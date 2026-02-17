@@ -20,4 +20,4 @@ ENV PORT=8000
 
 EXPOSE ${PORT}
 
-CMD uvicorn filings.web:app --host 0.0.0.0 --port ${PORT}
+CMD ["sh", "-c", "uvicorn filings.web:app --host 0.0.0.0 --port $PORT"]
