@@ -137,21 +137,3 @@ class AnalystRating:
     from_grade: str     # e.g. "Hold", "" if N/A
     to_grade: str       # e.g. "Buy"
     date: str           # ISO date string "2025-01-15"
-
-
-@dataclass
-class Notification:
-    """A notification about a filing/watchlist match."""
-    id: str                    # "1067983-2025-11-14-037833100"
-    timestamp: str             # ISO datetime when detected
-    type: str                  # "watchlist_match"
-    fund_cik: str
-    fund_name: str
-    ticker: str | None
-    cusip: str
-    issuer_name: str
-    action: str                # "NEW BUY", "ADD", "REDUCE", "SOLD"
-    pct_of_portfolio: float
-    filing_date: str
-    read: bool
-    link: str                  # "/stock/AAPL" or "/stock/cusip/{cusip}"

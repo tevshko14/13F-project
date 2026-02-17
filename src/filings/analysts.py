@@ -7,27 +7,37 @@ merged, deduplicated, and cached in memory for 5 minutes.
 from __future__ import annotations
 
 import os
+import threading
 import time
 from datetime import datetime
 
 from filings.models import AnalystRating
 
-# ── In-memory TTL cache ─────────────────────────────────────────────
+# ── Thread lock + cache ──────────────────────────────────────────────
+_lock = threading.Lock()
 _cache: dict[str, tuple[float, list[AnalystRating]]] = {}
 _CACHE_TTL = 300  # 5 minutes
+_MAX_CACHE_ENTRIES = 2000
 
 
 def _get_cached(ticker: str) -> list[AnalystRating] | None:
     key = ticker.upper()
-    if key in _cache:
-        ts, data = _cache[key]
-        if time.time() - ts < _CACHE_TTL:
-            return data
+    with _lock:
+        if key in _cache:
+            ts, data = _cache[key]
+            if time.time() - ts < _CACHE_TTL:
+                return data
     return None
 
 
 def _set_cached(ticker: str, data: list[AnalystRating]) -> None:
-    _cache[ticker.upper()] = (time.time(), data)
+    with _lock:
+        _cache[ticker.upper()] = (time.time(), data)
+        # Evict oldest if over limit
+        if len(_cache) > _MAX_CACHE_ENTRIES:
+            sorted_keys = sorted(_cache, key=lambda k: _cache[k][0])
+            for k in sorted_keys[:len(_cache) - _MAX_CACHE_ENTRIES]:
+                del _cache[k]
 
 
 # ── Finnhub source ──────────────────────────────────────────────────
