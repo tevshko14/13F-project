@@ -5,7 +5,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from filings import client, cache, watchlist, notifications, analysts
@@ -211,7 +211,7 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
             "message": str(e),
         }, status_code=404)
 
-    return templates.TemplateResponse("holdings.html", {
+    return templates.TemplateResponse("investor.html", {
         "request": request,
         "fund": fund,
         "holdings": holdings_list,
@@ -220,27 +220,34 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
     })
 
 
-# --- Compare page (unchanged logic) ---
+# --- Compare page (redirects to investor page) ---
 
-@app.get("/compare/{cik}", response_class=HTMLResponse)
-async def compare(request: Request, cik: str, top_n: int = Query(25)):
-    si = SUPERINVESTORS_BY_CIK.get(cik)
+@app.get("/compare/{cik}")
+async def compare(request: Request, cik: str):
+    """Redirect old /compare URLs to the consolidated investor page."""
+    return RedirectResponse(url=f"/holdings/{cik}", status_code=302)
+
+
+# --- Compare API (lazy-loaded into investor page Compare tab) ---
+
+@app.get("/api/compare/{cik}", response_class=HTMLResponse)
+async def compare_api(request: Request, cik: str, top_n: int = Query(25)):
+    """Return compare quarter partial for an investor (loaded on tab click)."""
     try:
         current, previous, changes = await asyncio.to_thread(
             client.compare_quarters, cik, top_n
         )
     except (ValueError, Exception) as e:
-        return templates.TemplateResponse("error.html", {
+        return templates.TemplateResponse("partials/compare_content.html", {
             "request": request,
-            "message": str(e),
-        }, status_code=404)
+            "error": str(e),
+        })
 
-    return templates.TemplateResponse("compare.html", {
+    return templates.TemplateResponse("partials/compare_content.html", {
         "request": request,
         "current": current,
         "previous": previous,
         "changes": changes,
-        "investor_name": si.display_name if si else None,
     })
 
 

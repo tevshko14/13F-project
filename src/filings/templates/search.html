@@ -27,27 +27,20 @@
     <thead>
         <tr>
             <th>#</th>
-            <th>Name</th>
-            <th>CIK</th>
-            <th>Ticker</th>
-            <th>Actions</th>
+            <th data-sort="text">Name</th>
+            <th data-sort="number">CIK</th>
+            <th data-sort="text">Ticker</th>
         </tr>
     </thead>
     <tbody>
         {% for r in results %}
         <tr>
             <td>{{ loop.index }}</td>
-            <td><strong>{{ r.name }}</strong></td>
+            <td>
+                <a href="/holdings/{{ r.cik }}"><strong>{{ r.name }}</strong></a>
+            </td>
             <td>{{ r.cik }}</td>
             <td>{{ r.ticker or '-' }}</td>
-            <td>
-                <div class="actions">
-                    <a href="/holdings/{{ r.cik }}" role="button"
-                       class="outline">Holdings</a>
-                    <a href="/compare/{{ r.cik }}" role="button"
-                       class="outline secondary">Compare</a>
-                </div>
-            </td>
         </tr>
         {% endfor %}
     </tbody>

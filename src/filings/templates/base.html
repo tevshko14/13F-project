@@ -193,6 +193,11 @@
         }
         .notification-toast.reduce-toast:hover { background: #f8bbd0; }
 
+        /* Sortable table headers */
+        th[data-sort] { cursor: pointer; user-select: none; }
+        th[data-sort]:hover { background: rgba(0,0,0,0.04); }
+        .sort-indicator { font-size: 0.7em; vertical-align: middle; margin-left: 0.2em; }
+
         /* Notification cards on history page */
         .notification-card { transition: opacity 0.2s; }
         .notification-unread { border-left: 3px solid #1976d2; }
@@ -244,6 +249,107 @@
     <div id="notification-toasts"
          style="position: fixed; bottom: 1em; right: 1em; z-index: 1000; max-width: 400px;">
     </div>
+
+    <script>
+    // ── Sortable tables engine ──
+    (function() {
+        var activityOrder = {
+            "NEW BUY": 0, "NEW": 0, "INITIATED": 0,
+            "ADD": 1, "INCREASED": 1, "UPGRADE": 1,
+            "REDUCE": 2, "DECREASED": 2, "REITERATE": 2,
+            "MAINTAIN": 3,
+            "SOLD": 4, "CLOSED": 4, "DOWNGRADE": 4
+        };
+
+        function parseValue(cell, sortType) {
+            var text = cell.textContent.trim();
+            if (sortType === "number") {
+                var cleaned = text.replace(/[$,%+\s]/g, "").replace(/,/g, "");
+                return (cleaned === "-" || cleaned === "") ? -Infinity : parseFloat(cleaned) || 0;
+            }
+            if (sortType === "activity") {
+                var upper = text.toUpperCase();
+                return activityOrder[upper] !== undefined ? activityOrder[upper] : 5;
+            }
+            if (sortType === "date") {
+                var qMatch = text.match(/Q(\d)\s+(\d{4})/);
+                if (qMatch) return parseInt(qMatch[2]) * 10 + parseInt(qMatch[1]);
+                var d = new Date(text);
+                return isNaN(d.getTime()) ? 0 : d.getTime();
+            }
+            return text.toLowerCase();
+        }
+
+        function sortTable(th, colIndex, sortType) {
+            var table = th.closest("table");
+            var tbody = table.querySelector("tbody");
+            if (!tbody) return;
+            var rows = Array.from(tbody.querySelectorAll("tr"));
+
+            var asc = th.dataset.sortDir !== "asc";
+            th.dataset.sortDir = asc ? "asc" : "desc";
+
+            th.closest("tr").querySelectorAll("th").forEach(function(h) {
+                if (h !== th) { h.dataset.sortDir = ""; updateIndicator(h); }
+            });
+            updateIndicator(th);
+
+            rows.sort(function(a, b) {
+                var va = parseValue(a.cells[colIndex], sortType);
+                var vb = parseValue(b.cells[colIndex], sortType);
+                if (va < vb) return asc ? -1 : 1;
+                if (va > vb) return asc ? 1 : -1;
+                return 0;
+            });
+
+            rows.forEach(function(row) { tbody.appendChild(row); });
+            renumberRows(tbody);
+        }
+
+        function updateIndicator(th) {
+            var ind = th.querySelector(".sort-indicator");
+            if (!ind) return;
+            if (th.dataset.sortDir === "asc") { ind.textContent = " \u25B2"; ind.style.opacity = "1"; }
+            else if (th.dataset.sortDir === "desc") { ind.textContent = " \u25BC"; ind.style.opacity = "1"; }
+            else { ind.textContent = " \u25B4"; ind.style.opacity = "0.3"; }
+        }
+
+        function renumberRows(tbody) {
+            var rows = tbody.querySelectorAll("tr");
+            rows.forEach(function(row, i) {
+                var first = row.cells[0];
+                if (first && /^\d+$/.test(first.textContent.trim())) {
+                    first.textContent = i + 1;
+                }
+            });
+        }
+
+        function initSortableTables() {
+            document.querySelectorAll("th[data-sort]").forEach(function(th) {
+                if (th.dataset.sortBound) return;
+                th.dataset.sortBound = "true";
+                var sortType = th.dataset.sort;
+                var colIndex = Array.from(th.parentNode.children).indexOf(th);
+
+                var indicator = document.createElement("span");
+                indicator.className = "sort-indicator";
+                indicator.textContent = " \u25B4";
+                indicator.style.opacity = "0.3";
+                th.appendChild(indicator);
+
+                th.addEventListener("click", function() {
+                    sortTable(th, colIndex, sortType);
+                });
+            });
+        }
+
+        // Expose globally for lazy-loaded content (fetch-based tabs)
+        window.initSortableTables = initSortableTables;
+
+        document.addEventListener("DOMContentLoaded", initSortableTables);
+        document.addEventListener("htmx:afterSwap", initSortableTables);
+    })();
+    </script>
 
     <script>
     // ── SSE listener for real-time notifications ──
