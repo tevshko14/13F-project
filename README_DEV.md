@@ -38,6 +38,7 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | CSS           | Pico CSS v2 (classless, from CDN)   |
 | CLI output    | Rich (tables, panels, colors)       |
 | SEC data      | `edgartools` library (wraps EDGAR API) |
+| Analyst data  | `yfinance` (free) + `finnhub-python` (free tier, optional key) |
 | Caching       | JSON files at `~/.13f-cache/` (fund_data.json + watchlist.json) |
 | Entry points  | `filings` (CLI), `filings-web` (web, port 8000) |
 
@@ -184,15 +185,16 @@ uv run filings-web          # starts at http://localhost:8000
 ├── uv.lock
 └── src/filings/
     ├── __init__.py                   # version = "0.1.0"
-    ├── models.py                     # 12 dataclasses (data contracts)
+    ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
     ├── cache.py                      # JSON file cache (6-hour TTL)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification engine: detection, matching, persistence
+    ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
     ├── cli.py                        # CLI entry point (search/holdings/compare)
-    ├── web.py                        # FastAPI app (19 routes + background refresh + SSE + polling)
+    ├── web.py                        # FastAPI app (20 routes + background refresh + SSE + polling)
     └── templates/
         ├── base.html                 # Master layout: nav, PicoCSS, HTMX, sidebar, CSS
         ├── index.html                # Homepage: superinvestor list with lazy-load
@@ -211,7 +213,8 @@ uv run filings-web          # starts at http://localhost:8000
             ├── watchlist_sidebar.html # Sidebar content: ticker list + remove buttons
             ├── watchlist_star.html    # Star button (filled/outline) for stock pages
             ├── watchlist_response.html # OOB response: star + sidebar update
-            └── notification_bell.html # Navbar bell icon with unread badge
+            ├── notification_bell.html # Navbar bell icon with unread badge
+            └── analyst_ratings.html  # Analyst consensus + ratings table (lazy-loaded)
 ```
 
 ---
@@ -475,6 +478,7 @@ All models are `@dataclass`. No ORM. No database.
 | `StockDetail` | All holders of a specific stock | Web stock detail |
 | `StockQuarterEntry` | One fund's activity on a stock in one quarter | Web stock history |
 | `StockQuarter` | All activity on a stock in one quarter | Web stock history |
+| `AnalystRating` | A single firm-level analyst rating | Web analyst tab |
 | `Notification` | A notification about a filing/watchlist match | Notification system |
 
 ### 4.6 How a Superinvestor Links to a CIK
@@ -681,6 +685,7 @@ HTMX lazy-load (cold start):
 | GET | `/grand-portfolio` | `grand_portfolio` | Cache only | `grand_portfolio.html` |
 | GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
 | GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only | `stock.html` |
+| GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (live, 5-min cache) | `partials/analyst_ratings.html` |
 | POST | `/api/watchlist/{ticker}` | `watchlist_add` | Watchlist JSON | `partials/watchlist_response.html` |
 | DELETE | `/api/watchlist/{ticker}` | `watchlist_remove` | Watchlist JSON + Cache | `partials/watchlist_response.html` or `partials/watchlist_sidebar.html` |
 | GET | `/api/watchlist-sidebar` | `watchlist_sidebar_refresh` | Watchlist JSON | `partials/watchlist_sidebar.html` |
@@ -747,8 +752,9 @@ base.html (nav + styles + HTMX + Chart.js CDN + sidebar + SSE + toasts)
   │     └── imports partials/ticker_link.html (macro)
   ├── grand_portfolio.html
   │     └── imports partials/ticker_link.html (macro)
-  ├── stock.html (Chart.js + star button)
-  │     └── includes partials/watchlist_star.html
+  ├── stock.html (Tabbed: Overview + Analyst Ratings, Chart.js, star button)
+  │     ├── includes partials/watchlist_star.html
+  │     └── lazy-loads partials/analyst_ratings.html via fetch(/api/analysts/{ticker})
   ├── notifications.html (notification history)
   └── error.html
 ```
@@ -1049,6 +1055,7 @@ the cache — every CLI command makes live SEC API calls.
 - [x] In-app notification system (SEC poller + watchlist matching + SSE toasts + bell badge)
 - [x] Clickable investor names in stock history (links to `/holdings/{cik}` —
       implemented in both holders table and quarterly history section)
+- [x] Analyst ratings tab on stock pages (Finnhub + yfinance, firm-level, lazy-loaded via HTMX)
 - [ ] Sortable tables in the web UI (currently static sort order)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF

@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from filings import client, cache, watchlist, notifications
+from filings import client, cache, watchlist, notifications, analysts
 from filings.models import SuperinvestorSummary
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -339,6 +339,21 @@ async def stock_detail(request: Request, ticker: str):
         "request": request,
         "stock": detail,
         "history": history,
+    })
+
+
+# --- Analyst Ratings API (lazy-loaded via HTMX) ---
+
+@app.get("/api/analysts/{ticker}", response_class=HTMLResponse)
+async def analyst_ratings(request: Request, ticker: str):
+    """Return analyst ratings partial for a ticker (loaded on tab click)."""
+    ratings = await asyncio.to_thread(analysts.get_analyst_ratings, ticker)
+    consensus = analysts.get_consensus_summary(ratings)
+    return templates.TemplateResponse("partials/analyst_ratings.html", {
+        "request": request,
+        "ratings": ratings[:50],  # Limit to 50 most recent
+        "consensus": consensus,
+        "ticker": ticker.upper(),
     })
 
 
