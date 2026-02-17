@@ -130,6 +130,16 @@ class StockQuarter:
 
 
 @dataclass
+class AnalystRating:
+    """A single analyst (firm-level) rating for a stock."""
+    firm: str           # e.g. "JP Morgan", "Goldman Sachs"
+    action: str         # "upgrade", "downgrade", "maintain", "init", "reiterate"
+    from_grade: str     # e.g. "Hold", "" if N/A
+    to_grade: str       # e.g. "Buy"
+    date: str           # ISO date string "2025-01-15"
+
+
+@dataclass
 class Notification:
     """A notification about a filing/watchlist match."""
     id: str                    # "1067983-2025-11-14-037833100"
