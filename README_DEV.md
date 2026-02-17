@@ -37,7 +37,9 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | Web framework | FastAPI + Jinja2 + HTMX             |
 | CSS           | Pico CSS v2 (classless, from CDN)   |
 | CLI output    | Rich (tables, panels, colors)       |
+| Charts        | Chart.js v4 (bar charts) + ECharts v5 (heatmap treemap) |
 | SEC data      | `edgartools` library (wraps EDGAR API) |
+| Market data   | `yfinance` (S&P 500 prices, 52W range) + Wikipedia (sectors) |
 | Analyst data  | `yfinance` (free) + `finnhub-python` (free tier, optional key) |
 | Caching       | JSON files at `~/.13f-cache/` (fund_data.json + watchlist.json) |
 | Entry points  | `filings` (CLI), `filings-web` (web, port 8000) |
@@ -123,13 +125,13 @@ uv run filings-web          # starts at http://localhost:8000
 │  Uses display.py │  │  1-sec rate limit between funds       │
 │  for formatting  │  │  Watchlist: server-side JSON + HTMX   │
 │                  │  │  Notifications: SSE + polling + JSON  │
-└──────────────────┘  │  21 routes (see Section 6)            │
+└──────────────────┘  │  24 routes (see Section 6)            │
                       └──────────┬──────────────────────────┘
                                  │
                                  ▼
                       ┌─────────────────────────┐
                       │  templates/ (Jinja2)     │
-                      │  9 pages + 8 partials    │
+                      │  9 pages + 11 partials   │
                       │  (see Section 7)         │
                       └─────────────────────────┘
 ```
@@ -139,7 +141,12 @@ uv run filings-web          # starts at http://localhost:8000
 ```
 1. User visits http://localhost:8000/
 2. web.py lifespan: load_cache() → empty dict (no cache file)
-3. index() renders 84 superinvestor rows, each marked for lazy-load
+   Also starts: _prefetch_market_data(app) background task (S&P 500 data, ~30-60s)
+3. index() renders:
+   a. Heatmap section: HTMX fires GET /api/heatmap → returns "loading" stub with
+      auto-retry (hx-trigger="load delay:5s") until market data is ready
+   b. Most-added section: HTMX fires GET /api/most-added → renders table from cache
+   c. 84 superinvestor rows, each marked for lazy-load
 4. Browser HTMX fires GET /api/fund-row/{cik} for each row
 5. fund_row() calls get_fund_summary(cik) in a thread:
    a. edgartools Company(cik).get_filings(form="13F-HR", amendments=False)
@@ -150,6 +157,8 @@ uv run filings-web          # starts at http://localhost:8000
 6. Result saved to app.state.fund_cache[cik] and written to disk
 7. HTMX replaces the loading row with rendered fund_row.html partial
 8. Repeat for all 84 funds (one at a time as HTMX triggers)
+9. Once market data prefetch completes, heatmap auto-retry succeeds →
+   full ECharts treemap rendered with sector groups, colors, gold borders
 ```
 
 ### Data Flow: Stock Detail Page
@@ -191,13 +200,14 @@ uv run filings-web          # starts at http://localhost:8000
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification engine: detection, matching, persistence
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
+    ├── market_data.py                # S&P 500 heatmap, most-added table, ticker search (yfinance + Wikipedia)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
     ├── cli.py                        # CLI entry point (search/holdings/compare)
-    ├── web.py                        # FastAPI app (21 routes + background refresh + SSE + polling)
+    ├── web.py                        # FastAPI app (24 routes + background refresh + SSE + polling + market data)
     └── templates/
-        ├── base.html                 # Master layout: nav, PicoCSS, HTMX, sidebar, CSS, sortable table engine
-        ├── index.html                # Homepage: superinvestor list with lazy-load
+        ├── base.html                 # Master layout: nav, PicoCSS, HTMX, ECharts, sidebar, CSS, sortable table engine, ticker search JS
+        ├── index.html                # Homepage: heatmap + most-added + superinvestor list
         ├── search.html               # Fund manager search
         ├── investor.html             # Superinvestor page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
@@ -213,6 +223,9 @@ uv run filings-web          # starts at http://localhost:8000
             ├── watchlist_star.html    # Star button (filled/outline) for stock pages
             ├── watchlist_response.html # OOB response: star + sidebar update
             ├── notification_bell.html # Navbar bell icon with unread badge
+            ├── heatmap.html          # S&P 500 ECharts treemap (lazy-loaded via HTMX)
+            ├── most_added.html      # Most-added-by-superinvestors table (lazy-loaded)
+            ├── ticker_search.html   # Nav autocomplete search input (included in base.html)
             ├── analyst_ratings.html  # Analyst consensus + ratings table (lazy-loaded)
             └── compare_content.html  # Compare quarters partial (lazy-loaded into investor page)
 ```
@@ -652,7 +665,31 @@ HTMX lazy-load (cold start):
     Disk save runs in background thread (non-blocking)
 ```
 
-### 5.8 Performance Optimizations
+### 5.8 Market Data Module (`market_data.py`)
+
+Central module for all homepage market data features. Follows the same TTL
+cache pattern as `analysts.py`.
+
+| Function | Data Source | TTL | Purpose |
+|---|---|---|---|
+| `get_sp500_constituents()` | Wikipedia (pd.read_html) | 24h | Ticker + sector list (~500 items) |
+| `get_sp500_market_data()` | yfinance bulk download (5d) | 30min | Daily % change for all S&P 500 tickers |
+| `build_heatmap_data()` | Pure computation | — | ECharts treemap format with colors + gold borders |
+| `build_most_added_table()` | Cache (fund_data changes) | 30min | Top 25 stocks by superinvestor add count |
+| `get_52_week_range_bulk()` | yfinance bulk download (1y) | 30min | 52-week high/low/current for enrichment |
+| `get_ticker_search_list()` | Cache + S&P 500 | — | Autocomplete index (~500-1000 items) |
+| `_pct_to_color()` | Pure computation | — | Map [-5%, +5%] to red→gray→green hex color |
+
+**Cold start behavior:**
+- `_prefetch_market_data(app)` runs in lifespan background task
+- Takes ~30-60s for first yfinance bulk download
+- Heatmap HTMX auto-retries every 5s until `app.state.market_data_ready = True`
+- After first load, 30-min cache makes all subsequent requests instant
+
+**Fallback:** If Wikipedia is unreachable, falls back to hardcoded top ~50 S&P 500
+tickers with sectors. The heatmap will be smaller but functional.
+
+### 5.9 Performance Optimizations
 
 **Problem:** With 84 superinvestors, synchronous file I/O was blocking the async event loop.
 
@@ -687,6 +724,9 @@ HTMX lazy-load (cold start):
 | GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
 | GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only | `stock.html` |
 | GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (live, 5-min cache) | `partials/analyst_ratings.html` |
+| GET | `/api/ticker-search-index` | `ticker_search_index` | Cache + S&P 500 (Wikipedia) | JSON response |
+| GET | `/api/heatmap` | `heatmap` | yfinance (30-min cache) + Wikipedia | `partials/heatmap.html` |
+| GET | `/api/most-added` | `most_added` | Cache + analysts + yfinance | `partials/most_added.html` |
 | POST | `/api/watchlist/{ticker}` | `watchlist_add` | Watchlist JSON | `partials/watchlist_response.html` |
 | DELETE | `/api/watchlist/{ticker}` | `watchlist_remove` | Watchlist JSON + Cache | `partials/watchlist_response.html` or `partials/watchlist_sidebar.html` |
 | GET | `/api/watchlist-sidebar` | `watchlist_sidebar_refresh` | Watchlist JSON | `partials/watchlist_sidebar.html` |
@@ -742,11 +782,14 @@ Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund
 ### Template Hierarchy
 
 ```
-base.html (nav + styles + HTMX + Chart.js CDN + sidebar + SSE + toasts + sortable table engine)
+base.html (nav + styles + HTMX + Chart.js + ECharts CDN + sidebar + SSE + toasts + sortable table engine + ticker search JS)
   ├── includes partials/watchlist_sidebar.html (in <aside> via hx-preserve)
   ├── includes partials/notification_bell.html (in <nav>, HTMX-polls every 60s)
+  ├── includes partials/ticker_search.html (in <nav>, autocomplete dropdown)
   ├── index.html (homepage)
-  │     └── uses partials/fund_row.html (HTMX lazy-load)
+  │     ├── lazy-loads partials/heatmap.html via HTMX (/api/heatmap)
+  │     ├── lazy-loads partials/most_added.html via HTMX (/api/most-added)
+  │     ├── uses partials/fund_row.html (HTMX lazy-load)
   │     └── uses partials/fund_row_error.html (HTMX error)
   ├── search.html
   ├── investor.html (Tabbed: Holdings + Compare Quarters, lazy-loads compare)
@@ -1061,6 +1104,7 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Analyst ratings tab on stock pages (Finnhub + yfinance, firm-level, lazy-loaded via HTMX)
 - [x] Sortable tables across all pages (vanilla JS, `data-sort` attributes, text/number/date/activity types)
 - [x] Consolidated superinvestor page (investor.html with Holdings + Compare Quarters tabs)
+- [x] Homepage enhancement: S&P 500 heatmap (ECharts treemap), most-added table, ticker search autocomplete
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
 - [ ] Comparison across multiple funds on the same page

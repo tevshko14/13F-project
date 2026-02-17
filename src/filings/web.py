@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from filings import client, cache, watchlist, notifications, analysts
+from filings import client, cache, watchlist, notifications, analysts, market_data
 from filings.models import SuperinvestorSummary
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -28,6 +28,9 @@ async def lifespan(app: FastAPI):
 
     # Start periodic polling for new filings
     poll_task = asyncio.create_task(_notification_poll_loop(app))
+
+    # Prefetch S&P 500 market data in background (~30-60s on cold start)
+    asyncio.create_task(_prefetch_market_data(app))
 
     yield
 
@@ -112,6 +115,16 @@ async def _broadcast_sse(app: FastAPI, notif: dict):
     """Push a notification to all connected SSE clients."""
     for queue in getattr(app.state, "sse_clients", []):
         await queue.put(notif)
+
+
+async def _prefetch_market_data(app: FastAPI):
+    """Prefetch S&P 500 market data on startup (runs in background thread)."""
+    try:
+        app.state.market_data_ready = False
+        await asyncio.to_thread(market_data.get_sp500_market_data)
+        app.state.market_data_ready = True
+    except Exception:
+        app.state.market_data_ready = False
 
 
 # --- Homepage: Superinvestor list ---
@@ -361,6 +374,103 @@ async def analyst_ratings(request: Request, ticker: str):
         "ratings": ratings[:50],  # Limit to 50 most recent
         "consensus": consensus,
         "ticker": ticker.upper(),
+    })
+
+
+# --- Market Data API (heatmap, most-added, ticker search) ---
+
+@app.get("/api/ticker-search-index")
+async def ticker_search_index(request: Request):
+    """JSON autocomplete index for the nav ticker search bar."""
+    cache_data = getattr(app.state, "fund_cache", {})
+    data = await asyncio.to_thread(market_data.get_ticker_search_list, cache_data)
+    from fastapi.responses import JSONResponse
+    return JSONResponse(content=data)
+
+
+@app.get("/api/heatmap", response_class=HTMLResponse)
+async def heatmap(request: Request):
+    """S&P 500 heatmap partial (ECharts treemap). Auto-retries if data not ready."""
+    if not getattr(app.state, "market_data_ready", False):
+        # Data still loading — return a polling stub
+        return HTMLResponse(
+            '<article>'
+            '<p aria-busy="true">Loading S&P 500 market data (first load takes ~30s)...</p>'
+            '</article>'
+            '<div hx-get="/api/heatmap" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
+        )
+
+    mkt = await asyncio.to_thread(market_data.get_sp500_market_data)
+    if not mkt or "_metadata" not in mkt:
+        return HTMLResponse(
+            '<article><p class="text-muted">Market data unavailable.</p></article>'
+        )
+
+    constituents = await asyncio.to_thread(market_data.get_sp500_constituents)
+
+    # Build set of tickers held by superinvestors
+    cache_data = getattr(app.state, "fund_cache", {})
+    super_tickers: set[str] = set()
+    for cik, fund_data in cache_data.items():
+        if cik in SUPERINVESTORS_BY_CIK:
+            for h in fund_data.get("all_holdings", []):
+                t = h.get("ticker")
+                if t:
+                    super_tickers.add(t.upper())
+
+    heatmap_data = market_data.build_heatmap_data(mkt, constituents, super_tickers)
+    metadata = mkt.get("_metadata", {})
+
+    return templates.TemplateResponse("partials/heatmap.html", {
+        "request": request,
+        "heatmap_json": json_module.dumps(heatmap_data),
+        "metadata": metadata,
+    })
+
+
+@app.get("/api/most-added", response_class=HTMLResponse)
+async def most_added(request: Request):
+    """Most-added-by-superinvestors table partial, enriched with analyst consensus + 52W range."""
+    cache_data = getattr(app.state, "fund_cache", {})
+    if not cache_data:
+        return HTMLResponse(
+            '<article><p class="text-muted">No data available yet.</p></article>'
+        )
+
+    entries = await asyncio.to_thread(
+        market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK
+    )
+
+    # Enrich each entry with analyst consensus and 52-week range
+    tickers_to_lookup = [e["ticker"] for e in entries if e.get("ticker")]
+
+    # Get 52-week ranges in bulk (cached)
+    range_data = {}
+    if tickers_to_lookup:
+        range_data = await asyncio.to_thread(
+            market_data.get_52_week_range_bulk, tickers_to_lookup
+        )
+
+    # Get analyst consensus per ticker (uses existing 5-min cache)
+    for entry in entries:
+        ticker = entry.get("ticker")
+        if ticker:
+            try:
+                ratings = await asyncio.to_thread(analysts.get_analyst_ratings, ticker)
+                consensus = analysts.get_consensus_summary(ratings)
+                entry["consensus"] = consensus
+            except Exception:
+                entry["consensus"] = None
+
+            r = range_data.get(ticker)
+            entry["range_pct"] = r["pct_of_range"] if r else None
+        else:
+            entry["consensus"] = None
+            entry["range_pct"] = None
+
+    return templates.TemplateResponse("partials/most_added.html", {
+        "request": request,
+        "entries": entries,
     })
 
 
