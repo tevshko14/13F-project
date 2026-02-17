@@ -8,10 +8,14 @@ configurable TTLs to avoid repeated downloads.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# ── Thread lock for all cache reads/writes ────────────────────────────
+_lock = threading.Lock()
 
 # ── In-memory TTL caches ──────────────────────────────────────────────
 _constituents_cache: tuple[float, list[dict]] | None = None
@@ -92,10 +96,11 @@ def get_sp500_constituents() -> list[dict]:
     """
     global _constituents_cache
 
-    if _constituents_cache is not None:
-        ts, data = _constituents_cache
-        if time.time() - ts < _CONSTITUENTS_TTL:
-            return data
+    with _lock:
+        if _constituents_cache is not None:
+            ts, data = _constituents_cache
+            if time.time() - ts < _CONSTITUENTS_TTL:
+                return data
 
     try:
         import pandas as pd
@@ -121,14 +126,16 @@ def get_sp500_constituents() -> list[dict]:
 
         if len(constituents) > 400:
             logger.info("Fetched %d S&P 500 constituents from Wikipedia", len(constituents))
-            _constituents_cache = (time.time(), constituents)
+            with _lock:
+                _constituents_cache = (time.time(), constituents)
             return constituents
 
     except Exception as e:
         logger.warning("Wikipedia S&P 500 fetch failed: %s — using fallback", e)
 
     # Fallback
-    _constituents_cache = (time.time(), _FALLBACK_SP500)
+    with _lock:
+        _constituents_cache = (time.time(), _FALLBACK_SP500)
     return _FALLBACK_SP500
 
 
@@ -145,10 +152,11 @@ def get_sp500_market_data() -> dict:
     """
     global _market_data_cache
 
-    if _market_data_cache is not None:
-        ts, data = _market_data_cache
-        if time.time() - ts < _MARKET_DATA_TTL:
-            return data
+    with _lock:
+        if _market_data_cache is not None:
+            ts, data = _market_data_cache
+            if time.time() - ts < _MARKET_DATA_TTL:
+                return data
 
     constituents = get_sp500_constituents()
     tickers = [c["ticker"] for c in constituents]
@@ -196,7 +204,8 @@ def get_sp500_market_data() -> dict:
         }
 
         logger.info("Fetched market data for %d tickers", len(result) - 1)
-        _market_data_cache = (time.time(), result)
+        with _lock:
+            _market_data_cache = (time.time(), result)
         return result
 
     except Exception as e:
@@ -214,11 +223,11 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
     """
     global _52w_cache
 
-    if _52w_cache is not None:
-        ts, data = _52w_cache
-        if time.time() - ts < _52W_TTL:
-            # Return only requested tickers
-            return {t: data[t] for t in tickers if t in data}
+    with _lock:
+        if _52w_cache is not None:
+            ts, data = _52w_cache
+            if time.time() - ts < _52W_TTL:
+                return {t: data[t] for t in tickers if t in data}
 
     try:
         import yfinance as yf
@@ -266,7 +275,8 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
             except Exception:
                 continue
 
-        _52w_cache = (time.time(), result)
+        with _lock:
+            _52w_cache = (time.time(), result)
         return {t: result[t] for t in tickers if t in result}
 
     except Exception as e:
@@ -356,10 +366,11 @@ def build_most_added_table(
     """
     global _most_added_cache
 
-    if _most_added_cache is not None:
-        ts, data = _most_added_cache
-        if time.time() - ts < _MOST_ADDED_TTL:
-            return data
+    with _lock:
+        if _most_added_cache is not None:
+            ts, data = _most_added_cache
+            if time.time() - ts < _MOST_ADDED_TTL:
+                return data
 
     by_cusip: dict[str, dict] = {}
 
@@ -407,7 +418,8 @@ def build_most_added_table(
     for i, entry in enumerate(entries):
         entry["rank"] = i + 1
 
-    _most_added_cache = (time.time(), entries)
+    with _lock:
+        _most_added_cache = (time.time(), entries)
     return entries
 
 
