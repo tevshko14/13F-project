@@ -43,6 +43,13 @@
                     Analyst Ratings
                 </button>
             </li>
+            <li>
+                <button id="tab-sentiment-btn"
+                        class="stock-tab"
+                        onclick="switchTab('sentiment')">
+                    Sentiment
+                </button>
+            </li>
         </ul>
     </nav>
 </div>
@@ -111,7 +118,7 @@
                 <th>#</th>
                 <th data-sort="text">Investor</th>
                 <th class="text-right" data-sort="number">% of Portfolio</th>
-                <th class="text-right" data-sort="number">Value ($)</th>
+                <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
                 <th class="text-right" data-sort="number">Shares</th>
                 <th data-sort="activity">Recent Activity</th>
                 <th class="text-right" data-sort="number">Share Change</th>
@@ -249,10 +256,20 @@
     </div>
 </div>
 
+{# ── Sentiment Tab ── #}
+<div id="tab-sentiment" class="tab-content">
+    <div id="sentiment-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading sentiment data...
+        </p>
+    </div>
+</div>
+
 {# ── Tab Switching Logic ── #}
 <script>
 (function() {
     var analystLoaded = false;
+    var sentimentLoaded = false;
 
     window.switchTab = function(tab) {
         // Toggle tab buttons
@@ -291,6 +308,34 @@
                 document.getElementById('analyst-ratings-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                     'Analyst ratings require a ticker symbol. This stock only has a CUSIP identifier.</p>';
+            }
+        }
+
+        // Lazy-load sentiment data on first click
+        if (tab === 'sentiment' && !sentimentLoaded) {
+            sentimentLoaded = true;
+            {% if stock.ticker %}
+            var sentimentUrl = '/api/sentiment/{{ stock.ticker }}';
+            {% else %}
+            var sentimentUrl = null;
+            {% endif %}
+
+            if (sentimentUrl) {
+                fetch(sentimentUrl)
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) {
+                        document.getElementById('sentiment-content').innerHTML = html;
+                        if (window.initSortableTables) window.initSortableTables();
+                    })
+                    .catch(function() {
+                        document.getElementById('sentiment-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load sentiment data. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('sentiment-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Sentiment data requires a ticker symbol.</p>';
             }
         }
     };
