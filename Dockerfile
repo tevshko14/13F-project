@@ -18,6 +18,9 @@ RUN pip install --no-cache-dir hatchling && \
 # Railway injects PORT env var
 ENV PORT=8000
 
-EXPOSE ${PORT}
+COPY start.sh ./
+RUN chmod +x start.sh
 
-CMD ["sh", "-c", "uvicorn filings.web:app --host 0.0.0.0 --port $PORT"]
+EXPOSE 8000
+
+ENTRYPOINT ["./start.sh"]
