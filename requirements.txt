@@ -1,0 +1,6 @@
+# Auto-generated from pyproject.toml for Railway deployment
+# Railway/nixpacks uses this to install dependencies
+edgartools>=5.13
+rich>=13.0
+fastapi[standard]>=0.115
+jinja2>=3.1

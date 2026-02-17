@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Search - 13F Filing Viewer{% endblock %}
+{% block content %}
+<h1>Search Fund Managers</h1>
+<p>Look up SEC 13F filings to see what institutional investors are holding.</p>
+
+<form action="/search" method="get"
+      hx-get="/search" hx-target="#results" hx-indicator="#loading"
+      hx-push-url="true">
+    <fieldset role="group">
+        <input type="search" name="q"
+               placeholder='e.g. "Berkshire Hathaway" or "Citadel"'
+               value="{{ query or '' }}" required autofocus>
+        <button type="submit">Search</button>
+    </fieldset>
+</form>
+
+<div id="loading" class="htmx-indicator" aria-busy="true">
+    <p><span class="spinner"></span> Searching SEC EDGAR (this may take a few seconds)...</p>
+</div>
+
+<div id="results">
+{% if results is defined and results %}
+<p>Found {{ results|length }} result(s) for "{{ query }}"</p>
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Name</th>
+            <th>CIK</th>
+            <th>Ticker</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in results %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td><strong>{{ r.name }}</strong></td>
+            <td>{{ r.cik }}</td>
+            <td>{{ r.ticker or '-' }}</td>
+            <td>
+                <div class="actions">
+                    <a href="/holdings/{{ r.cik }}" role="button"
+                       class="outline">Holdings</a>
+                    <a href="/compare/{{ r.cik }}" role="button"
+                       class="outline secondary">Compare</a>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% elif query is defined and query %}
+<p>No fund managers found matching "{{ query }}".</p>
+{% endif %}
+</div>
+{% endblock %}

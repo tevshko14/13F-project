@@ -1,0 +1,29 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# macOS
+.DS_Store
+
+# Cache data (generated at runtime, user-specific)
+# These live at ~/.13f-cache/ so they won't be in the repo anyway,
+# but just in case someone moves them:
+fund_data.json
+watchlist.json
+notifications.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Claude Code
+.claude/

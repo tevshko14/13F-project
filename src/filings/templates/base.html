@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}13F Filing Viewer{% endblock %}</title>
+    <link rel="stylesheet"
+          href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <style>
+        .htmx-indicator { display: none; }
+        .htmx-request .htmx-indicator,
+        .htmx-request.htmx-indicator { display: block; }
+
+        .status-new, .activity-new-buy { color: #2e7d32; font-weight: bold; }
+        .status-closed, .activity-sold { color: #c62828; font-weight: bold; }
+        .status-increased, .activity-add { color: #2e7d32; }
+        .status-decreased, .activity-reduce { color: #c62828; }
+        .status-unchanged { opacity: 0.6; }
+
+        .text-right { text-align: right; }
+        .text-muted { opacity: 0.6; font-size: 0.9em; }
+        .text-small { font-size: 0.85em; }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            display: inline-block;
+            width: 1em; height: 1em;
+            border: 2px solid currentColor;
+            border-right-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-right: 0.5em;
+        }
+
+        .actions { display: flex; gap: 0.5em; }
+        .actions a { white-space: nowrap; font-size: 0.85em; padding: 0.3em 0.8em; }
+
+        table td, table th { padding: 0.5em 0.75em; }
+
+        /* Badge-style labels for activity */
+        .badge {
+            display: inline-block;
+            padding: 0.15em 0.5em;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .badge-new { background: #e8f5e9; color: #2e7d32; }
+        .badge-add { background: #e8f5e9; color: #388e3c; }
+        .badge-reduce { background: #fce4ec; color: #c62828; }
+        .badge-sold { background: #fce4ec; color: #b71c1c; }
+
+        /* Ticker styling */
+        .ticker { font-weight: bold; font-family: monospace; }
+        a.ticker { text-decoration: none; }
+        a.ticker:hover { text-decoration: underline; }
+
+        /* Top holdings tags */
+        .tag-list { display: flex; gap: 0.3em; flex-wrap: wrap; }
+        .tag {
+            display: inline-block;
+            padding: 0.1em 0.4em;
+            background: #e3f2fd;
+            border-radius: 3px;
+            font-size: 0.78em;
+            font-family: monospace;
+        }
+        a.tag { text-decoration: none; color: inherit; }
+        a.tag:hover { text-decoration: underline; }
+
+        /* Refresh area */
+        .cache-info {
+            display: flex;
+            align-items: center;
+            gap: 1em;
+            margin-bottom: 1em;
+        }
+        .cache-info small { opacity: 0.6; }
+
+        /* Nav links */
+        nav ul li a { font-size: 0.9em; }
+
+        /* ── App layout: main + sidebar ── */
+        .app-layout {
+            display: flex;
+            gap: 1.5em;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 1em;
+        }
+        .app-layout > main {
+            flex: 1;
+            min-width: 0;   /* prevent flexbox overflow */
+        }
+
+        /* Watchlist sidebar */
+        #watchlist-sidebar {
+            width: 200px;
+            flex-shrink: 0;
+            position: sticky;
+            top: 1em;
+            align-self: flex-start;
+            border-left: 1px solid rgba(0,0,0,0.1);
+            padding-left: 1em;
+            margin-top: 0.5em;
+        }
+        .watchlist-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .watchlist-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.25em 0;
+        }
+        .watchlist-ticker {
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+        .watchlist-remove {
+            background: none;
+            border: none;
+            color: #c62828;
+            cursor: pointer;
+            font-size: 1.1em;
+            padding: 0 0.3em;
+            margin: 0;
+            line-height: 1;
+            opacity: 0.5;
+        }
+        .watchlist-remove:hover { opacity: 1; }
+
+        /* Star button */
+        .star-btn {
+            background: none;
+            border: 1px solid rgba(0,0,0,0.15);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1.3em;
+            line-height: 1;
+            padding: 0.15em 0.4em;
+            margin: 0;
+            color: #999;
+            transition: color 0.15s;
+        }
+        .star-btn:hover { color: #f9a825; }
+        .star-btn.starred { color: #f9a825; border-color: #f9a825; }
+
+        /* Notification bell badge */
+        .notif-badge {
+            position: absolute;
+            top: -6px; right: -8px;
+            background: #c62828;
+            color: white;
+            border-radius: 50%;
+            font-size: 0.6em;
+            min-width: 1.4em;
+            height: 1.4em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        /* Toast notifications */
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .notification-toast {
+            margin-bottom: 0.5em;
+            padding: 0.75em 1em;
+            background: #e8f5e9;
+            border-left: 4px solid #2e7d32;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            animation: slideIn 0.3s ease;
+            font-size: 0.9em;
+        }
+        .notification-toast:hover { background: #c8e6c9; }
+        .notification-toast.reduce-toast {
+            background: #fce4ec;
+            border-left-color: #c62828;
+        }
+        .notification-toast.reduce-toast:hover { background: #f8bbd0; }
+
+        /* Notification cards on history page */
+        .notification-card { transition: opacity 0.2s; }
+        .notification-unread { border-left: 3px solid #1976d2; }
+
+        /* Responsive: stack on narrow viewports */
+        @media (max-width: 768px) {
+            .app-layout { flex-direction: column; }
+            #watchlist-sidebar {
+                width: 100%;
+                position: static;
+                border-left: none;
+                border-top: 1px solid rgba(0,0,0,0.1);
+                padding-left: 0;
+                padding-top: 1em;
+                margin-top: 1em;
+            }
+            .watchlist-list {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 0.5em;
+            }
+            .watchlist-item { padding: 0.2em 0.5em; }
+        }
+    </style>
+</head>
+<body hx-boost="true">
+    <nav class="container">
+        <ul><li><a href="/"><strong>13F Viewer</strong></a></li></ul>
+        <ul>
+            <li><a href="/">Superinvestors</a></li>
+            <li><a href="/activity">Activity</a></li>
+            <li><a href="/grand-portfolio">Grand Portfolio</a></li>
+            <li><a href="/search">Search</a></li>
+            <li>{% include "partials/notification_bell.html" %}</li>
+        </ul>
+    </nav>
+    <div class="app-layout">
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+        <aside id="watchlist-sidebar" hx-preserve>
+            <div id="watchlist-sidebar-content">
+                {% include "partials/watchlist_sidebar.html" %}
+            </div>
+        </aside>
+    </div>
+
+    {# ── Toast container for real-time notifications ── #}
+    <div id="notification-toasts"
+         style="position: fixed; bottom: 1em; right: 1em; z-index: 1000; max-width: 400px;">
+    </div>
+
+    <script>
+    // ── SSE listener for real-time notifications ──
+    (function() {
+        var evtSource = new EventSource("/api/notifications/stream");
+
+        evtSource.addEventListener("notification", function(event) {
+            var notif = JSON.parse(event.data);
+
+            // Show in-app toast
+            showToast(notif);
+
+            // Refresh the bell badge via HTMX
+            if (typeof htmx !== "undefined") {
+                var bell = document.getElementById("notification-bell");
+                if (bell) {
+                    htmx.ajax("GET", "/api/notifications/bell", {target: "#notification-bell", swap: "outerHTML"});
+                }
+            }
+        });
+
+        // Auto-reconnect is built into EventSource, but log errors
+        evtSource.onerror = function() {
+            // EventSource will auto-reconnect; nothing to do
+        };
+
+        function buildNotifText(notif) {
+            var actions = {
+                "NEW BUY": "just disclosed a new position in",
+                "ADD": "added to their position in",
+                "REDUCE": "reduced their position in",
+                "SOLD": "sold their entire position in"
+            };
+            var verb = actions[notif.action] || "made a change to";
+            var ticker = notif.ticker || notif.cusip.substring(0, 6);
+            var text = notif.fund_name + " " + verb + " $" + ticker + ".";
+            if (notif.pct_of_portfolio && notif.action !== "SOLD") {
+                text += " It now makes up " + notif.pct_of_portfolio.toFixed(1) + "% of their portfolio.";
+            }
+            return text;
+        }
+
+        function showToast(notif) {
+            var container = document.getElementById("notification-toasts");
+            if (!container) return;
+
+            var isReduce = (notif.action === "REDUCE" || notif.action === "SOLD");
+            var toast = document.createElement("div");
+            toast.className = "notification-toast" + (isReduce ? " reduce-toast" : "");
+            toast.innerHTML =
+                "<small><strong>" + notif.fund_name + "</strong></small><br>" +
+                "<small>" + buildNotifText(notif) + "</small>";
+            toast.onclick = function() { window.location.href = notif.link; };
+            container.appendChild(toast);
+
+            // Auto-dismiss after 10 seconds
+            setTimeout(function() {
+                if (toast.parentNode) toast.remove();
+            }, 10000);
+        }
+    })();
+    </script>
+</body>
+</html>

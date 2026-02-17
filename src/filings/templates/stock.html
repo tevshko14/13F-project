@@ -1,0 +1,428 @@
+{% extends "base.html" %}
+{% block title %}{{ stock.ticker or stock.cusip }} - Stock Detail - 13F Filing Viewer{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>
+        {% if stock.ticker %}
+        <span class="ticker">{{ stock.ticker }}</span> &mdash;
+        {% endif %}
+        {{ stock.issuer_name }}
+    </h1>
+    <p>
+        {% if stock.cusip %}CUSIP: {{ stock.cusip }} &middot; {% endif %}
+        Held by <strong>{{ stock.num_holders }}</strong> superinvestor{{ "s" if stock.num_holders != 1 else "" }}
+        &middot;
+        Combined value: <strong>${{ "{:,.0f}".format(stock.combined_value) }}</strong>
+    </p>
+</hgroup>
+
+<div class="actions" style="margin-bottom: 1.5em;">
+    <a href="/grand-portfolio" role="button" class="secondary">Grand Portfolio</a>
+    <a href="/activity" role="button" class="secondary outline">Activity Feed</a>
+    <a href="/" role="button" class="secondary outline">Superinvestors</a>
+    <span id="watchlist-star">
+        {% include "partials/watchlist_star.html" %}
+    </span>
+</div>
+
+{% if history %}
+<article id="chart-section">
+    <header style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <strong>Quarterly Activity Chart</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Adds vs. Reduces by Quarter
+            </span>
+        </div>
+        <button id="chart-toggle-btn"
+                class="secondary outline"
+                style="font-size: 0.8em; padding: 0.25em 0.75em; margin: 0;"
+                onclick="toggleChartView()">
+            Show Detailed View
+        </button>
+    </header>
+    <div style="position: relative; width: 100%; height: 350px;">
+        <canvas id="activityChart"></canvas>
+    </div>
+    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.5em;">
+        Green bars = share additions &middot; Red bars = share reductions
+    </footer>
+</article>
+{% endif %}
+
+<article>
+    <header>
+        <strong>Superinvestor Holders</strong>
+    </header>
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Investor</th>
+                <th class="text-right">% of Portfolio</th>
+                <th class="text-right">Value ($)</th>
+                <th class="text-right">Shares</th>
+                <th>Recent Activity</th>
+                <th class="text-right">Share Change</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for h in stock.holders %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>
+                    <a href="/holdings/{{ h.fund_cik }}">
+                        <strong>{{ h.fund_display_name }}</strong>
+                    </a>
+                </td>
+                <td class="text-right">{{ "%.1f"|format(h.pct_of_portfolio) }}%</td>
+                <td class="text-right">${{ "{:,.0f}".format(h.value) }}</td>
+                <td class="text-right">{{ "{:,}".format(h.shares) }}</td>
+                <td>
+                    {% if h.activity == "NEW BUY" %}
+                        <span class="badge badge-new">NEW BUY</span>
+                    {% elif h.activity == "ADD" %}
+                        <span class="badge badge-add">ADD</span>
+                    {% elif h.activity == "REDUCE" %}
+                        <span class="badge badge-reduce">REDUCE</span>
+                    {% elif h.activity == "SOLD" %}
+                        <span class="badge badge-sold">SOLD</span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td class="text-right">
+                    {% if h.share_change != 0 %}
+                        <span class="{% if h.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                            {{ "{:+,}".format(h.share_change) }}
+                        </span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+</article>
+
+{% if history %}
+<article>
+    <header>
+        <strong>Quarterly Activity History</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            ({{ history | length }} quarter{{ "s" if history | length != 1 else "" }})
+        </span>
+    </header>
+
+    {% for quarter in history %}
+    <details{% if loop.first %} open{% endif %} style="margin-bottom: 1em;">
+        <summary style="cursor: pointer; font-weight: bold; font-size: 1.05em;">
+            {{ quarter.period }}
+            <span class="text-muted text-small" style="font-weight: normal;">
+                &mdash; {{ quarter.entries | length }} investor{{ "s" if quarter.entries | length != 1 else "" }}
+            </span>
+        </summary>
+        <figure>
+        <table>
+            <thead>
+                <tr>
+                    <th>Investor</th>
+                    <th>Activity</th>
+                    <th class="text-right">Share Change</th>
+                    <th class="text-right">% Change</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in quarter.entries %}
+                <tr>
+                    <td>
+                        <a href="/holdings/{{ entry.fund_cik }}">
+                            <strong>{{ entry.fund_display_name }}</strong>
+                        </a>
+                    </td>
+                    <td>
+                        {% if entry.activity == "NEW BUY" %}
+                            <span class="badge badge-new">NEW BUY</span>
+                        {% elif entry.activity == "ADD" %}
+                            <span class="badge badge-add">ADD</span>
+                        {% elif entry.activity == "REDUCE" %}
+                            <span class="badge badge-reduce">REDUCE</span>
+                        {% elif entry.activity == "SOLD" %}
+                            <span class="badge badge-sold">SOLD</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if entry.share_change != 0 %}
+                            <span class="{% if entry.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                {{ "{:+,}".format(entry.share_change) }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if entry.activity == "NEW BUY" %}
+                            <span class="activity-new-buy">New</span>
+                        {% elif entry.activity == "SOLD" %}
+                            <span class="activity-sold">Exit</span>
+                        {% elif entry.pct_change != 0 %}
+                            <span class="{% if entry.pct_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                {{ "%+.1f"|format(entry.pct_change) }}%
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </figure>
+    </details>
+    {% endfor %}
+</article>
+{% endif %}
+
+{% if history %}
+<script>
+(function() {
+    // ── Data: Jinja2 → JavaScript (reversed to chronological order) ──
+    const rawQuarters = [
+        {% for quarter in history | reverse %}
+        {
+            period: "{{ quarter.period }}",
+            entries: [
+                {% for entry in quarter.entries %}
+                {
+                    investor: "{{ entry.fund_display_name | e }}",
+                    activity: "{{ entry.activity }}",
+                    shareChange: {{ entry.share_change }},
+                },
+                {% endfor %}
+            ]
+        },
+        {% endfor %}
+    ];
+
+    const labels = rawQuarters.map(q => q.period);
+
+    // ── Number formatting helpers ────────────────────────────────
+    function fmtAxis(num) {
+        if (num === 0) return "0";
+        const a = Math.abs(num);
+        if (a >= 1e6) return (num / 1e6).toFixed(1) + "M";
+        if (a >= 1e3) return (num / 1e3).toFixed(0) + "K";
+        return num.toLocaleString();
+    }
+
+    function fmtShares(num) {
+        return (num > 0 ? "+" : "") + num.toLocaleString() + " shares";
+    }
+
+    // ── Simple view: 2 datasets (total adds / total reduces) ────
+    function buildSimpleData() {
+        const adds = [], reduces = [], addCounts = [], reduceCounts = [];
+
+        for (const q of rawQuarters) {
+            let aSum = 0, rSum = 0, aN = 0, rN = 0;
+            for (const e of q.entries) {
+                if (e.activity === "NEW BUY" || e.activity === "ADD") {
+                    aSum += e.shareChange;
+                    aN++;
+                } else {
+                    rSum += e.shareChange;   // already negative
+                    rN++;
+                }
+            }
+            adds.push(aSum);
+            reduces.push(rSum);
+            addCounts.push(aN);
+            reduceCounts.push(rN);
+        }
+
+        return {
+            datasets: [
+                {
+                    label: "Total Adds",
+                    data: adds,
+                    backgroundColor: "rgba(46, 125, 50, 0.8)",
+                    borderColor: "#1b5e20",
+                    borderWidth: 1,
+                    _counts: addCounts,
+                },
+                {
+                    label: "Total Reduces",
+                    data: reduces,
+                    backgroundColor: "rgba(198, 40, 40, 0.8)",
+                    borderColor: "#b71c1c",
+                    borderWidth: 1,
+                    _counts: reduceCounts,
+                },
+            ],
+        };
+    }
+
+    // ── Detailed view: one dataset per investor (split add/reduce) ──
+    function buildDetailedData() {
+        const investorAdds = {};
+        const investorReduces = {};
+        const n = rawQuarters.length;
+
+        for (let i = 0; i < n; i++) {
+            for (const e of rawQuarters[i].entries) {
+                if (e.activity === "NEW BUY" || e.activity === "ADD") {
+                    if (!investorAdds[e.investor])
+                        investorAdds[e.investor] = new Array(n).fill(0);
+                    investorAdds[e.investor][i] = e.shareChange;
+                } else {
+                    if (!investorReduces[e.investor])
+                        investorReduces[e.investor] = new Array(n).fill(0);
+                    investorReduces[e.investor][i] = e.shareChange;
+                }
+            }
+        }
+
+        const datasets = [];
+        const addNames = Object.keys(investorAdds);
+        const redNames = Object.keys(investorReduces);
+        const greens = palette("#2e7d32", "#a5d6a7", addNames.length);
+        const reds   = palette("#c62828", "#ef9a9a", redNames.length);
+
+        addNames.forEach((name, i) => {
+            datasets.push({
+                label: name,
+                data: investorAdds[name],
+                backgroundColor: greens[i],
+                borderColor: greens[i],
+                borderWidth: 0.5,
+                stack: "adds",
+            });
+        });
+
+        redNames.forEach((name, i) => {
+            datasets.push({
+                label: name,
+                data: investorReduces[name],
+                backgroundColor: reds[i],
+                borderColor: reds[i],
+                borderWidth: 0.5,
+                stack: "reduces",
+            });
+        });
+
+        return { datasets };
+    }
+
+    // ── Color palette: interpolate dark → light ─────────────────
+    function palette(darkHex, lightHex, count) {
+        if (count === 0) return [];
+        if (count === 1) return [darkHex];
+        const d = hexRgb(darkHex), l = hexRgb(lightHex), out = [];
+        for (let i = 0; i < count; i++) {
+            const t = i / (count - 1);
+            out.push(`rgb(${mix(d.r,l.r,t)},${mix(d.g,l.g,t)},${mix(d.b,l.b,t)})`);
+        }
+        return out;
+    }
+    function hexRgb(h) {
+        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h);
+        return { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) };
+    }
+    function mix(a, b, t) { return Math.round(a + (b - a) * t); }
+
+    // ── Chart creation ──────────────────────────────────────────
+    let currentView = "simple";
+    let chart = null;
+
+    function createChart(viewData) {
+        if (chart) { chart.destroy(); chart = null; }
+
+        const ctx = document.getElementById("activityChart");
+        if (!ctx) return;
+
+        chart = new Chart(ctx, {
+            type: "bar",
+            data: { labels: labels, datasets: viewData.datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                scales: {
+                    x: {
+                        stacked: true,
+                        grid: { display: false },
+                    },
+                    y: {
+                        stacked: true,
+                        title: { display: true, text: "Share Change", font: { size: 13 } },
+                        ticks: { callback: function(v) { return fmtAxis(v); } },
+                        grid: {
+                            color: function(ctx) {
+                                return ctx.tick.value === 0
+                                    ? "rgba(0,0,0,0.3)"
+                                    : "rgba(0,0,0,0.06)";
+                            },
+                            lineWidth: function(ctx) {
+                                return ctx.tick.value === 0 ? 2 : 1;
+                            },
+                        },
+                    },
+                },
+                plugins: {
+                    legend: {
+                        display: currentView === "detailed",
+                        position: "bottom",
+                        labels: { font: { size: 11 }, boxWidth: 12, padding: 8 },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: function(items) { return items[0].label; },
+                            label: function(ctx) {
+                                const val = ctx.raw;
+                                if (val === 0) return null;
+                                if (currentView === "simple") {
+                                    const ds = ctx.dataset;
+                                    const cnt = ds._counts ? ds._counts[ctx.dataIndex] : 0;
+                                    return ds.label + ": " + fmtShares(val)
+                                        + " (" + cnt + " investor" + (cnt !== 1 ? "s" : "") + ")";
+                                }
+                                return ctx.dataset.label + ": " + fmtShares(val);
+                            },
+                            afterBody: function(items) {
+                                let net = 0;
+                                for (const it of items) net += it.raw;
+                                if (net !== 0) return ["", "Net: " + fmtShares(net)];
+                                return [];
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    // ── Toggle simple ↔ detailed ────────────────────────────────
+    window.toggleChartView = function() {
+        const btn = document.getElementById("chart-toggle-btn");
+        if (currentView === "simple") {
+            currentView = "detailed";
+            btn.textContent = "Show Simple View";
+            createChart(buildDetailedData());
+        } else {
+            currentView = "simple";
+            btn.textContent = "Show Detailed View";
+            createChart(buildSimpleData());
+        }
+    };
+
+    // ── Initialize with simple view ─────────────────────────────
+    createChart(buildSimpleData());
+})();
+</script>
+{% endif %}
+{% endblock %}

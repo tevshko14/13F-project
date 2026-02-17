@@ -1,0 +1,15 @@
+{# Notification bell icon for navbar.
+   HTMX-polls every 60s to update unread count.
+   Uses Jinja2 global get_unread_count(). #}
+{% set unread = get_unread_count() %}
+<span id="notification-bell"
+      hx-get="/api/notifications/bell"
+      hx-trigger="every 60s"
+      hx-swap="outerHTML">
+    <a href="/notifications" style="position: relative; text-decoration: none; font-size: 1.1em;">
+        &#128276;{# 🔔 bell emoji #}
+        {% if unread > 0 %}
+        <span class="notif-badge">{{ unread }}</span>
+        {% endif %}
+    </a>
+</span>
