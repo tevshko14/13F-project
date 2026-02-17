@@ -25,6 +25,56 @@
     </span>
 </div>
 
+{# ── Tab Navigation ── #}
+<div class="stock-tabs" style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+            <li>
+                <button id="tab-overview-btn"
+                        class="stock-tab active"
+                        onclick="switchTab('overview')">
+                    Overview
+                </button>
+            </li>
+            <li>
+                <button id="tab-analysts-btn"
+                        class="stock-tab"
+                        onclick="switchTab('analysts')">
+                    Analyst Ratings
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
+
+<style>
+    .stock-tab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: rgba(0,0,0,0.5);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .stock-tab:hover {
+        color: rgba(0,0,0,0.8);
+    }
+    .stock-tab.active {
+        color: #1976d2;
+        border-bottom-color: #1976d2;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+</style>
+
+{# ── Overview Tab ── #}
+<div id="tab-overview" class="tab-content active">
+
 {% if history %}
 <article id="chart-section">
     <header style="display: flex; justify-content: space-between; align-items: center;">
@@ -187,6 +237,65 @@
     {% endfor %}
 </article>
 {% endif %}
+
+</div>{# end tab-overview #}
+
+{# ── Analyst Ratings Tab ── #}
+<div id="tab-analysts" class="tab-content">
+    <div id="analyst-ratings-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading analyst ratings...
+        </p>
+    </div>
+</div>
+
+{# ── Tab Switching Logic ── #}
+<script>
+(function() {
+    var analystLoaded = false;
+
+    window.switchTab = function(tab) {
+        // Toggle tab buttons
+        document.querySelectorAll('.stock-tab').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        document.getElementById('tab-' + tab + '-btn').classList.add('active');
+
+        // Toggle tab content
+        document.querySelectorAll('.tab-content').forEach(function(el) {
+            el.classList.remove('active');
+        });
+        document.getElementById('tab-' + tab).classList.add('active');
+
+        // Lazy-load analyst ratings on first click
+        if (tab === 'analysts' && !analystLoaded) {
+            analystLoaded = true;
+            {% if stock.ticker %}
+            var url = '/api/analysts/{{ stock.ticker }}';
+            {% else %}
+            var url = null;
+            {% endif %}
+
+            if (url) {
+                fetch(url)
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) {
+                        document.getElementById('analyst-ratings-content').innerHTML = html;
+                    })
+                    .catch(function() {
+                        document.getElementById('analyst-ratings-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load analyst ratings. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('analyst-ratings-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Analyst ratings require a ticker symbol. This stock only has a CUSIP identifier.</p>';
+            }
+        }
+    };
+})();
+</script>
 
 {% if history %}
 <script>
