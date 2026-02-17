@@ -5,6 +5,9 @@ A web dashboard and CLI tool for tracking SEC 13F institutional holdings filings
 ## Features
 
 - **Superinvestor Tracking** - Monitor 84 top institutional investors' 13F filings from SEC EDGAR
+- **S&P 500 Heatmap** - Interactive treemap showing daily performance grouped by sector (ECharts), with gold borders on stocks held by superinvestors
+- **Most Added by Superinvestors** - Stack-ranked table of stocks most added this quarter, with analyst consensus and 52-week range
+- **Ticker Search** - Autocomplete search bar in the nav for quick navigation to any stock page
 - **Investor Pages** - Click any investor name to view a tabbed page with Holdings and Compare Quarters
 - **Stock Detail Pages** - See which superinvestors hold a specific stock, with quarterly activity charts
 - **Analyst Ratings** - View firm-level upgrade/downgrade ratings from Wall Street (via Finnhub + yfinance)
@@ -23,9 +26,10 @@ A web dashboard and CLI tool for tracking SEC 13F institutional holdings filings
 | Package Manager | `uv` |
 | Web Framework | FastAPI + Jinja2 + HTMX |
 | CSS | Pico CSS v2 (classless, CDN) |
-| Charts | Chart.js v4 |
+| Charts | Chart.js v4 + ECharts v5 (heatmap) |
 | CLI Output | Rich |
 | SEC Data | `edgartools` (wraps EDGAR API) |
+| Market Data | `yfinance` (S&P 500 daily prices, 52-week ranges) + Wikipedia (sector data) |
 | Analyst Data | `yfinance` (free) + `finnhub-python` (free tier, optional API key) |
 | Caching | JSON files at `~/.13f-cache/` |
 
@@ -67,10 +71,11 @@ railway up
 
 ```
 src/filings/
-├── web.py              # FastAPI app (20+ routes)
+├── web.py              # FastAPI app (24+ routes)
 ├── cli.py              # CLI entry point
 ├── client.py           # SEC EDGAR data access layer
 ├── analysts.py         # Analyst ratings (Finnhub + yfinance)
+├── market_data.py      # S&P 500 heatmap, most-added table, ticker search
 ├── cache.py            # JSON file cache (6-hour TTL)
 ├── models.py           # Dataclasses (data contracts)
 ├── watchlist.py        # Watchlist persistence
@@ -78,10 +83,13 @@ src/filings/
 ├── superinvestors.py   # 84 hardcoded superinvestors
 ├── display.py          # CLI Rich formatters
 └── templates/          # Jinja2 HTML templates
-    ├── base.html       # Master layout + sortable table engine
+    ├── base.html       # Master layout + sortable table engine + ticker search
     ├── investor.html   # Superinvestor page (Holdings + Compare tabs)
     ├── stock.html      # Stock detail + analyst ratings tabs
     └── partials/       # HTMX partials
+        ├── heatmap.html           # S&P 500 ECharts treemap (lazy-loaded)
+        ├── most_added.html        # Most-added-by-superinvestors table
+        ├── ticker_search.html     # Nav autocomplete search input
         ├── analyst_ratings.html   # Analyst consensus + ratings table
         └── compare_content.html   # Compare quarters (lazy-loaded)
 ```

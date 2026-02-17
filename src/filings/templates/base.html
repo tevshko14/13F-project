@@ -8,6 +8,7 @@
           href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
     <style>
         .htmx-indicator { display: none; }
         .htmx-request .htmx-indicator,
@@ -231,6 +232,7 @@
             <li><a href="/activity">Activity</a></li>
             <li><a href="/grand-portfolio">Grand Portfolio</a></li>
             <li><a href="/search">Search</a></li>
+            <li>{% include "partials/ticker_search.html" %}</li>
             <li>{% include "partials/notification_bell.html" %}</li>
         </ul>
     </nav>
@@ -410,6 +412,100 @@
                 if (toast.parentNode) toast.remove();
             }, 10000);
         }
+    })();
+    </script>
+
+    <script>
+    // ── Ticker Search Autocomplete ──
+    (function() {
+        var _tickerIndex = null;
+        var _selectedIdx = -1;
+
+        // Fetch the search index on page load
+        fetch("/api/ticker-search-index")
+            .then(function(r) { return r.json(); })
+            .then(function(data) { _tickerIndex = data; })
+            .catch(function() { _tickerIndex = []; });
+
+        window.tickerSearchFilter = function(query) {
+            var container = document.getElementById("ticker-search-results");
+            if (!container || !_tickerIndex) return;
+
+            query = (query || "").trim().toUpperCase();
+            if (query.length < 1) {
+                container.style.display = "none";
+                return;
+            }
+
+            var matches = _tickerIndex.filter(function(item) {
+                return item.ticker.indexOf(query) === 0
+                    || item.name.toUpperCase().indexOf(query) !== -1;
+            }).slice(0, 12);
+
+            if (matches.length === 0) {
+                container.style.display = "none";
+                return;
+            }
+
+            _selectedIdx = -1;
+            container.innerHTML = matches.map(function(m, i) {
+                var star = m.held_by_super ? '<span style="color: #f9a825; margin-right: 0.3em;" title="Held by superinvestors">&#9733;</span>' : '';
+                var sp = m.in_sp500 ? '<span style="opacity:0.5; font-size:0.75em;"> S&P</span>' : '';
+                return '<div class="ts-item" data-idx="' + i + '" data-ticker="' + m.ticker + '"'
+                    + ' style="padding: 0.4em 0.6em; cursor: pointer; font-size: 0.85em; display: flex; justify-content: space-between; align-items: center;"'
+                    + ' onmouseenter="this.style.background=\'rgba(0,0,0,0.06)\'" onmouseleave="this.style.background=\'\'"'
+                    + ' onclick="tickerSearchGo(\'' + m.ticker + '\')">'
+                    + '<span>' + star + '<strong>' + m.ticker + '</strong> <span class="text-muted">' + m.name + '</span></span>'
+                    + sp
+                    + '</div>';
+            }).join("");
+            container.style.display = "block";
+        };
+
+        window.tickerSearchKeydown = function(e) {
+            var container = document.getElementById("ticker-search-results");
+            if (!container || container.style.display === "none") return;
+            var items = container.querySelectorAll(".ts-item");
+            if (items.length === 0) return;
+
+            if (e.key === "ArrowDown") {
+                e.preventDefault();
+                _selectedIdx = Math.min(_selectedIdx + 1, items.length - 1);
+                highlightItem(items);
+            } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                _selectedIdx = Math.max(_selectedIdx - 1, 0);
+                highlightItem(items);
+            } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (_selectedIdx >= 0 && items[_selectedIdx]) {
+                    tickerSearchGo(items[_selectedIdx].dataset.ticker);
+                } else if (items.length > 0) {
+                    tickerSearchGo(items[0].dataset.ticker);
+                }
+            } else if (e.key === "Escape") {
+                container.style.display = "none";
+            }
+        };
+
+        function highlightItem(items) {
+            items.forEach(function(el, i) {
+                el.style.background = i === _selectedIdx ? "rgba(0,0,0,0.08)" : "";
+            });
+        }
+
+        window.tickerSearchGo = function(ticker) {
+            window.location.href = "/stock/" + ticker;
+        };
+
+        // Close dropdown when clicking outside
+        document.addEventListener("click", function(e) {
+            var search = document.getElementById("ticker-search");
+            var results = document.getElementById("ticker-search-results");
+            if (search && results && !search.contains(e.target)) {
+                results.style.display = "none";
+            }
+        });
     })();
     </script>
 </body>
