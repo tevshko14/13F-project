@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}{{ fund.name }} - 13F Filing Viewer{% endblock %}
+{% block content %}
+{% from "partials/ticker_link.html" import ticker_link %}
+<hgroup>
+    <h1>{% if investor_name %}{{ investor_name }}{% else %}{{ fund.name }}{% endif %}</h1>
+    <p>{{ fund.name }} &middot; CIK: {{ fund.cik }} &middot;
+       Report Period: {{ fund.report_period }} &middot; Filed: {{ fund.filing_date }}</p>
+</hgroup>
+
+<div class="actions" style="margin-bottom: 1.5em;">
+    <a href="/" role="button" class="secondary">Superinvestors</a>
+    <a href="/activity" role="button" class="secondary outline">Activity Feed</a>
+    <a href="/search" role="button" class="secondary outline">Search</a>
+</div>
+
+{# ── Tab Navigation ── #}
+<div class="investor-tabs" style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+            <li>
+                <button id="tab-holdings-btn"
+                        class="investor-tab active"
+                        onclick="switchInvestorTab('holdings')">
+                    Holdings
+                </button>
+            </li>
+            <li>
+                <button id="tab-compare-btn"
+                        class="investor-tab"
+                        onclick="switchInvestorTab('compare')">
+                    Compare Quarters
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
+
+<style>
+    .investor-tab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: rgba(0,0,0,0.5);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .investor-tab:hover {
+        color: rgba(0,0,0,0.8);
+    }
+    .investor-tab.active {
+        color: #1976d2;
+        border-bottom-color: #1976d2;
+    }
+    .investor-tab-content { display: none; }
+    .investor-tab-content.active { display: block; }
+</style>
+
+{# ── Holdings Tab (server-rendered) ── #}
+<div id="tab-holdings" class="investor-tab-content active">
+
+<article>
+    <header>
+        <strong>Total Value:</strong> ${{ "{:,.0f}".format(fund.total_value) }}
+        &nbsp;&middot;&nbsp;
+        <strong>Total Holdings:</strong> {{ fund.total_holdings }}
+    </header>
+
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th data-sort="text">Ticker</th>
+                <th data-sort="text">Issuer</th>
+                <th data-sort="text">Class</th>
+                <th class="text-right" data-sort="number">% of Portfolio</th>
+                <th class="text-right" data-sort="number">Value ($)</th>
+                <th class="text-right" data-sort="number">Shares</th>
+                <th data-sort="activity">Activity</th>
+                <th class="text-right" data-sort="number">Share Change</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for h in holdings %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ ticker_link(h.ticker, h.cusip) }}</td>
+                <td><strong>{{ h.issuer_name }}</strong></td>
+                <td class="text-small">{{ h.title_of_class }}</td>
+                <td class="text-right">{{ "%.1f"|format(h.pct_of_portfolio) }}%</td>
+                <td class="text-right">${{ "{:,.0f}".format(h.value) }}</td>
+                <td class="text-right">{{ "{:,}".format(h.shares) }}</td>
+                <td>
+                    {% if h.activity == "NEW BUY" %}
+                        <span class="badge badge-new">NEW BUY</span>
+                    {% elif h.activity == "ADD" %}
+                        <span class="badge badge-add">ADD</span>
+                    {% elif h.activity == "REDUCE" %}
+                        <span class="badge badge-reduce">REDUCE</span>
+                    {% elif h.activity == "SOLD" %}
+                        <span class="badge badge-sold">SOLD</span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td class="text-right">
+                    {% if h.share_change != 0 %}
+                        <span class="{% if h.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                            {{ "{:+,}".format(h.share_change) }}
+                        </span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+
+    {% if top_n < fund.total_holdings %}
+    <footer class="text-muted">
+        Showing top {{ top_n }} of {{ fund.total_holdings }} holdings (sorted by value)
+    </footer>
+    {% endif %}
+</article>
+
+</div>{# end tab-holdings #}
+
+{# ── Compare Quarters Tab (lazy-loaded) ── #}
+<div id="tab-compare" class="investor-tab-content">
+    <div id="compare-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading comparison data...
+        </p>
+    </div>
+</div>
+
+{# ── Tab Switching Logic ── #}
+<script>
+(function() {
+    var compareLoaded = false;
+
+    window.switchInvestorTab = function(tab) {
+        // Toggle tab buttons
+        document.querySelectorAll('.investor-tab').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        document.getElementById('tab-' + tab + '-btn').classList.add('active');
+
+        // Toggle tab content
+        document.querySelectorAll('.investor-tab-content').forEach(function(el) {
+            el.classList.remove('active');
+        });
+        document.getElementById('tab-' + tab).classList.add('active');
+
+        // Lazy-load compare data on first click
+        if (tab === 'compare' && !compareLoaded) {
+            compareLoaded = true;
+            fetch('/api/compare/{{ fund.cik }}')
+                .then(function(resp) { return resp.text(); })
+                .then(function(html) {
+                    document.getElementById('compare-content').innerHTML = html;
+                    // Re-init sortable tables for the new content
+                    if (window.initSortableTables) window.initSortableTables();
+                })
+                .catch(function() {
+                    document.getElementById('compare-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Failed to load comparison data. Please try again later.</p>';
+                });
+        }
+    };
+})();
+</script>
+{% endblock %}

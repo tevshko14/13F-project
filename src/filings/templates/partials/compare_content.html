@@ -1,22 +1,19 @@
-{% extends "base.html" %}
-{% block title %}{{ current.name }} Comparison - 13F Filing Viewer{% endblock %}
-{% block content %}
-<hgroup>
-    <h1>{{ current.name }}</h1>
-    <p>Comparing: {{ previous.report_period }} &rarr; {{ current.report_period }}</p>
-</hgroup>
-
-<div class="actions" style="margin-bottom: 1.5em;">
-    <a href="/holdings/{{ current.cik }}" role="button" class="secondary">View Holdings</a>
-    <a href="/" role="button" class="secondary">Superinvestors</a>
-    <a href="/search" role="button" class="secondary outline">Search</a>
-</div>
-
+{# Compare Quarters partial – loaded via fetch() into the investor page Compare tab #}
+{% if error is defined and error %}
+<article>
+    <p class="text-muted" style="text-align: center; padding: 2em 0;">
+        {{ error }}
+    </p>
+</article>
+{% else %}
 <article>
     <header>
         <strong>Previous Value:</strong> ${{ "{:,.0f}".format(previous.total_value) }}
         &nbsp;&rarr;&nbsp;
         <strong>Current Value:</strong> ${{ "{:,.0f}".format(current.total_value) }}
+        <span class="text-muted" style="margin-left: 1em; font-weight: normal;">
+            {{ previous.report_period }} &rarr; {{ current.report_period }}
+        </span>
     </header>
 
     <figure>
@@ -24,12 +21,12 @@
         <thead>
             <tr>
                 <th>#</th>
-                <th>Issuer</th>
-                <th>Status</th>
-                <th class="text-right">Prev Shares</th>
-                <th class="text-right">Curr Shares</th>
-                <th class="text-right">Change</th>
-                <th class="text-right">Curr Value ($)</th>
+                <th data-sort="text">Issuer</th>
+                <th data-sort="activity">Status</th>
+                <th class="text-right" data-sort="number">Prev Shares</th>
+                <th class="text-right" data-sort="number">Curr Shares</th>
+                <th class="text-right" data-sort="number">Change</th>
+                <th class="text-right" data-sort="number">Curr Value ($)</th>
             </tr>
         </thead>
         <tbody>
@@ -58,4 +55,4 @@
     </table>
     </figure>
 </article>
-{% endblock %}
+{% endif %}
