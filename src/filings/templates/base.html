@@ -231,7 +231,6 @@
             <li><a href="/">Superinvestors</a></li>
             <li><a href="/activity">Activity</a></li>
             <li><a href="/grand-portfolio">Grand Portfolio</a></li>
-            <li><a href="/search">Search</a></li>
             <li>{% include "partials/ticker_search.html" %}</li>
             <li>{% include "partials/notification_bell.html" %}</li>
         </ul>
@@ -416,7 +415,7 @@
     </script>
 
     <script>
-    // ── Ticker Search Autocomplete ──
+    // ── Unified Search Autocomplete (tickers + investors) ──
     (function() {
         var _tickerIndex = null;
         var _selectedIdx = -1;
@@ -438,7 +437,7 @@
             }
 
             var matches = _tickerIndex.filter(function(item) {
-                return item.ticker.indexOf(query) === 0
+                return item.ticker.toUpperCase().indexOf(query) === 0
                     || item.name.toUpperCase().indexOf(query) !== -1;
             }).slice(0, 12);
 
@@ -449,14 +448,21 @@
 
             _selectedIdx = -1;
             container.innerHTML = matches.map(function(m, i) {
-                var star = m.held_by_super ? '<span style="color: #f9a825; margin-right: 0.3em;" title="Held by superinvestors">&#9733;</span>' : '';
-                var sp = m.in_sp500 ? '<span style="opacity:0.5; font-size:0.75em;"> S&P</span>' : '';
+                var isInvestor = m.type === 'investor';
+                var icon = isInvestor
+                    ? '<span style="margin-right: 0.3em;" title="Superinvestor">&#128100;</span>'
+                    : (m.held_by_super ? '<span style="color: #f9a825; margin-right: 0.3em;" title="Held by superinvestors">&#9733;</span>' : '');
+                var badge = isInvestor
+                    ? '<span style="opacity:0.5; font-size:0.75em; background:#e8eaf6; padding:0 0.3em; border-radius:2px;"> Investor</span>'
+                    : (m.in_sp500 ? '<span style="opacity:0.5; font-size:0.75em;"> S&P</span>' : '');
+
                 return '<div class="ts-item" data-idx="' + i + '" data-ticker="' + m.ticker + '"'
+                    + ' data-type="' + (m.type || 'ticker') + '" data-cik="' + (m.cik || '') + '"'
                     + ' style="padding: 0.4em 0.6em; cursor: pointer; font-size: 0.85em; display: flex; justify-content: space-between; align-items: center;"'
                     + ' onmouseenter="this.style.background=\'rgba(0,0,0,0.06)\'" onmouseleave="this.style.background=\'\'"'
-                    + ' onclick="tickerSearchGo(\'' + m.ticker + '\')">'
-                    + '<span>' + star + '<strong>' + m.ticker + '</strong> <span class="text-muted">' + m.name + '</span></span>'
-                    + sp
+                    + ' onclick="tickerSearchGo(\'' + m.ticker.replace(/'/g, "\\'") + '\', \'' + (m.type || 'ticker') + '\', \'' + (m.cik || '') + '\')">'
+                    + '<span>' + icon + '<strong>' + m.ticker + '</strong> <span class="text-muted">' + m.name + '</span></span>'
+                    + badge
                     + '</div>';
             }).join("");
             container.style.display = "block";
@@ -478,10 +484,9 @@
                 highlightItem(items);
             } else if (e.key === "Enter") {
                 e.preventDefault();
-                if (_selectedIdx >= 0 && items[_selectedIdx]) {
-                    tickerSearchGo(items[_selectedIdx].dataset.ticker);
-                } else if (items.length > 0) {
-                    tickerSearchGo(items[0].dataset.ticker);
+                var sel = (_selectedIdx >= 0 && items[_selectedIdx]) ? items[_selectedIdx] : items[0];
+                if (sel) {
+                    tickerSearchGo(sel.dataset.ticker, sel.dataset.type, sel.dataset.cik);
                 }
             } else if (e.key === "Escape") {
                 container.style.display = "none";
@@ -494,8 +499,12 @@
             });
         }
 
-        window.tickerSearchGo = function(ticker) {
-            window.location.href = "/stock/" + ticker;
+        window.tickerSearchGo = function(ticker, type, cik) {
+            if (type === 'investor' && cik) {
+                window.location.href = "/holdings/" + cik;
+            } else {
+                window.location.href = "/stock/" + ticker;
+            }
         };
 
         // Close dropdown when clicking outside
