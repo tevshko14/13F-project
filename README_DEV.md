@@ -123,13 +123,13 @@ uv run filings-web          # starts at http://localhost:8000
 │  Uses display.py │  │  1-sec rate limit between funds       │
 │  for formatting  │  │  Watchlist: server-side JSON + HTMX   │
 │                  │  │  Notifications: SSE + polling + JSON  │
-└──────────────────┘  │  19 routes (see Section 6)            │
+└──────────────────┘  │  21 routes (see Section 6)            │
                       └──────────┬──────────────────────────┘
                                  │
                                  ▼
                       ┌─────────────────────────┐
                       │  templates/ (Jinja2)     │
-                      │  10 pages + 7 partials   │
+                      │  9 pages + 8 partials    │
                       │  (see Section 7)         │
                       └─────────────────────────┘
 ```
@@ -194,13 +194,12 @@ uv run filings-web          # starts at http://localhost:8000
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
     ├── cli.py                        # CLI entry point (search/holdings/compare)
-    ├── web.py                        # FastAPI app (20 routes + background refresh + SSE + polling)
+    ├── web.py                        # FastAPI app (21 routes + background refresh + SSE + polling)
     └── templates/
-        ├── base.html                 # Master layout: nav, PicoCSS, HTMX, sidebar, CSS
+        ├── base.html                 # Master layout: nav, PicoCSS, HTMX, sidebar, CSS, sortable table engine
         ├── index.html                # Homepage: superinvestor list with lazy-load
         ├── search.html               # Fund manager search
-        ├── holdings.html             # Fund holdings with enriched activity data
-        ├── compare.html              # Quarter-over-quarter diff
+        ├── investor.html             # Superinvestor page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
         ├── grand_portfolio.html      # Aggregated holdings across all funds
         ├── stock.html                # Stock detail + multi-quarter history + star button
@@ -214,7 +213,8 @@ uv run filings-web          # starts at http://localhost:8000
             ├── watchlist_star.html    # Star button (filled/outline) for stock pages
             ├── watchlist_response.html # OOB response: star + sidebar update
             ├── notification_bell.html # Navbar bell icon with unread badge
-            └── analyst_ratings.html  # Analyst consensus + ratings table (lazy-loaded)
+            ├── analyst_ratings.html  # Analyst consensus + ratings table (lazy-loaded)
+            └── compare_content.html  # Compare quarters partial (lazy-loaded into investor page)
 ```
 
 ---
@@ -679,8 +679,9 @@ HTMX lazy-load (cold start):
 | GET | `/` | `index` | Cache (read) | `index.html` |
 | GET | `/api/fund-row/{cik}` | `fund_row` | SEC API (live) | `partials/fund_row.html` |
 | GET | `/search` | `search_page` | SEC API (live) | `search.html` |
-| GET | `/holdings/{cik}` | `holdings` | SEC API (live) | `holdings.html` |
-| GET | `/compare/{cik}` | `compare` | SEC API (live) | `compare.html` |
+| GET | `/holdings/{cik}` | `holdings` | SEC API (live) | `investor.html` |
+| GET | `/compare/{cik}` | `compare` | Redirect | → `/holdings/{cik}` (302) |
+| GET | `/api/compare/{cik}` | `compare_api` | SEC API (live) | `partials/compare_content.html` |
 | GET | `/activity` | `activity_feed` | Cache only | `activity.html` |
 | GET | `/grand-portfolio` | `grand_portfolio` | Cache only | `grand_portfolio.html` |
 | GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
@@ -698,7 +699,8 @@ HTMX lazy-load (cold start):
 
 **Key pattern:** Pages that aggregate across all 84 funds (activity, grand portfolio,
 stock detail) always read from cache — they never call the SEC API directly.
-Pages for a single fund (holdings, compare) make live SEC API calls.
+Pages for a single fund (investor page holdings tab, compare quarters API) make live SEC API calls.
+The `/compare/{cik}` route now redirects to `/holdings/{cik}` — compare data is lazy-loaded via `/api/compare/{cik}`.
 Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
 
 ---
@@ -734,20 +736,22 @@ Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund
 | `.notification-unread` | Left border highlight on unread notification cards |
 | `.notification-card` | Clickable notification entry in history page |
 | `@keyframes slideIn` | Toast entrance animation (translateX 100% → 0) |
+| `th[data-sort]` | Sortable column header (cursor:pointer, hover highlight) |
+| `.sort-indicator` | Sort direction arrow (▲/▼/▴) appended to sortable headers |
 
 ### Template Hierarchy
 
 ```
-base.html (nav + styles + HTMX + Chart.js CDN + sidebar + SSE + toasts)
+base.html (nav + styles + HTMX + Chart.js CDN + sidebar + SSE + toasts + sortable table engine)
   ├── includes partials/watchlist_sidebar.html (in <aside> via hx-preserve)
   ├── includes partials/notification_bell.html (in <nav>, HTMX-polls every 60s)
   ├── index.html (homepage)
   │     └── uses partials/fund_row.html (HTMX lazy-load)
   │     └── uses partials/fund_row_error.html (HTMX error)
   ├── search.html
-  ├── holdings.html
-  │     └── imports partials/ticker_link.html (macro)
-  ├── compare.html
+  ├── investor.html (Tabbed: Holdings + Compare Quarters, lazy-loads compare)
+  │     ├── imports partials/ticker_link.html (macro)
+  │     └── lazy-loads partials/compare_content.html via fetch(/api/compare/{cik})
   ├── activity.html
   │     └── imports partials/ticker_link.html (macro)
   ├── grand_portfolio.html
@@ -773,8 +777,7 @@ base.html (nav + styles + HTMX + Chart.js CDN + sidebar + SSE + toasts)
 {% endmacro %}
 ```
 
-Used in: `holdings.html`, `activity.html`, `grand_portfolio.html`,
-`index.html`, `partials/fund_row.html`.
+Used in: `investor.html`, `activity.html`, `grand_portfolio.html`.
 
 ### Interactive Chart (`stock.html` inline script)
 
@@ -1056,7 +1059,8 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Clickable investor names in stock history (links to `/holdings/{cik}` —
       implemented in both holders table and quarterly history section)
 - [x] Analyst ratings tab on stock pages (Finnhub + yfinance, firm-level, lazy-loaded via HTMX)
-- [ ] Sortable tables in the web UI (currently static sort order)
+- [x] Sortable tables across all pages (vanilla JS, `data-sort` attributes, text/number/date/activity types)
+- [x] Consolidated superinvestor page (investor.html with Holdings + Compare Quarters tabs)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
 - [ ] Comparison across multiple funds on the same page

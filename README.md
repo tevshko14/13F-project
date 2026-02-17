@@ -5,11 +5,12 @@ A web dashboard and CLI tool for tracking SEC 13F institutional holdings filings
 ## Features
 
 - **Superinvestor Tracking** - Monitor 84 top institutional investors' 13F filings from SEC EDGAR
+- **Investor Pages** - Click any investor name to view a tabbed page with Holdings and Compare Quarters
 - **Stock Detail Pages** - See which superinvestors hold a specific stock, with quarterly activity charts
 - **Analyst Ratings** - View firm-level upgrade/downgrade ratings from Wall Street (via Finnhub + yfinance)
+- **Sortable Tables** - Click any column header to sort tables across all pages
 - **Activity Feed** - Track recent buys, sells, and position changes across all funds
 - **Grand Portfolio** - Aggregated view of all superinvestor holdings ranked by conviction
-- **Quarter Comparison** - Side-by-side diff of a fund's holdings between quarters
 - **Watchlist** - Star tickers you care about, with real-time notifications when superinvestors trade them
 - **Notifications** - SSE-powered real-time alerts when new filings match your watchlist
 - **CLI** - Search managers, view holdings, and compare quarters from the terminal
@@ -77,10 +78,12 @@ src/filings/
 ├── superinvestors.py   # 84 hardcoded superinvestors
 ├── display.py          # CLI Rich formatters
 └── templates/          # Jinja2 HTML templates
-    ├── base.html       # Master layout
+    ├── base.html       # Master layout + sortable table engine
+    ├── investor.html   # Superinvestor page (Holdings + Compare tabs)
     ├── stock.html      # Stock detail + analyst ratings tabs
     └── partials/       # HTMX partials
-        └── analyst_ratings.html  # Analyst consensus + ratings table
+        ├── analyst_ratings.html   # Analyst consensus + ratings table
+        └── compare_content.html   # Compare quarters (lazy-loaded)
 ```
 
 ## Analyst Ratings
