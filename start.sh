@@ -1,2 +1,8 @@
 #!/bin/sh
-exec uvicorn filings.web:app --host 0.0.0.0 --port "${PORT:-8000}"
+exec gunicorn filings.web:app \
+  --bind "0.0.0.0:${PORT:-8000}" \
+  --workers "${WEB_WORKERS:-2}" \
+  --worker-class uvicorn.workers.UvicornWorker \
+  --timeout 120 \
+  --graceful-timeout 30 \
+  --access-logfile -

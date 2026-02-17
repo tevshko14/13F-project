@@ -4,9 +4,17 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}13F Filing Viewer{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}Track superinvestor 13F filings — see what Buffett, Ackman, and other top investors are buying and selling.{% endblock %}">
+    <meta property="og:title" content="{% block og_title %}13F Filing Viewer{% endblock %}">
+    <meta property="og:description" content="Track superinvestor 13F filings — what top investors are buying and selling.">
+    <meta property="og:type" content="website">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="13F Filing Viewer">
+    <meta name="twitter:description" content="Track superinvestor 13F filings — what top investors are buying and selling.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
     <style>
@@ -86,142 +94,21 @@
         /* Nav links */
         nav ul li a { font-size: 0.9em; }
 
-        /* ── App layout: main + sidebar ── */
-        .app-layout {
-            display: flex;
-            gap: 1.5em;
-            max-width: 1280px;
-            margin: 0 auto;
-            padding: 0 1em;
-        }
-        .app-layout > main {
-            flex: 1;
-            min-width: 0;   /* prevent flexbox overflow */
-        }
-
-        /* Watchlist sidebar */
-        #watchlist-sidebar {
-            width: 200px;
-            flex-shrink: 0;
-            position: sticky;
-            top: 1em;
-            align-self: flex-start;
-            border-left: 1px solid rgba(0,0,0,0.1);
-            padding-left: 1em;
-            margin-top: 0.5em;
-        }
-        .watchlist-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-        .watchlist-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0.25em 0;
-        }
-        .watchlist-ticker {
-            font-size: 0.9em;
-            font-weight: bold;
-        }
-        .watchlist-remove {
-            background: none;
-            border: none;
-            color: #c62828;
-            cursor: pointer;
-            font-size: 1.1em;
-            padding: 0 0.3em;
-            margin: 0;
-            line-height: 1;
-            opacity: 0.5;
-        }
-        .watchlist-remove:hover { opacity: 1; }
-
-        /* Star button */
-        .star-btn {
-            background: none;
-            border: 1px solid rgba(0,0,0,0.15);
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 1.3em;
-            line-height: 1;
-            padding: 0.15em 0.4em;
-            margin: 0;
-            color: #999;
-            transition: color 0.15s;
-        }
-        .star-btn:hover { color: #f9a825; }
-        .star-btn.starred { color: #f9a825; border-color: #f9a825; }
-
-        /* Notification bell badge */
-        .notif-badge {
-            position: absolute;
-            top: -6px; right: -8px;
-            background: #c62828;
-            color: white;
-            border-radius: 50%;
-            font-size: 0.6em;
-            min-width: 1.4em;
-            height: 1.4em;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            line-height: 1;
-        }
-
-        /* Toast notifications */
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        .notification-toast {
-            margin-bottom: 0.5em;
-            padding: 0.75em 1em;
-            background: #e8f5e9;
-            border-left: 4px solid #2e7d32;
-            border-radius: 4px;
-            cursor: pointer;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-            animation: slideIn 0.3s ease;
-            font-size: 0.9em;
-        }
-        .notification-toast:hover { background: #c8e6c9; }
-        .notification-toast.reduce-toast {
-            background: #fce4ec;
-            border-left-color: #c62828;
-        }
-        .notification-toast.reduce-toast:hover { background: #f8bbd0; }
-
         /* Sortable table headers */
         th[data-sort] { cursor: pointer; user-select: none; }
         th[data-sort]:hover { background: rgba(0,0,0,0.04); }
         .sort-indicator { font-size: 0.7em; vertical-align: middle; margin-left: 0.2em; }
 
-        /* Notification cards on history page */
-        .notification-card { transition: opacity 0.2s; }
-        .notification-unread { border-left: 3px solid #1976d2; }
-
-        /* Responsive: stack on narrow viewports */
-        @media (max-width: 768px) {
-            .app-layout { flex-direction: column; }
-            #watchlist-sidebar {
-                width: 100%;
-                position: static;
-                border-left: none;
-                border-top: 1px solid rgba(0,0,0,0.1);
-                padding-left: 0;
-                padding-top: 1em;
-                margin-top: 1em;
-            }
-            .watchlist-list {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 0.5em;
-            }
-            .watchlist-item { padding: 0.2em 0.5em; }
+        /* Footer */
+        .site-footer {
+            border-top: 1px solid rgba(0,0,0,0.1);
+            padding: 1.5em 0;
+            margin-top: 3em;
+            font-size: 0.85em;
+            opacity: 0.7;
+            text-align: center;
         }
+        .site-footer a { color: inherit; }
     </style>
 </head>
 <body hx-boost="true">
@@ -232,24 +119,24 @@
             <li><a href="/activity">Activity</a></li>
             <li><a href="/grand-portfolio">Grand Portfolio</a></li>
             <li>{% include "partials/ticker_search.html" %}</li>
-            <li>{% include "partials/notification_bell.html" %}</li>
         </ul>
     </nav>
-    <div class="app-layout">
-        <main>
-            {% block content %}{% endblock %}
-        </main>
-        <aside id="watchlist-sidebar" hx-preserve>
-            <div id="watchlist-sidebar-content">
-                {% include "partials/watchlist_sidebar.html" %}
-            </div>
-        </aside>
-    </div>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
 
-    {# ── Toast container for real-time notifications ── #}
-    <div id="notification-toasts"
-         style="position: fixed; bottom: 1em; right: 1em; z-index: 1000; max-width: 400px;">
-    </div>
+    <footer class="container site-footer">
+        <p>
+            Data sourced from <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=13F" target="_blank">SEC EDGAR</a>,
+            <a href="https://finance.yahoo.com" target="_blank">Yahoo Finance</a>,
+            and other public sources.
+        </p>
+        <p>
+            <strong>Not financial advice.</strong> This tool is for informational purposes only.
+            Always do your own research before making investment decisions.
+        </p>
+        <p>&copy; {{ current_year }} 13F Filing Viewer</p>
+    </footer>
 
     <script>
     // ── Sortable tables engine ──
@@ -362,68 +249,6 @@
 
         document.addEventListener("DOMContentLoaded", initSortableTables);
         document.addEventListener("htmx:afterSwap", initSortableTables);
-    })();
-    </script>
-
-    <script>
-    // ── SSE listener for real-time notifications ──
-    (function() {
-        var evtSource = new EventSource("/api/notifications/stream");
-
-        evtSource.addEventListener("notification", function(event) {
-            var notif = JSON.parse(event.data);
-
-            // Show in-app toast
-            showToast(notif);
-
-            // Refresh the bell badge via HTMX
-            if (typeof htmx !== "undefined") {
-                var bell = document.getElementById("notification-bell");
-                if (bell) {
-                    htmx.ajax("GET", "/api/notifications/bell", {target: "#notification-bell", swap: "outerHTML"});
-                }
-            }
-        });
-
-        // Auto-reconnect is built into EventSource, but log errors
-        evtSource.onerror = function() {
-            // EventSource will auto-reconnect; nothing to do
-        };
-
-        function buildNotifText(notif) {
-            var actions = {
-                "NEW BUY": "just disclosed a new position in",
-                "ADD": "added to their position in",
-                "REDUCE": "reduced their position in",
-                "SOLD": "sold their entire position in"
-            };
-            var verb = actions[notif.action] || "made a change to";
-            var ticker = notif.ticker || notif.cusip.substring(0, 6);
-            var text = notif.fund_name + " " + verb + " $" + ticker + ".";
-            if (notif.pct_of_portfolio && notif.action !== "SOLD") {
-                text += " It now makes up " + notif.pct_of_portfolio.toFixed(1) + "% of their portfolio.";
-            }
-            return text;
-        }
-
-        function showToast(notif) {
-            var container = document.getElementById("notification-toasts");
-            if (!container) return;
-
-            var isReduce = (notif.action === "REDUCE" || notif.action === "SOLD");
-            var toast = document.createElement("div");
-            toast.className = "notification-toast" + (isReduce ? " reduce-toast" : "");
-            toast.innerHTML =
-                "<small><strong>" + notif.fund_name + "</strong></small><br>" +
-                "<small>" + buildNotifText(notif) + "</small>";
-            toast.onclick = function() { window.location.href = notif.link; };
-            container.appendChild(toast);
-
-            // Auto-dismiss after 10 seconds
-            setTimeout(function() {
-                if (toast.parentNode) toast.remove();
-            }, 10000);
-        }
     })();
     </script>
 
