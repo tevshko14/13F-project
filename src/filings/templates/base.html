@@ -326,6 +326,7 @@
         }
 
         function initSortableTables() {
+            var defaultSortHeaders = [];
             document.querySelectorAll("th[data-sort]").forEach(function(th) {
                 if (th.dataset.sortBound) return;
                 th.dataset.sortBound = "true";
@@ -341,6 +342,18 @@
                 th.addEventListener("click", function() {
                     sortTable(th, colIndex, sortType);
                 });
+
+                // Collect columns that want a default sort
+                if (th.dataset.sortDefault) {
+                    defaultSortHeaders.push({ th: th, colIndex: colIndex, sortType: sortType, dir: th.dataset.sortDefault });
+                }
+            });
+
+            // Apply default sorts (one per table)
+            defaultSortHeaders.forEach(function(item) {
+                // Pre-set sortDir so the toggle lands on the desired direction
+                item.th.dataset.sortDir = item.dir === "desc" ? "asc" : "desc";
+                sortTable(item.th, item.colIndex, item.sortType);
             });
         }
 
