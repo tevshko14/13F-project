@@ -2,7 +2,7 @@
 nixPkgs = ["python312"]
 
 [phases.install]
-cmds = ["pip install ."]
+cmds = ["pip install hatchling", "pip install ."]
 
 [start]
 cmd = "uvicorn filings.web:app --host 0.0.0.0 --port ${PORT:-8000}"
