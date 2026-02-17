@@ -1,0 +1,324 @@
+{# ── Market Mood: CNN Fear & Greed Index ── #}
+{% if cnn %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>Market Mood</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            CNN Fear &amp; Greed Index
+        </span>
+    </header>
+
+    {% set score = cnn.score %}
+    {% if score <= 25 %}
+        {% set mood_color = "#c62828" %}
+        {% set mood_bg = "#ffebee" %}
+    {% elif score <= 45 %}
+        {% set mood_color = "#e65100" %}
+        {% set mood_bg = "#fff3e0" %}
+    {% elif score <= 55 %}
+        {% set mood_color = "#616161" %}
+        {% set mood_bg = "#f5f5f5" %}
+    {% elif score <= 75 %}
+        {% set mood_color = "#2e7d32" %}
+        {% set mood_bg = "#e8f5e9" %}
+    {% else %}
+        {% set mood_color = "#1b5e20" %}
+        {% set mood_bg = "#c8e6c9" %}
+    {% endif %}
+
+    <div style="display: flex; gap: 2em; align-items: center; flex-wrap: wrap;">
+        {# Score badge #}
+        <div style="text-align: center;">
+            <span style="display: inline-block; font-size: 1.8em; font-weight: 700; color: {{ mood_color }};">
+                {{ score|round(0)|int }}
+            </span>
+            <span style="font-size: 0.9em; color: #888;">/100</span>
+            <div>
+                <span class="badge" style="background: {{ mood_bg }}; color: {{ mood_color }}; font-size: 0.85em; padding: 0.2em 0.7em;">
+                    {{ cnn.rating }}
+                </span>
+            </div>
+        </div>
+
+        {# Gauge bar #}
+        <div style="flex: 1; min-width: 200px; max-width: 500px;">
+            <div style="position: relative; height: 10px; border-radius: 5px; overflow: hidden;
+                        background: linear-gradient(to right, #c62828, #e65100, #9e9e9e, #2e7d32, #1b5e20);">
+                <div style="position: absolute; left: {{ score }}%; top: -3px;
+                            width: 4px; height: 16px; background: #000; border-radius: 2px;
+                            transform: translateX(-50%);"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.7em; color: #999; margin-top: 0.2em;">
+                <span>Extreme Fear</span>
+                <span>Neutral</span>
+                <span>Extreme Greed</span>
+            </div>
+        </div>
+
+        {# Comparison #}
+        <div style="font-size: 0.85em; color: #666;">
+            {% if cnn.previous_close is not none %}
+            <div>Previous close: <strong>{{ cnn.previous_close|round(0)|int }}</strong></div>
+            {% endif %}
+            {% if cnn.one_week_ago is not none %}
+            <div>1 week ago: <strong>{{ cnn.one_week_ago|round(0)|int }}</strong></div>
+            {% endif %}
+            {% if cnn.one_month_ago is not none %}
+            <div>1 month ago: <strong>{{ cnn.one_month_ago|round(0)|int }}</strong></div>
+            {% endif %}
+        </div>
+    </div>
+</article>
+{% endif %}
+
+{# ── News Sentiment: Finnhub ── #}
+{% if finnhub %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>News Sentiment</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            {{ ticker }}
+        </span>
+    </header>
+
+    {% set bull = (finnhub.bullish_pct * 100)|round(0)|int %}
+    {% set bear = (finnhub.bearish_pct * 100)|round(0)|int %}
+    {% set neutral_pct = 100 - bull - bear %}
+
+    <div style="display: flex; gap: 2em; align-items: flex-start; flex-wrap: wrap;">
+        {# Bullish / Bearish breakdown #}
+        <div style="min-width: 250px; flex: 1; max-width: 400px;">
+            <div style="display: flex; gap: 1.5em; margin-bottom: 0.5em;">
+                <span class="badge badge-add" style="font-size: 0.9em; padding: 0.25em 0.6em;">
+                    Bullish: {{ bull }}%
+                </span>
+                {% if neutral_pct > 0 %}
+                <span class="badge" style="font-size: 0.9em; padding: 0.25em 0.6em; background: #f5f5f5; color: #616161;">
+                    Neutral: {{ neutral_pct }}%
+                </span>
+                {% endif %}
+                <span class="badge badge-reduce" style="font-size: 0.9em; padding: 0.25em 0.6em;">
+                    Bearish: {{ bear }}%
+                </span>
+            </div>
+            {# Visual bar #}
+            <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #f5f5f5;">
+                {% if bull > 0 %}
+                <div style="width: {{ bull }}%; background: #2e7d32;"></div>
+                {% endif %}
+                {% if neutral_pct > 0 %}
+                <div style="width: {{ neutral_pct }}%; background: #9e9e9e;"></div>
+                {% endif %}
+                {% if bear > 0 %}
+                <div style="width: {{ bear }}%; background: #c62828;"></div>
+                {% endif %}
+            </div>
+        </div>
+
+        {# Buzz metrics #}
+        <div style="font-size: 0.85em; color: #666;">
+            <div>
+                Articles this week: <strong>{{ finnhub.buzz_articles_last_week }}</strong>
+                <span class="text-muted" style="margin-left: 0.3em;">
+                    (avg: {{ finnhub.buzz_weekly_avg|round(0)|int }})
+                </span>
+            </div>
+            <div>
+                Buzz score: <strong>{{ "%.2f"|format(finnhub.buzz_score) }}</strong>
+                {% if finnhub.buzz_score > 1.0 %}
+                    <span style="color: #2e7d32;">&#x25B2; Above avg</span>
+                {% elif finnhub.buzz_score < 1.0 %}
+                    <span style="color: #c62828;">&#x25BC; Below avg</span>
+                {% else %}
+                    <span class="text-muted">&#x25C4; Average</span>
+                {% endif %}
+            </div>
+            <div>
+                Company news score: <strong>{{ "%.2f"|format(finnhub.company_news_score) }}</strong>
+                <span class="text-muted">(sector avg: {{ "%.2f"|format(finnhub.sector_avg_news_score) }})</span>
+            </div>
+        </div>
+
+        {# Sector comparison #}
+        <div style="font-size: 0.85em; color: #666;">
+            {% set sector_bull = (finnhub.sector_avg_bullish_pct * 100)|round(0)|int %}
+            <div>
+                vs Sector bullish avg:
+                {% if bull > sector_bull %}
+                    <strong style="color: #2e7d32;">{{ bull }}%</strong>
+                    <span style="color: #2e7d32;">&#x25B2;</span>
+                    <span class="text-muted">(sector: {{ sector_bull }}%)</span>
+                {% elif bull < sector_bull %}
+                    <strong style="color: #c62828;">{{ bull }}%</strong>
+                    <span style="color: #c62828;">&#x25BC;</span>
+                    <span class="text-muted">(sector: {{ sector_bull }}%)</span>
+                {% else %}
+                    <strong>{{ bull }}%</strong>
+                    <span class="text-muted">= sector ({{ sector_bull }}%)</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</article>
+{% elif not has_finnhub_key %}
+<article style="margin-bottom: 1.5em;">
+    <p class="text-muted" style="text-align: center; padding: 1em 0;">
+        News sentiment requires a <code>FINNHUB_API_KEY</code> environment variable.
+    </p>
+</article>
+{% endif %}
+
+{# ── Reddit Buzz: ApeWisdom ── #}
+{% if apewisdom %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>Reddit Buzz</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            via ApeWisdom (r/wallstreetbets, r/stocks, etc.)
+        </span>
+    </header>
+    <div style="display: flex; gap: 2.5em; align-items: center; flex-wrap: wrap;">
+        <div style="text-align: center;">
+            <div style="font-size: 1.6em; font-weight: 700; color: #1976d2;">#{{ apewisdom.rank }}</div>
+            <div style="font-size: 0.75em; color: #888;">Rank</div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 1.6em; font-weight: 700;">{{ apewisdom.mentions }}</div>
+            <div style="font-size: 0.75em; color: #888;">Mentions (24h)</div>
+        </div>
+        <div style="text-align: center;">
+            <div style="font-size: 1.6em; font-weight: 700;">{{ "{:,}".format(apewisdom.upvotes) }}</div>
+            <div style="font-size: 0.75em; color: #888;">Upvotes</div>
+        </div>
+        <div style="text-align: center;">
+            {% set rank_diff = apewisdom.rank_24h_ago - apewisdom.rank %}
+            {% if rank_diff > 0 %}
+                <div style="font-size: 1.6em; font-weight: 700; color: #2e7d32;">
+                    &#x25B2; +{{ rank_diff }}
+                </div>
+                <div style="font-size: 0.75em; color: #888;">Rank change (24h)</div>
+            {% elif rank_diff < 0 %}
+                <div style="font-size: 1.6em; font-weight: 700; color: #c62828;">
+                    &#x25BC; {{ rank_diff }}
+                </div>
+                <div style="font-size: 0.75em; color: #888;">Rank change (24h)</div>
+            {% else %}
+                <div style="font-size: 1.6em; font-weight: 700; color: #888;">&#x2014;</div>
+                <div style="font-size: 0.75em; color: #888;">Rank change (24h)</div>
+            {% endif %}
+        </div>
+        <div style="text-align: center;">
+            {% set mention_diff = apewisdom.mentions - apewisdom.mentions_24h_ago %}
+            {% if mention_diff > 0 %}
+                <div style="font-size: 1.2em; color: #2e7d32;">+{{ mention_diff }} mentions</div>
+            {% elif mention_diff < 0 %}
+                <div style="font-size: 1.2em; color: #c62828;">{{ mention_diff }} mentions</div>
+            {% else %}
+                <div style="font-size: 1.2em; color: #888;">No change</div>
+            {% endif %}
+            <div style="font-size: 0.75em; color: #888;">vs previous 24h</div>
+        </div>
+    </div>
+</article>
+{% else %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>Reddit Buzz</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            via ApeWisdom
+        </span>
+    </header>
+    <p class="text-muted" style="text-align: center; padding: 1em 0;">
+        {{ ticker }} is not currently trending on Reddit.
+    </p>
+</article>
+{% endif %}
+
+{# ── News Articles: Alpha Vantage ── #}
+{% if alphavantage and alphavantage.articles %}
+<article>
+    <header>
+        <strong>Recent News Sentiment</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            via Alpha Vantage NLP
+        </span>
+        {% if alphavantage.avg_sentiment_label %}
+        <span style="margin-left: 1em;">
+            Overall:
+            {% if "bullish" in alphavantage.avg_sentiment_label|lower %}
+                <span class="badge badge-add" style="font-size: 0.8em; padding: 0.15em 0.5em;">
+                    {{ alphavantage.avg_sentiment_label }}
+                </span>
+            {% elif "bearish" in alphavantage.avg_sentiment_label|lower %}
+                <span class="badge badge-reduce" style="font-size: 0.8em; padding: 0.15em 0.5em;">
+                    {{ alphavantage.avg_sentiment_label }}
+                </span>
+            {% else %}
+                <span class="badge" style="font-size: 0.8em; padding: 0.15em 0.5em; background: #fff3e0; color: #e65100;">
+                    {{ alphavantage.avg_sentiment_label }}
+                </span>
+            {% endif %}
+            <span class="text-muted text-small">({{ alphavantage.avg_sentiment_score }})</span>
+        </span>
+        {% endif %}
+    </header>
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="text">Date</th>
+                <th data-sort="text">Source</th>
+                <th>Title</th>
+                <th data-sort="text">Sentiment</th>
+                <th class="text-right" data-sort="number">Score</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for a in alphavantage.articles %}
+            <tr>
+                <td class="text-muted text-small">{{ a.published }}</td>
+                <td class="text-small">{{ a.source }}</td>
+                <td>
+                    <a href="{{ a.url }}" target="_blank" rel="noopener">
+                        {{ a.title[:80] }}{% if a.title|length > 80 %}...{% endif %}
+                    </a>
+                </td>
+                <td>
+                    {% if "bullish" in a.ticker_sentiment_label|lower %}
+                        <span class="badge badge-add" style="font-size: 0.8em; padding: 0.15em 0.5em;">
+                            {{ a.ticker_sentiment_label }}
+                        </span>
+                    {% elif "bearish" in a.ticker_sentiment_label|lower %}
+                        <span class="badge badge-reduce" style="font-size: 0.8em; padding: 0.15em 0.5em;">
+                            {{ a.ticker_sentiment_label }}
+                        </span>
+                    {% else %}
+                        <span class="badge" style="font-size: 0.8em; padding: 0.15em 0.5em; background: #fff3e0; color: #e65100;">
+                            {{ a.ticker_sentiment_label }}
+                        </span>
+                    {% endif %}
+                </td>
+                <td class="text-right">{{ "%.3f"|format(a.ticker_sentiment_score) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+    <footer class="text-muted text-small">
+        Sentiment analysis via Alpha Vantage NLP. Scores range from -1 (bearish) to +1 (bullish).
+    </footer>
+</article>
+{% endif %}
+
+{# ── Fallback: nothing available ── #}
+{% if not cnn and not finnhub and not apewisdom and not alphavantage %}
+<article>
+    <p class="text-muted" style="text-align: center; padding: 2em 0;">
+        No sentiment data available for <strong>{{ ticker }}</strong>.
+        <br>
+        <small>Configure <code>FINNHUB_API_KEY</code> and/or <code>ALPHAVANTAGE_API_KEY</code> for additional data sources.</small>
+    </p>
+</article>
+{% endif %}
+
+<script>if (window.initSortableTables) window.initSortableTables();</script>

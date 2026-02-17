@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from filings import client, cache, watchlist, notifications, analysts, market_data
+from filings import client, cache, watchlist, notifications, analysts, market_data, sentiment
 from filings.models import SuperinvestorSummary
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -374,6 +374,22 @@ async def analyst_ratings(request: Request, ticker: str):
         "ratings": ratings[:50],  # Limit to 50 most recent
         "consensus": consensus,
         "ticker": ticker.upper(),
+    })
+
+
+@app.get("/api/sentiment/{ticker}", response_class=HTMLResponse)
+async def sentiment_data(request: Request, ticker: str):
+    """Return sentiment partial for a ticker (loaded on tab click)."""
+    data = await asyncio.to_thread(sentiment.get_sentiment_data, ticker)
+    return templates.TemplateResponse("partials/sentiment.html", {
+        "request": request,
+        "ticker": ticker.upper(),
+        "cnn": data.get("cnn_fear_greed"),
+        "finnhub": data.get("finnhub"),
+        "apewisdom": data.get("apewisdom"),
+        "alphavantage": data.get("alphavantage"),
+        "has_finnhub_key": sentiment.has_finnhub_key(),
+        "has_alphavantage_key": sentiment.has_alphavantage_key(),
     })
 
 
