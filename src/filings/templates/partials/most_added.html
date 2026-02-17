@@ -1,0 +1,79 @@
+{# Most Added by Superinvestors — loaded asynchronously via HTMX #}
+<article>
+    <header>
+        <strong>Most Added by Superinvestors This Quarter</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Top {{ entries|length }} stocks by number of superinvestor buyers
+        </span>
+    </header>
+    {% if entries %}
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="number">#</th>
+                <th data-sort="text">Ticker</th>
+                <th data-sort="text">Stock</th>
+                <th class="text-right" data-sort="number">Added By</th>
+                <th data-sort="text">Consensus</th>
+                <th class="text-right" data-sort="number">52W Range</th>
+                <th>Superinvestors</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in entries %}
+            <tr>
+                <td>{{ e.rank }}</td>
+                <td>
+                    {% if e.ticker %}
+                    <a href="/stock/{{ e.ticker }}" class="ticker">{{ e.ticker }}</a>
+                    {% else %}
+                    <a href="/stock/cusip/{{ e.cusip }}" class="ticker" title="{{ e.cusip }}">{{ e.cusip[:6] }}</a>
+                    {% endif %}
+                </td>
+                <td class="text-small">{{ e.issuer_name }}</td>
+                <td class="text-right"><strong>{{ e.add_count }}</strong></td>
+                <td>
+                    {% if e.consensus %}
+                        {% if e.consensus.label == "Buy" or e.consensus.label == "Strong Buy" %}
+                        <span class="badge badge-new">{{ e.consensus.label }}</span>
+                        {% elif e.consensus.label == "Sell" or e.consensus.label == "Strong Sell" %}
+                        <span class="badge badge-sold">{{ e.consensus.label }}</span>
+                        {% else %}
+                        <span class="badge" style="background: #fff3e0; color: #e65100;">{{ e.consensus.label }}</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td class="text-right">
+                    {% if e.range_pct is not none %}
+                    {{ e.range_pct }}%
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td class="text-small">
+                    <div class="tag-list">
+                        {% for name in e.adders[:5] %}
+                        <span class="tag">{{ name }}</span>
+                        {% endfor %}
+                        {% if e.adders|length > 5 %}
+                        <span class="tag" style="opacity: 0.6;">+{{ e.adders|length - 5 }}</span>
+                        {% endif %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+    {% else %}
+    <p class="text-muted">No recent superinvestor additions found.</p>
+    {% endif %}
+</article>
+
+<script>
+// Re-init sortable tables for this HTMX-loaded content
+if (window.initSortableTables) window.initSortableTables();
+</script>

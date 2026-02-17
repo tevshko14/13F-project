@@ -1,0 +1,17 @@
+{# Inline ticker search with autocomplete dropdown — included in nav bar #}
+<div id="ticker-search" style="position: relative; display: inline-block;">
+    <input type="search"
+           id="ticker-search-input"
+           placeholder="Search ticker..."
+           autocomplete="off"
+           style="padding: 0.3em 0.6em; font-size: 0.85em; width: 150px; margin: 0; border-radius: 4px;"
+           oninput="tickerSearchFilter(this.value)"
+           onfocus="tickerSearchFilter(this.value)"
+           onkeydown="tickerSearchKeydown(event)">
+    <div id="ticker-search-results"
+         style="display: none; position: absolute; top: 100%; left: 0; width: 280px;
+                background: var(--pico-background-color, white); border: 1px solid var(--pico-muted-border-color, #ccc);
+                border-radius: 4px; max-height: 320px; overflow-y: auto; z-index: 1001;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+    </div>
+</div>

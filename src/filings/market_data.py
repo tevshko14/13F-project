@@ -1,0 +1,468 @@
+"""S&P 500 market data: heatmap, most-added table, ticker search index.
+
+Data comes from yfinance (free bulk download) and Wikipedia (S&P 500
+constituent list with sectors). All results are cached in memory with
+configurable TTLs to avoid repeated downloads.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+# ── In-memory TTL caches ──────────────────────────────────────────────
+_constituents_cache: tuple[float, list[dict]] | None = None
+_CONSTITUENTS_TTL = 86_400  # 24 hours
+
+_market_data_cache: tuple[float, dict] | None = None
+_MARKET_DATA_TTL = 1_800  # 30 minutes
+
+_52w_cache: tuple[float, dict] | None = None
+_52W_TTL = 1_800  # 30 minutes
+
+_most_added_cache: tuple[float, list[dict]] | None = None
+_MOST_ADDED_TTL = 1_800  # 30 minutes
+
+
+# ── S&P 500 Constituents ──────────────────────────────────────────────
+
+# Hardcoded fallback for top ~50 S&P 500 names (used if Wikipedia fails)
+_FALLBACK_SP500 = [
+    {"ticker": "AAPL", "name": "Apple Inc.", "sector": "Information Technology"},
+    {"ticker": "MSFT", "name": "Microsoft Corp.", "sector": "Information Technology"},
+    {"ticker": "AMZN", "name": "Amazon.com Inc.", "sector": "Consumer Discretionary"},
+    {"ticker": "NVDA", "name": "NVIDIA Corp.", "sector": "Information Technology"},
+    {"ticker": "GOOGL", "name": "Alphabet Inc.", "sector": "Communication Services"},
+    {"ticker": "META", "name": "Meta Platforms Inc.", "sector": "Communication Services"},
+    {"ticker": "BRK-B", "name": "Berkshire Hathaway", "sector": "Financials"},
+    {"ticker": "TSLA", "name": "Tesla Inc.", "sector": "Consumer Discretionary"},
+    {"ticker": "UNH", "name": "UnitedHealth Group", "sector": "Health Care"},
+    {"ticker": "LLY", "name": "Eli Lilly", "sector": "Health Care"},
+    {"ticker": "JPM", "name": "JPMorgan Chase", "sector": "Financials"},
+    {"ticker": "V", "name": "Visa Inc.", "sector": "Financials"},
+    {"ticker": "XOM", "name": "Exxon Mobil", "sector": "Energy"},
+    {"ticker": "MA", "name": "Mastercard Inc.", "sector": "Financials"},
+    {"ticker": "JNJ", "name": "Johnson & Johnson", "sector": "Health Care"},
+    {"ticker": "PG", "name": "Procter & Gamble", "sector": "Consumer Staples"},
+    {"ticker": "HD", "name": "Home Depot", "sector": "Consumer Discretionary"},
+    {"ticker": "COST", "name": "Costco Wholesale", "sector": "Consumer Staples"},
+    {"ticker": "ABBV", "name": "AbbVie Inc.", "sector": "Health Care"},
+    {"ticker": "CRM", "name": "Salesforce Inc.", "sector": "Information Technology"},
+    {"ticker": "BAC", "name": "Bank of America", "sector": "Financials"},
+    {"ticker": "AVGO", "name": "Broadcom Inc.", "sector": "Information Technology"},
+    {"ticker": "KO", "name": "Coca-Cola Co.", "sector": "Consumer Staples"},
+    {"ticker": "WMT", "name": "Walmart Inc.", "sector": "Consumer Staples"},
+    {"ticker": "MRK", "name": "Merck & Co.", "sector": "Health Care"},
+    {"ticker": "PEP", "name": "PepsiCo Inc.", "sector": "Consumer Staples"},
+    {"ticker": "CVX", "name": "Chevron Corp.", "sector": "Energy"},
+    {"ticker": "TMO", "name": "Thermo Fisher", "sector": "Health Care"},
+    {"ticker": "ADBE", "name": "Adobe Inc.", "sector": "Information Technology"},
+    {"ticker": "NFLX", "name": "Netflix Inc.", "sector": "Communication Services"},
+    {"ticker": "AMD", "name": "AMD Inc.", "sector": "Information Technology"},
+    {"ticker": "CSCO", "name": "Cisco Systems", "sector": "Information Technology"},
+    {"ticker": "DIS", "name": "Walt Disney Co.", "sector": "Communication Services"},
+    {"ticker": "INTC", "name": "Intel Corp.", "sector": "Information Technology"},
+    {"ticker": "WFC", "name": "Wells Fargo", "sector": "Financials"},
+    {"ticker": "ABT", "name": "Abbott Labs", "sector": "Health Care"},
+    {"ticker": "ORCL", "name": "Oracle Corp.", "sector": "Information Technology"},
+    {"ticker": "PM", "name": "Philip Morris", "sector": "Consumer Staples"},
+    {"ticker": "GE", "name": "GE Aerospace", "sector": "Industrials"},
+    {"ticker": "CAT", "name": "Caterpillar Inc.", "sector": "Industrials"},
+    {"ticker": "NOW", "name": "ServiceNow Inc.", "sector": "Information Technology"},
+    {"ticker": "QCOM", "name": "Qualcomm Inc.", "sector": "Information Technology"},
+    {"ticker": "INTU", "name": "Intuit Inc.", "sector": "Information Technology"},
+    {"ticker": "GS", "name": "Goldman Sachs", "sector": "Financials"},
+    {"ticker": "ISRG", "name": "Intuitive Surgical", "sector": "Health Care"},
+    {"ticker": "T", "name": "AT&T Inc.", "sector": "Communication Services"},
+    {"ticker": "AXP", "name": "American Express", "sector": "Financials"},
+    {"ticker": "BLK", "name": "BlackRock Inc.", "sector": "Financials"},
+    {"ticker": "NEE", "name": "NextEra Energy", "sector": "Utilities"},
+    {"ticker": "LMT", "name": "Lockheed Martin", "sector": "Industrials"},
+]
+
+
+def get_sp500_constituents() -> list[dict]:
+    """Fetch S&P 500 constituents with sectors from Wikipedia.
+
+    Returns list of dicts: [{"ticker", "name", "sector"}, ...]
+    Uses 24-hour in-memory cache. Falls back to hardcoded list on failure.
+    """
+    global _constituents_cache
+
+    if _constituents_cache is not None:
+        ts, data = _constituents_cache
+        if time.time() - ts < _CONSTITUENTS_TTL:
+            return data
+
+    try:
+        import pandas as pd
+
+        tables = pd.read_html(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+        )
+        df = tables[0]
+
+        constituents = []
+        for _, row in df.iterrows():
+            ticker = str(row.get("Symbol", "")).strip()
+            # Wikipedia uses dots (BRK.B), yfinance uses dashes (BRK-B)
+            ticker = ticker.replace(".", "-")
+            name = str(row.get("Security", "")).strip()
+            sector = str(row.get("GICS Sector", "")).strip()
+            if ticker and name:
+                constituents.append({
+                    "ticker": ticker,
+                    "name": name,
+                    "sector": sector,
+                })
+
+        if len(constituents) > 400:
+            logger.info("Fetched %d S&P 500 constituents from Wikipedia", len(constituents))
+            _constituents_cache = (time.time(), constituents)
+            return constituents
+
+    except Exception as e:
+        logger.warning("Wikipedia S&P 500 fetch failed: %s — using fallback", e)
+
+    # Fallback
+    _constituents_cache = (time.time(), _FALLBACK_SP500)
+    return _FALLBACK_SP500
+
+
+# ── Market Data (daily % change) ──────────────────────────────────────
+
+def get_sp500_market_data() -> dict:
+    """Fetch daily % change for S&P 500 tickers via yfinance bulk download.
+
+    Returns dict keyed by ticker:
+    {"AAPL": {"pct_change": 1.23, "price": 185.50}, ...
+     "_metadata": {"fetched_at": "...", "count": 503}}
+
+    Uses 30-min TTL cache. Returns empty dict on failure.
+    """
+    global _market_data_cache
+
+    if _market_data_cache is not None:
+        ts, data = _market_data_cache
+        if time.time() - ts < _MARKET_DATA_TTL:
+            return data
+
+    constituents = get_sp500_constituents()
+    tickers = [c["ticker"] for c in constituents]
+
+    try:
+        import yfinance as yf
+
+        # Bulk download 2 days of data for % change calculation
+        df = yf.download(tickers, period="5d", threads=True, progress=False)
+
+        if df.empty:
+            logger.warning("yfinance returned empty DataFrame for S&P 500")
+            return {}
+
+        result: dict = {}
+
+        # yf.download with multiple tickers returns MultiIndex columns
+        # Access pattern: df["Close"]["AAPL"]
+        close_data = df["Close"] if "Close" in df.columns.get_level_values(0) else df.get("Close")
+
+        if close_data is None or close_data.empty:
+            return {}
+
+        for ticker in tickers:
+            try:
+                if ticker not in close_data.columns:
+                    continue
+                series = close_data[ticker].dropna()
+                if len(series) < 2:
+                    continue
+                prev_close = series.iloc[-2]
+                last_close = series.iloc[-1]
+                if prev_close > 0:
+                    pct = round((last_close - prev_close) / prev_close * 100, 2)
+                    result[ticker] = {
+                        "pct_change": pct,
+                        "price": round(float(last_close), 2),
+                    }
+            except Exception:
+                continue
+
+        result["_metadata"] = {
+            "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "count": len(result) - 1,  # exclude _metadata key
+        }
+
+        logger.info("Fetched market data for %d tickers", len(result) - 1)
+        _market_data_cache = (time.time(), result)
+        return result
+
+    except Exception as e:
+        logger.warning("yfinance S&P 500 download failed: %s", e)
+        return {}
+
+
+# ── 52-Week Range (bulk) ──────────────────────────────────────────────
+
+def get_52_week_range_bulk(tickers: list[str]) -> dict:
+    """Get 52-week high/low/current for tickers via yfinance bulk download.
+
+    Returns {ticker: {"low": 120.5, "high": 198.3, "current": 185.5, "pct_of_range": 83.4}}
+    Uses 30-min TTL cache. Returns empty dict on failure.
+    """
+    global _52w_cache
+
+    if _52w_cache is not None:
+        ts, data = _52w_cache
+        if time.time() - ts < _52W_TTL:
+            # Return only requested tickers
+            return {t: data[t] for t in tickers if t in data}
+
+    try:
+        import yfinance as yf
+
+        # Download 1 year of daily data
+        constituents = get_sp500_constituents()
+        all_tickers = [c["ticker"] for c in constituents]
+
+        df = yf.download(all_tickers, period="1y", threads=True, progress=False)
+
+        if df.empty:
+            return {}
+
+        result: dict = {}
+        high_data = df.get("High")
+        low_data = df.get("Low")
+        close_data = df.get("Close")
+
+        if high_data is None or low_data is None or close_data is None:
+            return {}
+
+        for t in all_tickers:
+            try:
+                if t not in close_data.columns:
+                    continue
+                highs = high_data[t].dropna()
+                lows = low_data[t].dropna()
+                closes = close_data[t].dropna()
+
+                if len(highs) < 10 or len(lows) < 10 or len(closes) < 1:
+                    continue
+
+                w52_high = float(highs.max())
+                w52_low = float(lows.min())
+                current = float(closes.iloc[-1])
+                range_span = w52_high - w52_low
+
+                pct = round((current - w52_low) / range_span * 100, 1) if range_span > 0 else 50.0
+                result[t] = {
+                    "low": round(w52_low, 2),
+                    "high": round(w52_high, 2),
+                    "current": round(current, 2),
+                    "pct_of_range": pct,
+                }
+            except Exception:
+                continue
+
+        _52w_cache = (time.time(), result)
+        return {t: result[t] for t in tickers if t in result}
+
+    except Exception as e:
+        logger.warning("52-week range download failed: %s", e)
+        return {}
+
+
+# ── Heatmap Builder ───────────────────────────────────────────────────
+
+def _pct_to_color(pct: float) -> str:
+    """Map % change to hex color. -5%=deep red, 0=gray, +5%=deep green."""
+    pct = max(-5.0, min(5.0, pct))
+    if pct >= 0:
+        t = pct / 5.0
+        r = int(153 + (27 - 153) * t)
+        g = int(153 + (94 - 153) * t)
+        b = int(153 + (32 - 153) * t)
+    else:
+        t = abs(pct) / 5.0
+        r = int(153 + (183 - 153) * t)
+        g = int(153 + (28 - 153) * t)
+        b = int(153 + (28 - 153) * t)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def build_heatmap_data(
+    market_data: dict,
+    constituents: list[dict],
+    superinvestor_tickers: set[str],
+) -> list[dict]:
+    """Build ECharts treemap data grouped by sector.
+
+    Returns list of sector groups:
+    [{"name": "Tech", "children": [{"name": "AAPL", "value": 1, ...}]}]
+    """
+    sectors: dict[str, list[dict]] = {}
+
+    for c in constituents:
+        ticker = c["ticker"]
+        mkt = market_data.get(ticker)
+        if not mkt:
+            continue
+
+        pct = mkt["pct_change"]
+        held = ticker.upper() in superinvestor_tickers
+        sector = c.get("sector", "Other")
+
+        node = {
+            "name": ticker,
+            "value": 1,  # equal weight
+            "pct_change": pct,
+            "full_name": c["name"],
+            "held_by_superinvestors": held,
+            "link": f"/stock/{ticker}",
+            "itemStyle": {
+                "color": _pct_to_color(pct),
+                "borderColor": "#FFD700" if held else "rgba(0,0,0,0.15)",
+                "borderWidth": 3 if held else 1,
+            },
+        }
+
+        if sector not in sectors:
+            sectors[sector] = []
+        sectors[sector].append(node)
+
+    # Sort sectors by number of children (largest first)
+    result = []
+    for name in sorted(sectors, key=lambda s: -len(sectors[s])):
+        result.append({
+            "name": name,
+            "children": sectors[name],
+        })
+
+    return result
+
+
+# ── Most Added by Superinvestors ──────────────────────────────────────
+
+def build_most_added_table(
+    cache_data: dict,
+    superinvestors_by_cik: dict,
+) -> list[dict]:
+    """Build table of stocks most added by superinvestors this quarter.
+
+    Reads from fund_cache changes (status=NEW/INCREASED), groups by CUSIP,
+    counts number of superinvestors that added. Returns top 25.
+    """
+    global _most_added_cache
+
+    if _most_added_cache is not None:
+        ts, data = _most_added_cache
+        if time.time() - ts < _MOST_ADDED_TTL:
+            return data
+
+    by_cusip: dict[str, dict] = {}
+
+    for cik, fund_data in cache_data.items():
+        si = superinvestors_by_cik.get(cik)
+        if not si:
+            continue
+
+        # Build ticker lookup from holdings
+        ticker_by_cusip: dict[str, str | None] = {}
+        for h in fund_data.get("all_holdings", []):
+            ticker_by_cusip[h["cusip"]] = h.get("ticker")
+
+        for change in fund_data.get("changes", []):
+            status = change.get("status", "")
+            if status not in ("NEW", "INCREASED"):
+                continue
+
+            cusip = change["cusip"]
+            if cusip not in by_cusip:
+                by_cusip[cusip] = {
+                    "ticker": ticker_by_cusip.get(cusip),
+                    "issuer_name": change["issuer"],
+                    "cusip": cusip,
+                    "add_count": 0,
+                    "adders": [],
+                    "total_value": 0,
+                }
+
+            by_cusip[cusip]["add_count"] += 1
+            by_cusip[cusip]["adders"].append(si.display_name)
+            by_cusip[cusip]["total_value"] += change.get("current_value", 0)
+
+            # Prefer non-None ticker
+            if ticker_by_cusip.get(cusip) and not by_cusip[cusip]["ticker"]:
+                by_cusip[cusip]["ticker"] = ticker_by_cusip[cusip]
+
+    # Sort by add_count desc, then total_value desc
+    entries = sorted(
+        by_cusip.values(),
+        key=lambda e: (-e["add_count"], -e["total_value"]),
+    )[:25]
+
+    # Add rank
+    for i, entry in enumerate(entries):
+        entry["rank"] = i + 1
+
+    _most_added_cache = (time.time(), entries)
+    return entries
+
+
+# ── Ticker Search Index ───────────────────────────────────────────────
+
+def get_ticker_search_list(cache_data: dict) -> list[dict]:
+    """Build the autocomplete search index from cache + S&P 500 constituents.
+
+    Returns deduplicated list:
+    [{"ticker": "AAPL", "name": "Apple Inc.", "held_by_super": true, "in_sp500": true}]
+    """
+    # Collect tickers held by superinvestors
+    super_tickers: dict[str, str] = {}  # ticker -> issuer name
+    for cik, fund_data in cache_data.items():
+        for h in fund_data.get("all_holdings", []):
+            t = h.get("ticker")
+            if t:
+                t_upper = t.upper()
+                if t_upper not in super_tickers:
+                    super_tickers[t_upper] = h.get("issuer", t_upper)
+
+    # Get S&P 500 constituents
+    try:
+        constituents = get_sp500_constituents()
+    except Exception:
+        constituents = []
+
+    sp500_set = {c["ticker"].upper() for c in constituents}
+    sp500_names = {c["ticker"].upper(): c["name"] for c in constituents}
+
+    # Merge
+    all_tickers: dict[str, dict] = {}
+
+    for c in constituents:
+        t = c["ticker"].upper()
+        all_tickers[t] = {
+            "ticker": t,
+            "name": c["name"],
+            "held_by_super": t in super_tickers,
+            "in_sp500": True,
+        }
+
+    for t, issuer in super_tickers.items():
+        if t not in all_tickers:
+            all_tickers[t] = {
+                "ticker": t,
+                "name": issuer,
+                "held_by_super": True,
+                "in_sp500": t in sp500_set,
+            }
+
+    # Sort: superinvestor-held first, then alphabetical
+    result = sorted(
+        all_tickers.values(),
+        key=lambda x: (not x["held_by_super"], x["ticker"]),
+    )
+
+    return result

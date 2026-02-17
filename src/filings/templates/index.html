@@ -6,6 +6,20 @@
     <p>Track the 13F holdings of the world's top investors, powered by SEC EDGAR data.</p>
 </hgroup>
 
+{# ── S&P 500 Heatmap (lazy-loaded) ── #}
+<div hx-get="/api/heatmap" hx-trigger="load" hx-swap="innerHTML">
+    <article>
+        <p aria-busy="true"><span class="spinner"></span> Loading S&P 500 heatmap...</p>
+    </article>
+</div>
+
+{# ── Most Added by Superinvestors (lazy-loaded) ── #}
+<div hx-get="/api/most-added" hx-trigger="load" hx-swap="innerHTML">
+    <article>
+        <p aria-busy="true"><span class="spinner"></span> Loading most-added stocks...</p>
+    </article>
+</div>
+
 <div class="cache-info">
     <small>Cache: {{ cache_age }}</small>
     {% if refreshing %}
