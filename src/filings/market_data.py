@@ -295,7 +295,7 @@ def _pct_to_color(pct: float) -> str:
 def build_heatmap_data(
     market_data: dict,
     constituents: list[dict],
-    superinvestor_tickers: set[str],
+    superinvestor_ticker_counts: dict[str, int],
 ) -> list[dict]:
     """Build ECharts treemap data grouped by sector.
 
@@ -311,7 +311,7 @@ def build_heatmap_data(
             continue
 
         pct = mkt["pct_change"]
-        held = ticker.upper() in superinvestor_tickers
+        count = superinvestor_ticker_counts.get(ticker.upper(), 0)
         sector = c.get("sector", "Other")
 
         node = {
@@ -319,12 +319,12 @@ def build_heatmap_data(
             "value": 1,  # equal weight
             "pct_change": pct,
             "full_name": c["name"],
-            "held_by_superinvestors": held,
+            "superinvestor_count": count,
             "link": f"/stock/{ticker}",
             "itemStyle": {
                 "color": _pct_to_color(pct),
-                "borderColor": "#FFD700" if held else "rgba(0,0,0,0.15)",
-                "borderWidth": 3 if held else 1,
+                "borderColor": "rgba(0,0,0,0.15)",
+                "borderWidth": 1,
             },
         }
 
@@ -414,11 +414,14 @@ def build_most_added_table(
 # ── Ticker Search Index ───────────────────────────────────────────────
 
 def get_ticker_search_list(cache_data: dict) -> list[dict]:
-    """Build the autocomplete search index from cache + S&P 500 constituents.
+    """Build the autocomplete search index from cache + S&P 500 + superinvestors.
 
-    Returns deduplicated list:
-    [{"ticker": "AAPL", "name": "Apple Inc.", "held_by_super": true, "in_sp500": true}]
+    Returns deduplicated list of tickers and investors:
+    [{"ticker": "AAPL", "name": "Apple Inc.", "held_by_super": true, "in_sp500": true, "type": "ticker"},
+     {"ticker": "Warren Buffett", "name": "Berkshire Hathaway", "type": "investor", "cik": "1067983"}]
     """
+    from filings.superinvestors import SUPERINVESTORS
+
     # Collect tickers held by superinvestors
     super_tickers: dict[str, str] = {}  # ticker -> issuer name
     for cik, fund_data in cache_data.items():
@@ -436,33 +439,50 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
         constituents = []
 
     sp500_set = {c["ticker"].upper() for c in constituents}
-    sp500_names = {c["ticker"].upper(): c["name"] for c in constituents}
 
-    # Merge
-    all_tickers: dict[str, dict] = {}
+    # Merge tickers
+    all_items: dict[str, dict] = {}
 
     for c in constituents:
         t = c["ticker"].upper()
-        all_tickers[t] = {
+        all_items[t] = {
             "ticker": t,
             "name": c["name"],
             "held_by_super": t in super_tickers,
             "in_sp500": True,
+            "type": "ticker",
         }
 
     for t, issuer in super_tickers.items():
-        if t not in all_tickers:
-            all_tickers[t] = {
+        if t not in all_items:
+            all_items[t] = {
                 "ticker": t,
                 "name": issuer,
                 "held_by_super": True,
                 "in_sp500": t in sp500_set,
+                "type": "ticker",
             }
 
-    # Sort: superinvestor-held first, then alphabetical
+    # Add superinvestors
+    for si in SUPERINVESTORS:
+        key = f"_investor_{si.cik}"
+        all_items[key] = {
+            "ticker": si.display_name,
+            "name": si.fund_name,
+            "held_by_super": False,
+            "in_sp500": False,
+            "type": "investor",
+            "cik": si.cik,
+        }
+
+    # Sort: tickers first (superinvestor-held → S&P 500 → others), then investors
     result = sorted(
-        all_tickers.values(),
-        key=lambda x: (not x["held_by_super"], x["ticker"]),
+        all_items.values(),
+        key=lambda x: (
+            x.get("type", "ticker") != "ticker",  # tickers first
+            not x.get("held_by_super", False),
+            x.get("ticker", ""),
+        ),
     )
 
     return result
