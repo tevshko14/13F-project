@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Superinvestors - 13F Filing Viewer{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>Superinvestor Portfolios</h1>
+    <p>Track the 13F holdings of the world's top investors, powered by SEC EDGAR data.</p>
+</hgroup>
+
+<div class="cache-info">
+    <small>Cache: {{ cache_age }}</small>
+    {% if refreshing %}
+        <small aria-busy="true">Refreshing in background...</small>
+    {% else %}
+        <button class="outline secondary text-small"
+                hx-post="/refresh" hx-target="#refresh-status" hx-swap="innerHTML"
+                style="padding: 0.2em 0.6em; font-size: 0.8em;">
+            Refresh Data
+        </button>
+    {% endif %}
+    <span id="refresh-status"></span>
+</div>
+
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Investor</th>
+            <th>Fund</th>
+            <th class="text-right">Portfolio Value</th>
+            <th class="text-right">Holdings</th>
+            <th>Top Holdings</th>
+            <th>Period</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for i in range(superinvestors|length) %}
+        {% set si = superinvestors[i] %}
+        {% set summary = summaries[i] %}
+        {% if summary %}
+        {# Cached data available — render immediately #}
+        <tr>
+            <td><strong>{{ summary.display_name }}</strong></td>
+            <td class="text-small">{{ summary.fund_name }}</td>
+            <td class="text-right">${{ "{:,.0f}".format(summary.portfolio_value) }}</td>
+            <td class="text-right">{{ summary.num_holdings }}</td>
+            <td>
+                <div class="tag-list">
+                    {% for t in summary.top_holdings %}
+                    <a href="/stock/{{ t }}" class="tag">{{ t }}</a>
+                    {% endfor %}
+                </div>
+            </td>
+            <td class="text-small">{{ summary.report_period }}</td>
+            <td>
+                <div class="actions">
+                    <a href="/holdings/{{ si.cik }}" role="button" class="outline">Holdings</a>
+                    <a href="/compare/{{ si.cik }}" role="button" class="outline secondary">Compare</a>
+                </div>
+            </td>
+        </tr>
+        {% else %}
+        {# No cache — lazy load via HTMX, staggered to avoid overwhelming SEC #}
+        <tr hx-get="/api/fund-row/{{ si.cik }}"
+            hx-trigger="load delay:{{ (loop.index0 // 3) }}s"
+            hx-swap="outerHTML">
+            <td><strong>{{ si.display_name }}</strong></td>
+            <td class="text-small">{{ si.fund_name }}</td>
+            <td colspan="5" aria-busy="true">
+                <span class="spinner"></span> Loading from SEC EDGAR...
+            </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% endblock %}

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Activity Feed - 13F Filing Viewer{% endblock %}
+{% block content %}
+{% from "partials/ticker_link.html" import ticker_link %}
+<hgroup>
+    <h1>Superinvestor Activity</h1>
+    <p>Recent buys, sells, and position changes across all tracked superinvestors.</p>
+</hgroup>
+
+{% if empty is defined and empty %}
+<article>
+    <p>No activity data available yet. Data will load as superinvestor portfolios are cached.</p>
+    <p><a href="/" role="button">Go to Superinvestors</a> to trigger data loading.</p>
+</article>
+{% else %}
+<p class="text-muted">Showing {{ activities|length }} recent changes (sorted by value)</p>
+
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Investor</th>
+            <th>Action</th>
+            <th>Ticker</th>
+            <th>Stock</th>
+            <th class="text-right">Share Change</th>
+            <th class="text-right">Current Value ($)</th>
+            <th>Filed</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for a in activities %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>
+                <a href="/holdings/{{ a.fund_cik }}">
+                    <strong>{{ a.fund_display_name }}</strong>
+                </a>
+            </td>
+            <td>
+                {% if a.action == "NEW BUY" %}
+                    <span class="badge badge-new">NEW BUY</span>
+                {% elif a.action == "ADD" %}
+                    <span class="badge badge-add">ADD</span>
+                {% elif a.action == "REDUCE" %}
+                    <span class="badge badge-reduce">REDUCE</span>
+                {% elif a.action == "SOLD" %}
+                    <span class="badge badge-sold">SOLD</span>
+                {% endif %}
+            </td>
+            <td>{{ ticker_link(a.ticker, a.cusip) }}</td>
+            <td>{{ a.issuer_name }}</td>
+            <td class="text-right">
+                {% if a.share_change != 0 %}
+                    <span class="{% if a.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                        {{ "{:+,}".format(a.share_change) }}
+                    </span>
+                {% else %}-{% endif %}
+            </td>
+            <td class="text-right">${{ "{:,.0f}".format(a.current_value) }}</td>
+            <td class="text-small">{{ a.filing_date }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% endif %}
+{% endblock %}

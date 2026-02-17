@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Notifications - 13F Filing Viewer{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>&#128276; Notifications</h1>
+    <p>
+        Watchlist alerts when superinvestors file new 13Fs matching your starred tickers.
+    </p>
+</hgroup>
+
+{% if notifications %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em;">
+    <p class="text-muted" style="margin: 0;">
+        {{ unread_count }} unread &middot; {{ notifications | length }} total
+    </p>
+    {% if unread_count > 0 %}
+    <button class="secondary outline"
+            style="font-size: 0.85em; padding: 0.3em 0.8em; margin: 0;"
+            hx-post="/api/notifications/read-all"
+            hx-target="#notification-bell"
+            hx-swap="outerHTML"
+            onclick="document.querySelectorAll('.notification-unread').forEach(el => el.classList.remove('notification-unread'))">
+        Mark all read
+    </button>
+    {% endif %}
+</div>
+
+{% for notif in notifications %}
+<article class="notification-card {% if not notif.read %}notification-unread{% endif %}"
+         style="margin-bottom: 0.75em; padding: 0.75em 1em; cursor: pointer;"
+         onclick="window.location.href='{{ notif.link }}'"
+         {% if not notif.read %}
+         hx-post="/api/notifications/read/{{ notif.id }}"
+         hx-trigger="click once"
+         hx-swap="none"
+         {% endif %}>
+    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+        <div>
+            {% if notif.action == "NEW BUY" %}
+                <span class="badge badge-new">NEW BUY</span>
+            {% elif notif.action == "ADD" %}
+                <span class="badge badge-add">ADD</span>
+            {% elif notif.action == "REDUCE" %}
+                <span class="badge badge-reduce">REDUCE</span>
+            {% elif notif.action == "SOLD" %}
+                <span class="badge badge-sold">SOLD</span>
+            {% endif %}
+
+            <strong>{{ notif.fund_name }}</strong>
+
+            {% if notif.action == "NEW BUY" %}
+                just disclosed a new position in
+            {% elif notif.action == "ADD" %}
+                added to their position in
+            {% elif notif.action == "REDUCE" %}
+                reduced their position in
+            {% elif notif.action == "SOLD" %}
+                sold their entire position in
+            {% endif %}
+
+            <a href="{{ notif.link }}" class="ticker"
+               onclick="event.stopPropagation();">${{ notif.ticker or notif.cusip[:6] }}</a>{% if notif.issuer_name %}
+                <span class="text-muted">({{ notif.issuer_name }})</span>{% endif %}.
+
+            {% if notif.pct_of_portfolio and notif.action != "SOLD" %}
+                <span class="text-muted">
+                    It now makes up {{ "%.1f"|format(notif.pct_of_portfolio) }}% of their portfolio.
+                </span>
+            {% endif %}
+        </div>
+        <div style="white-space: nowrap; margin-left: 1em;">
+            {% if not notif.read %}
+            <span style="color: #1976d2; font-size: 0.7em;">&#9679; </span>
+            {% endif %}
+            <small class="text-muted">{{ notif.timestamp[:10] }}</small>
+        </div>
+    </div>
+    <div class="text-muted text-small" style="margin-top: 0.3em;">
+        Filed: {{ notif.filing_date }}
+        &middot;
+        <a href="/holdings/{{ notif.fund_cik }}" onclick="event.stopPropagation();">
+            View {{ notif.fund_name }}'s holdings
+        </a>
+    </div>
+</article>
+{% endfor %}
+
+{% else %}
+<article style="text-align: center; padding: 2em;">
+    <p class="text-muted">No notifications yet.</p>
+    <p class="text-muted text-small">
+        Add tickers to your <a href="/">watchlist</a>, then notifications will appear
+        here when superinvestors file new 13Fs affecting those tickers.
+    </p>
+    <p class="text-muted text-small">
+        Polling runs automatically:
+        every 2 hours during filing season, every 12 hours otherwise.
+    </p>
+</article>
+{% endif %}
+{% endblock %}

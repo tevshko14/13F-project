@@ -1,0 +1,19 @@
+{# Star/favorite button for stock pages.
+   Expects `stock` variable in context (from stock.html).
+   Uses Jinja2 global is_in_watchlist(). #}
+{% if stock and stock.ticker %}
+    {% if is_in_watchlist(stock.ticker) %}
+    <button class="star-btn starred"
+            title="Remove {{ stock.ticker }} from watchlist"
+            hx-delete="/api/watchlist/{{ stock.ticker }}"
+            hx-target="#watchlist-star"
+            hx-swap="innerHTML">&#9733;</button>
+    {% else %}
+    <button class="star-btn"
+            title="Add {{ stock.ticker }} to watchlist"
+            hx-post="/api/watchlist/{{ stock.ticker }}"
+            hx-target="#watchlist-star"
+            hx-swap="innerHTML"
+            hx-vals='{"cusip": "{{ stock.cusip or '' }}", "issuer_name": "{{ stock.issuer_name | e }}"}'>&#9734;</button>
+    {% endif %}
+{% endif %}

@@ -1,0 +1,717 @@
+import os
+import re
+
+import httpx
+from edgar import set_identity, find, Company, ThirteenF
+from edgar.entity.search import CompanySearchResults
+
+from filings.models import (
+    SearchResult, Holding, FundInfo, HoldingChange,
+    EnrichedHolding, ActivityItem, GrandPortfolioEntry,
+    StockHolder, StockDetail, StockQuarterEntry, StockQuarter,
+)
+
+# Set SEC identity (required for API access)
+_identity = os.environ.get("SEC_IDENTITY", "13f-tool-user user@example.com")
+set_identity(_identity)
+
+_HEADERS = {"User-Agent": _identity}
+
+
+def _search_edgar_efts(query: str) -> list[SearchResult]:
+    """Fallback: search EDGAR full-text search for 13F filers by name."""
+    url = "https://efts.sec.gov/LATEST/search-index"
+    params = {
+        "q": f'"{query}"',
+        "forms": "13F-HR",
+        "dateRange": "custom",
+        "startdt": "2023-01-01",
+    }
+    resp = httpx.get(url, params=params, headers=_HEADERS, timeout=15)
+    resp.raise_for_status()
+    data = resp.json()
+
+    seen_ciks: set[str] = set()
+    results: list[SearchResult] = []
+
+    for hit in data.get("hits", {}).get("hits", []):
+        for display_name in hit.get("_source", {}).get("display_names", []):
+            # Format: "COMPANY NAME  (CIK 0001423053)"
+            match = re.match(r"^(.+?)\s+\(CIK\s+(\d+)\)", display_name)
+            if match:
+                name = match.group(1).strip()
+                cik = str(int(match.group(2)))  # strip leading zeros
+                if cik not in seen_ciks:
+                    seen_ciks.add(cik)
+                    results.append(SearchResult(name=name, cik=cik, ticker=None))
+
+    return results
+
+
+def search_managers(query: str) -> list[SearchResult]:
+    """Search for fund managers by name."""
+    result = find(query)
+
+    results: list[SearchResult] = []
+
+    if result is not None:
+        # find() returns CompanySearchResults for name queries
+        if isinstance(result, CompanySearchResults):
+            if not result.empty:
+                for row in result.results.itertuples():
+                    results.append(SearchResult(
+                        name=str(row.company),
+                        cik=str(row.cik),
+                        ticker=str(row.ticker) if hasattr(row, "ticker") and row.ticker else None,
+                    ))
+        # find() may return a single Entity/Company for exact matches
+        elif hasattr(result, "cik") and hasattr(result, "name"):
+            ticker = None
+            if hasattr(result, "tickers") and result.tickers:
+                ticker = result.tickers[0]
+            results.append(SearchResult(
+                name=str(result.name),
+                cik=str(result.cik),
+                ticker=ticker,
+            ))
+
+    # Also search EDGAR full-text search for 13F filers
+    # This catches hedge funds and other 13F filers without tickers
+    efts_results = _search_edgar_efts(query)
+    seen_ciks = {r.cik for r in results}
+    for r in efts_results:
+        if r.cik not in seen_ciks:
+            seen_ciks.add(r.cik)
+            results.append(r)
+
+    return results
+
+
+def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
+    """Get the most recent 13F holdings for a fund by CIK."""
+    company = Company(int(cik))
+    filings = company.get_filings(form="13F-HR", amendments=False)
+
+    if len(filings) == 0:
+        raise ValueError(f"No 13F-HR filings found for CIK {cik} ({company.name})")
+
+    latest = filings[0]
+    tf = ThirteenF(latest)
+    holdings_df = tf.holdings
+
+    fund = FundInfo(
+        name=tf.management_company_name or company.name,
+        cik=cik,
+        report_period=str(tf.report_period),
+        filing_date=str(tf.filing_date),
+        total_value=int(tf.total_value),
+        total_holdings=len(holdings_df),
+    )
+
+    # Sort by value descending and take top N
+    sorted_df = holdings_df.sort_values("Value", ascending=False).head(top_n)
+
+    holdings = []
+    for row in sorted_df.itertuples():
+        holdings.append(Holding(
+            issuer_name=str(row.Issuer),
+            title_of_class=str(row.Class),
+            cusip=str(row.Cusip),
+            value=int(row.Value),
+            shares=int(row.SharesPrnAmount),
+            share_type=str(row.Type),
+        ))
+
+    return fund, holdings
+
+
+def _compare_two_filings(current_df, previous_df) -> list[HoldingChange]:
+    """Compare two filing DataFrames and return a list of HoldingChanges.
+
+    This is the core diff algorithm used by both compare_quarters()
+    and the multi-quarter history builder.
+    """
+    current_by_cusip = {}
+    for row in current_df.itertuples():
+        current_by_cusip[row.Cusip] = row
+
+    previous_by_cusip = {}
+    for row in previous_df.itertuples():
+        previous_by_cusip[row.Cusip] = row
+
+    all_cusips = set(current_by_cusip.keys()) | set(previous_by_cusip.keys())
+
+    changes = []
+    for cusip in all_cusips:
+        curr = current_by_cusip.get(cusip)
+        prev = previous_by_cusip.get(cusip)
+
+        curr_shares = int(curr.SharesPrnAmount) if curr else 0
+        prev_shares = int(prev.SharesPrnAmount) if prev else 0
+        curr_value = int(curr.Value) if curr else 0
+        prev_value = int(prev.Value) if prev else 0
+        name = str(curr.Issuer) if curr else str(prev.Issuer)
+
+        if prev is None:
+            status = "NEW"
+        elif curr is None:
+            status = "CLOSED"
+        elif curr_shares > prev_shares:
+            status = "INCREASED"
+        elif curr_shares < prev_shares:
+            status = "DECREASED"
+        else:
+            status = "UNCHANGED"
+
+        changes.append(HoldingChange(
+            issuer_name=name,
+            cusip=cusip,
+            status=status,
+            current_shares=curr_shares,
+            previous_shares=prev_shares,
+            share_change=curr_shares - prev_shares,
+            current_value=curr_value,
+            previous_value=prev_value,
+        ))
+
+    return changes
+
+
+def _report_period_to_quarter_label(report_period: str) -> str:
+    """Convert '09-30-2025' or '2025-09-30' to 'Q3 2025'."""
+    parts = report_period.split("-")
+    if len(parts[0]) == 4:
+        # YYYY-MM-DD
+        year, month = parts[0], int(parts[1])
+    else:
+        # MM-DD-YYYY
+        month, year = int(parts[0]), parts[2]
+    quarter = (month - 1) // 3 + 1
+    return f"Q{quarter} {year}"
+
+
+def compare_quarters(cik: str, top_n: int = 25) -> tuple[FundInfo, FundInfo, list[HoldingChange]]:
+    """Compare the latest two quarters of 13F holdings for a fund."""
+    company = Company(int(cik))
+    filings = company.get_filings(form="13F-HR", amendments=False)
+
+    if len(filings) < 2:
+        raise ValueError(
+            f"Need at least 2 filings to compare, but CIK {cik} ({company.name}) "
+            f"has {len(filings)}"
+        )
+
+    tf_current = ThirteenF(filings[0])
+    tf_previous = ThirteenF(filings[1])
+
+    current_info = FundInfo(
+        name=tf_current.management_company_name or company.name,
+        cik=cik,
+        report_period=str(tf_current.report_period),
+        filing_date=str(tf_current.filing_date),
+        total_value=int(tf_current.total_value),
+        total_holdings=len(tf_current.holdings),
+    )
+    previous_info = FundInfo(
+        name=tf_previous.management_company_name or company.name,
+        cik=cik,
+        report_period=str(tf_previous.report_period),
+        filing_date=str(tf_previous.filing_date),
+        total_value=int(tf_previous.total_value),
+        total_holdings=len(tf_previous.holdings),
+    )
+
+    changes = _compare_two_filings(tf_current.holdings, tf_previous.holdings)
+
+    # Sort: NEW first, then CLOSED, then by absolute share change descending
+    status_order = {"NEW": 0, "CLOSED": 1, "INCREASED": 2, "DECREASED": 3, "UNCHANGED": 4}
+    changes.sort(key=lambda c: (status_order.get(c.status, 5), -abs(c.share_change)))
+
+    return current_info, previous_info, changes[:top_n]
+
+
+def _safe_ticker(row) -> str | None:
+    """Extract ticker from a DataFrame row, handling missing/NaN values."""
+    if hasattr(row, "Ticker"):
+        val = row.Ticker
+        if val and str(val) not in ("", "nan", "None", "NaN"):
+            return str(val)
+    return None
+
+
+def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
+    """Fetch all data for a single fund (for caching).
+    Returns a dict with fund info, holdings, changes, and quarterly history."""
+    company = Company(int(cik))
+    filings = company.get_filings(form="13F-HR", amendments=False)
+
+    if len(filings) == 0:
+        raise ValueError(f"No 13F-HR filings found for CIK {cik}")
+
+    tf = ThirteenF(filings[0])
+    holdings_df = tf.holdings
+    total_val = int(tf.total_value) if tf.total_value else 0
+
+    sorted_df = holdings_df.sort_values("Value", ascending=False)
+
+    top_holdings = []
+    for row in sorted_df.head(10).itertuples():
+        top_holdings.append({
+            "issuer": str(row.Issuer),
+            "ticker": _safe_ticker(row),
+            "cusip": str(row.Cusip),
+            "value": int(row.Value),
+            "shares": int(row.SharesPrnAmount),
+        })
+
+    all_holdings = []
+    for row in sorted_df.itertuples():
+        val = int(row.Value)
+        all_holdings.append({
+            "issuer": str(row.Issuer),
+            "ticker": _safe_ticker(row),
+            "cusip": str(row.Cusip),
+            "value": val,
+            "shares": int(row.SharesPrnAmount),
+            "pct": round(val / total_val * 100, 2) if total_val > 0 else 0,
+        })
+
+    # Multi-quarter change history
+    num_pairs = min(history_quarters, len(filings) - 1)
+    quarterly_changes = []
+    flat_changes = []  # Backwards-compatible "changes" field (most recent only)
+
+    for i in range(num_pairs):
+        try:
+            tf_newer = tf if i == 0 else ThirteenF(filings[i])
+            tf_older = ThirteenF(filings[i + 1])
+
+            change_list = _compare_two_filings(tf_newer.holdings, tf_older.holdings)
+
+            period_label = _report_period_to_quarter_label(str(tf_newer.report_period))
+
+            quarter_entry = {
+                "period": period_label,
+                "report_period": str(tf_newer.report_period),
+                "filing_date": str(tf_newer.filing_date),
+                "changes": [],
+            }
+
+            for c in change_list:
+                if c.status == "UNCHANGED":
+                    continue
+                change_dict = {
+                    "issuer": c.issuer_name,
+                    "cusip": c.cusip,
+                    "status": c.status,
+                    "share_change": c.share_change,
+                    "current_value": c.current_value,
+                    "current_shares": c.current_shares,
+                    "previous_shares": c.previous_shares,
+                }
+                quarter_entry["changes"].append(change_dict)
+
+                # First pair populates flat changes for backwards compat
+                if i == 0:
+                    flat_changes.append({
+                        "issuer": c.issuer_name,
+                        "cusip": c.cusip,
+                        "status": c.status,
+                        "share_change": c.share_change,
+                        "current_value": c.current_value,
+                    })
+
+            quarterly_changes.append(quarter_entry)
+        except Exception:
+            continue
+
+    return {
+        "name": tf.management_company_name or company.name,
+        "cik": cik,
+        "report_period": str(tf.report_period),
+        "filing_date": str(tf.filing_date),
+        "total_value": total_val,
+        "total_holdings": len(holdings_df),
+        "top_holdings": top_holdings,
+        "all_holdings": all_holdings,
+        "changes": flat_changes,
+        "quarterly_changes": quarterly_changes,
+    }
+
+
+def get_enriched_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[EnrichedHolding]]:
+    """Get holdings with ticker, portfolio %, and activity status."""
+    company = Company(int(cik))
+    filings = company.get_filings(form="13F-HR", amendments=False)
+
+    if len(filings) == 0:
+        raise ValueError(f"No 13F-HR filings found for CIK {cik} ({company.name})")
+
+    tf = ThirteenF(filings[0])
+    holdings_df = tf.holdings
+    total_val = int(tf.total_value) if tf.total_value else 0
+
+    fund = FundInfo(
+        name=tf.management_company_name or company.name,
+        cik=cik,
+        report_period=str(tf.report_period),
+        filing_date=str(tf.filing_date),
+        total_value=total_val,
+        total_holdings=len(holdings_df),
+    )
+
+    # Get activity data from compare
+    activity_by_cusip: dict[str, HoldingChange] = {}
+    if len(filings) >= 2:
+        try:
+            _, _, change_list = compare_quarters(cik, top_n=9999)
+            for c in change_list:
+                activity_by_cusip[c.cusip] = c
+        except Exception:
+            pass
+
+    sorted_df = holdings_df.sort_values("Value", ascending=False).head(top_n)
+
+    holdings = []
+    for row in sorted_df.itertuples():
+        val = int(row.Value)
+        cusip = str(row.Cusip)
+        change = activity_by_cusip.get(cusip)
+        activity = change.status if change and change.status != "UNCHANGED" else None
+        share_change = change.share_change if change else 0
+
+        # Map status to user-friendly labels
+        activity_label = None
+        if activity == "NEW":
+            activity_label = "NEW BUY"
+        elif activity == "INCREASED":
+            activity_label = "ADD"
+        elif activity == "DECREASED":
+            activity_label = "REDUCE"
+        elif activity == "CLOSED":
+            activity_label = "SOLD"
+
+        holdings.append(EnrichedHolding(
+            issuer_name=str(row.Issuer),
+            title_of_class=str(row.Class),
+            cusip=cusip,
+            value=val,
+            shares=int(row.SharesPrnAmount),
+            share_type=str(row.Type),
+            ticker=_safe_ticker(row),
+            pct_of_portfolio=round(val / total_val * 100, 2) if total_val > 0 else 0,
+            activity=activity_label,
+            share_change=share_change,
+        ))
+
+    return fund, holdings
+
+
+def build_activity_feed(cache_data: dict, superinvestors_by_cik: dict) -> list[ActivityItem]:
+    """Build activity feed from cached data. Zero API calls."""
+    status_labels = {
+        "NEW": "NEW BUY",
+        "CLOSED": "SOLD",
+        "INCREASED": "ADD",
+        "DECREASED": "REDUCE",
+    }
+
+    activities = []
+    for cik, fund_data in cache_data.items():
+        si = superinvestors_by_cik.get(cik)
+        if not si:
+            continue
+        display_name = si.display_name
+
+        # Find tickers from holdings for matching
+        ticker_by_cusip = {}
+        for h in fund_data.get("all_holdings", []):
+            ticker_by_cusip[h["cusip"]] = h.get("ticker")
+
+        for change in fund_data.get("changes", []):
+            label = status_labels.get(change["status"])
+            if not label:
+                continue
+            activities.append(ActivityItem(
+                fund_display_name=display_name,
+                fund_cik=cik,
+                issuer_name=change["issuer"],
+                ticker=ticker_by_cusip.get(change["cusip"]),
+                cusip=change["cusip"],
+                action=label,
+                share_change=change["share_change"],
+                current_value=change["current_value"],
+                filing_date=fund_data.get("filing_date", ""),
+            ))
+
+    # Sort by absolute value descending
+    activities.sort(key=lambda a: -abs(a.current_value))
+    return activities
+
+
+def build_grand_portfolio(cache_data: dict, superinvestors_by_cik: dict) -> list[GrandPortfolioEntry]:
+    """Build aggregated grand portfolio from cached data. Zero API calls."""
+    # Group by CUSIP across all funds
+    by_cusip: dict[str, dict] = {}
+    total_aggregate = 0
+
+    for cik, fund_data in cache_data.items():
+        si = superinvestors_by_cik.get(cik)
+        if not si:
+            continue
+        for h in fund_data.get("all_holdings", []):
+            cusip = h["cusip"]
+            val = h["value"]
+            total_aggregate += val
+            if cusip not in by_cusip:
+                by_cusip[cusip] = {
+                    "issuer_name": h["issuer"],
+                    "ticker": h.get("ticker"),
+                    "cusip": cusip,
+                    "combined_value": 0,
+                    "holders": [],
+                }
+            by_cusip[cusip]["combined_value"] += val
+            by_cusip[cusip]["holders"].append(si.display_name)
+            # Prefer a non-None ticker
+            if h.get("ticker") and not by_cusip[cusip]["ticker"]:
+                by_cusip[cusip]["ticker"] = h["ticker"]
+
+    entries = []
+    for data in by_cusip.values():
+        entries.append(GrandPortfolioEntry(
+            issuer_name=data["issuer_name"],
+            ticker=data["ticker"],
+            cusip=data["cusip"],
+            num_holders=len(data["holders"]),
+            combined_value=data["combined_value"],
+            pct_of_aggregate=round(
+                data["combined_value"] / total_aggregate * 100, 3
+            ) if total_aggregate > 0 else 0,
+            holders=data["holders"],
+        ))
+
+    # Sort by number of holders (desc), then by combined value (desc)
+    entries.sort(key=lambda e: (-e.num_holders, -e.combined_value))
+    return entries
+
+
+def build_stock_detail(
+    lookup: str,
+    cache_data: dict,
+    superinvestors_by_cik: dict,
+    *,
+    by_cusip: bool = False,
+) -> StockDetail | None:
+    """Build stock detail from cached data. Zero API calls.
+
+    Args:
+        lookup: Ticker symbol (e.g. "AMZN") or CUSIP if by_cusip=True.
+        cache_data: The full fund_cache dict (keyed by CIK).
+        superinvestors_by_cik: Mapping from CIK to SuperinvestorInfo.
+        by_cusip: If True, match by CUSIP instead of ticker.
+
+    Returns:
+        StockDetail or None if no fund holds this stock.
+    """
+    status_labels = {
+        "NEW": "NEW BUY",
+        "CLOSED": "SOLD",
+        "INCREASED": "ADD",
+        "DECREASED": "REDUCE",
+    }
+
+    lookup_upper = lookup.upper().strip()
+
+    issuer_name = None
+    ticker = None
+    cusip = None
+    holders: list[StockHolder] = []
+    combined_value = 0
+
+    for cik, fund_data in cache_data.items():
+        si = superinvestors_by_cik.get(cik)
+        if not si:
+            continue
+
+        total_val = fund_data.get("total_value", 0)
+
+        # Build change lookup for this fund (cusip -> change dict)
+        change_by_cusip: dict[str, dict] = {}
+        for ch in fund_data.get("changes", []):
+            change_by_cusip[ch["cusip"]] = ch
+
+        for h in fund_data.get("all_holdings", []):
+            # Match logic
+            if by_cusip:
+                if h["cusip"].upper() != lookup_upper:
+                    continue
+            else:
+                h_ticker = h.get("ticker")
+                if not h_ticker or h_ticker.upper() != lookup_upper:
+                    continue
+
+            # Found a match in this fund
+            val = h["value"]
+            combined_value += val
+
+            # Capture stock-level info from first match
+            if issuer_name is None:
+                issuer_name = h["issuer"]
+                cusip = h["cusip"]
+                ticker = h.get("ticker")
+            # Prefer a non-None ticker
+            if h.get("ticker") and not ticker:
+                ticker = h["ticker"]
+
+            # Compute activity for this holding
+            change = change_by_cusip.get(h["cusip"])
+            activity_label = None
+            share_change = 0
+            if change:
+                activity_label = status_labels.get(change["status"])
+                share_change = change["share_change"]
+
+            pct = h.get("pct", 0.0)
+            if pct == 0 and total_val > 0:
+                pct = round(val / total_val * 100, 2)
+
+            holders.append(StockHolder(
+                fund_display_name=si.display_name,
+                fund_cik=cik,
+                pct_of_portfolio=pct,
+                value=val,
+                shares=h["shares"],
+                activity=activity_label,
+                share_change=share_change,
+            ))
+
+    if not holders:
+        return None
+
+    # Sort holders by value descending (largest position first)
+    holders.sort(key=lambda h: -h.value)
+
+    return StockDetail(
+        issuer_name=issuer_name,
+        ticker=ticker,
+        cusip=cusip,
+        num_holders=len(holders),
+        combined_value=combined_value,
+        holders=holders,
+    )
+
+
+def build_stock_history(
+    lookup: str,
+    cache_data: dict,
+    superinvestors_by_cik: dict,
+    *,
+    by_cusip: bool = False,
+) -> list[StockQuarter]:
+    """Build multi-quarter activity history for a stock from cached data.
+
+    Returns a list of StockQuarter objects, one per quarter that had any
+    activity on this stock, sorted most recent first. Zero API calls.
+    """
+    status_labels = {
+        "NEW": "NEW BUY",
+        "CLOSED": "SOLD",
+        "INCREASED": "ADD",
+        "DECREASED": "REDUCE",
+    }
+
+    lookup_upper = lookup.upper().strip()
+
+    # Build a set of CUSIPs that match this stock (across all funds)
+    matching_cusips: set[str] = set()
+    for cik, fund_data in cache_data.items():
+        for h in fund_data.get("all_holdings", []):
+            if by_cusip:
+                if h["cusip"].upper() == lookup_upper:
+                    matching_cusips.add(h["cusip"])
+            else:
+                h_ticker = h.get("ticker")
+                if h_ticker and h_ticker.upper() == lookup_upper:
+                    matching_cusips.add(h["cusip"])
+
+    # Also check quarterly_changes for CUSIPs (stock may have been sold)
+    for cik, fund_data in cache_data.items():
+        for qc in fund_data.get("quarterly_changes", []):
+            for ch in qc.get("changes", []):
+                if by_cusip and ch["cusip"].upper() == lookup_upper:
+                    matching_cusips.add(ch["cusip"])
+
+    if not matching_cusips:
+        return []
+
+    # Collect entries grouped by period
+    quarters: dict[str, dict] = {}  # period -> {"report_date": ..., "entries": [...]}
+
+    for cik, fund_data in cache_data.items():
+        si = superinvestors_by_cik.get(cik)
+        if not si:
+            continue
+
+        for qc in fund_data.get("quarterly_changes", []):
+            period = qc["period"]
+            report_date = qc.get("report_period", "")
+
+            for ch in qc.get("changes", []):
+                if ch["cusip"] not in matching_cusips:
+                    continue
+
+                label = status_labels.get(ch["status"])
+                if not label:
+                    continue
+
+                prev_shares = ch.get("previous_shares", 0)
+                pct_change = 0.0
+                if prev_shares and prev_shares > 0:
+                    pct_change = round(
+                        (ch["share_change"] / prev_shares) * 100, 1
+                    )
+                elif ch["status"] == "NEW":
+                    pct_change = 100.0
+
+                entry = StockQuarterEntry(
+                    fund_display_name=si.display_name,
+                    fund_cik=cik,
+                    activity=label,
+                    share_change=ch["share_change"],
+                    pct_change=pct_change,
+                )
+
+                if period not in quarters:
+                    quarters[period] = {
+                        "report_date": report_date,
+                        "entries": [],
+                    }
+                quarters[period]["entries"].append(entry)
+
+    # Sort entries within each quarter: buys first, then adds, reduces, sells
+    activity_order = {"NEW BUY": 0, "ADD": 1, "REDUCE": 2, "SOLD": 3}
+
+    result = []
+    for period, data in quarters.items():
+        entries = data["entries"]
+        entries.sort(key=lambda e: (activity_order.get(e.activity, 99), e.fund_display_name))
+        result.append(StockQuarter(
+            period=period,
+            report_date=data["report_date"],
+            entries=entries,
+        ))
+
+    # Sort quarters most recent first
+    def quarter_sort_key(sq: StockQuarter) -> tuple[int, int]:
+        try:
+            parts = sq.period.split()
+            q_num = int(parts[0][1])
+            year = int(parts[1])
+            return (-year, -q_num)
+        except (IndexError, ValueError):
+            return (0, 0)
+
+    result.sort(key=quarter_sort_key)
+
+    return result

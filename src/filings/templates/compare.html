@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}{{ current.name }} Comparison - 13F Filing Viewer{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>{{ current.name }}</h1>
+    <p>Comparing: {{ previous.report_period }} &rarr; {{ current.report_period }}</p>
+</hgroup>
+
+<div class="actions" style="margin-bottom: 1.5em;">
+    <a href="/holdings/{{ current.cik }}" role="button" class="secondary">View Holdings</a>
+    <a href="/" role="button" class="secondary">Superinvestors</a>
+    <a href="/search" role="button" class="secondary outline">Search</a>
+</div>
+
+<article>
+    <header>
+        <strong>Previous Value:</strong> ${{ "{:,.0f}".format(previous.total_value) }}
+        &nbsp;&rarr;&nbsp;
+        <strong>Current Value:</strong> ${{ "{:,.0f}".format(current.total_value) }}
+    </header>
+
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Issuer</th>
+                <th>Status</th>
+                <th class="text-right">Prev Shares</th>
+                <th class="text-right">Curr Shares</th>
+                <th class="text-right">Change</th>
+                <th class="text-right">Curr Value ($)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in changes %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td><strong>{{ c.issuer_name }}</strong></td>
+                <td class="status-{{ c.status|lower }}">{{ c.status }}</td>
+                <td class="text-right">
+                    {{ "{:,}".format(c.previous_shares) if c.previous_shares else '-' }}
+                </td>
+                <td class="text-right">
+                    {{ "{:,}".format(c.current_shares) if c.current_shares else '-' }}
+                </td>
+                <td class="text-right status-{{ c.status|lower }}">
+                    {% if c.share_change != 0 %}
+                        {{ "{:+,}".format(c.share_change) }}
+                    {% else %}-{% endif %}
+                </td>
+                <td class="text-right">
+                    {{ "${:,.0f}".format(c.current_value) if c.current_value else '-' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+</article>
+{% endblock %}

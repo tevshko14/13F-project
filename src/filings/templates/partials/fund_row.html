@@ -1,0 +1,20 @@
+<tr>
+    <td><strong>{{ si.display_name }}</strong></td>
+    <td class="text-small">{{ data.get("name", si.fund_name) }}</td>
+    <td class="text-right">${{ "{:,.0f}".format(data.get("total_value", 0)) }}</td>
+    <td class="text-right">{{ data.get("total_holdings", 0) }}</td>
+    <td>
+        <div class="tag-list">
+            {% for t in top_tickers %}
+            <a href="/stock/{{ t }}" class="tag">{{ t }}</a>
+            {% endfor %}
+        </div>
+    </td>
+    <td class="text-small">{{ data.get("report_period", "-") }}</td>
+    <td>
+        <div class="actions">
+            <a href="/holdings/{{ si.cik }}" role="button" class="outline">Holdings</a>
+            <a href="/compare/{{ si.cik }}" role="button" class="outline secondary">Compare</a>
+        </div>
+    </td>
+</tr>

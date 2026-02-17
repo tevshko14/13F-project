@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Grand Portfolio - 13F Filing Viewer{% endblock %}
+{% block content %}
+{% from "partials/ticker_link.html" import ticker_link %}
+<hgroup>
+    <h1>Grand Portfolio</h1>
+    <p>Stocks held by the most superinvestors, aggregated across all tracked portfolios.</p>
+</hgroup>
+
+{% if empty is defined and empty %}
+<article>
+    <p>No portfolio data available yet. Data will load as superinvestor portfolios are cached.</p>
+    <p><a href="/" role="button">Go to Superinvestors</a> to trigger data loading.</p>
+</article>
+{% else %}
+<p class="text-muted">Showing top {{ entries|length }} stocks (sorted by number of holders)</p>
+
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Ticker</th>
+            <th>Stock</th>
+            <th class="text-right">Holders</th>
+            <th class="text-right">Combined Value ($)</th>
+            <th class="text-right">% of Aggregate</th>
+            <th>Held By</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in entries %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ ticker_link(e.ticker, e.cusip) }}</td>
+            <td><strong>{{ e.issuer_name }}</strong></td>
+            <td class="text-right"><strong>{{ e.num_holders }}</strong></td>
+            <td class="text-right">${{ "{:,.0f}".format(e.combined_value) }}</td>
+            <td class="text-right">{{ "%.2f"|format(e.pct_of_aggregate) }}%</td>
+            <td>
+                <div class="tag-list">
+                    {% for h in e.holders %}
+                    <span class="tag">{{ h }}</span>
+                    {% endfor %}
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% endif %}
+{% endblock %}

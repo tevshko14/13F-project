@@ -1,0 +1,9 @@
+{% macro ticker_link(ticker, cusip=None) -%}
+{% if ticker %}
+<a href="/stock/{{ ticker }}" class="ticker">{{ ticker }}</a>
+{% elif cusip %}
+<a href="/stock/cusip/{{ cusip }}" class="ticker text-muted">[{{ cusip[:6] }}]</a>
+{% else %}
+<span class="text-muted">-</span>
+{% endif %}
+{%- endmacro %}
