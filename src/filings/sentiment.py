@@ -15,16 +15,23 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import urllib.request
 
 logger = logging.getLogger(__name__)
+
+# ── Thread lock for all cache reads/writes ────────────────────────────
+_lock = threading.Lock()
 
 # ── Cache TTLs ──────────────────────────────────────────────────────
 _FINNHUB_TTL = 7200       # 2 hours
 _CNN_TTL = 3600            # 1 hour
 _APEWISDOM_TTL = 3600      # 1 hour
 _ALPHAVANTAGE_TTL = 43200  # 12 hours
+
+# ── LRU max entries for per-ticker caches ─────────────────────────────
+_MAX_CACHE_ENTRIES = 2000
 
 # ── Per-ticker caches: {TICKER: (timestamp, data)} ─────────────────
 _finnhub_cache: dict[str, tuple[float, dict | None]] = {}
@@ -38,6 +45,15 @@ _apewisdom_cache: tuple[float, list[dict]] | None = None
 _av_daily_count = 0
 _av_daily_reset: float = 0.0
 _AV_DAILY_MAX = 20  # leave 5-call buffer from the 25/day limit
+
+
+def _evict_oldest(cache: dict, max_size: int = _MAX_CACHE_ENTRIES) -> None:
+    """Evict oldest entries if cache exceeds max_size. Must hold _lock."""
+    if len(cache) <= max_size:
+        return
+    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
+    for k in sorted_keys[:len(cache) - max_size]:
+        del cache[k]
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -85,10 +101,11 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
     key = ticker.upper()
 
     # Check cache
-    if key in _finnhub_cache:
-        ts, data = _finnhub_cache[key]
-        if time.time() - ts < _FINNHUB_TTL:
-            return data
+    with _lock:
+        if key in _finnhub_cache:
+            ts, data = _finnhub_cache[key]
+            if time.time() - ts < _FINNHUB_TTL:
+                return data
 
     api_key = os.environ.get("FINNHUB_API_KEY", "")
     if not api_key:
@@ -103,7 +120,9 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
         return None
 
     if not raw or not isinstance(raw, dict):
-        _finnhub_cache[key] = (time.time(), None)
+        with _lock:
+            _finnhub_cache[key] = (time.time(), None)
+            _evict_oldest(_finnhub_cache)
         return None
 
     buzz = raw.get("buzz") or {}
@@ -120,7 +139,9 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
         "sector_avg_news_score": raw.get("sectorAverageNewsScore", 0),
     }
 
-    _finnhub_cache[key] = (time.time(), result)
+    with _lock:
+        _finnhub_cache[key] = (time.time(), result)
+        _evict_oldest(_finnhub_cache)
     return result
 
 
@@ -136,10 +157,11 @@ def _get_cnn_fear_greed() -> dict | None:
     """
     global _cnn_cache
 
-    if _cnn_cache is not None:
-        ts, data = _cnn_cache
-        if time.time() - ts < _CNN_TTL:
-            return data
+    with _lock:
+        if _cnn_cache is not None:
+            ts, data = _cnn_cache
+            if time.time() - ts < _CNN_TTL:
+                return data
 
     url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
     raw = _http_get_json(url, headers={
@@ -149,13 +171,15 @@ def _get_cnn_fear_greed() -> dict | None:
     })
 
     if not raw or not isinstance(raw, dict):
-        _cnn_cache = (time.time(), None)
+        with _lock:
+            _cnn_cache = (time.time(), None)
         return None
 
     fg = raw.get("fear_and_greed") or {}
     score = fg.get("score")
     if score is None:
-        _cnn_cache = (time.time(), None)
+        with _lock:
+            _cnn_cache = (time.time(), None)
         return None
 
     result = {
@@ -167,7 +191,8 @@ def _get_cnn_fear_greed() -> dict | None:
         "one_year_ago": fg.get("previous_1_year"),
     }
 
-    _cnn_cache = (time.time(), result)
+    with _lock:
+        _cnn_cache = (time.time(), result)
     return result
 
 
@@ -179,10 +204,11 @@ def _get_apewisdom_all() -> list[dict]:
     """Fetch all-stocks ranked list from ApeWisdom (pages 1-5)."""
     global _apewisdom_cache
 
-    if _apewisdom_cache is not None:
-        ts, data = _apewisdom_cache
-        if time.time() - ts < _APEWISDOM_TTL:
-            return data
+    with _lock:
+        if _apewisdom_cache is not None:
+            ts, data = _apewisdom_cache
+            if time.time() - ts < _APEWISDOM_TTL:
+                return data
 
     all_results: list[dict] = []
     for page in range(1, 6):  # pages 1-5 (cap for speed)
@@ -195,7 +221,8 @@ def _get_apewisdom_all() -> list[dict]:
             break
         all_results.extend(results)
 
-    _apewisdom_cache = (time.time(), all_results)
+    with _lock:
+        _apewisdom_cache = (time.time(), all_results)
     return all_results
 
 
@@ -241,10 +268,11 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
     key = ticker.upper()
 
     # Check cache
-    if key in _alphavantage_cache:
-        ts, data = _alphavantage_cache[key]
-        if time.time() - ts < _ALPHAVANTAGE_TTL:
-            return data
+    with _lock:
+        if key in _alphavantage_cache:
+            ts, data = _alphavantage_cache[key]
+            if time.time() - ts < _ALPHAVANTAGE_TTL:
+                return data
 
     api_key = os.environ.get("ALPHAVANTAGE_API_KEY", "")
     if not api_key:
@@ -262,19 +290,25 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
     _av_daily_count += 1
 
     if not raw or not isinstance(raw, dict):
-        _alphavantage_cache[key] = (time.time(), None)
+        with _lock:
+            _alphavantage_cache[key] = (time.time(), None)
+            _evict_oldest(_alphavantage_cache)
         return None
 
     # Check for error/rate-limit responses
     if "Note" in raw or "Error Message" in raw or "Information" in raw:
         logger.warning("Alpha Vantage returned error for %s: %s",
                        key, raw.get("Note") or raw.get("Error Message") or raw.get("Information"))
-        _alphavantage_cache[key] = (time.time(), None)
+        with _lock:
+            _alphavantage_cache[key] = (time.time(), None)
+            _evict_oldest(_alphavantage_cache)
         return None
 
     feed = raw.get("feed") or []
     if not feed:
-        _alphavantage_cache[key] = (time.time(), None)
+        with _lock:
+            _alphavantage_cache[key] = (time.time(), None)
+            _evict_oldest(_alphavantage_cache)
         return None
 
     articles: list[dict] = []
@@ -322,7 +356,9 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
         "avg_sentiment_label": avg_label,
     }
 
-    _alphavantage_cache[key] = (time.time(), result)
+    with _lock:
+        _alphavantage_cache[key] = (time.time(), result)
+        _evict_oldest(_alphavantage_cache)
     return result
 
 

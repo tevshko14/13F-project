@@ -1,33 +1,112 @@
+"""13F Filing Viewer — FastAPI web application.
+
+Production-ready with: security headers, request logging, exception
+handlers, rate limiting, health check, structured logging, and Sentry.
+"""
+
 import asyncio
 import json as json_module
+import logging
+import os
+import time as time_module
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 
-from filings import client, cache, watchlist, notifications, analysts, market_data, sentiment
+from filings import client, cache, analysts, market_data, sentiment
 from filings.models import SuperinvestorSummary
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# Logging
+# ═══════════════════════════════════════════════════════════════════════
+
+def _setup_logging() -> None:
+    """Configure structured JSON logging for production (Railway)."""
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+    if os.environ.get("RAILWAY_ENVIRONMENT"):
+        # JSON format for Railway log aggregation
+        fmt = '{"time":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}'
+    else:
+        fmt = "%(asctime)s %(levelname)-8s %(name)s — %(message)s"
+
+    logging.basicConfig(level=log_level, format=fmt, force=True)
+    # Quiet noisy libraries
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("yfinance").setLevel(logging.WARNING)
+    logging.getLogger("peewee").setLevel(logging.WARNING)
+
+_setup_logging()
+logger = logging.getLogger(__name__)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Sentry (optional — only if SENTRY_DSN is set)
+# ═══════════════════════════════════════════════════════════════════════
+
+_sentry_dsn = os.environ.get("SENTRY_DSN", "")
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            traces_sample_rate=0.1,
+            environment=os.environ.get("RAILWAY_ENVIRONMENT", "development"),
+        )
+        logger.info("Sentry initialized (10%% trace sampling)")
+    except ImportError:
+        logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Rate limiting (optional — graceful fallback if slowapi not installed)
+# ═══════════════════════════════════════════════════════════════════════
+
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+
+    limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+    _has_limiter = True
+except ImportError:
+    limiter = None
+    _has_limiter = False
+    logger.info("slowapi not installed — rate limiting disabled")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# App startup time (for /health uptime)
+# ═══════════════════════════════════════════════════════════════════════
+
+_app_start_time = time_module.time()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Lifespan
+# ═══════════════════════════════════════════════════════════════════════
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load cache on startup, trigger background refresh if stale."""
     app.state.fund_cache = cache.load_cache()
     app.state.refreshing = False
-    app.state.sse_clients: list[asyncio.Queue] = []
-
-    # Initialize notification system (first-run: marks existing filings as "seen")
-    notifications.initialize_if_needed(app.state.fund_cache)
 
     if cache.is_cache_stale() and app.state.fund_cache:
         asyncio.create_task(_background_refresh(app))
 
     # Start periodic polling for new filings
-    poll_task = asyncio.create_task(_notification_poll_loop(app))
+    poll_task = asyncio.create_task(_poll_loop(app))
 
     # Prefetch S&P 500 market data in background (~30-60s on cold start)
     asyncio.create_task(_prefetch_market_data(app))
@@ -37,84 +116,120 @@ async def lifespan(app: FastAPI):
     poll_task.cancel()
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# App creation
+# ═══════════════════════════════════════════════════════════════════════
+
 app = FastAPI(title="13F Filing Viewer", lifespan=lifespan)
 
 templates = Jinja2Templates(
     directory=Path(__file__).parent / "templates"
 )
 
-# Expose watchlist + notification helpers to every template
-templates.env.globals["get_watchlist"] = watchlist.load_watchlist
-templates.env.globals["is_in_watchlist"] = watchlist.is_in_watchlist
-templates.env.globals["get_unread_count"] = notifications.get_unread_count
+# Template globals
+templates.env.globals["current_year"] = datetime.now().year
 
+# Attach rate limiter
+if _has_limiter:
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Middleware
+# ═══════════════════════════════════════════════════════════════════════
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        # HSTS only on HTTPS (Railway terminates TLS)
+        if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time_module.time()
+        response = await call_next(request)
+        duration_ms = round((time_module.time() - start) * 1000)
+        logger.info("%s %s %s %dms", request.method, request.url.path, response.status_code, duration_ms)
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Exception handlers
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 404:
+        message = "The page you're looking for doesn't exist."
+    elif exc.status_code == 429:
+        message = "Too many requests. Please slow down and try again in a minute."
+    else:
+        message = exc.detail or "An unexpected error occurred."
+    return templates.TemplateResponse("error.html", {
+        "request": request,
+        "message": message,
+    }, status_code=exc.status_code)
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return templates.TemplateResponse("error.html", {
+        "request": request,
+        "message": "Something went wrong on our end. Please try again later.",
+    }, status_code=500)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Background tasks
+# ═══════════════════════════════════════════════════════════════════════
 
 async def _background_refresh(app: FastAPI):
-    """Refresh cache for all superinvestors in background.
-
-    Also detects new filings and checks for watchlist matches.
-    Saves cache to disk in batches (every 10 funds) to avoid blocking I/O.
-    """
+    """Refresh cache for all superinvestors in background."""
     app.state.refreshing = True
     dirty_count = 0
     for si in SUPERINVESTORS:
         try:
             data = await asyncio.to_thread(cache.refresh_single_fund, si.cik)
             if data:
-                # Check for new filing BEFORE updating in-memory cache
-                new_filing_date = data.get("filing_date", "")
-                is_new = notifications.is_new_filing(si.cik, new_filing_date)
-
-                # Update in-memory cache immediately
                 app.state.fund_cache[si.cik] = data
                 dirty_count += 1
-
-                # Batch disk writes: save every 10 funds (not every single one)
                 if dirty_count % 10 == 0:
                     await asyncio.to_thread(cache.save_cache, app.state.fund_cache)
-
-                # If new filing detected, check watchlist matches
-                if is_new and new_filing_date:
-                    wl = watchlist.load_watchlist()
-                    if wl:
-                        matches = notifications.check_watchlist_matches(
-                            si.cik, si.display_name, data, wl
-                        )
-                        for notif in matches:
-                            notifications.add_notification(notif)
-                            await _broadcast_sse(app, notif)
-                    notifications.mark_filing_seen(si.cik, new_filing_date)
         except Exception:
             pass
-        await asyncio.sleep(1)  # Rate limit: don't overwhelm SEC
+        await asyncio.sleep(1)
 
-    # Final save to catch any remaining dirty data
     if dirty_count % 10 != 0:
         await asyncio.to_thread(cache.save_cache, app.state.fund_cache)
     app.state.refreshing = False
 
 
-async def _notification_poll_loop(app: FastAPI):
-    """Periodically trigger background refresh to detect new filings.
-
-    Polling interval adapts to filing season (2h during, 12h outside).
-    """
+async def _poll_loop(app: FastAPI):
+    """Periodically trigger background refresh to detect new filings."""
     while True:
         try:
-            interval = notifications.get_poll_interval_seconds()
+            from filings.notifications import get_poll_interval_seconds
+            interval = get_poll_interval_seconds()
             await asyncio.sleep(interval)
             if not getattr(app.state, "refreshing", False):
                 asyncio.create_task(_background_refresh(app))
         except asyncio.CancelledError:
             break
         except Exception:
-            pass
-
-
-async def _broadcast_sse(app: FastAPI, notif: dict):
-    """Push a notification to all connected SSE clients."""
-    for queue in getattr(app.state, "sse_clients", []):
-        await queue.put(notif)
+            await asyncio.sleep(3600)  # fallback: retry in 1h
 
 
 async def _prefetch_market_data(app: FastAPI):
@@ -126,6 +241,10 @@ async def _prefetch_market_data(app: FastAPI):
     except Exception:
         app.state.market_data_ready = False
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# Pages
+# ═══════════════════════════════════════════════════════════════════════
 
 # --- Homepage: Superinvestor list ---
 
@@ -152,7 +271,7 @@ async def index(request: Request):
                 filing_date=cached.get("filing_date", ""),
             ))
         else:
-            summaries.append(None)  # Will trigger lazy loading
+            summaries.append(None)
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -167,12 +286,11 @@ async def index(request: Request):
 
 @app.get("/api/fund-row/{cik}", response_class=HTMLResponse)
 async def fund_row(request: Request, cik: str):
-    cik_normalized = cik.lstrip("0") or cik       # "0001067983" -> "1067983"
+    cik_normalized = cik.lstrip("0") or cik
     si = SUPERINVESTORS_BY_CIK.get(cik_normalized) or SUPERINVESTORS_BY_CIK.get(cik)
     try:
         data = await asyncio.to_thread(client.get_fund_summary, cik)
         app.state.fund_cache[cik_normalized] = data
-        # Save to disk in a background thread (non-blocking)
         asyncio.create_task(asyncio.to_thread(cache.save_cache, app.state.fund_cache))
         top_tickers = [
             h.get("ticker") or h.get("issuer", "?")[:8]
@@ -237,7 +355,6 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
 
 @app.get("/compare/{cik}")
 async def compare(request: Request, cik: str):
-    """Redirect old /compare URLs to the consolidated investor page."""
     return RedirectResponse(url=f"/holdings/{cik}", status_code=302)
 
 
@@ -245,7 +362,6 @@ async def compare(request: Request, cik: str):
 
 @app.get("/api/compare/{cik}", response_class=HTMLResponse)
 async def compare_api(request: Request, cik: str, top_n: int = Query(25)):
-    """Return compare quarter partial for an investor (loaded on tab click)."""
     try:
         current, previous, changes = await asyncio.to_thread(
             client.compare_quarters, cik, top_n
@@ -279,7 +395,7 @@ async def activity_feed(request: Request):
     activities = client.build_activity_feed(cache_data, SUPERINVESTORS_BY_CIK)
     return templates.TemplateResponse("activity.html", {
         "request": request,
-        "activities": activities[:100],  # Limit to top 100
+        "activities": activities[:100],
     })
 
 
@@ -298,7 +414,7 @@ async def grand_portfolio(request: Request):
     entries = client.build_grand_portfolio(cache_data, SUPERINVESTORS_BY_CIK)
     return templates.TemplateResponse("grand_portfolio.html", {
         "request": request,
-        "entries": entries[:100],  # Top 100 stocks
+        "entries": entries[:100],
     })
 
 
@@ -366,12 +482,11 @@ async def stock_detail(request: Request, ticker: str):
 
 @app.get("/api/analysts/{ticker}", response_class=HTMLResponse)
 async def analyst_ratings(request: Request, ticker: str):
-    """Return analyst ratings partial for a ticker (loaded on tab click)."""
     ratings = await asyncio.to_thread(analysts.get_analyst_ratings, ticker)
     consensus = analysts.get_consensus_summary(ratings)
     return templates.TemplateResponse("partials/analyst_ratings.html", {
         "request": request,
-        "ratings": ratings[:50],  # Limit to 50 most recent
+        "ratings": ratings[:50],
         "consensus": consensus,
         "ticker": ticker.upper(),
     })
@@ -379,7 +494,6 @@ async def analyst_ratings(request: Request, ticker: str):
 
 @app.get("/api/sentiment/{ticker}", response_class=HTMLResponse)
 async def sentiment_data(request: Request, ticker: str):
-    """Return sentiment partial for a ticker (loaded on tab click)."""
     data = await asyncio.to_thread(sentiment.get_sentiment_data, ticker)
     return templates.TemplateResponse("partials/sentiment.html", {
         "request": request,
@@ -397,18 +511,14 @@ async def sentiment_data(request: Request, ticker: str):
 
 @app.get("/api/ticker-search-index")
 async def ticker_search_index(request: Request):
-    """JSON autocomplete index for the nav ticker search bar."""
     cache_data = getattr(app.state, "fund_cache", {})
     data = await asyncio.to_thread(market_data.get_ticker_search_list, cache_data)
-    from fastapi.responses import JSONResponse
     return JSONResponse(content=data)
 
 
 @app.get("/api/heatmap", response_class=HTMLResponse)
 async def heatmap(request: Request):
-    """S&P 500 heatmap partial (ECharts treemap). Auto-retries if data not ready."""
     if not getattr(app.state, "market_data_ready", False):
-        # Data still loading — return a polling stub
         return HTMLResponse(
             '<article>'
             '<p aria-busy="true">Loading S&P 500 market data (first load takes ~30s)...</p>'
@@ -424,12 +534,11 @@ async def heatmap(request: Request):
 
     constituents = await asyncio.to_thread(market_data.get_sp500_constituents)
 
-    # Count how many superinvestors hold each ticker
     cache_data = getattr(app.state, "fund_cache", {})
     super_ticker_counts: dict[str, int] = {}
     for cik, fund_data in cache_data.items():
         if cik in SUPERINVESTORS_BY_CIK:
-            seen_tickers: set[str] = set()  # avoid double-counting within one fund
+            seen_tickers: set[str] = set()
             for h in fund_data.get("all_holdings", []):
                 t = h.get("ticker")
                 if t:
@@ -450,7 +559,6 @@ async def heatmap(request: Request):
 
 @app.get("/api/most-added", response_class=HTMLResponse)
 async def most_added(request: Request):
-    """Most-added-by-superinvestors table partial, enriched with analyst consensus + 52W range."""
     cache_data = getattr(app.state, "fund_cache", {})
     if not cache_data:
         return HTMLResponse(
@@ -461,17 +569,14 @@ async def most_added(request: Request):
         market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK
     )
 
-    # Enrich each entry with analyst consensus and 52-week range
     tickers_to_lookup = [e["ticker"] for e in entries if e.get("ticker")]
 
-    # Get 52-week ranges in bulk (cached)
     range_data = {}
     if tickers_to_lookup:
         range_data = await asyncio.to_thread(
             market_data.get_52_week_range_bulk, tickers_to_lookup
         )
 
-    # Get analyst consensus per ticker (uses existing 5-min cache)
     for entry in entries:
         ticker = entry.get("ticker")
         if ticker:
@@ -500,128 +605,6 @@ async def most_added(request: Request):
     })
 
 
-# --- Watchlist API ---
-
-@app.post("/api/watchlist/{ticker}", response_class=HTMLResponse)
-async def watchlist_add(request: Request, ticker: str):
-    """Add a ticker to the watchlist. Returns star button + OOB sidebar."""
-    form = await request.form()
-    cusip = form.get("cusip", "")
-    issuer_name = form.get("issuer_name", "")
-    watchlist.add_to_watchlist(ticker, cusip=cusip, issuer_name=issuer_name)
-
-    # Build a minimal stock-like object for the star template
-    stock_obj = type("S", (), {
-        "ticker": ticker.upper(),
-        "cusip": cusip,
-        "issuer_name": issuer_name,
-    })()
-    return templates.TemplateResponse("partials/watchlist_response.html", {
-        "request": request,
-        "stock": stock_obj,
-    })
-
-
-@app.delete("/api/watchlist/{ticker}", response_class=HTMLResponse)
-async def watchlist_remove(request: Request, ticker: str):
-    """Remove a ticker from the watchlist."""
-    watchlist.remove_from_watchlist(ticker)
-
-    hx_target = request.headers.get("hx-target", "")
-
-    # If triggered from the stock page star button → return star + OOB sidebar
-    if hx_target == "watchlist-star":
-        # Look up stock info from cache to rebuild star button context
-        cache_data = getattr(app.state, "fund_cache", {})
-        detail = client.build_stock_detail(
-            ticker, cache_data, SUPERINVESTORS_BY_CIK
-        )
-        stock_obj = type("S", (), {
-            "ticker": ticker.upper(),
-            "cusip": getattr(detail, "cusip", "") if detail else "",
-            "issuer_name": getattr(detail, "issuer_name", "") if detail else "",
-        })()
-        return templates.TemplateResponse("partials/watchlist_response.html", {
-            "request": request,
-            "stock": stock_obj,
-        })
-
-    # If triggered from sidebar × button → return just the sidebar content
-    return templates.TemplateResponse("partials/watchlist_sidebar.html", {
-        "request": request,
-    })
-
-
-@app.get("/api/watchlist-sidebar", response_class=HTMLResponse)
-async def watchlist_sidebar_refresh(request: Request):
-    """Full sidebar content refresh (fallback)."""
-    return templates.TemplateResponse("partials/watchlist_sidebar.html", {
-        "request": request,
-    })
-
-
-# --- Notification API ---
-
-@app.get("/api/notifications/stream")
-async def notification_stream(request: Request):
-    """SSE endpoint for real-time in-app notifications."""
-    queue: asyncio.Queue = asyncio.Queue()
-    app.state.sse_clients.append(queue)
-
-    async def event_generator():
-        try:
-            while True:
-                notif = await queue.get()
-                data = json_module.dumps(notif)
-                yield f"event: notification\ndata: {data}\n\n"
-        except asyncio.CancelledError:
-            pass
-        finally:
-            if queue in app.state.sse_clients:
-                app.state.sse_clients.remove(queue)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
-
-
-@app.get("/api/notifications/bell", response_class=HTMLResponse)
-async def notification_bell(request: Request):
-    """Return the bell icon partial (for HTMX polling)."""
-    return templates.TemplateResponse("partials/notification_bell.html", {
-        "request": request,
-    })
-
-
-@app.get("/notifications", response_class=HTMLResponse)
-async def notifications_page(request: Request):
-    """Full notification history page."""
-    all_notifs = notifications.get_all_notifications(limit=50)
-    return templates.TemplateResponse("notifications.html", {
-        "request": request,
-        "notifications": all_notifs,
-        "unread_count": notifications.get_unread_count(),
-    })
-
-
-@app.post("/api/notifications/read/{notification_id}", response_class=HTMLResponse)
-async def mark_read(request: Request, notification_id: str):
-    """Mark a single notification as read."""
-    notifications.mark_notification_read(notification_id)
-    return HTMLResponse("")
-
-
-@app.post("/api/notifications/read-all", response_class=HTMLResponse)
-async def mark_all_read(request: Request):
-    """Mark all notifications as read. Returns updated bell."""
-    notifications.mark_all_read()
-    return templates.TemplateResponse("partials/notification_bell.html", {
-        "request": request,
-    })
-
-
 # --- Manual Refresh ---
 
 @app.post("/refresh", response_class=HTMLResponse)
@@ -634,12 +617,80 @@ async def trigger_refresh(request: Request):
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# Infrastructure endpoints
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/health")
+async def health_check(request: Request):
+    uptime = round(time_module.time() - _app_start_time)
+    cache_data = getattr(app.state, "fund_cache", {})
+    return JSONResponse({
+        "status": "ok",
+        "uptime_seconds": uptime,
+        "cache_entries": len(cache_data),
+        "cache_age": cache.get_cache_age_str(),
+        "refreshing": getattr(app.state, "refreshing", False),
+        "market_data_ready": getattr(app.state, "market_data_ready", False),
+    })
+
+
+@app.get("/robots.txt")
+async def robots_txt():
+    content = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "Disallow: /refresh\n"
+        "\n"
+        "Sitemap: https://13f-viewer.up.railway.app/sitemap.xml\n"
+    )
+    return PlainTextResponse(content, media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+async def sitemap_xml():
+    base_url = "https://13f-viewer.up.railway.app"
+    urls = [
+        f"  <url><loc>{base_url}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>",
+        f"  <url><loc>{base_url}/activity</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/grand-portfolio</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
+    ]
+    for si in SUPERINVESTORS:
+        urls.append(
+            f"  <url><loc>{base_url}/holdings/{si.cik}</loc>"
+            f"<changefreq>weekly</changefreq><priority>0.7</priority></url>"
+        )
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "\n".join(urls) + "\n"
+        "</urlset>\n"
+    )
+    return PlainTextResponse(xml, media_type="application/xml")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Rate limiting decorators (applied only if slowapi installed)
+# ═══════════════════════════════════════════════════════════════════════
+
+if _has_limiter:
+    fund_row = limiter.limit("10/minute")(fund_row)
+    analyst_ratings = limiter.limit("30/minute")(analyst_ratings)
+    sentiment_data = limiter.limit("30/minute")(sentiment_data)
+    trigger_refresh = limiter.limit("5/minute")(trigger_refresh)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Entry point
+# ═══════════════════════════════════════════════════════════════════════
+
 def main():
     """Entry point for `uv run filings-web`."""
-    import os
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "127.0.0.1")
-    reload = os.environ.get("RAILWAY_ENVIRONMENT") is None  # Only reload locally
+    reload = os.environ.get("RAILWAY_ENVIRONMENT") is None
     uvicorn.run(
         "filings.web:app",
         host=host,
