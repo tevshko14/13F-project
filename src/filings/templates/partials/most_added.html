@@ -1,79 +1,169 @@
-{# Most Added by Superinvestors — loaded asynchronously via HTMX #}
+{# Most Added by Superinvestors — ECharts bar chart, loaded asynchronously via HTMX #}
 <article>
-    <header>
-        <strong>Most Added by Superinvestors This Quarter</strong>
-        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            Top {{ entries|length }} stocks by number of superinvestor buyers
-        </span>
+    <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5em;">
+        <div>
+            <strong>Most Added by Superinvestors This Quarter</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Top {{ entries|length }} stocks
+            </span>
+        </div>
+        {% if entries %}
+        <div style="display: flex; gap: 0.3em;">
+            <button id="sort-count-btn" class="outline secondary"
+                    style="padding: 0.15em 0.5em; font-size: 0.75em; margin: 0;"
+                    onclick="sortMostAdded('count')">Sort: Count ↓</button>
+            <button id="sort-az-btn" class="outline secondary"
+                    style="padding: 0.15em 0.5em; font-size: 0.75em; margin: 0;"
+                    onclick="sortMostAdded('az')">A–Z</button>
+        </div>
+        {% endif %}
     </header>
     {% if entries %}
-    <figure>
-    <table>
-        <thead>
-            <tr>
-                <th data-sort="number">#</th>
-                <th data-sort="text">Ticker</th>
-                <th data-sort="text">Stock</th>
-                <th class="text-right" data-sort="number">Added By</th>
-                <th data-sort="text">Consensus</th>
-                <th class="text-right" data-sort="number">52W Range</th>
-                <th>Superinvestors</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for e in entries %}
-            <tr>
-                <td>{{ e.rank }}</td>
-                <td>
-                    {% if e.ticker %}
-                    <a href="/stock/{{ e.ticker }}" class="ticker">{{ e.ticker }}</a>
-                    {% else %}
-                    <a href="/stock/cusip/{{ e.cusip }}" class="ticker" title="{{ e.cusip }}">{{ e.cusip[:6] }}</a>
-                    {% endif %}
-                </td>
-                <td class="text-small">{{ e.issuer_name }}</td>
-                <td class="text-right"><strong>{{ e.add_count }}</strong></td>
-                <td>
-                    {% if e.consensus %}
-                        {% if e.consensus.label == "Buy" or e.consensus.label == "Strong Buy" %}
-                        <span class="badge badge-new">{{ e.consensus.label }}</span>
-                        {% elif e.consensus.label == "Sell" or e.consensus.label == "Strong Sell" %}
-                        <span class="badge badge-sold">{{ e.consensus.label }}</span>
-                        {% else %}
-                        <span class="badge" style="background: #fff3e0; color: #e65100;">{{ e.consensus.label }}</span>
-                        {% endif %}
-                    {% else %}
-                    <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                <td class="text-right">
-                    {% if e.range_pct is not none %}
-                    {{ e.range_pct }}%
-                    {% else %}
-                    <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                <td class="text-small">
-                    <div class="tag-list">
-                        {% for name in e.adders[:5] %}
-                        <span class="tag">{{ name }}</span>
-                        {% endfor %}
-                        {% if e.adders|length > 5 %}
-                        <span class="tag" style="opacity: 0.6;">+{{ e.adders|length - 5 }}</span>
-                        {% endif %}
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    </figure>
+    <div id="most-added-chart" style="width: 100%; height: 300px;"></div>
     {% else %}
     <p class="text-muted">No recent superinvestor additions found.</p>
     {% endif %}
 </article>
 
+{% if entries %}
 <script>
-// Re-init sortable tables for this HTMX-loaded content
-if (window.initSortableTables) window.initSortableTables();
+(function() {
+    var rawData = {{ entries | tojson }};
+    var container = document.getElementById('most-added-chart');
+    if (!container || !rawData || rawData.length === 0) return;
+
+    var chart = echarts.init(container);
+    var currentSort = 'count';
+
+    function getData(sortBy) {
+        var sorted = rawData.slice();
+        if (sortBy === 'az') {
+            sorted.sort(function(a, b) {
+                var ta = (a.ticker || a.cusip || '').toUpperCase();
+                var tb = (b.ticker || b.cusip || '').toUpperCase();
+                return ta < tb ? -1 : ta > tb ? 1 : 0;
+            });
+        } else {
+            sorted.sort(function(a, b) { return b.add_count - a.add_count; });
+        }
+        return sorted;
+    }
+
+    function renderChart(sortBy) {
+        var data = getData(sortBy);
+        var tickers = data.map(function(d) { return d.ticker || (d.cusip || '').substring(0, 6); });
+        var counts = data.map(function(d) { return d.add_count; });
+
+        chart.setOption({
+            grid: { left: 40, right: 16, top: 10, bottom: 60 },
+            xAxis: {
+                type: 'category',
+                data: tickers,
+                axisLabel: {
+                    rotate: 45,
+                    fontSize: 10,
+                    fontWeight: 'bold',
+                    fontFamily: 'monospace'
+                },
+                axisTick: { alignWithLabel: true }
+            },
+            yAxis: {
+                type: 'value',
+                name: '# Added',
+                nameTextStyle: { fontSize: 10 },
+                minInterval: 1
+            },
+            tooltip: {
+                trigger: 'axis',
+                formatter: function(params) {
+                    if (!params || params.length === 0) return '';
+                    var idx = params[0].dataIndex;
+                    var d = data[idx];
+                    if (!d) return '';
+
+                    var ticker = d.ticker || (d.cusip || '').substring(0, 6);
+                    var html = '<strong style="font-size: 1.1em;">' + ticker + '</strong>'
+                        + '<br/><span style="opacity: 0.8;">' + (d.issuer_name || '') + '</span>'
+                        + '<br/><br/>Added by <strong>' + d.add_count + '</strong> superinvestor'
+                        + (d.add_count > 1 ? 's' : '') + ':';
+
+                    // Show adder names (max 5)
+                    var adders = d.adders || [];
+                    var showAdders = adders.slice(0, 5);
+                    for (var i = 0; i < showAdders.length; i++) {
+                        html += '<br/>&nbsp;&nbsp;• ' + showAdders[i];
+                    }
+                    if (adders.length > 5) {
+                        html += '<br/>&nbsp;&nbsp;+ ' + (adders.length - 5) + ' more';
+                    }
+
+                    // Analyst consensus
+                    if (d.consensus && d.consensus.total > 0) {
+                        html += '<br/><br/><strong>Analyst Consensus</strong>';
+                        if (d.consensus.buy > 0) html += '<br/>&nbsp;&nbsp;<span style="color:#2e7d32;">Buy: ' + d.consensus.buy + '</span>';
+                        if (d.consensus.hold > 0) html += '<br/>&nbsp;&nbsp;<span style="color:#e65100;">Hold: ' + d.consensus.hold + '</span>';
+                        if (d.consensus.sell > 0) html += '<br/>&nbsp;&nbsp;<span style="color:#c62828;">Sell: ' + d.consensus.sell + '</span>';
+                    }
+
+                    // Price + 52W range
+                    if (d.current_price != null) {
+                        html += '<br/><br/><strong>Price:</strong> $' + d.current_price.toFixed(2);
+                    }
+                    if (d.range_low != null && d.range_high != null && d.range_pct != null) {
+                        html += '<br/><strong>52W Range:</strong> $' + d.range_low.toFixed(0)
+                            + ' → $' + d.range_high.toFixed(0)
+                            + ' (' + d.range_pct.toFixed(0) + '%)';
+                    }
+
+                    return html;
+                }
+            },
+            series: [{
+                type: 'bar',
+                data: counts,
+                itemStyle: {
+                    color: '#1976d2',
+                    borderRadius: [3, 3, 0, 0]
+                },
+                emphasis: {
+                    itemStyle: { color: '#1565c0' }
+                },
+                barMaxWidth: 40
+            }]
+        }, true);
+
+        // Store data reference for click handler
+        chart._mostAddedData = data;
+    }
+
+    // Click bar → navigate to stock page
+    chart.on('click', function(params) {
+        var data = chart._mostAddedData;
+        if (!data) return;
+        var d = data[params.dataIndex];
+        if (d && d.ticker) {
+            window.location.href = '/stock/' + d.ticker;
+        } else if (d && d.cusip) {
+            window.location.href = '/stock/cusip/' + d.cusip;
+        }
+    });
+
+    // Sort toggle
+    window.sortMostAdded = function(sortBy) {
+        currentSort = sortBy;
+        renderChart(sortBy);
+        // Update button styles
+        var countBtn = document.getElementById('sort-count-btn');
+        var azBtn = document.getElementById('sort-az-btn');
+        if (countBtn) countBtn.className = sortBy === 'count' ? 'secondary' : 'outline secondary';
+        if (azBtn) azBtn.className = sortBy === 'az' ? 'secondary' : 'outline secondary';
+    };
+
+    // Initial render
+    renderChart('count');
+
+    // Responsive resize
+    window.addEventListener('resize', function() { chart.resize(); });
+})();
 </script>
+{% endif %}

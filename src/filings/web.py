@@ -408,17 +408,21 @@ async def heatmap(request: Request):
 
     constituents = await asyncio.to_thread(market_data.get_sp500_constituents)
 
-    # Build set of tickers held by superinvestors
+    # Count how many superinvestors hold each ticker
     cache_data = getattr(app.state, "fund_cache", {})
-    super_tickers: set[str] = set()
+    super_ticker_counts: dict[str, int] = {}
     for cik, fund_data in cache_data.items():
         if cik in SUPERINVESTORS_BY_CIK:
+            seen_tickers: set[str] = set()  # avoid double-counting within one fund
             for h in fund_data.get("all_holdings", []):
                 t = h.get("ticker")
                 if t:
-                    super_tickers.add(t.upper())
+                    t_upper = t.upper()
+                    if t_upper not in seen_tickers:
+                        seen_tickers.add(t_upper)
+                        super_ticker_counts[t_upper] = super_ticker_counts.get(t_upper, 0) + 1
 
-    heatmap_data = market_data.build_heatmap_data(mkt, constituents, super_tickers)
+    heatmap_data = market_data.build_heatmap_data(mkt, constituents, super_ticker_counts)
     metadata = mkt.get("_metadata", {})
 
     return templates.TemplateResponse("partials/heatmap.html", {
@@ -464,9 +468,15 @@ async def most_added(request: Request):
 
             r = range_data.get(ticker)
             entry["range_pct"] = r["pct_of_range"] if r else None
+            entry["current_price"] = r["current"] if r else None
+            entry["range_low"] = r["low"] if r else None
+            entry["range_high"] = r["high"] if r else None
         else:
             entry["consensus"] = None
             entry["range_pct"] = None
+            entry["current_price"] = None
+            entry["range_low"] = None
+            entry["range_high"] = None
 
     return templates.TemplateResponse("partials/most_added.html", {
         "request": request,

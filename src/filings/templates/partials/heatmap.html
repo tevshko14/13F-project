@@ -1,16 +1,10 @@
 {# S&P 500 heatmap partial — loaded asynchronously via HTMX #}
 <article id="heatmap-article">
-    <header style="display: flex; justify-content: space-between; align-items: center;">
-        <div>
-            <strong>S&P 500 Market Heatmap</strong>
-            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-                {{ metadata.count }} stocks &middot; Updated {{ metadata.fetched_at }}
-            </span>
-        </div>
-        <small class="text-muted">
-            <span style="border: 2px solid #FFD700; padding: 0 0.3em; font-size: 0.85em;">Gold border</span>
-            = held by superinvestors
-        </small>
+    <header>
+        <strong>S&P 500 Market Heatmap</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            {{ metadata.count }} stocks &middot; Updated {{ metadata.fetched_at }}
+        </span>
     </header>
     <div id="heatmap-container" style="width: 100%; height: 500px;"></div>
 </article>
@@ -32,9 +26,12 @@
                 }
                 var sign = d.pct_change >= 0 ? '+' : '';
                 var color = d.pct_change >= 0 ? '#2e7d32' : '#c62828';
-                var superTag = d.held_by_superinvestors
-                    ? '<br/><span style="color: #FFD700;">&#9733; Held by superinvestors</span>'
-                    : '';
+                var superTag = '';
+                if (d.superinvestor_count > 0) {
+                    superTag = '<br/><span style="color: #FFD700;">&#9733; Held by '
+                        + d.superinvestor_count + ' superinvestor'
+                        + (d.superinvestor_count > 1 ? 's' : '') + '</span>';
+                }
                 return '<strong>' + d.name + '</strong>'
                     + '<br/>' + (d.full_name || '')
                     + '<br/><span style="color:' + color + '; font-size: 1.1em; font-weight: bold;">'
@@ -74,7 +71,11 @@
                             var d = params.data;
                             if (!d || d.pct_change === undefined) return params.name;
                             var sign = d.pct_change >= 0 ? '+' : '';
-                            return d.name + '\n' + sign + d.pct_change.toFixed(1) + '%';
+                            var text = d.name + '\n' + sign + d.pct_change.toFixed(1) + '%';
+                            if (d.superinvestor_count > 0) {
+                                text += '\n(' + d.superinvestor_count + ' supers)';
+                            }
+                            return text;
                         },
                         fontSize: 10,
                         color: '#fff',
