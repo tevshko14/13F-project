@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Insider Trading Screener - 13F Filing Viewer{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>Insider Trading</h1>
+    <p>Real-time SEC Form 4 filings — insider buys and sells across all public companies.</p>
+</hgroup>
+
+<div class="actions" style="margin-bottom: 1.5em;">
+    <a href="/grand-portfolio" role="button" class="secondary outline">Grand Portfolio</a>
+    <a href="/activity" role="button" class="secondary outline">Activity Feed</a>
+    <a href="/" role="button" class="secondary outline">Superinvestors</a>
+</div>
+
+{# ── Sub-tabs: Latest / Top Buys / Top Sells ── #}
+<div style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+            <li>
+                <button id="insider-tab-all-btn"
+                        class="insider-tab active"
+                        onclick="switchInsiderTab('all')">
+                    Latest
+                </button>
+            </li>
+            <li>
+                <button id="insider-tab-buys-btn"
+                        class="insider-tab"
+                        onclick="switchInsiderTab('buys')">
+                    Purchases
+                </button>
+            </li>
+            <li>
+                <button id="insider-tab-sells-btn"
+                        class="insider-tab"
+                        onclick="switchInsiderTab('sells')">
+                    Sales
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
+
+<style>
+    .insider-tab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: rgba(0,0,0,0.5);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .insider-tab:hover { color: rgba(0,0,0,0.8); }
+    .insider-tab.active {
+        color: #1976d2;
+        border-bottom-color: #1976d2;
+    }
+</style>
+
+{# ── Trade table (lazy-loaded) ── #}
+<div id="insider-trades-content">
+    <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+        Loading insider trades...
+    </p>
+</div>
+
+<script>
+(function() {
+    var currentFilter = 'all';
+    var cache = {};
+
+    function loadTrades(filter) {
+        currentFilter = filter;
+
+        // Update tab buttons
+        document.querySelectorAll('.insider-tab').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        document.getElementById('insider-tab-' + filter + '-btn').classList.add('active');
+
+        // Check cache
+        if (cache[filter]) {
+            document.getElementById('insider-trades-content').innerHTML = cache[filter];
+            if (window.initSortableTables) window.initSortableTables();
+            return;
+        }
+
+        // Show loading
+        document.getElementById('insider-trades-content').innerHTML =
+            '<p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading insider trades...</p>';
+
+        var url = '/api/insider-trades?filter=' + filter;
+        fetch(url)
+            .then(function(resp) { return resp.text(); })
+            .then(function(html) {
+                cache[filter] = html;
+                document.getElementById('insider-trades-content').innerHTML = html;
+                if (window.initSortableTables) window.initSortableTables();
+            })
+            .catch(function() {
+                document.getElementById('insider-trades-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Failed to load insider trades. Please try again later.</p>';
+            });
+    }
+
+    window.switchInsiderTab = loadTrades;
+
+    // Auto-load default tab
+    loadTrades('all');
+})();
+</script>
+{% endblock %}
