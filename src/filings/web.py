@@ -22,7 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from filings import client, cache, analysts, market_data, sentiment, company_filings, insider_trading
-from filings.models import SuperinvestorSummary
+from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
 
@@ -436,27 +436,32 @@ async def grand_portfolio(request: Request):
 @app.get("/stock/cusip/{cusip}", response_class=HTMLResponse)
 async def stock_detail_by_cusip(request: Request, cusip: str):
     cache_data = getattr(app.state, "fund_cache", {})
-    if not cache_data:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "No cached data available. Visit the Superinvestors page to load data.",
-        }, status_code=404)
 
-    detail = client.build_stock_detail(
-        cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True
-    )
-    if not detail:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": f'No superinvestor holds a stock with CUSIP "{cusip}".',
-        }, status_code=404)
+    # Try to build superinvestor ownership data (may be None)
+    detail = None
+    history = []
+    if cache_data:
+        detail = client.build_stock_detail(
+            cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True
+        )
+        if detail:
+            history = client.build_stock_history(
+                cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True
+            )
 
-    history = client.build_stock_history(
-        cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True
-    )
+    # Build stock identity from detail or minimal CUSIP info
+    if detail:
+        stock_info = StockInfo(
+            ticker=detail.ticker or "",
+            issuer_name=detail.issuer_name,
+            cusip=detail.cusip or cusip,
+        )
+    else:
+        stock_info = StockInfo(ticker="", issuer_name=None, cusip=cusip)
 
     return templates.TemplateResponse("stock.html", {
         "request": request,
+        "stock_info": stock_info,
         "stock": detail,
         "history": history,
     })
@@ -465,27 +470,33 @@ async def stock_detail_by_cusip(request: Request, cusip: str):
 @app.get("/stock/{ticker}", response_class=HTMLResponse)
 async def stock_detail(request: Request, ticker: str):
     cache_data = getattr(app.state, "fund_cache", {})
-    if not cache_data:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": "No cached data available. Visit the Superinvestors page to load data.",
-        }, status_code=404)
 
-    detail = client.build_stock_detail(
-        ticker, cache_data, SUPERINVESTORS_BY_CIK
-    )
-    if not detail:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": f'No superinvestor holds a stock with ticker "{ticker.upper()}".',
-        }, status_code=404)
+    # Try to build superinvestor ownership data (may be None)
+    detail = None
+    history = []
+    if cache_data:
+        detail = client.build_stock_detail(
+            ticker, cache_data, SUPERINVESTORS_BY_CIK
+        )
+        if detail:
+            history = client.build_stock_history(
+                ticker, cache_data, SUPERINVESTORS_BY_CIK
+            )
 
-    history = client.build_stock_history(
-        ticker, cache_data, SUPERINVESTORS_BY_CIK
+    # Resolve basic stock identity (works for any ticker)
+    # Always call resolve_stock_info to get logo_domain; uses cache first (instant)
+    stock_info = await asyncio.to_thread(
+        client.resolve_stock_info, ticker, cache_data or {}
     )
+    # Overlay with detail data if available (more accurate name/cusip)
+    if detail:
+        stock_info.issuer_name = detail.issuer_name or stock_info.issuer_name
+        stock_info.cusip = detail.cusip or stock_info.cusip
+        stock_info.ticker = detail.ticker or stock_info.ticker
 
     return templates.TemplateResponse("stock.html", {
         "request": request,
+        "stock_info": stock_info,
         "stock": detail,
         "history": history,
     })

@@ -89,6 +89,15 @@ class GrandPortfolioEntry:
 
 
 @dataclass
+class StockInfo:
+    """Basic stock identity — used for any ticker, even without superinvestor data."""
+    ticker: str
+    issuer_name: str | None
+    cusip: str | None
+    logo_domain: str | None = None  # e.g. "apple.com" for Clearbit logo lookup
+
+
+@dataclass
 class StockHolder:
     """One superinvestor's position in a specific stock."""
     fund_display_name: str
