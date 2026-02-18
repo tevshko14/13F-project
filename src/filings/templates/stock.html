@@ -171,15 +171,29 @@
         height: 100% !important;
     }
 
-    /* ── Financials container: full-width with breathing room ── */
+    /* ── Financials container: tall enough for rows to breathe ── */
     .financials-container {
         width: 100%;
-        min-height: 550px;
+        height: 800px;          /* tall explicit height so TradingView iframe rows aren't compressed */
+        max-height: none;       /* remove any inherited max-height */
+        overflow: visible;      /* never clip content */
     }
-    .financials-container .tradingview-widget-container,
+    .financials-container .tradingview-widget-container {
+        width: 100% !important;
+        height: 100% !important;
+        overflow: visible !important;
+    }
     .financials-container .tradingview-widget-container__widget {
         width: 100% !important;
         height: 100% !important;
+        overflow: visible !important;
+    }
+    /* Ensure the iframe itself gets full space */
+    .financials-container iframe {
+        width: 100% !important;
+        height: 100% !important;
+        min-height: 780px;
+        border: none;
     }
 
     /* ── Full-width tab panels ── */
@@ -206,14 +220,36 @@
         border-bottom-color: #1976d2;
     }
 
-    /* ── Table spacing: proper padding and line-height ── */
+    /* ── Table spacing: proper padding, line-height, min font ── */
+    #tab-overview table,
+    #tab-ownership table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+    }
     #tab-overview table th,
     #tab-overview table td,
     #tab-ownership table th,
     #tab-ownership table td {
-        padding: 12px 14px;
+        padding: 10px 14px;     /* min 10px top/bottom */
         line-height: 1.5;
         vertical-align: middle;
+        font-size: max(14px, 0.875rem);  /* never shrink below 14px */
+        height: auto;
+        white-space: normal;
+        overflow: visible;
+    }
+    #tab-overview table tr,
+    #tab-ownership table tr {
+        height: auto;
+        min-height: 44px;
+    }
+
+    /* ── Force full-width on overview panels (break out of PicoCSS container) ── */
+    #tab-overview .financials-container,
+    #tab-overview .chart-container {
+        max-width: none;
+        box-sizing: border-box;
     }
 
     /* TickerTick news styling */
@@ -250,7 +286,10 @@
             min-height: 350px;
         }
         .financials-container {
-            min-height: 400px;
+            height: 600px;
+        }
+        .financials-container iframe {
+            min-height: 580px;
         }
         #tab-overview,
         #tab-ownership {
@@ -261,6 +300,12 @@
         #tab-overview.active {
             display: flex;
         }
+        #tab-overview table th,
+        #tab-overview table td,
+        #tab-ownership table th,
+        #tab-ownership table td {
+            font-size: 14px;    /* enforce 14px minimum on mobile */
+        }
     }
     @media (min-width: 769px) {
         #tab-overview,
@@ -268,6 +313,9 @@
         .overview-subpanel {
             width: 100%;
             max-width: 100%;
+        }
+        .financials-container {
+            height: 800px;
         }
     }
 </style>
@@ -318,8 +366,8 @@
     {# ── Financials panel (TradingView) ── #}
     <div id="overview-sub-financials" class="overview-subpanel active">
         <div class="financials-container">
-            <div class="tradingview-widget-container" style="width: 100%; height: 100%;">
-                <div class="tradingview-widget-container__widget" style="width: 100%; height: 100%;"></div>
+            <div class="tradingview-widget-container">
+                <div class="tradingview-widget-container__widget"></div>
                 <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-financials.js" async>
                 {
                     "symbol": "{{ stock_info.ticker }}",
@@ -328,7 +376,7 @@
                     "largeChartUrl": "",
                     "displayMode": "regular",
                     "width": "100%",
-                    "height": "100%",
+                    "height": 780,
                     "locale": "en"
                 }
                 </script>
