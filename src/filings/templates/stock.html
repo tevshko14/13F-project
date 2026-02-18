@@ -54,6 +54,13 @@
                     SEC Filings
                 </button>
             </li>
+            <li>
+                <button id="tab-insider-btn"
+                        class="stock-tab"
+                        onclick="switchTab('insider')">
+                    Insider Trading
+                </button>
+            </li>
         </ul>
     </nav>
 </div>
@@ -349,6 +356,15 @@
     </div>
 </div>
 
+{# ── Insider Trading Tab ── #}
+<div id="tab-insider" class="tab-content">
+    <div id="insider-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading insider trading data...
+        </p>
+    </div>
+</div>
+
 {# ── Quarter Tab Switching ── #}
 <script>
 window.switchQuarterTab = function(idx) {
@@ -383,6 +399,7 @@ window.toggleHolders = function(btn) {
     var analystLoaded = false;
     var sentimentLoaded = false;
     var filingsLoaded = false;
+    var insiderLoaded = false;
 
     window.switchTab = function(tab) {
         // Toggle tab buttons
@@ -476,6 +493,34 @@ window.toggleHolders = function(btn) {
                 document.getElementById('filings-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                     'SEC filings require a ticker symbol.</p>';
+            }
+        }
+
+        // Lazy-load insider trading on first click
+        if (tab === 'insider' && !insiderLoaded) {
+            insiderLoaded = true;
+            {% if stock.ticker %}
+            var insiderUrl = '/api/insider-trades/{{ stock.ticker }}';
+            {% else %}
+            var insiderUrl = null;
+            {% endif %}
+
+            if (insiderUrl) {
+                fetch(insiderUrl)
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) {
+                        document.getElementById('insider-content').innerHTML = html;
+                        if (window.initSortableTables) window.initSortableTables();
+                    })
+                    .catch(function() {
+                        document.getElementById('insider-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load insider trading data. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('insider-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Insider trading data requires a ticker symbol.</p>';
             }
         }
     };

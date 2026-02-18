@@ -1,0 +1,117 @@
+{% if trades %}
+<article>
+    <header>
+        <strong>Insider Trading</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            {{ trades | length }} recent Form 4 filing{{ "s" if trades | length != 1 else "" }} for {{ ticker }}
+        </span>
+    </header>
+
+    {# ── Buy/Sell filter ── #}
+    <div style="display: flex; gap: 0.5em; flex-wrap: wrap; margin-bottom: 1em;">
+        <button class="insider-filter active" onclick="filterInsiderTrades('all', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
+            All
+        </button>
+        <button class="insider-filter" onclick="filterInsiderTrades('buy', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
+            Buys
+        </button>
+        <button class="insider-filter" onclick="filterInsiderTrades('sell', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
+            Sells
+        </button>
+    </div>
+
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th data-sort="text">Insider</th>
+                <th>Title</th>
+                <th data-sort="date">Trade Date</th>
+                <th>Type</th>
+                <th class="text-right">Price</th>
+                <th class="text-right" data-sort="number">Qty</th>
+                <th class="text-right" data-sort="number">Value</th>
+                <th class="text-right">Owned After</th>
+                <th style="text-align: center;">Filing</th>
+            </tr>
+        </thead>
+        <tbody id="stock-insider-tbody">
+            {% for t in trades %}
+            <tr data-insider-type="{% if 'Purchase' in t.trade_type %}buy{% elif 'Sale' in t.trade_type %}sell{% else %}other{% endif %}">
+                <td><strong>{{ t.insider_name }}</strong></td>
+                <td class="text-small text-muted">{{ t.title }}</td>
+                <td style="white-space: nowrap;">{{ t.trade_date }}</td>
+                <td>
+                    {% if "Purchase" in t.trade_type %}
+                        <span class="badge badge-add">{{ t.trade_type }}</span>
+                    {% elif "Sale" in t.trade_type %}
+                        <span class="badge badge-reduce">{{ t.trade_type }}</span>
+                    {% else %}
+                        <span class="badge" style="background: #f5f5f5; color: #616161;">{{ t.trade_type }}</span>
+                    {% endif %}
+                </td>
+                <td class="text-right">{{ t.price }}</td>
+                <td class="text-right">{{ t.qty }}</td>
+                <td class="text-right">{{ t.value }}</td>
+                <td class="text-right text-small">{{ t.owned }}{% if t.delta_own %} <span class="text-muted">({{ t.delta_own }})</span>{% endif %}</td>
+                <td style="text-align: center;">
+                    {% if t.sec_url %}
+                    <a href="{{ t.sec_url }}" target="_blank" rel="noopener" title="View SEC Form 4">&#128279;</a>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+
+    <footer class="text-muted text-small" style="text-align: center;">
+        Data sourced from <a href="http://openinsider.com/{{ ticker }}" target="_blank" rel="noopener">OpenInsider</a>
+        (SEC Form 4 filings).
+    </footer>
+</article>
+
+<style>
+    .insider-filter {
+        background: none;
+        border: 1px solid rgba(0,0,0,0.15);
+        border-radius: 4px;
+        cursor: pointer;
+        color: rgba(0,0,0,0.55);
+        font-weight: 600;
+        transition: all 0.15s;
+    }
+    .insider-filter:hover { background: rgba(0,0,0,0.04); color: rgba(0,0,0,0.8); }
+    .insider-filter.active {
+        background: #1976d2;
+        color: #fff;
+        border-color: #1976d2;
+    }
+</style>
+
+<script>
+window.filterInsiderTrades = function(type, btn) {
+    document.querySelectorAll('.insider-filter').forEach(function(b) {
+        b.classList.remove('active');
+    });
+    btn.classList.add('active');
+
+    document.querySelectorAll('#stock-insider-tbody tr').forEach(function(row) {
+        if (type === 'all') {
+            row.style.display = '';
+        } else {
+            row.style.display = row.dataset.insiderType === type ? '' : 'none';
+        }
+    });
+};
+</script>
+
+{% else %}
+<article>
+    <p class="text-muted" style="text-align: center; padding: 2em 0;">
+        No insider trading data found for {{ ticker }}.
+    </p>
+</article>
+{% endif %}
