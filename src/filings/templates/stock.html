@@ -47,6 +47,13 @@
                     Sentiment
                 </button>
             </li>
+            <li>
+                <button id="tab-filings-btn"
+                        class="stock-tab"
+                        onclick="switchTab('filings')">
+                    SEC Filings
+                </button>
+            </li>
         </ul>
     </nav>
 </div>
@@ -229,12 +236,12 @@
         </span>
     </header>
 
-    {# ── Quarter Tabs (left=oldest, right=newest, default=newest) ── #}
+    {# ── Quarter Tabs (left=newest, right=oldest, default=newest) ── #}
     <nav>
         <ul class="quarter-tabs" style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid rgba(0,0,0,0.1); overflow-x: auto;">
-            {% for quarter in history | reverse %}
+            {% for quarter in history %}
             <li>
-                <button class="quarter-tab{% if loop.last %} active{% endif %}"
+                <button class="quarter-tab{% if loop.first %} active{% endif %}"
                         onclick="switchQuarterTab({{ loop.index0 }})"
                         data-quarter-idx="{{ loop.index0 }}">
                     {{ quarter.period }}
@@ -248,8 +255,8 @@
     </nav>
 
     {# ── Quarter Tab Panels ── #}
-    {% for quarter in history | reverse %}
-    <div class="quarter-panel{% if loop.last %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
+    {% for quarter in history %}
+    <div class="quarter-panel{% if loop.first %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
         <figure>
         <table>
             <thead>
@@ -333,6 +340,15 @@
     </div>
 </div>
 
+{# ── SEC Filings Tab ── #}
+<div id="tab-filings" class="tab-content">
+    <div id="filings-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading SEC filings...
+        </p>
+    </div>
+</div>
+
 {# ── Quarter Tab Switching ── #}
 <script>
 window.switchQuarterTab = function(idx) {
@@ -366,6 +382,7 @@ window.toggleHolders = function(btn) {
 (function() {
     var analystLoaded = false;
     var sentimentLoaded = false;
+    var filingsLoaded = false;
 
     window.switchTab = function(tab) {
         // Toggle tab buttons
@@ -432,6 +449,33 @@ window.toggleHolders = function(btn) {
                 document.getElementById('sentiment-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                     'Sentiment data requires a ticker symbol.</p>';
+            }
+        }
+
+        // Lazy-load SEC filings on first click
+        if (tab === 'filings' && !filingsLoaded) {
+            filingsLoaded = true;
+            {% if stock.ticker %}
+            var filingsUrl = '/api/company-filings/{{ stock.ticker }}';
+            {% else %}
+            var filingsUrl = null;
+            {% endif %}
+
+            if (filingsUrl) {
+                fetch(filingsUrl)
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) {
+                        document.getElementById('filings-content').innerHTML = html;
+                    })
+                    .catch(function() {
+                        document.getElementById('filings-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load SEC filings. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('filings-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'SEC filings require a ticker symbol.</p>';
             }
         }
     };
