@@ -9,6 +9,7 @@ from filings.models import (
     SearchResult, Holding, FundInfo, HoldingChange,
     EnrichedHolding, ActivityItem, GrandPortfolioEntry,
     StockHolder, StockDetail, StockQuarterEntry, StockQuarter,
+    StockInfo,
 )
 
 # Set SEC identity (required for API access)
@@ -715,3 +716,75 @@ def build_stock_history(
     result.sort(key=quarter_sort_key)
 
     return result
+
+
+def _resolve_logo_domain(ticker: str) -> str | None:
+    """Resolve a ticker to its company website domain for logo lookup."""
+    try:
+        import yfinance as yf
+        from urllib.parse import urlparse
+
+        tk = yf.Ticker(ticker)
+        info = tk.info or {}
+        website = info.get("website") or ""
+        if website:
+            parsed = urlparse(website)
+            domain = parsed.netloc or parsed.path
+            if domain.startswith("www."):
+                domain = domain[4:]
+            return domain or None
+    except Exception:
+        pass
+    return None
+
+
+def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
+    """Resolve a ticker to basic stock info.
+
+    First checks 13F cache for issuer name (zero API calls for name).
+    Falls back to yfinance for non-superinvestor-held tickers.
+    Always tries to resolve logo_domain via yfinance.
+    Always returns a StockInfo — never raises.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    ticker_upper = ticker.upper().strip()
+
+    # Try to resolve logo domain (yfinance caches internally)
+    logo_domain = _resolve_logo_domain(ticker_upper)
+
+    # 1. Try to find in 13F cache (any fund's holdings)
+    for fund_data in cache_data.values():
+        for h in fund_data.get("all_holdings", []):
+            h_ticker = h.get("ticker")
+            if h_ticker and h_ticker.upper() == ticker_upper:
+                return StockInfo(
+                    ticker=ticker_upper,
+                    issuer_name=h.get("issuer"),
+                    cusip=h.get("cusip"),
+                    logo_domain=logo_domain,
+                )
+
+    # 2. Fall back to yfinance for company name
+    try:
+        import yfinance as yf
+
+        tk = yf.Ticker(ticker_upper)
+        info = tk.info or {}
+        name = info.get("longName") or info.get("shortName")
+
+        return StockInfo(
+            ticker=ticker_upper,
+            issuer_name=name,
+            cusip=None,
+            logo_domain=logo_domain,
+        )
+    except Exception as e:
+        logger.warning("yfinance lookup failed for %s: %s", ticker_upper, e)
+        return StockInfo(
+            ticker=ticker_upper,
+            issuer_name=None,
+            cusip=None,
+            logo_domain=logo_domain,
+        )

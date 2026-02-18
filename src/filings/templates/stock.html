@@ -1,18 +1,28 @@
 {% extends "base.html" %}
-{% block title %}{{ stock.ticker or stock.cusip }} - Stock Detail - PaperPanda{% endblock %}
+{% block title %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} - Stock Detail - PaperPanda{% endblock %}
 {% block content %}
 <hgroup>
-    <h1>
-        {% if stock.ticker %}
-        <span class="ticker">{{ stock.ticker }}</span> &mdash;
+    <h1 style="display: flex; align-items: center; gap: 0.5em;">
+        {% if stock_info.logo_domain %}
+        <img src="https://logo.clearbit.com/{{ stock_info.logo_domain }}"
+             alt=""
+             style="height: 40px; width: 40px; border-radius: 6px; object-fit: contain;"
+             onerror="this.style.display='none'">
         {% endif %}
-        {{ stock.issuer_name }}
+        {% if stock_info.ticker %}
+        <span class="ticker">{{ stock_info.ticker }}</span> &mdash;
+        {% endif %}
+        {{ stock_info.issuer_name or "Unknown Company" }}
     </h1>
     <p>
-        {% if stock.cusip %}CUSIP: {{ stock.cusip }} &middot; {% endif %}
-        Held by <strong>{{ stock.num_holders }}</strong> superinvestor{{ "s" if stock.num_holders != 1 else "" }}
-        &middot;
-        Combined value: <strong>${{ "{:,.0f}".format(stock.combined_value) }}</strong>
+        {% if stock_info.cusip %}CUSIP: {{ stock_info.cusip }} &middot; {% endif %}
+        {% if stock and stock.num_holders > 0 %}
+            Held by <strong>{{ stock.num_holders }}</strong> superinvestor{{ "s" if stock.num_holders != 1 else "" }}
+            &middot;
+            Combined value: <strong>${{ "{:,.0f}".format(stock.combined_value) }}</strong>
+        {% else %}
+            <span class="text-muted">Not held by any tracked superinvestor</span>
+        {% endif %}
     </p>
 </hgroup>
 
@@ -31,6 +41,13 @@
                         class="stock-tab active"
                         onclick="switchTab('overview')">
                     Overview
+                </button>
+            </li>
+            <li>
+                <button id="tab-ownership-btn"
+                        class="stock-tab"
+                        onclick="switchTab('ownership')">
+                    Ownership
                 </button>
             </li>
             <li>
@@ -140,10 +157,104 @@
     .holders-expand-arrow.expanded {
         transform: rotate(180deg);
     }
+
+    /* Overview two-column grid */
+    .stock-overview-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2em;
+        margin-top: 1.5em;
+    }
+    @media (max-width: 768px) {
+        .stock-overview-grid {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 
-{# ── Overview Tab ── #}
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── NEW Overview Tab: Price Chart, Financials, News ──            #}
+{# ══════════════════════════════════════════════════════════════════ #}
 <div id="tab-overview" class="tab-content active">
+
+{% if stock_info.ticker %}
+    {# ── TradingView Advanced Price Chart ── #}
+    <div class="tradingview-widget-container" style="height: 500px; margin-bottom: 1em;">
+        <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
+        {
+            "symbol": "{{ stock_info.ticker }}",
+            "width": "100%",
+            "height": "100%",
+            "theme": "light",
+            "style": "1",
+            "locale": "en",
+            "allow_symbol_change": false,
+            "calendar": false,
+            "hide_volume": false,
+            "support_host": "https://www.tradingview.com"
+        }
+        </script>
+    </div>
+
+    {# ── Two-column: Financials + News ── #}
+    <div class="stock-overview-grid">
+        {# ── Financials (TradingView Fundamental Data) ── #}
+        <div>
+            <h3 style="margin-bottom: 0.5em;">Financials</h3>
+            <div class="tradingview-widget-container" style="height: 450px;">
+                <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-financials.js" async>
+                {
+                    "symbol": "{{ stock_info.ticker }}",
+                    "colorTheme": "light",
+                    "isTransparent": true,
+                    "largeChartUrl": "",
+                    "displayMode": "regular",
+                    "width": "100%",
+                    "height": "100%",
+                    "locale": "en"
+                }
+                </script>
+            </div>
+        </div>
+
+        {# ── News (TradingView Timeline for this ticker) ── #}
+        <div>
+            <h3 style="margin-bottom: 0.5em;">News</h3>
+            <div class="tradingview-widget-container" style="height: 450px;">
+                <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-timeline.js" async>
+                {
+                    "feedMode": "symbol",
+                    "symbol": "{{ stock_info.ticker }}",
+                    "isTransparent": true,
+                    "displayMode": "regular",
+                    "width": "100%",
+                    "height": "100%",
+                    "colorTheme": "light",
+                    "locale": "en"
+                }
+                </script>
+            </div>
+        </div>
+    </div>
+{% else %}
+    <article style="text-align: center; padding: 3em 1em;">
+        <p class="text-muted" style="font-size: 1.1em;">
+            Overview requires a ticker symbol. This stock only has a CUSIP identifier.
+        </p>
+    </article>
+{% endif %}
+
+</div>{# end tab-overview #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Ownership Tab (renamed from Overview) ──                      #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="tab-ownership" class="tab-content">
+
+{% if stock and stock.holders %}
 
 {% if history %}
 <article id="chart-section">
@@ -327,7 +438,20 @@
 </article>
 {% endif %}
 
-</div>{# end tab-overview #}
+{% else %}
+    {# ── Empty state: no superinvestor holds this stock ── #}
+    <article style="text-align: center; padding: 3em 1em;">
+        <p class="text-muted" style="font-size: 1.1em;">
+            Not held by any tracked superinvestor.
+        </p>
+        <p class="text-muted">
+            This stock does not appear in any of the 13F filings we track.
+            <a href="/superinvestors">View all tracked superinvestors</a>.
+        </p>
+    </article>
+{% endif %}
+
+</div>{# end tab-ownership #}
 
 {# ── Analyst Ratings Tab ── #}
 <div id="tab-analysts" class="tab-content">
@@ -414,11 +538,16 @@ window.toggleHolders = function(btn) {
         });
         document.getElementById('tab-' + tab).classList.add('active');
 
+        // Re-init sortable tables when switching to ownership tab
+        if (tab === 'ownership') {
+            if (window.initSortableTables) window.initSortableTables();
+        }
+
         // Lazy-load analyst ratings on first click
         if (tab === 'analysts' && !analystLoaded) {
             analystLoaded = true;
-            {% if stock.ticker %}
-            var url = '/api/analysts/{{ stock.ticker }}';
+            {% if stock_info.ticker %}
+            var url = '/api/analysts/{{ stock_info.ticker }}';
             {% else %}
             var url = null;
             {% endif %}
@@ -444,8 +573,8 @@ window.toggleHolders = function(btn) {
         // Lazy-load sentiment data on first click
         if (tab === 'sentiment' && !sentimentLoaded) {
             sentimentLoaded = true;
-            {% if stock.ticker %}
-            var sentimentUrl = '/api/sentiment/{{ stock.ticker }}';
+            {% if stock_info.ticker %}
+            var sentimentUrl = '/api/sentiment/{{ stock_info.ticker }}';
             {% else %}
             var sentimentUrl = null;
             {% endif %}
@@ -472,8 +601,8 @@ window.toggleHolders = function(btn) {
         // Lazy-load SEC filings on first click
         if (tab === 'filings' && !filingsLoaded) {
             filingsLoaded = true;
-            {% if stock.ticker %}
-            var filingsUrl = '/api/company-filings/{{ stock.ticker }}';
+            {% if stock_info.ticker %}
+            var filingsUrl = '/api/company-filings/{{ stock_info.ticker }}';
             {% else %}
             var filingsUrl = null;
             {% endif %}
@@ -499,8 +628,8 @@ window.toggleHolders = function(btn) {
         // Lazy-load insider trading on first click
         if (tab === 'insider' && !insiderLoaded) {
             insiderLoaded = true;
-            {% if stock.ticker %}
-            var insiderUrl = '/api/insider-trades/{{ stock.ticker }}';
+            {% if stock_info.ticker %}
+            var insiderUrl = '/api/insider-trades/{{ stock_info.ticker }}';
             {% else %}
             var insiderUrl = null;
             {% endif %}
@@ -527,7 +656,7 @@ window.toggleHolders = function(btn) {
 })();
 </script>
 
-{% if history %}
+{% if stock and history %}
 <script>
 (function() {
     // ── Data: Jinja2 → JavaScript (reversed to chronological order) ──
