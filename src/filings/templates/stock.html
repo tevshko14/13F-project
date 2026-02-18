@@ -74,6 +74,58 @@
     }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
+
+    /* Quarter history tabs */
+    .quarter-tab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.4em 1em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.85em;
+        font-weight: 600;
+        color: rgba(0,0,0,0.45);
+        transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+        text-align: center;
+    }
+    .quarter-tab:hover { color: rgba(0,0,0,0.75); }
+    .quarter-tab.active {
+        color: #1976d2;
+        border-bottom-color: #1976d2;
+    }
+    .quarter-panel { display: none; }
+    .quarter-panel.active { display: block; }
+
+    /* Holders expand/collapse */
+    .holders-expand-btn {
+        background: none;
+        border: 1px solid rgba(0,0,0,0.15);
+        border-radius: 6px;
+        padding: 0.4em 1.2em;
+        cursor: pointer;
+        font-size: 0.85em;
+        color: rgba(0,0,0,0.6);
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+        margin: 0.5em auto 0;
+        transition: background 0.15s, color 0.15s;
+    }
+    .holders-expand-btn:hover {
+        background: rgba(0,0,0,0.04);
+        color: rgba(0,0,0,0.8);
+    }
+    .holders-expand-arrow {
+        display: inline-block;
+        transition: transform 0.2s;
+        font-size: 0.75em;
+    }
+    .holders-expand-arrow.expanded {
+        transform: rotate(180deg);
+    }
 </style>
 
 {# ── Overview Tab ── #}
@@ -123,7 +175,7 @@
         </thead>
         <tbody>
             {% for h in stock.holders %}
-            <tr>
+            <tr{% if loop.index > 10 %} class="holder-overflow" style="display: none;"{% endif %}>
                 <td>{{ loop.index }}</td>
                 <td>
                     <a href="/holdings/{{ h.fund_cik }}">
@@ -160,6 +212,12 @@
         </tbody>
     </table>
     </figure>
+    {% if stock.holders | length > 10 %}
+    <button class="holders-expand-btn" onclick="toggleHolders(this)">
+        <span>Show all {{ stock.holders | length }} holders</span>
+        <span class="holders-expand-arrow">&#9660;</span>
+    </button>
+    {% endif %}
 </article>
 
 {% if history %}
@@ -171,14 +229,27 @@
         </span>
     </header>
 
-    {% for quarter in history %}
-    <details{% if loop.first %} open{% endif %} style="margin-bottom: 1em;">
-        <summary style="cursor: pointer; font-weight: bold; font-size: 1.05em;">
-            {{ quarter.period }}
-            <span class="text-muted text-small" style="font-weight: normal;">
-                &mdash; {{ quarter.entries | length }} investor{{ "s" if quarter.entries | length != 1 else "" }}
-            </span>
-        </summary>
+    {# ── Quarter Tabs (left=oldest, right=newest, default=newest) ── #}
+    <nav>
+        <ul class="quarter-tabs" style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid rgba(0,0,0,0.1); overflow-x: auto;">
+            {% for quarter in history | reverse %}
+            <li>
+                <button class="quarter-tab{% if loop.last %} active{% endif %}"
+                        onclick="switchQuarterTab({{ loop.index0 }})"
+                        data-quarter-idx="{{ loop.index0 }}">
+                    {{ quarter.period }}
+                    <span class="text-muted text-small" style="font-weight: normal; display: block; font-size: 0.75em;">
+                        {{ quarter.entries | length }} investor{{ "s" if quarter.entries | length != 1 else "" }}
+                    </span>
+                </button>
+            </li>
+            {% endfor %}
+        </ul>
+    </nav>
+
+    {# ── Quarter Tab Panels ── #}
+    {% for quarter in history | reverse %}
+    <div class="quarter-panel{% if loop.last %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
         <figure>
         <table>
             <thead>
@@ -237,7 +308,7 @@
             </tbody>
         </table>
         </figure>
-    </details>
+    </div>
     {% endfor %}
 </article>
 {% endif %}
@@ -261,6 +332,34 @@
         </p>
     </div>
 </div>
+
+{# ── Quarter Tab Switching ── #}
+<script>
+window.switchQuarterTab = function(idx) {
+    document.querySelectorAll('.quarter-tab').forEach(function(btn) {
+        btn.classList.toggle('active', parseInt(btn.dataset.quarterIdx) === idx);
+    });
+    document.querySelectorAll('.quarter-panel').forEach(function(panel) {
+        panel.classList.toggle('active', parseInt(panel.dataset.quarterIdx) === idx);
+    });
+    if (window.initSortableTables) window.initSortableTables();
+};
+
+window.toggleHolders = function(btn) {
+    var rows = document.querySelectorAll('.holder-overflow');
+    var arrow = btn.querySelector('.holders-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+    var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+    rows.forEach(function(row) {
+        row.style.display = expanded ? 'none' : '';
+    });
+    arrow.classList.toggle('expanded', !expanded);
+    label.textContent = expanded
+        ? 'Show all ' + (document.querySelectorAll('.holder-overflow').length + 10) + ' holders'
+        : 'Show top 10';
+};
+</script>
 
 {# ── Tab Switching Logic ── #}
 <script>
