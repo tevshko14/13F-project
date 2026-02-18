@@ -158,12 +158,40 @@
         transform: rotate(180deg);
     }
 
+    /* ── Chart container: responsive 21:9 aspect ratio ── */
+    .chart-container {
+        width: 100%;
+        min-height: 500px;
+        aspect-ratio: 21 / 9;
+        margin-bottom: 2em;
+    }
+    .chart-container .tradingview-widget-container,
+    .chart-container .tradingview-widget-container__widget {
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    /* ── Financials container: full-width with breathing room ── */
+    .financials-container {
+        width: 100%;
+        min-height: 550px;
+    }
+    .financials-container .tradingview-widget-container,
+    .financials-container .tradingview-widget-container__widget {
+        width: 100% !important;
+        height: 100% !important;
+    }
+
+    /* ── Full-width tab panels ── */
+    .overview-subpanel { display: none; width: 100%; }
+    .overview-subpanel.active { display: block; }
+
     /* Overview subtabs (Financials / News) */
     .overview-subtab {
         background: none;
         border: none;
         border-bottom: 2px solid transparent;
-        padding: 0.4em 1em;
+        padding: 0.5em 1.2em;
         margin: 0;
         margin-bottom: -2px;
         cursor: pointer;
@@ -177,12 +205,20 @@
         color: #1976d2;
         border-bottom-color: #1976d2;
     }
-    .overview-subpanel { display: none; }
-    .overview-subpanel.active { display: block; }
+
+    /* ── Table spacing: proper padding and line-height ── */
+    #tab-overview table th,
+    #tab-overview table td,
+    #tab-ownership table th,
+    #tab-ownership table td {
+        padding: 12px 14px;
+        line-height: 1.5;
+        vertical-align: middle;
+    }
 
     /* TickerTick news styling */
     .news-item {
-        padding: 0.85em 0;
+        padding: 1em 0;
         border-bottom: 1px solid rgba(0,0,0,0.06);
     }
     .news-item:last-child { border-bottom: none; }
@@ -190,20 +226,49 @@
         font-weight: 600;
         color: var(--pico-color, #333);
         text-decoration: none;
-        line-height: 1.4;
+        line-height: 1.5;
+        font-size: 1.02em;
     }
     .news-item a:hover { text-decoration: underline; }
     .news-meta {
-        font-size: 0.82em;
+        font-size: 0.85em;
         color: rgba(0,0,0,0.5);
-        margin-top: 0.3em;
+        margin-top: 0.4em;
         display: flex;
         align-items: center;
-        gap: 0.4em;
+        gap: 0.5em;
     }
     .news-meta img {
         vertical-align: middle;
         border-radius: 2px;
+    }
+
+    /* ── Responsive: stack on mobile, full-width on desktop ── */
+    @media (max-width: 768px) {
+        .chart-container {
+            aspect-ratio: 16 / 9;
+            min-height: 350px;
+        }
+        .financials-container {
+            min-height: 400px;
+        }
+        #tab-overview,
+        #tab-ownership {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+        }
+        #tab-overview.active {
+            display: flex;
+        }
+    }
+    @media (min-width: 769px) {
+        #tab-overview,
+        #tab-ownership,
+        .overview-subpanel {
+            width: 100%;
+            max-width: 100%;
+        }
     }
 </style>
 
@@ -213,23 +278,25 @@
 <div id="tab-overview" class="tab-content active">
 
 {% if stock_info.ticker %}
-    {# ── TradingView Advanced Price Chart (tall) ── #}
-    <div class="tradingview-widget-container" style="height: 1000px; margin-bottom: 1.5em;">
-        <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
-        <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
-        {
-            "symbol": "{{ stock_info.ticker }}",
-            "width": "100%",
-            "height": "100%",
-            "theme": "light",
-            "style": "1",
-            "locale": "en",
-            "allow_symbol_change": false,
-            "calendar": false,
-            "hide_volume": false,
-            "support_host": "https://www.tradingview.com"
-        }
-        </script>
+    {# ── TradingView Advanced Price Chart (responsive 21:9) ── #}
+    <div class="chart-container">
+        <div class="tradingview-widget-container" style="width: 100%; height: 100%;">
+            <div class="tradingview-widget-container__widget" style="width: 100%; height: 100%;"></div>
+            <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
+            {
+                "symbol": "{{ stock_info.ticker }}",
+                "width": "100%",
+                "height": "100%",
+                "theme": "light",
+                "style": "1",
+                "locale": "en",
+                "allow_symbol_change": false,
+                "calendar": false,
+                "hide_volume": false,
+                "support_host": "https://www.tradingview.com"
+            }
+            </script>
+        </div>
     </div>
 
     {# ── Subtabs: Financials / News (full-width) ── #}
@@ -250,20 +317,22 @@
 
     {# ── Financials panel (TradingView) ── #}
     <div id="overview-sub-financials" class="overview-subpanel active">
-        <div class="tradingview-widget-container" style="height: 500px;">
-            <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
-            <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-financials.js" async>
-            {
-                "symbol": "{{ stock_info.ticker }}",
-                "colorTheme": "light",
-                "isTransparent": true,
-                "largeChartUrl": "",
-                "displayMode": "regular",
-                "width": "100%",
-                "height": "100%",
-                "locale": "en"
-            }
-            </script>
+        <div class="financials-container">
+            <div class="tradingview-widget-container" style="width: 100%; height: 100%;">
+                <div class="tradingview-widget-container__widget" style="width: 100%; height: 100%;"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-financials.js" async>
+                {
+                    "symbol": "{{ stock_info.ticker }}",
+                    "colorTheme": "light",
+                    "isTransparent": true,
+                    "largeChartUrl": "",
+                    "displayMode": "regular",
+                    "width": "100%",
+                    "height": "100%",
+                    "locale": "en"
+                }
+                </script>
+            </div>
         </div>
     </div>
 
