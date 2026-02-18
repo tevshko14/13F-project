@@ -158,17 +158,52 @@
         transform: rotate(180deg);
     }
 
-    /* Overview two-column grid */
-    .stock-overview-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2em;
-        margin-top: 1.5em;
+    /* Overview subtabs (Financials / News) */
+    .overview-subtab {
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: 0.4em 1em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.9em;
+        font-weight: 600;
+        color: rgba(0,0,0,0.45);
+        transition: color 0.15s, border-color 0.15s;
     }
-    @media (max-width: 768px) {
-        .stock-overview-grid {
-            grid-template-columns: 1fr;
-        }
+    .overview-subtab:hover { color: rgba(0,0,0,0.75); }
+    .overview-subtab.active {
+        color: #1976d2;
+        border-bottom-color: #1976d2;
+    }
+    .overview-subpanel { display: none; }
+    .overview-subpanel.active { display: block; }
+
+    /* TickerTick news styling */
+    .news-item {
+        padding: 0.85em 0;
+        border-bottom: 1px solid rgba(0,0,0,0.06);
+    }
+    .news-item:last-child { border-bottom: none; }
+    .news-item a {
+        font-weight: 600;
+        color: var(--pico-color, #333);
+        text-decoration: none;
+        line-height: 1.4;
+    }
+    .news-item a:hover { text-decoration: underline; }
+    .news-meta {
+        font-size: 0.82em;
+        color: rgba(0,0,0,0.5);
+        margin-top: 0.3em;
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+    }
+    .news-meta img {
+        vertical-align: middle;
+        border-radius: 2px;
     }
 </style>
 
@@ -178,8 +213,8 @@
 <div id="tab-overview" class="tab-content active">
 
 {% if stock_info.ticker %}
-    {# ── TradingView Advanced Price Chart ── #}
-    <div class="tradingview-widget-container" style="height: 500px; margin-bottom: 1em;">
+    {# ── TradingView Advanced Price Chart (tall) ── #}
+    <div class="tradingview-widget-container" style="height: 1000px; margin-bottom: 1.5em;">
         <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
         <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
         {
@@ -197,48 +232,130 @@
         </script>
     </div>
 
-    {# ── Two-column: Financials + News ── #}
-    <div class="stock-overview-grid">
-        {# ── Financials (TradingView Fundamental Data) ── #}
-        <div>
-            <h3 style="margin-bottom: 0.5em;">Financials</h3>
-            <div class="tradingview-widget-container" style="height: 450px;">
-                <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
-                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-financials.js" async>
-                {
-                    "symbol": "{{ stock_info.ticker }}",
-                    "colorTheme": "light",
-                    "isTransparent": true,
-                    "largeChartUrl": "",
-                    "displayMode": "regular",
-                    "width": "100%",
-                    "height": "100%",
-                    "locale": "en"
-                }
-                </script>
-            </div>
-        </div>
+    {# ── Subtabs: Financials / News (full-width) ── #}
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+            <li>
+                <button class="overview-subtab active" onclick="switchOverviewSubtab('financials')">
+                    Financials
+                </button>
+            </li>
+            <li>
+                <button class="overview-subtab" onclick="switchOverviewSubtab('news')">
+                    News
+                </button>
+            </li>
+        </ul>
+    </nav>
 
-        {# ── News (TradingView Timeline for this ticker) ── #}
-        <div>
-            <h3 style="margin-bottom: 0.5em;">News</h3>
-            <div class="tradingview-widget-container" style="height: 450px;">
-                <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
-                <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-timeline.js" async>
-                {
-                    "feedMode": "symbol",
-                    "symbol": "{{ stock_info.ticker }}",
-                    "isTransparent": true,
-                    "displayMode": "regular",
-                    "width": "100%",
-                    "height": "100%",
-                    "colorTheme": "light",
-                    "locale": "en"
-                }
-                </script>
-            </div>
+    {# ── Financials panel (TradingView) ── #}
+    <div id="overview-sub-financials" class="overview-subpanel active">
+        <div class="tradingview-widget-container" style="height: 500px;">
+            <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
+            <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-financials.js" async>
+            {
+                "symbol": "{{ stock_info.ticker }}",
+                "colorTheme": "light",
+                "isTransparent": true,
+                "largeChartUrl": "",
+                "displayMode": "regular",
+                "width": "100%",
+                "height": "100%",
+                "locale": "en"
+            }
+            </script>
         </div>
     </div>
+
+    {# ── News panel (TickerTick API) ── #}
+    <div id="overview-sub-news" class="overview-subpanel">
+        <div id="ticker-news-container">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+                Loading news...
+            </p>
+        </div>
+    </div>
+
+    <script>
+    (function() {
+        var newsLoaded = false;
+
+        window.switchOverviewSubtab = function(sub) {
+            document.querySelectorAll('.overview-subtab').forEach(function(btn) {
+                btn.classList.remove('active');
+            });
+            document.querySelectorAll('.overview-subpanel').forEach(function(p) {
+                p.classList.remove('active');
+            });
+            // Activate clicked subtab
+            event.target.classList.add('active');
+            document.getElementById('overview-sub-' + sub).classList.add('active');
+
+            // Lazy-load news on first click
+            if (sub === 'news' && !newsLoaded) {
+                newsLoaded = true;
+                loadTickerNews('{{ stock_info.ticker }}');
+            }
+        };
+
+        function loadTickerNews(ticker) {
+            var container = document.getElementById('ticker-news-container');
+            var url = 'https://api.tickertick.com/feed?q=tt:' + ticker.toLowerCase() + '&n=25';
+
+            fetch(url)
+                .then(function(resp) { return resp.json(); })
+                .then(function(data) {
+                    if (!data.stories || data.stories.length === 0) {
+                        container.innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'No recent news found for ' + ticker + '.</p>';
+                        return;
+                    }
+                    var html = '';
+                    for (var i = 0; i < data.stories.length; i++) {
+                        var story = data.stories[i];
+                        var date = new Date(story.time);
+                        var timeAgo = getTimeAgo(date);
+                        html += '<div class="news-item">' +
+                            '<a href="' + escapeHtml(story.url) + '" target="_blank" rel="noopener">' +
+                            escapeHtml(story.title) + '</a>' +
+                            '<div class="news-meta">' +
+                            '<img src="' + escapeHtml(story.favicon_url || '') + '" width="14" height="14" ' +
+                            'onerror="this.style.display=\'none\'">' +
+                            '<span>' + escapeHtml(story.site || '') + '</span>' +
+                            '<span>&middot;</span>' +
+                            '<span>' + timeAgo + '</span>' +
+                            '</div></div>';
+                    }
+                    container.innerHTML = html;
+                })
+                .catch(function() {
+                    container.innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Failed to load news. Please try again later.</p>';
+                });
+        }
+
+        function getTimeAgo(date) {
+            var now = new Date();
+            var diffMs = now - date;
+            var diffMin = Math.floor(diffMs / 60000);
+            var diffHr = Math.floor(diffMs / 3600000);
+            var diffDay = Math.floor(diffMs / 86400000);
+            if (diffMin < 60) return diffMin + 'm ago';
+            if (diffHr < 24) return diffHr + 'h ago';
+            if (diffDay < 7) return diffDay + 'd ago';
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+    })();
+    </script>
 {% else %}
     <article style="text-align: center; padding: 3em 1em;">
         <p class="text-muted" style="font-size: 1.1em;">
