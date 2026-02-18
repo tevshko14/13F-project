@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from filings import client, cache, analysts, market_data, sentiment, company_filings
+from filings import client, cache, analysts, market_data, sentiment, company_filings, insider_trading
 from filings.models import SuperinvestorSummary
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -517,6 +517,39 @@ async def company_filings_tab(request: Request, ticker: str):
     })
 
 
+# --- Insider Trading ---
+
+@app.get("/insider-trading", response_class=HTMLResponse)
+async def insider_trading_page(request: Request):
+    return templates.TemplateResponse("insider_trading.html", {
+        "request": request,
+    })
+
+
+@app.get("/api/insider-trades", response_class=HTMLResponse)
+async def insider_trades_api(request: Request, filter: str = "all"):
+    trade_type = {"buys": "p", "sells": "s", "all": ""}.get(filter, "")
+    trades = await asyncio.to_thread(
+        insider_trading.get_latest_insider_trades, trade_type
+    )
+    return templates.TemplateResponse("partials/insider_trades.html", {
+        "request": request,
+        "trades": trades,
+    })
+
+
+@app.get("/api/insider-trades/{ticker}", response_class=HTMLResponse)
+async def stock_insider_trades_api(request: Request, ticker: str):
+    trades = await asyncio.to_thread(
+        insider_trading.get_ticker_insider_trades, ticker
+    )
+    return templates.TemplateResponse("partials/stock_insider_trades.html", {
+        "request": request,
+        "trades": trades,
+        "ticker": ticker.upper(),
+    })
+
+
 # --- Market Data API (heatmap, most-added, ticker search) ---
 
 @app.get("/api/ticker-search-index")
@@ -665,6 +698,7 @@ async def sitemap_xml():
         f"  <url><loc>{base_url}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>",
         f"  <url><loc>{base_url}/activity</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
         f"  <url><loc>{base_url}/grand-portfolio</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/insider-trading</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
     ]
     for si in SUPERINVESTORS:
         urls.append(
@@ -690,6 +724,8 @@ if _has_limiter:
     analyst_ratings = limiter.limit("30/minute")(analyst_ratings)
     sentiment_data = limiter.limit("30/minute")(sentiment_data)
     company_filings_tab = limiter.limit("30/minute")(company_filings_tab)
+    insider_trades_api = limiter.limit("20/minute")(insider_trades_api)
+    stock_insider_trades_api = limiter.limit("30/minute")(stock_insider_trades_api)
     trigger_refresh = limiter.limit("5/minute")(trigger_refresh)
 
 

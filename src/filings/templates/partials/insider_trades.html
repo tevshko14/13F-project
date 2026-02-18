@@ -1,0 +1,62 @@
+{% if trades %}
+<p class="text-muted text-small">
+    Showing {{ trades | length }} recent insider trades &middot; Source: SEC Form 4 filings via
+    <a href="http://openinsider.com" target="_blank" rel="noopener">OpenInsider</a>
+</p>
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th data-sort="text">Ticker</th>
+            <th data-sort="text">Company</th>
+            <th data-sort="text">Insider</th>
+            <th>Title</th>
+            <th data-sort="date">Trade Date</th>
+            <th>Type</th>
+            <th class="text-right">Price</th>
+            <th class="text-right" data-sort="number">Qty</th>
+            <th class="text-right" data-sort="number">Value</th>
+            <th class="text-right">Owned</th>
+            <th style="text-align: center;">Filing</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in trades %}
+        <tr>
+            <td>
+                <a href="/stock/{{ t.ticker }}"><strong>{{ t.ticker }}</strong></a>
+            </td>
+            <td class="text-small">{{ t.company_name }}</td>
+            <td>{{ t.insider_name }}</td>
+            <td class="text-small text-muted">{{ t.title }}</td>
+            <td style="white-space: nowrap;">{{ t.trade_date }}</td>
+            <td>
+                {% if "Purchase" in t.trade_type %}
+                    <span class="badge badge-add">{{ t.trade_type }}</span>
+                {% elif "Sale" in t.trade_type %}
+                    <span class="badge badge-reduce">{{ t.trade_type }}</span>
+                {% else %}
+                    <span class="badge" style="background: #f5f5f5; color: #616161;">{{ t.trade_type }}</span>
+                {% endif %}
+            </td>
+            <td class="text-right">{{ t.price }}</td>
+            <td class="text-right">{{ t.qty }}</td>
+            <td class="text-right">{{ t.value }}</td>
+            <td class="text-right text-small">{{ t.owned }}{% if t.delta_own %} <span class="text-muted">({{ t.delta_own }})</span>{% endif %}</td>
+            <td style="text-align: center;">
+                {% if t.sec_url %}
+                <a href="{{ t.sec_url }}" target="_blank" rel="noopener" title="View SEC Form 4">&#128279;</a>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% else %}
+<p class="text-muted" style="text-align: center; padding: 2em 0;">
+    No insider trades found. Try a different filter.
+</p>
+{% endif %}
