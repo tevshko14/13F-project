@@ -3,15 +3,17 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{% block title %}13F Filing Viewer{% endblock %}</title>
+    <title>{% block title %}PaperPanda — Superinvestor 13F Tracker{% endblock %}</title>
     <meta name="description" content="{% block meta_description %}Track superinvestor 13F filings — see what Buffett, Ackman, and other top investors are buying and selling.{% endblock %}">
-    <meta property="og:title" content="{% block og_title %}13F Filing Viewer{% endblock %}">
+    <meta property="og:title" content="{% block og_title %}PaperPanda — Superinvestor 13F Tracker{% endblock %}">
     <meta property="og:description" content="Track superinvestor 13F filings — what top investors are buying and selling.">
     <meta property="og:type" content="website">
+    <meta property="og:image" content="/static/logo-nav.png">
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="13F Filing Viewer">
+    <meta name="twitter:title" content="PaperPanda — Superinvestor 13F Tracker">
     <meta name="twitter:description" content="Track superinvestor 13F filings — what top investors are buying and selling.">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
@@ -117,7 +119,7 @@
 </head>
 <body hx-boost="true">
     <nav class="container">
-        <ul><li><a href="/"><strong>13F Viewer</strong></a></li></ul>
+        <ul><li><a href="/"><img src="/static/logo-nav.png" alt="PaperPanda" style="height: 36px; vertical-align: middle;"></a></li></ul>
         <ul>
             <li><a href="/">Superinvestors</a></li>
             <li><a href="/activity">Activity</a></li>
@@ -140,7 +142,7 @@
             <strong>Not financial advice.</strong> This tool is for informational purposes only.
             Always do your own research before making investment decisions.
         </p>
-        <p>&copy; {{ current_year }} 13F Filing Viewer</p>
+        <p>&copy; {{ current_year }} PaperPanda</p>
     </footer>
 
     <script>
