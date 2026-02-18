@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from filings import client, cache, analysts, market_data, sentiment
+from filings import client, cache, analysts, market_data, sentiment, company_filings
 from filings.models import SuperinvestorSummary
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -507,6 +507,16 @@ async def sentiment_data(request: Request, ticker: str):
     })
 
 
+@app.get("/api/company-filings/{ticker}", response_class=HTMLResponse)
+async def company_filings_tab(request: Request, ticker: str):
+    filings = await asyncio.to_thread(company_filings.get_company_filings, ticker)
+    return templates.TemplateResponse("partials/company_filings.html", {
+        "request": request,
+        "filings": filings,
+        "ticker": ticker.upper(),
+    })
+
+
 # --- Market Data API (heatmap, most-added, ticker search) ---
 
 @app.get("/api/ticker-search-index")
@@ -679,6 +689,7 @@ if _has_limiter:
     fund_row = limiter.limit("10/minute")(fund_row)
     analyst_ratings = limiter.limit("30/minute")(analyst_ratings)
     sentiment_data = limiter.limit("30/minute")(sentiment_data)
+    company_filings_tab = limiter.limit("30/minute")(company_filings_tab)
     trigger_refresh = limiter.limit("5/minute")(trigger_refresh)
 
 
