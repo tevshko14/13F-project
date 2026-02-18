@@ -279,6 +279,43 @@
         border-radius: 2px;
     }
 
+    /* ── News pagination ── */
+    .news-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5em;
+        padding: 1.2em 0 0.5em;
+        margin-top: 0.5em;
+        border-top: 1px solid rgba(0,0,0,0.08);
+    }
+    .news-pagination button {
+        background: none;
+        border: 1px solid rgba(0,0,0,0.15);
+        border-radius: 6px;
+        padding: 0.35em 0.9em;
+        cursor: pointer;
+        font-size: 0.85em;
+        font-weight: 600;
+        color: rgba(0,0,0,0.6);
+        transition: background 0.15s, color 0.15s;
+        margin: 0;
+    }
+    .news-pagination button:hover:not(:disabled) {
+        background: rgba(0,0,0,0.04);
+        color: rgba(0,0,0,0.8);
+    }
+    .news-pagination button:disabled {
+        opacity: 0.35;
+        cursor: default;
+    }
+    .news-pagination .page-info {
+        font-size: 0.85em;
+        color: rgba(0,0,0,0.5);
+        min-width: 80px;
+        text-align: center;
+    }
+
     /* ── Responsive: stack on mobile, full-width on desktop ── */
     @media (max-width: 768px) {
         .chart-container {
@@ -396,6 +433,9 @@
     <script>
     (function() {
         var newsLoaded = false;
+        var allStories = [];
+        var currentPage = 0;
+        var perPage = 10;
 
         window.switchOverviewSubtab = function(sub) {
             document.querySelectorAll('.overview-subtab').forEach(function(btn) {
@@ -404,11 +444,9 @@
             document.querySelectorAll('.overview-subpanel').forEach(function(p) {
                 p.classList.remove('active');
             });
-            // Activate clicked subtab
             event.target.classList.add('active');
             document.getElementById('overview-sub-' + sub).classList.add('active');
 
-            // Lazy-load news on first click
             if (sub === 'news' && !newsLoaded) {
                 newsLoaded = true;
                 loadTickerNews('{{ stock_info.ticker }}');
@@ -417,7 +455,7 @@
 
         function loadTickerNews(ticker) {
             var container = document.getElementById('ticker-news-container');
-            var url = 'https://api.tickertick.com/feed?q=tt:' + ticker.toLowerCase() + '&n=25';
+            var url = 'https://api.tickertick.com/feed?q=tt:' + ticker.toLowerCase() + '&n=50';
 
             fetch(url)
                 .then(function(resp) { return resp.json(); })
@@ -428,23 +466,9 @@
                             'No recent news found for ' + ticker + '.</p>';
                         return;
                     }
-                    var html = '';
-                    for (var i = 0; i < data.stories.length; i++) {
-                        var story = data.stories[i];
-                        var date = new Date(story.time);
-                        var timeAgo = getTimeAgo(date);
-                        html += '<div class="news-item">' +
-                            '<a href="' + escapeHtml(story.url) + '" target="_blank" rel="noopener">' +
-                            escapeHtml(story.title) + '</a>' +
-                            '<div class="news-meta">' +
-                            '<img src="' + escapeHtml(story.favicon_url || '') + '" width="14" height="14" ' +
-                            'onerror="this.style.display=\'none\'">' +
-                            '<span>' + escapeHtml(story.site || '') + '</span>' +
-                            '<span>&middot;</span>' +
-                            '<span>' + timeAgo + '</span>' +
-                            '</div></div>';
-                    }
-                    container.innerHTML = html;
+                    allStories = data.stories;
+                    currentPage = 0;
+                    renderNewsPage(container);
                 })
                 .catch(function() {
                     container.innerHTML =
@@ -452,6 +476,58 @@
                         'Failed to load news. Please try again later.</p>';
                 });
         }
+
+        function renderNewsPage(container) {
+            var totalPages = Math.ceil(allStories.length / perPage);
+            var start = currentPage * perPage;
+            var end = Math.min(start + perPage, allStories.length);
+            var pageStories = allStories.slice(start, end);
+
+            var html = '';
+            for (var i = 0; i < pageStories.length; i++) {
+                var story = pageStories[i];
+                var date = new Date(story.time);
+                var timeAgo = getTimeAgo(date);
+                html += '<div class="news-item">' +
+                    '<a href="' + escapeHtml(story.url) + '" target="_blank" rel="noopener">' +
+                    escapeHtml(story.title) + '</a>' +
+                    '<div class="news-meta">' +
+                    '<img src="' + escapeHtml(story.favicon_url || '') + '" width="14" height="14" ' +
+                    'onerror="this.style.display=\'none\'">' +
+                    '<span>' + escapeHtml(story.site || '') + '</span>' +
+                    '<span>&middot;</span>' +
+                    '<span>' + timeAgo + '</span>' +
+                    '</div></div>';
+            }
+
+            // Pagination controls
+            html += '<div class="news-pagination">' +
+                '<button onclick="window._newsPrev()" ' +
+                (currentPage === 0 ? 'disabled' : '') + '>&laquo; Prev</button>' +
+                '<span class="page-info">Page ' + (currentPage + 1) + ' of ' + totalPages + '</span>' +
+                '<button onclick="window._newsNext()" ' +
+                (currentPage >= totalPages - 1 ? 'disabled' : '') + '>Next &raquo;</button>' +
+                '</div>';
+
+            container.innerHTML = html;
+        }
+
+        window._newsPrev = function() {
+            if (currentPage > 0) {
+                currentPage--;
+                renderNewsPage(document.getElementById('ticker-news-container'));
+                document.getElementById('ticker-news-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+
+        window._newsNext = function() {
+            var totalPages = Math.ceil(allStories.length / perPage);
+            if (currentPage < totalPages - 1) {
+                currentPage++;
+                renderNewsPage(document.getElementById('ticker-news-container'));
+                document.getElementById('ticker-news-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
 
         function getTimeAgo(date) {
             var now = new Date();
