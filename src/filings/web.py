@@ -250,10 +250,19 @@ async def _prefetch_market_data(app: FastAPI):
 # Pages
 # ═══════════════════════════════════════════════════════════════════════
 
-# --- Homepage: Superinvestor list ---
+# --- Homepage: dashboard with market data & widgets ---
 
 @app.get("/", response_class=HTMLResponse)
-async def index(request: Request):
+async def homepage(request: Request):
+    return templates.TemplateResponse("home.html", {
+        "request": request,
+    })
+
+
+# --- Superinvestors: portfolio list ---
+
+@app.get("/superinvestors", response_class=HTMLResponse)
+async def superinvestors_page(request: Request):
     cache_data = getattr(app.state, "fund_cache", {})
 
     summaries = []
@@ -430,7 +439,7 @@ async def stock_detail_by_cusip(request: Request, cusip: str):
     if not cache_data:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "No cached data available. Visit the homepage to load data.",
+            "message": "No cached data available. Visit the Superinvestors page to load data.",
         }, status_code=404)
 
     detail = client.build_stock_detail(
@@ -459,7 +468,7 @@ async def stock_detail(request: Request, ticker: str):
     if not cache_data:
         return templates.TemplateResponse("error.html", {
             "request": request,
-            "message": "No cached data available. Visit the homepage to load data.",
+            "message": "No cached data available. Visit the Superinvestors page to load data.",
         }, status_code=404)
 
     detail = client.build_stock_detail(
@@ -690,16 +699,17 @@ async def robots_txt():
         "Disallow: /api/\n"
         "Disallow: /refresh\n"
         "\n"
-        "Sitemap: https://13f-viewer.up.railway.app/sitemap.xml\n"
+        "Sitemap: https://paperpanda.io/sitemap.xml\n"
     )
     return PlainTextResponse(content, media_type="text/plain")
 
 
 @app.get("/sitemap.xml")
 async def sitemap_xml():
-    base_url = "https://13f-viewer.up.railway.app"
+    base_url = "https://paperpanda.io"
     urls = [
         f"  <url><loc>{base_url}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>",
+        f"  <url><loc>{base_url}/superinvestors</loc><changefreq>daily</changefreq><priority>0.9</priority></url>",
         f"  <url><loc>{base_url}/activity</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
         f"  <url><loc>{base_url}/grand-portfolio</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
         f"  <url><loc>{base_url}/insider-trading</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",

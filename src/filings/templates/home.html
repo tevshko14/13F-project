@@ -1,0 +1,224 @@
+{% extends "base.html" %}
+{% block title %}PaperPanda — Track Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
+{% block meta_description %}PaperPanda tracks superinvestor 13F filings, insider trading, analyst ratings, and market news — all in one place. See what Buffett, Ackman, and top investors are buying.{% endblock %}
+{% block og_title %}PaperPanda — Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
+{% block content %}
+
+{# ── Hero Section ── #}
+<div style="text-align: center; margin-bottom: 1.5em;">
+    <h1 style="margin-bottom: 0.2em;">Welcome to PaperPanda</h1>
+    <p class="text-muted" style="font-size: 1.1em; max-width: 600px; margin: 0 auto;">
+        Track superinvestor portfolios, insider trades, analyst ratings, and market news — all in one place.
+    </p>
+</div>
+
+{# ── Quick Navigation Cards ── #}
+<div class="home-cards">
+    <a href="/superinvestors" class="home-card">
+        <div class="home-card-icon">&#128188;</div>
+        <strong>Superinvestors</strong>
+        <span class="text-muted text-small">13F portfolio holdings from Buffett, Ackman, and more</span>
+    </a>
+    <a href="/activity" class="home-card">
+        <div class="home-card-icon">&#128200;</div>
+        <strong>Activity Feed</strong>
+        <span class="text-muted text-small">Recent buys, sells, and position changes</span>
+    </a>
+    <a href="/grand-portfolio" class="home-card">
+        <div class="home-card-icon">&#127942;</div>
+        <strong>Grand Portfolio</strong>
+        <span class="text-muted text-small">Most popular stocks across all superinvestors</span>
+    </a>
+    <a href="/insider-trading" class="home-card">
+        <div class="home-card-icon">&#128269;</div>
+        <strong>Insider Trading</strong>
+        <span class="text-muted text-small">Latest SEC Form 4 insider buys and sells</span>
+    </a>
+</div>
+
+{# ── TradingView Ticker Tape ── #}
+<div style="margin: 1.5em -1em 2em -1em;">
+    <div class="tradingview-widget-container">
+        <div class="tradingview-widget-container__widget"></div>
+        <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-ticker-tape.js" async>
+        {
+            "symbols": [
+                {"proName": "FOREXCOM:SPXUSD", "title": "S&P 500"},
+                {"proName": "FOREXCOM:NSXUSD", "title": "US 100"},
+                {"proName": "FX_IDC:EURUSD", "title": "EUR/USD"},
+                {"description": "DOW", "proName": "FOREXCOM:DJI"},
+                {"description": "BTC/USD", "proName": "BITSTAMP:BTCUSD"},
+                {"description": "AAPL", "proName": "NASDAQ:AAPL"},
+                {"description": "MSFT", "proName": "NASDAQ:MSFT"},
+                {"description": "AMZN", "proName": "NASDAQ:AMZN"},
+                {"description": "GOOGL", "proName": "NASDAQ:GOOGL"},
+                {"description": "TSLA", "proName": "NASDAQ:TSLA"},
+                {"description": "NVDA", "proName": "NASDAQ:NVDA"},
+                {"description": "META", "proName": "NASDAQ:META"}
+            ],
+            "showSymbolLogo": true,
+            "isTransparent": true,
+            "displayMode": "adaptive",
+            "colorTheme": "light",
+            "locale": "en"
+        }
+        </script>
+    </div>
+</div>
+
+{# ── Market Overview + News: two-column layout ── #}
+<div class="home-grid">
+
+    {# ── Left: Market Overview widget ── #}
+    <div>
+        <h3 style="margin-bottom: 0.5em;">Market Overview</h3>
+        <div class="tradingview-widget-container" style="height: 500px;">
+            <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
+            <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js" async>
+            {
+                "colorTheme": "light",
+                "dateRange": "1D",
+                "showChart": true,
+                "locale": "en",
+                "width": "100%",
+                "height": "100%",
+                "largeChartUrl": "",
+                "isTransparent": true,
+                "showSymbolLogo": true,
+                "showFloatingTooltip": true,
+                "plotLineColorGrowing": "rgba(25, 118, 210, 1)",
+                "plotLineColorFalling": "rgba(198, 40, 40, 1)",
+                "gridLineColor": "rgba(0, 0, 0, 0.06)",
+                "scaleFontColor": "rgba(0, 0, 0, 0.6)",
+                "belowLineFillColorGrowing": "rgba(25, 118, 210, 0.06)",
+                "belowLineFillColorFalling": "rgba(198, 40, 40, 0.06)",
+                "belowLineFillColorGrowingBottom": "rgba(25, 118, 210, 0)",
+                "belowLineFillColorFallingBottom": "rgba(198, 40, 40, 0)",
+                "symbolActiveColor": "rgba(25, 118, 210, 0.08)",
+                "tabs": [
+                    {
+                        "title": "Indices",
+                        "symbols": [
+                            {"s": "FOREXCOM:SPXUSD", "d": "S&P 500"},
+                            {"s": "FOREXCOM:NSXUSD", "d": "Nasdaq 100"},
+                            {"s": "FOREXCOM:DJI", "d": "Dow Jones"},
+                            {"s": "INDEX:RUT", "d": "Russell 2000"},
+                            {"s": "INDEX:VIX", "d": "VIX"}
+                        ],
+                        "originalTitle": "Indices"
+                    },
+                    {
+                        "title": "Mega Caps",
+                        "symbols": [
+                            {"s": "NASDAQ:AAPL", "d": "Apple"},
+                            {"s": "NASDAQ:MSFT", "d": "Microsoft"},
+                            {"s": "NASDAQ:GOOGL", "d": "Alphabet"},
+                            {"s": "NASDAQ:AMZN", "d": "Amazon"},
+                            {"s": "NASDAQ:NVDA", "d": "Nvidia"},
+                            {"s": "NASDAQ:META", "d": "Meta"},
+                            {"s": "NASDAQ:TSLA", "d": "Tesla"}
+                        ],
+                        "originalTitle": "Mega Caps"
+                    },
+                    {
+                        "title": "Commodities",
+                        "symbols": [
+                            {"s": "COMEX:GC1!", "d": "Gold"},
+                            {"s": "NYMEX:CL1!", "d": "Crude Oil"},
+                            {"s": "COMEX:SI1!", "d": "Silver"},
+                            {"s": "NYMEX:NG1!", "d": "Natural Gas"}
+                        ],
+                        "originalTitle": "Commodities"
+                    }
+                ]
+            }
+            </script>
+        </div>
+    </div>
+
+    {# ── Right: Financial News timeline ── #}
+    <div>
+        <h3 style="margin-bottom: 0.5em;">Market News</h3>
+        <div class="tradingview-widget-container" style="height: 500px;">
+            <div class="tradingview-widget-container__widget" style="height: 100%;"></div>
+            <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-timeline.js" async>
+            {
+                "feedMode": "all_symbols",
+                "isTransparent": true,
+                "displayMode": "regular",
+                "width": "100%",
+                "height": "100%",
+                "colorTheme": "light",
+                "locale": "en"
+            }
+            </script>
+        </div>
+    </div>
+
+</div>
+
+{# ── S&P 500 Heatmap (lazy-loaded) ── #}
+<div style="margin-top: 2em;">
+    <h3 style="margin-bottom: 0.5em;">S&P 500 Heatmap</h3>
+    <div hx-get="/api/heatmap" hx-trigger="load" hx-swap="innerHTML">
+        <article>
+            <p aria-busy="true"><span class="spinner"></span> Loading S&P 500 heatmap...</p>
+        </article>
+    </div>
+</div>
+
+{# ── Most Added by Superinvestors (lazy-loaded) ── #}
+<div style="margin-top: 1.5em;">
+    <h3 style="margin-bottom: 0.5em;">Trending with Superinvestors</h3>
+    <div hx-get="/api/most-added" hx-trigger="load" hx-swap="innerHTML">
+        <article>
+            <p aria-busy="true"><span class="spinner"></span> Loading most-added stocks...</p>
+        </article>
+    </div>
+</div>
+
+<style>
+    .home-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1em;
+        margin-bottom: 1em;
+    }
+    .home-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding: 1.2em 1em;
+        border: 1px solid rgba(0,0,0,0.1);
+        border-radius: 8px;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .home-card:hover {
+        border-color: #1976d2;
+        box-shadow: 0 4px 12px rgba(25, 118, 210, 0.12);
+        transform: translateY(-2px);
+    }
+    .home-card-icon {
+        font-size: 2em;
+        margin-bottom: 0.3em;
+    }
+    .home-card strong {
+        display: block;
+        margin-bottom: 0.2em;
+    }
+
+    .home-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2em;
+    }
+    @media (max-width: 768px) {
+        .home-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
