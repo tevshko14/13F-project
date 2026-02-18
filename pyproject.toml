@@ -33,3 +33,4 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/filings"]
+artifacts = ["src/filings/static/*", "src/filings/templates/**/*"]

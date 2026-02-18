@@ -16,6 +16,7 @@ from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -120,11 +121,14 @@ async def lifespan(app: FastAPI):
 # App creation
 # ═══════════════════════════════════════════════════════════════════════
 
-app = FastAPI(title="13F Filing Viewer", lifespan=lifespan)
+app = FastAPI(title="PaperPanda", lifespan=lifespan)
 
 templates = Jinja2Templates(
     directory=Path(__file__).parent / "templates"
 )
+
+# Static files (logo, favicon, etc.)
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
 # Template globals
 templates.env.globals["current_year"] = datetime.now().year
