@@ -1,24 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Superinvestors - PaperPanda{% endblock %}
+{% block title %}Superinvestor Portfolios — PaperPanda{% endblock %}
+{% block meta_description %}Track 13F holdings of top superinvestors like Warren Buffett, Bill Ackman, and more. See portfolio values, top holdings, and recent changes.{% endblock %}
 {% block content %}
 <hgroup>
     <h1>Superinvestor Portfolios</h1>
     <p>Track the 13F holdings of the world's top investors, powered by SEC EDGAR data.</p>
 </hgroup>
-
-{# ── S&P 500 Heatmap (lazy-loaded) ── #}
-<div hx-get="/api/heatmap" hx-trigger="load" hx-swap="innerHTML">
-    <article>
-        <p aria-busy="true"><span class="spinner"></span> Loading S&P 500 heatmap...</p>
-    </article>
-</div>
-
-{# ── Most Added by Superinvestors (lazy-loaded) ── #}
-<div hx-get="/api/most-added" hx-trigger="load" hx-swap="innerHTML">
-    <article>
-        <p aria-busy="true"><span class="spinner"></span> Loading most-added stocks...</p>
-    </article>
-</div>
 
 <div class="cache-info">
     <small>Cache: {{ cache_age }}</small>
