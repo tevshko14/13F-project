@@ -1,0 +1,120 @@
+{% if filings %}
+<article>
+    <header>
+        <strong>SEC Filings</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Recent disclosures for {{ ticker }}
+        </span>
+    </header>
+
+    {# ── Filter buttons ── #}
+    <div style="display: flex; gap: 0.5em; flex-wrap: wrap; margin-bottom: 1em;">
+        <button class="filing-filter active" onclick="filterFilings('all', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
+            All
+        </button>
+        <button class="filing-filter" onclick="filterFilings('10-K', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
+            10-K
+        </button>
+        <button class="filing-filter" onclick="filterFilings('10-Q', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
+            10-Q
+        </button>
+        <button class="filing-filter" onclick="filterFilings('8-K', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
+            8-K
+        </button>
+        <button class="filing-filter" onclick="filterFilings('4', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
+            Form 4
+        </button>
+    </div>
+
+    <figure>
+    <table>
+        <thead>
+            <tr>
+                <th>Form</th>
+                <th>Filed</th>
+                <th>Description</th>
+                <th style="text-align: center;">Link</th>
+            </tr>
+        </thead>
+        <tbody id="filings-tbody">
+            {% for f in filings %}
+            <tr data-form-type="{{ f.form }}">
+                <td>
+                    {% if f.form == "10-K" %}
+                        <span class="badge" style="background: #e3f2fd; color: #1565c0; font-size: 0.8em; padding: 0.2em 0.5em;">{{ f.form }}</span>
+                    {% elif f.form == "10-Q" %}
+                        <span class="badge" style="background: #f3e5f5; color: #7b1fa2; font-size: 0.8em; padding: 0.2em 0.5em;">{{ f.form }}</span>
+                    {% elif f.form == "8-K" %}
+                        <span class="badge" style="background: #fff3e0; color: #e65100; font-size: 0.8em; padding: 0.2em 0.5em;">{{ f.form }}</span>
+                    {% elif f.form in ["4", "3", "5"] %}
+                        <span class="badge" style="background: #e8f5e9; color: #2e7d32; font-size: 0.8em; padding: 0.2em 0.5em;">Form {{ f.form }}</span>
+                    {% else %}
+                        <span class="badge" style="background: #f5f5f5; color: #616161; font-size: 0.8em; padding: 0.2em 0.5em;">{{ f.form }}</span>
+                    {% endif %}
+                </td>
+                <td style="white-space: nowrap;">{{ f.filing_date }}</td>
+                <td>
+                    {{ f.description }}
+                    {% if f.items %}
+                        <span class="text-muted text-small">(Items: {{ f.items }})</span>
+                    {% endif %}
+                </td>
+                <td style="text-align: center;">
+                    <a href="{{ f.sec_url }}" target="_blank" rel="noopener" title="View on SEC EDGAR">
+                        &#128279;
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+
+    <footer class="text-muted text-small" style="text-align: center;">
+        Data sourced from <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&company={{ ticker }}&type=&dateb=&owner=include&count=40" target="_blank" rel="noopener">SEC EDGAR</a>.
+        Showing up to 25 most recent filings.
+    </footer>
+</article>
+
+<style>
+    .filing-filter {
+        background: none;
+        border: 1px solid rgba(0,0,0,0.15);
+        border-radius: 4px;
+        cursor: pointer;
+        color: rgba(0,0,0,0.55);
+        font-weight: 600;
+        transition: all 0.15s;
+    }
+    .filing-filter:hover { background: rgba(0,0,0,0.04); color: rgba(0,0,0,0.8); }
+    .filing-filter.active {
+        background: #1976d2;
+        color: #fff;
+        border-color: #1976d2;
+    }
+</style>
+
+<script>
+window.filterFilings = function(type, btn) {
+    document.querySelectorAll('.filing-filter').forEach(function(b) {
+        b.classList.remove('active');
+    });
+    btn.classList.add('active');
+
+    document.querySelectorAll('#filings-tbody tr').forEach(function(row) {
+        if (type === 'all') {
+            row.style.display = '';
+        } else {
+            row.style.display = row.dataset.formType === type ? '' : 'none';
+        }
+    });
+};
+</script>
+
+{% else %}
+<article>
+    <p class="text-muted" style="text-align: center; padding: 2em 0;">
+        No SEC filings found for {{ ticker }}. This may happen if the ticker doesn't match a public SEC filer.
+    </p>
+</article>
+{% endif %}
