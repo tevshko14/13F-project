@@ -1,14 +1,20 @@
 -- PaperPanda Supabase Schema: api_cache
 -- Run this in your Supabase SQL Editor (Dashboard > SQL Editor > New Query)
+-- NOTE: Auto-applied on first deploy via _auto_migrate() in supabase_cache.py
 --
--- This table acts as a universal persistent cache for expensive API data
--- (Glassdoor ratings, quota tracking, and future cacheable sources).
--- It replaces the local JSON file cache that wipes on Railway deploys.
+-- This table acts as a universal persistent cache (L2) for all API data.
+-- It survives Railway deploys (unlike the disk JSON cache).
+--
+-- Categories stored:
+--   "13f"              — ~100 superinvestor fund data (holdings, changes, quarterly history)
+--   "glassdoor"        — Company culture ratings per ticker
+--   "glassdoor_quota"  — Monthly Glassdoor API call counter
+--   "insider"          — Form 4 insider trades (global + per-ticker)
 
 -- 1. Create the api_cache table
 CREATE TABLE IF NOT EXISTS api_cache (
-    cache_key     TEXT PRIMARY KEY,           -- e.g. "glassdoor:AAPL", "glassdoor_quota:2026-02"
-    category      TEXT NOT NULL,              -- e.g. "glassdoor", "glassdoor_quota"
+    cache_key     TEXT PRIMARY KEY,           -- e.g. "13f:1067983", "glassdoor:AAPL", "insider_global:p:25"
+    category      TEXT NOT NULL,              -- e.g. "13f", "glassdoor", "glassdoor_quota", "insider"
     response_data JSONB NOT NULL,             -- the cached payload
     expires_at    TIMESTAMPTZ,                -- NULL = never expires (manually managed)
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
