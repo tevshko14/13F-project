@@ -201,14 +201,30 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _background_refresh(app: FastAPI):
-    """Refresh cache for all superinvestors in background."""
+    """Refresh stale superinvestor funds in background.
+
+    Uses per-fund TTL: only re-fetches funds whose `_last_refreshed`
+    timestamp is older than the effective TTL. Skips recently-refreshed
+    funds to avoid unnecessary SEC EDGAR API calls.
+
+    On failure, keeps existing stale data (stale-while-revalidate).
+    """
     app.state.refreshing = True
+    all_ciks = [si.cik for si in SUPERINVESTORS]
+    stale_ciks = cache.get_stale_ciks(app.state.fund_cache, all_ciks)
+
+    if not stale_ciks:
+        logger.info("No stale funds to refresh (%d funds all fresh)", len(all_ciks))
+        app.state.refreshing = False
+        return
+
+    logger.info("Refreshing %d/%d stale funds", len(stale_ciks), len(all_ciks))
     dirty_count = 0
-    for si in SUPERINVESTORS:
+    for cik in stale_ciks:
         try:
-            data = await asyncio.to_thread(cache.refresh_single_fund, si.cik)
+            data = await asyncio.to_thread(cache.refresh_single_fund, cik)
             if data:
-                app.state.fund_cache[si.cik] = data
+                app.state.fund_cache[cik] = data
                 dirty_count += 1
                 if dirty_count % 10 == 0:
                     await asyncio.to_thread(cache.save_cache, app.state.fund_cache)
@@ -216,13 +232,23 @@ async def _background_refresh(app: FastAPI):
             pass
         await asyncio.sleep(1)
 
-    if dirty_count % 10 != 0:
+    if dirty_count > 0 and dirty_count % 10 != 0:
         await asyncio.to_thread(cache.save_cache, app.state.fund_cache)
+
+    logger.info("Background refresh complete: %d funds updated", dirty_count)
     app.state.refreshing = False
 
 
 async def _poll_loop(app: FastAPI):
-    """Periodically trigger background refresh to detect new filings."""
+    """Periodically trigger background refresh to detect new filings.
+
+    Uses smart polling intervals from notifications module:
+      - Filing season (±15 days of deadline): every 2 hours
+      - Off-season: every 12 hours
+
+    The background refresh itself only re-fetches stale funds (per-fund TTL),
+    so even frequent polling doesn't cause excessive API calls when data is fresh.
+    """
     while True:
         try:
             from filings.notifications import get_poll_interval_seconds
@@ -707,11 +733,16 @@ async def trigger_refresh(request: Request):
 async def health_check(request: Request):
     uptime = round(time_module.time() - _app_start_time)
     cache_data = getattr(app.state, "fund_cache", {})
+    all_ciks = [si.cik for si in SUPERINVESTORS]
+    stale_ciks = cache.get_stale_ciks(cache_data, all_ciks)
     return JSONResponse({
         "status": "ok",
         "uptime_seconds": uptime,
         "cache_entries": len(cache_data),
         "cache_age": cache.get_cache_age_str(),
+        "cache_ttl": str(cache._get_effective_ttl()),
+        "stale_funds": len(stale_ciks),
+        "total_funds": len(all_ciks),
         "refreshing": getattr(app.state, "refreshing", False),
         "market_data_ready": getattr(app.state, "market_data_ready", False),
     })
