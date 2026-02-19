@@ -99,8 +99,19 @@ _app_start_time = time_module.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load cache on startup, trigger background refresh if stale."""
-    app.state.fund_cache = cache.load_cache()
+    """Load cache on startup, trigger background refresh if stale.
+
+    Hydration priority:
+      1. Supabase L2 (survives Railway deploys)
+      2. Disk cache (local dev / Supabase down)
+    """
+    # ── Try Supabase first (persists across Railway deploys) ──
+    app.state.fund_cache = await asyncio.to_thread(cache.load_cache_from_supabase)
+
+    if not app.state.fund_cache:
+        # Fallback: load from disk (local dev, or Supabase unavailable)
+        app.state.fund_cache = cache.load_cache()
+
     app.state.refreshing = False
 
     if cache.is_cache_stale() and app.state.fund_cache:
@@ -329,16 +340,26 @@ async def fund_row(request: Request, cik: str):
     si = SUPERINVESTORS_BY_CIK.get(cik_normalized) or SUPERINVESTORS_BY_CIK.get(cik)
     try:
         data = await asyncio.to_thread(client.get_fund_summary, cik)
-        app.state.fund_cache[cik_normalized] = data
+        stamped = cache.stamp_fund_data(data)
+        app.state.fund_cache[cik_normalized] = stamped
+
+        # Persist to Supabase L2 (non-fatal)
+        supabase_cache.set_cached(
+            cache_key=f"13f:{cik_normalized}",
+            category="13f",
+            data=stamped,
+            ttl_seconds=cache._get_effective_ttl_seconds(),
+        )
+
         asyncio.create_task(asyncio.to_thread(cache.save_cache, app.state.fund_cache))
         top_tickers = [
             h.get("ticker") or h.get("issuer", "?")[:8]
-            for h in data.get("top_holdings", [])[:5]
+            for h in stamped.get("top_holdings", [])[:5]
         ]
         return templates.TemplateResponse("partials/fund_row.html", {
             "request": request,
             "si": si,
-            "data": data,
+            "data": stamped,
             "top_tickers": top_tickers,
         })
     except Exception as e:
