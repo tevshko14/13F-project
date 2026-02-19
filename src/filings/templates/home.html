@@ -2,14 +2,41 @@
 {% block title %}PaperPanda — Track Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
 {% block meta_description %}PaperPanda tracks superinvestor 13F filings, insider trading, analyst ratings, and market news — all in one place. See what Buffett, Ackman, and top investors are buying.{% endblock %}
 {% block og_title %}PaperPanda — Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
+{% block nav_search %}{% endblock %}
 {% block content %}
 
 {# ── Hero Section ── #}
-<div style="text-align: center; margin-bottom: 1.5em;">
+<div style="text-align: center; margin-bottom: 0.5em;">
     <h1 style="margin-bottom: 0.2em;">Welcome to PaperPanda</h1>
     <p class="text-muted" style="font-size: 1.1em; max-width: 600px; margin: 0 auto;">
         Track superinvestor portfolios, insider trades, analyst ratings, and market news — all in one place.
     </p>
+</div>
+
+{# ── Hero Search Bar (Brave-style pill) ── #}
+<div class="hero-search-wrapper">
+    <div id="ticker-search" class="hero-search-bar">
+        <svg class="hero-search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="search"
+               id="ticker-search-input"
+               placeholder="Search for a stock, superinvestor, or insider"
+               autocomplete="off"
+               oninput="tickerSearchFilter(this.value)"
+               onfocus="tickerSearchFilter(this.value)"
+               onkeydown="tickerSearchKeydown(event)">
+        <button class="hero-search-btn" onclick="var inp=document.getElementById('ticker-search-input'); if(inp.value.trim()) tickerSearchFilter(inp.value);" aria-label="Search">
+            Search
+        </button>
+        <div id="ticker-search-results"
+             style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+                    background: var(--pico-background-color, white); border: 1px solid #e0e0e0;
+                    border-radius: 16px; max-height: 400px; overflow-y: auto; z-index: 1001;
+                    box-shadow: 0 8px 24px rgba(0,0,0,0.12);">
+        </div>
+    </div>
 </div>
 
 {# ── Quick Navigation Cards ── #}
@@ -178,11 +205,120 @@
 </div>
 
 <style>
+    /* ── Hero Search Bar (Brave-style pill) ── */
+    .hero-search-wrapper {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 40px;
+        padding: 0 1em;
+    }
+    .hero-search-bar {
+        position: relative;
+        display: flex;
+        align-items: center;
+        width: 90%;
+        max-width: 720px;
+        height: 56px;
+        background: var(--pico-background-color, #fff);
+        border: 1px solid #e0e0e0;
+        border-radius: 28px;
+        padding: 0 6px 0 20px;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .hero-search-bar:focus-within {
+        border-color: #1976d2;
+        box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.12), 0 4px 16px rgba(0,0,0,0.06);
+    }
+    .hero-search-icon {
+        width: 20px;
+        height: 20px;
+        color: rgba(0,0,0,0.35);
+        flex-shrink: 0;
+        margin-right: 12px;
+    }
+    .hero-search-bar input[type="search"] {
+        flex: 1;
+        border: none;
+        outline: none;
+        background: transparent;
+        font-size: 18px;
+        height: 100%;
+        padding: 0;
+        margin: 0;
+        margin-bottom: 0;
+        color: var(--pico-color, #333);
+        -webkit-appearance: none;
+    }
+    .hero-search-bar input[type="search"]::placeholder {
+        color: rgba(0,0,0,0.35);
+        font-size: 16px;
+    }
+    /* Remove PicoCSS input styling overrides */
+    .hero-search-bar input[type="search"]:focus {
+        border: none;
+        outline: none;
+        box-shadow: none;
+        --pico-border-color: transparent;
+    }
+    .hero-search-btn {
+        flex-shrink: 0;
+        height: 44px;
+        padding: 0 24px;
+        border: none;
+        border-radius: 22px;
+        background: #1976d2;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+        margin: 0;
+    }
+    .hero-search-btn:hover {
+        background: #1565c0;
+    }
+    /* Dropdown results styling for hero bar */
+    .hero-search-bar #ticker-search-results {
+        border-radius: 16px;
+        padding: 0.4em 0;
+    }
+    .hero-search-bar #ticker-search-results .ts-item {
+        padding: 0.6em 1.2em !important;
+        font-size: 0.95em !important;
+    }
+
+    @media (max-width: 600px) {
+        .hero-search-bar {
+            height: 50px;
+            padding: 0 5px 0 16px;
+        }
+        .hero-search-bar input[type="search"] {
+            font-size: 16px;
+        }
+        .hero-search-bar input[type="search"]::placeholder {
+            font-size: 14px;
+        }
+        .hero-search-btn {
+            height: 40px;
+            padding: 0 16px;
+            font-size: 14px;
+        }
+        .hero-search-icon {
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+        }
+    }
+
+    /* ── Feature Cards ── */
     .home-cards {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: 1em;
         margin-bottom: 1em;
+        max-width: 900px;
+        margin-left: auto;
+        margin-right: auto;
     }
     .home-card {
         display: flex;
