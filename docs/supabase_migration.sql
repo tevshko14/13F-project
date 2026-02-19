@@ -44,3 +44,59 @@ CREATE POLICY "Allow authenticated read access"
 
 -- No INSERT/UPDATE/DELETE policies for authenticated users.
 -- Only the service_role key (used by the Python backend) can write.
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- PaperPanda Supabase Schema: profiles (Authentication)
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- User profiles table for authentication.
+-- Extends Supabase auth.users with app-specific fields.
+-- Auto-created via trigger when a new user signs up.
+--
+-- Tiers: "free" (default) | "premium"
+
+-- 5. Create the profiles table
+CREATE TABLE IF NOT EXISTS profiles (
+    id           UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email        TEXT,
+    display_name TEXT,
+    tier         TEXT NOT NULL DEFAULT 'free',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 6. Enable Row Level Security on profiles
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+-- 7. RLS Policies for profiles
+-- Users can read their own profile
+CREATE POLICY "Users can read own profile"
+    ON profiles FOR SELECT
+    TO authenticated
+    USING (auth.uid() = id);
+
+-- Service role can do everything (backend user management)
+CREATE POLICY "Service role full access on profiles"
+    ON profiles FOR ALL
+    TO service_role
+    USING (true);
+
+-- 8. Auto-create profile on user signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+    INSERT INTO public.profiles (id, email, display_name)
+    VALUES (
+        NEW.id,
+        NEW.email,
+        COALESCE(NEW.raw_user_meta_data->>'display_name', split_part(NEW.email, '@', 1))
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+    AFTER INSERT ON auth.users
+    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
