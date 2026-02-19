@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-17 (expanded to 84 superinvestors from Dataroma)
+> Last updated: 2026-02-19 (Vitals tab, fuzzy search, persistent cache)
 
 ---
 
@@ -38,10 +38,14 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | CSS           | Pico CSS v2 (classless, from CDN)   |
 | CLI output    | Rich (tables, panels, colors)       |
 | Charts        | Chart.js v4 (bar charts) + ECharts v5 (heatmap treemap) |
+| Search        | Fuse.js v7 (client-side fuzzy search, CDN) |
 | SEC data      | `edgartools` library (wraps EDGAR API) |
-| Market data   | `yfinance` (S&P 500 prices, 52W range) + Wikipedia (sectors) |
+| Market data   | `yfinance` + NASDAQ Trader (~8K listings) + Wikipedia (sectors) |
 | Analyst data  | `yfinance` (free) + `finnhub-python` (free tier, optional key) |
-| Caching       | JSON files at `~/.13f-cache/` (fund_data.json + watchlist.json) |
+| Sentiment     | CNN Fear & Greed, Finnhub, ApeWisdom, Alpha Vantage |
+| Vitals        | People Data Labs, Glassdoor (RapidAPI), Apple iTunes Search |
+| Caching       | JSON files at `~/.13f-cache/` with per-fund TTL (stale-while-revalidate) |
+| Hosting       | Railway (auto-deploy from main) at [paperpanda.io](https://paperpanda.io) |
 | Entry points  | `filings` (CLI), `filings-web` (web, port 8000) |
 
 ### How to Run
@@ -99,14 +103,19 @@ uv run filings-web          # starts at http://localhost:8000
                      ▼
 ┌────────────────────────────────────────────────────────────┐
 │                      cache.py                              │
-│  JSON File Cache — ~/.13f-cache/fund_data.json             │
+│  Persistent Cache — ~/.13f-cache/fund_data.json            │
+│  Stale-While-Revalidate pattern                            │
 │                                                            │
 │  • load_cache() → dict         (read from disk)            │
 │  • save_cache(data)            (atomic write via tmp swap)  │
-│  • is_cache_stale() → bool     (6-hour TTL)                │
-│  • get_cache_age_str() → str   ("5 min ago")               │
+│  • is_cache_stale() → bool     (overall file staleness)    │
+│  • is_fund_stale(fund_data)    (per-fund _last_refreshed)  │
+│  • get_stale_ciks(cache, ciks) (selective refresh list)    │
+│  • stamp_fund_data(data)       (add _last_refreshed ts)    │
 │  • refresh_single_fund(cik)    (calls get_fund_summary)    │
+│  • get_cache_age_str() → str   ("5 min ago")               │
 │                                                            │
+│  TTL: 7 days (off-season) / 12 hours (filing season)       │
 │  Cache keys = CIK without leading zeros ("1067983")        │
 │  No DB. No migration. Delete file to reset.                │
 └────────────────────┬───────────────────────────────────────┘
@@ -125,7 +134,7 @@ uv run filings-web          # starts at http://localhost:8000
 │  Uses display.py │  │  1-sec rate limit between funds       │
 │  for formatting  │  │  Watchlist: server-side JSON + HTMX   │
 │                  │  │  Notifications: SSE + polling + JSON  │
-└──────────────────┘  │  24 routes (see Section 6)            │
+└──────────────────┘  │  30+ routes (see Section 6)            │
                       └──────────┬──────────────────────────┘
                                  │
                                  ▼
@@ -196,23 +205,27 @@ uv run filings-web          # starts at http://localhost:8000
     ├── __init__.py                   # version = "0.1.0"
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
-    ├── cache.py                      # JSON file cache (6-hour TTL)
+    ├── cache.py                      # Persistent cache (per-fund TTL, stale-while-revalidate)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
-    ├── notifications.py              # Notification engine: detection, matching, persistence
+    ├── notifications.py              # Notification engine: detection, matching, persistence, filing season
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
-    ├── market_data.py                # S&P 500 heatmap, most-added table, ticker search (yfinance + Wikipedia)
+    ├── sentiment.py                  # Market sentiment (CNN, Finnhub, ApeWisdom, Alpha Vantage)
+    ├── vitals.py                     # Alternative data (Glassdoor, People Data Labs, App Store)
+    ├── market_data.py                # S&P 500 heatmap, most-added, ticker search (~8K NYSE/NASDAQ listings)
+    ├── company_filings.py            # SEC filing links for stock pages
+    ├── insider_trading.py            # Form 4 insider transaction data
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
     ├── cli.py                        # CLI entry point (search/holdings/compare)
-    ├── web.py                        # FastAPI app (24 routes + background refresh + SSE + polling + market data)
+    ├── web.py                        # FastAPI app (30+ routes + background refresh + SSE + polling + market data)
     └── templates/
-        ├── base.html                 # Master layout: nav, PicoCSS, HTMX, ECharts, sidebar, CSS, sortable table engine, ticker search JS
+        ├── base.html                 # Master layout: nav, PicoCSS, HTMX, ECharts, Fuse.js, sidebar, sortable tables, ticker search
         ├── index.html                # Homepage: heatmap + most-added + superinvestor list
         ├── search.html               # Fund manager search
         ├── investor.html             # Superinvestor page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
         ├── grand_portfolio.html      # Aggregated holdings across all funds
-        ├── stock.html                # Stock detail + multi-quarter history + star button
+        ├── stock.html                # Stock detail (7 tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
         ├── notifications.html        # Notification history page
         ├── error.html                # Error page
         └── partials/
@@ -224,9 +237,13 @@ uv run filings-web          # starts at http://localhost:8000
             ├── watchlist_response.html # OOB response: star + sidebar update
             ├── notification_bell.html # Navbar bell icon with unread badge
             ├── heatmap.html          # S&P 500 ECharts treemap (lazy-loaded via HTMX)
-            ├── most_added.html      # Most-added-by-superinvestors table (lazy-loaded)
-            ├── ticker_search.html   # Nav autocomplete search input (included in base.html)
+            ├── most_added.html       # Most-added-by-superinvestors table (lazy-loaded)
+            ├── ticker_search.html    # Nav autocomplete search input (Fuse.js fuzzy search)
             ├── analyst_ratings.html  # Analyst consensus + ratings table (lazy-loaded)
+            ├── sentiment.html        # Market/news sentiment cards (CNN, Finnhub, Reddit, Alpha Vantage)
+            ├── vitals.html           # Employee pulse, culture, product sentiment (3-card grid)
+            ├── company_filings.html  # SEC filing links (lazy-loaded)
+            ├── insider_trades.html   # Insider trading table (lazy-loaded)
             └── compare_content.html  # Compare quarters partial (lazy-loaded into investor page)
 ```
 
@@ -643,17 +660,27 @@ This logic lives in the `ticker_link.html` Jinja2 macro.
 
 ### 5.7 Cache Refresh Strategy
 
-```
-Startup:
-  Load cache from disk → if stale (>6 hours) → trigger background refresh
+Uses a **stale-while-revalidate** pattern with per-fund TTL:
 
-Background refresh:
-  For each of 84 superinvestors (sequential):
-    1. Call get_fund_summary(cik) in a background thread (asyncio.to_thread)
-    2. Store result in app.state.fund_cache[cik] (in-memory, instant)
-    3. Save to disk in batches: every 10 funds (non-blocking, via thread)
-    4. Final save after loop completes to catch remaining data
-    5. Sleep 1 second between funds (SEC rate limiting)
+```
+TTL Configuration:
+  Off-season: 7 days (13F data only changes quarterly)
+  Filing season (±15 days of deadline): 12 hours
+  Filing deadlines: Feb 14, May 15, Aug 14, Nov 14
+
+Startup:
+  Load cache from disk → check overall staleness → trigger background refresh if needed
+
+Background refresh (selective):
+  1. get_stale_ciks(cache, all_ciks) → only CIKs whose _last_refreshed is expired
+  2. For each stale CIK (sequential):
+     a. Call get_fund_summary(cik) in a background thread
+     b. stamp_fund_data(data) → adds _last_refreshed ISO timestamp
+     c. Store in app.state.fund_cache[cik] (in-memory, instant)
+     d. Save to disk in batches: every 10 funds (non-blocking)
+     e. Sleep 1 second between funds (SEC rate limiting)
+  3. Fresh funds are SKIPPED (not re-fetched)
+  4. On API failure, old data is preserved (stale-while-revalidate)
 
 Manual refresh:
   POST /refresh → creates same background task
@@ -677,7 +704,8 @@ cache pattern as `analysts.py`.
 | `build_heatmap_data()` | Pure computation | — | ECharts treemap format with colors + gold borders |
 | `build_most_added_table()` | Cache (fund_data changes) | 30min | Top 25 stocks by superinvestor add count |
 | `get_52_week_range_bulk()` | yfinance bulk download (1y) | 30min | 52-week high/low/current for enrichment |
-| `get_ticker_search_list()` | Cache + S&P 500 | — | Autocomplete index (~500-1000 items) |
+| `get_all_listed_tickers()` | NASDAQ Trader (nasdaqtraded.txt) | 24h | All ~8K NYSE/NASDAQ/AMEX listings |
+| `get_ticker_search_list()` | Listings + S&P 500 + cache + investors | — | Unified search index (~8K items, Fuse.js) |
 | `_pct_to_color()` | Pure computation | — | Map [-5%, +5%] to red→gray→green hex color |
 
 **Cold start behavior:**
@@ -689,9 +717,50 @@ cache pattern as `analysts.py`.
 **Fallback:** If Wikipedia is unreachable, falls back to hardcoded top ~50 S&P 500
 tickers with sectors. The heatmap will be smaller but functional.
 
-### 5.9 Performance Optimizations
+**Ticker search:** `get_all_listed_tickers()` fetches the NASDAQ Trader public directory
+(`nasdaqtraded.txt`, pipe-delimited, updated daily) containing ~8K NYSE/NASDAQ/AMEX
+securities. `get_ticker_search_list()` merges 4 sources: all listings, S&P 500 constituents,
+superinvestor holdings, and investor profiles. The frontend uses Fuse.js v7 weighted fuzzy
+search (ticker weight 1.0, name weight 0.5) with 150ms debounce.
+
+### 5.9 Sentiment Module (`sentiment.py`)
+
+Fetches market/news sentiment from 4 free sources. Each source is fetched independently;
+failures in one do not affect the others. All results are cached in memory with per-source TTLs.
+
+| Provider | Function | TTL | API Key | Returns |
+|---|---|---|---|---|
+| CNN Fear & Greed | `_get_cnn_fear_greed()` | 1h | None | score (0-100), rating, historical comparisons |
+| Finnhub | `_get_finnhub_sentiment()` | 2h | `FINNHUB_API_KEY` | bullish/bearish %, buzz metrics, sector comparison |
+| ApeWisdom | `_get_apewisdom_for_ticker()` | 1h | None | Reddit mention rank, count, upvotes, 24h delta |
+| Alpha Vantage | `_get_alphavantage_sentiment()` | 12h | `ALPHAVANTAGE_API_KEY` | NLP-scored news articles, avg sentiment label |
+
+Alpha Vantage has a daily budget tracker (`_AV_DAILY_MAX = 20`) to stay within the
+25/day free tier limit.
+
+### 5.10 Vitals Module (`vitals.py`)
+
+Alternative data signals for the Vitals tab. Each source is fetched independently
+with aggressive caching (7-30 day TTLs).
+
+| Provider | Function | TTL | API Key | Returns |
+|---|---|---|---|---|
+| People Data Labs | `_get_pdl_data()` | 7d | `PDL_API_KEY` | employee_count, size, industry, founded, location |
+| Glassdoor (RapidAPI) | `_get_glassdoor_data()` | 30d | `GLASSDOOR_RAPIDAPI_KEY` | overall_rating, CEO approval, recommend %, outlook |
+| Apple iTunes Search | `_get_appstore_data()` | 7d | None (free) | app_name, rating, rating_count, version trend |
+
+**Company name resolution:** Both Glassdoor and App Store use `_resolve_company_name(ticker)`
+which calls `yfinance.Ticker(ticker).info["longName"]` to map ticker to company name.
+
+**App Store matching:** Uses `_TICKER_APP_OVERRIDES` dict for 20+ major companies where
+the ticker doesn't map to the main consumer app (e.g., GOOG → "Google", META → "Instagram").
+Falls back to yfinance company name search. Picks the result with the most ratings for
+override tickers.
+
+### 5.11 Performance Optimizations
 
 **Problem:** With 84 superinvestors, synchronous file I/O was blocking the async event loop.
+Per-fund TTL now skips fresh funds during background refresh, reducing API calls significantly.
 
 | Optimization | Before | After |
 |---|---|---|
@@ -724,7 +793,11 @@ tickers with sectors. The heatmap will be smaller but functional.
 | GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
 | GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only | `stock.html` |
 | GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (live, 5-min cache) | `partials/analyst_ratings.html` |
-| GET | `/api/ticker-search-index` | `ticker_search_index` | Cache + S&P 500 (Wikipedia) | JSON response |
+| GET | `/api/sentiment/{ticker}` | `sentiment_data` | CNN, Finnhub, ApeWisdom, Alpha Vantage | `partials/sentiment.html` |
+| GET | `/api/vitals/{ticker}` | `vitals_data` | Glassdoor, PDL, Apple iTunes | `partials/vitals.html` |
+| GET | `/api/company-filings/{ticker}` | `company_filings_tab` | SEC EDGAR | `partials/company_filings.html` |
+| GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | SEC EDGAR Form 4 | `partials/insider_trades.html` |
+| GET | `/api/ticker-search-index` | `ticker_search_index` | NASDAQ Trader + S&P 500 + cache | JSON response |
 | GET | `/api/heatmap` | `heatmap` | yfinance (30-min cache) + Wikipedia | `partials/heatmap.html` |
 | GET | `/api/most-added` | `most_added` | Cache + analysts + yfinance | `partials/most_added.html` |
 | POST | `/api/watchlist/{ticker}` | `watchlist_add` | Watchlist JSON | `partials/watchlist_response.html` |
@@ -782,10 +855,10 @@ Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund
 ### Template Hierarchy
 
 ```
-base.html (nav + styles + HTMX + Chart.js + ECharts CDN + sidebar + SSE + toasts + sortable table engine + ticker search JS)
+base.html (nav + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SSE + sortable tables + fuzzy search)
   ├── includes partials/watchlist_sidebar.html (in <aside> via hx-preserve)
   ├── includes partials/notification_bell.html (in <nav>, HTMX-polls every 60s)
-  ├── includes partials/ticker_search.html (in <nav>, autocomplete dropdown)
+  ├── includes partials/ticker_search.html (in <nav>, Fuse.js fuzzy autocomplete)
   ├── index.html (homepage)
   │     ├── lazy-loads partials/heatmap.html via HTMX (/api/heatmap)
   │     ├── lazy-loads partials/most_added.html via HTMX (/api/most-added)
@@ -799,9 +872,13 @@ base.html (nav + styles + HTMX + Chart.js + ECharts CDN + sidebar + SSE + toasts
   │     └── imports partials/ticker_link.html (macro)
   ├── grand_portfolio.html
   │     └── imports partials/ticker_link.html (macro)
-  ├── stock.html (Tabbed: Overview + Analyst Ratings, Chart.js, star button)
+  ├── stock.html (7 Tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
   │     ├── includes partials/watchlist_star.html
-  │     └── lazy-loads partials/analyst_ratings.html via fetch(/api/analysts/{ticker})
+  │     ├── lazy-loads partials/analyst_ratings.html via fetch(/api/analysts/{ticker})
+  │     ├── lazy-loads partials/sentiment.html via fetch(/api/sentiment/{ticker})
+  │     ├── lazy-loads partials/vitals.html via fetch(/api/vitals/{ticker})
+  │     ├── lazy-loads partials/company_filings.html via fetch(/api/company-filings/{ticker})
+  │     └── lazy-loads partials/insider_trades.html via fetch(/api/insider-trades/{ticker})
   ├── notifications.html (notification history)
   └── error.html
 ```
@@ -1099,12 +1176,17 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Interactive chart on stock pages (Chart.js stacked bar, simple/detailed toggle)
 - [x] Watchlist sidebar (star tickers, persistent JSON, HTMX OOB swaps)
 - [x] In-app notification system (SEC poller + watchlist matching + SSE toasts + bell badge)
-- [x] Clickable investor names in stock history (links to `/holdings/{cik}` —
-      implemented in both holders table and quarterly history section)
-- [x] Analyst ratings tab on stock pages (Finnhub + yfinance, firm-level, lazy-loaded via HTMX)
-- [x] Sortable tables across all pages (vanilla JS, `data-sort` attributes, text/number/date/activity types)
+- [x] Clickable investor names in stock history (links to `/holdings/{cik}`)
+- [x] Analyst ratings tab on stock pages (Finnhub + yfinance, firm-level, lazy-loaded)
+- [x] Sortable tables across all pages (vanilla JS, `data-sort` attributes)
 - [x] Consolidated superinvestor page (investor.html with Holdings + Compare Quarters tabs)
-- [x] Homepage enhancement: S&P 500 heatmap (ECharts treemap), most-added table, ticker search autocomplete
+- [x] Homepage: S&P 500 heatmap (ECharts), most-added table, ticker search autocomplete
+- [x] Insider trading tab on stock pages (SEC Form 4 data)
+- [x] SEC Filings tab on stock pages (direct links to EDGAR)
+- [x] Sentiment tab (CNN Fear & Greed, Finnhub news, Reddit buzz, Alpha Vantage NLP)
+- [x] Expanded ticker search: ~8K NYSE/NASDAQ listings via NASDAQ Trader + Fuse.js fuzzy search
+- [x] Persistent caching: per-fund TTL (7d/12h adaptive), stale-while-revalidate, selective refresh
+- [x] Vitals tab: Glassdoor ratings, People Data Labs employee data, Apple App Store ratings
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
 - [ ] Comparison across multiple funds on the same page
@@ -1143,6 +1225,6 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-17. If told "Context is drifting,"
+> This file documents the system as of 2026-02-19. If told "Context is drifting,"
 > the first action should be to re-read `/Users/Tevis_1/13F-project/README_DEV.md`
 > and reconcile any discrepancies with the actual code.

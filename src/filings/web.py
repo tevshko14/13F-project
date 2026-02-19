@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from filings import client, cache, analysts, market_data, sentiment, company_filings, insider_trading
+from filings import client, cache, analysts, market_data, sentiment, vitals, company_filings, insider_trading
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -552,10 +552,22 @@ async def sentiment_data(request: Request, ticker: str):
         "finnhub": data.get("finnhub"),
         "apewisdom": data.get("apewisdom"),
         "alphavantage": data.get("alphavantage"),
-        "glassdoor": data.get("glassdoor"),
         "has_finnhub_key": sentiment.has_finnhub_key(),
         "has_alphavantage_key": sentiment.has_alphavantage_key(),
-        "has_glassdoor_key": sentiment.has_glassdoor_key(),
+    })
+
+
+@app.get("/api/vitals/{ticker}", response_class=HTMLResponse)
+async def vitals_data(request: Request, ticker: str):
+    data = await asyncio.to_thread(vitals.get_vitals_data, ticker)
+    return templates.TemplateResponse("partials/vitals.html", {
+        "request": request,
+        "ticker": ticker.upper(),
+        "glassdoor": data.get("glassdoor"),
+        "pdl": data.get("pdl"),
+        "appstore": data.get("appstore"),
+        "has_glassdoor_key": vitals.has_glassdoor_key(),
+        "has_pdl_key": vitals.has_pdl_key(),
     })
 
 
@@ -796,6 +808,7 @@ if _has_limiter:
     fund_row = limiter.limit("10/minute")(fund_row)
     analyst_ratings = limiter.limit("30/minute")(analyst_ratings)
     sentiment_data = limiter.limit("30/minute")(sentiment_data)
+    vitals_data = limiter.limit("30/minute")(vitals_data)
     company_filings_tab = limiter.limit("30/minute")(company_filings_tab)
     insider_trades_api = limiter.limit("20/minute")(insider_trades_api)
     stock_insider_trades_api = limiter.limit("30/minute")(stock_insider_trades_api)

@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PaperPanda - 13F Filing Tracker</title>
+    <meta name="description" content="Track SEC 13F institutional holdings from 84 superinvestors. See what Buffett, Ackman, Burry, and 81 other top investors are buying and selling.">
+    <style>
+        :root {
+            --bg: #fafafa;
+            --text: #1a1a2e;
+            --muted: #666;
+            --accent: #2e7d32;
+            --accent-light: #e8f5e9;
+            --card-bg: #fff;
+            --border: rgba(0,0,0,0.08);
+            --blue: #1976d2;
+            --red: #c62828;
+            --gold: #f9a825;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        /* Hero */
+        .hero {
+            text-align: center;
+            padding: 4em 1.5em 3em;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            color: #fff;
+        }
+        .hero h1 {
+            font-size: 3em;
+            font-weight: 800;
+            margin-bottom: 0.2em;
+            letter-spacing: -0.02em;
+        }
+        .hero h1 span { color: var(--gold); }
+        .hero .tagline {
+            font-size: 1.25em;
+            color: rgba(255,255,255,0.8);
+            max-width: 600px;
+            margin: 0 auto 1.5em;
+        }
+        .hero .cta-row {
+            display: flex;
+            gap: 1em;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .btn {
+            display: inline-block;
+            padding: 0.75em 2em;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1em;
+            transition: transform 0.15s, box-shadow 0.15s;
+        }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .btn-primary { background: var(--gold); color: #1a1a2e; }
+        .btn-secondary { background: rgba(255,255,255,0.12); color: #fff; border: 1px solid rgba(255,255,255,0.25); }
+
+        /* Stats banner */
+        .stats-banner {
+            display: flex;
+            justify-content: center;
+            gap: 3em;
+            padding: 1.5em;
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+        .stat { text-align: center; }
+        .stat .num { font-size: 1.8em; font-weight: 800; color: var(--accent); }
+        .stat .label { font-size: 0.85em; color: var(--muted); }
+
+        /* Container */
+        .container { max-width: 1000px; margin: 0 auto; padding: 0 1.5em; }
+
+        /* Section */
+        .section { padding: 3em 0; }
+        .section h2 {
+            font-size: 1.8em;
+            font-weight: 700;
+            margin-bottom: 0.8em;
+            text-align: center;
+        }
+        .section .subtitle {
+            text-align: center;
+            color: var(--muted);
+            max-width: 600px;
+            margin: -0.5em auto 2em;
+        }
+
+        /* Feature grid */
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5em;
+        }
+        .feature-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5em;
+            transition: box-shadow 0.2s;
+        }
+        .feature-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
+        .feature-card .icon {
+            font-size: 1.6em;
+            margin-bottom: 0.5em;
+        }
+        .feature-card h3 { font-size: 1.1em; margin-bottom: 0.4em; }
+        .feature-card p { font-size: 0.9em; color: var(--muted); line-height: 1.5; }
+
+        /* Tabs preview */
+        .tabs-section { background: var(--card-bg); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+        .tab-pills {
+            display: flex;
+            gap: 0.5em;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 1.5em;
+        }
+        .tab-pill {
+            padding: 0.5em 1.2em;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            background: #f0f0f0;
+            color: var(--muted);
+        }
+        .tab-pill.active { background: var(--accent); color: #fff; }
+
+        /* Tech stack */
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1em;
+        }
+        .tech-item {
+            display: flex;
+            align-items: center;
+            gap: 0.8em;
+            padding: 0.8em;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+        .tech-item .tech-label { color: var(--muted); font-size: 0.8em; }
+        .tech-item .tech-name { font-weight: 600; }
+
+        /* ENV table */
+        .env-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+        .env-table th, .env-table td { padding: 0.6em 0.8em; text-align: left; border-bottom: 1px solid var(--border); }
+        .env-table th { font-weight: 600; background: var(--accent-light); }
+        .env-table code { background: #f5f5f5; padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.9em; }
+        .env-table .badge-free { display: inline-block; padding: 0.15em 0.5em; border-radius: 10px; font-size: 0.75em; font-weight: 600; background: var(--accent-light); color: var(--accent); }
+        .env-table .badge-none { display: inline-block; padding: 0.15em 0.5em; border-radius: 10px; font-size: 0.75em; font-weight: 600; background: #e3f2fd; color: var(--blue); }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 2em 1.5em;
+            color: var(--muted);
+            font-size: 0.85em;
+            border-top: 1px solid var(--border);
+        }
+        .footer a { color: var(--blue); text-decoration: none; }
+
+        /* Quick start */
+        .code-block {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            border-radius: 10px;
+            padding: 1.5em;
+            overflow-x: auto;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.9em;
+            line-height: 1.7;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .code-block .comment { color: #666; }
+        .code-block .cmd { color: var(--gold); }
+
+        @media (max-width: 600px) {
+            .hero h1 { font-size: 2em; }
+            .hero .tagline { font-size: 1em; }
+            .stats-banner { gap: 1.5em; }
+            .stat .num { font-size: 1.4em; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Hero -->
+<section class="hero">
+    <h1><span>PaperPanda</span></h1>
+    <p class="tagline">
+        Track what 84 superinvestors are buying and selling.
+        Real-time 13F filing data from SEC EDGAR.
+    </p>
+    <div class="cta-row">
+        <a href="https://paperpanda.io" class="btn btn-primary">Open Dashboard</a>
+        <a href="https://github.com/tevshko14/13F-project" class="btn btn-secondary">View on GitHub</a>
+    </div>
+</section>
+
+<!-- Stats -->
+<div class="stats-banner">
+    <div class="stat">
+        <div class="num">84</div>
+        <div class="label">Superinvestors Tracked</div>
+    </div>
+    <div class="stat">
+        <div class="num">8,000+</div>
+        <div class="label">Searchable Tickers</div>
+    </div>
+    <div class="stat">
+        <div class="num">7</div>
+        <div class="label">Stock Page Tabs</div>
+    </div>
+    <div class="stat">
+        <div class="num">10+</div>
+        <div class="label">Data Sources</div>
+    </div>
+</div>
+
+<!-- Features -->
+<section class="section">
+    <div class="container">
+        <h2>Features</h2>
+        <p class="subtitle">Everything you need to follow institutional money flow, from portfolio tracking to alternative data signals.</p>
+        <div class="features">
+            <div class="feature-card">
+                <div class="icon">&#x1f4c8;</div>
+                <h3>S&P 500 Heatmap</h3>
+                <p>Interactive treemap with daily performance by sector. Gold borders highlight stocks held by superinvestors.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">&#x1f50d;</div>
+                <h3>Fuzzy Ticker Search</h3>
+                <p>Fuse.js-powered autocomplete across ~8,000 NYSE/NASDAQ listings, weighted by superinvestor holdings.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">&#x1f4ca;</div>
+                <h3>Analyst Ratings</h3>
+                <p>Wall Street consensus with firm-level upgrades, downgrades, and price targets from Finnhub + yfinance.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">&#x1f4e3;</div>
+                <h3>Market Sentiment</h3>
+                <p>CNN Fear & Greed Index, Finnhub news sentiment, Reddit buzz from ApeWisdom, and Alpha Vantage NLP.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">&#x1f465;</div>
+                <h3>Employee Vitals</h3>
+                <p>Glassdoor ratings, People Data Labs headcount, and App Store ratings — alternative data for fundamentals.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">&#x1f514;</div>
+                <h3>Real-Time Alerts</h3>
+                <p>SSE-powered notifications when new filings match your watchlist. Star any ticker for instant tracking.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">&#x1f4b0;</div>
+                <h3>Grand Portfolio</h3>
+                <p>Aggregated view of all 84 superinvestor holdings ranked by conviction — see what the smart money agrees on.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">&#x1f4dd;</div>
+                <h3>Insider Trading</h3>
+                <p>Recent Form 4 insider transactions showing executive buys and sells alongside institutional activity.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">&#x26a1;</div>
+                <h3>Smart Caching</h3>
+                <p>Stale-while-revalidate with per-fund TTL. 7-day off-season, 12-hour during filing season. Never blocks on API calls.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Stock Page Tabs -->
+<section class="section tabs-section">
+    <div class="container">
+        <h2>Stock Page Deep Dive</h2>
+        <p class="subtitle">Every stock page has 7 tabs of rich data, all lazy-loaded for instant navigation.</p>
+        <div class="tab-pills">
+            <span class="tab-pill active">Overview</span>
+            <span class="tab-pill">Ownership</span>
+            <span class="tab-pill">Analyst Ratings</span>
+            <span class="tab-pill">Sentiment</span>
+            <span class="tab-pill">Vitals</span>
+            <span class="tab-pill">SEC Filings</span>
+            <span class="tab-pill">Insider Trading</span>
+        </div>
+        <div class="features" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));">
+            <div class="feature-card">
+                <h3>Overview</h3>
+                <p>Which superinvestors hold this stock, quarterly buy/sell chart, watchlist star button.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Sentiment</h3>
+                <p>CNN Fear & Greed gauge, Finnhub bull/bear %, Reddit mentions, NLP news scoring.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Vitals</h3>
+                <p>Employee headcount (PDL), Glassdoor culture rating with stars, App Store product rating.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Insider Trading</h3>
+                <p>Recent Form 4 transactions with buy/sell badges, transaction values, and ownership changes.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Tech Stack -->
+<section class="section">
+    <div class="container">
+        <h2>Tech Stack</h2>
+        <div class="tech-grid">
+            <div class="tech-item">
+                <div><div class="tech-name">Python 3.12+</div><div class="tech-label">Language</div></div>
+            </div>
+            <div class="tech-item">
+                <div><div class="tech-name">FastAPI + Jinja2</div><div class="tech-label">Web Framework</div></div>
+            </div>
+            <div class="tech-item">
+                <div><div class="tech-name">HTMX</div><div class="tech-label">Dynamic UI</div></div>
+            </div>
+            <div class="tech-item">
+                <div><div class="tech-name">Pico CSS v2</div><div class="tech-label">Classless CSS</div></div>
+            </div>
+            <div class="tech-item">
+                <div><div class="tech-name">Chart.js + ECharts</div><div class="tech-label">Charts</div></div>
+            </div>
+            <div class="tech-item">
+                <div><div class="tech-name">Fuse.js v7</div><div class="tech-label">Fuzzy Search</div></div>
+            </div>
+            <div class="tech-item">
+                <div><div class="tech-name">edgartools</div><div class="tech-label">SEC EDGAR</div></div>
+            </div>
+            <div class="tech-item">
+                <div><div class="tech-name">Railway</div><div class="tech-label">Hosting</div></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Environment Variables -->
+<section class="section" style="background: var(--card-bg); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+    <div class="container">
+        <h2>Environment Variables</h2>
+        <p class="subtitle">All optional. The dashboard works out of the box with SEC data. Add API keys for richer data.</p>
+        <table class="env-table">
+            <thead>
+                <tr>
+                    <th>Variable</th>
+                    <th>Provider</th>
+                    <th>Free Tier</th>
+                    <th>Powers</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>FINNHUB_API_KEY</code></td>
+                    <td>Finnhub</td>
+                    <td><span class="badge-free">60/min</span></td>
+                    <td>News sentiment + analyst ratings</td>
+                </tr>
+                <tr>
+                    <td><code>ALPHAVANTAGE_API_KEY</code></td>
+                    <td>Alpha Vantage</td>
+                    <td><span class="badge-free">25/day</span></td>
+                    <td>NLP news sentiment analysis</td>
+                </tr>
+                <tr>
+                    <td><code>GLASSDOOR_RAPIDAPI_KEY</code></td>
+                    <td>RapidAPI</td>
+                    <td><span class="badge-free">25/month</span></td>
+                    <td>Glassdoor culture ratings</td>
+                </tr>
+                <tr>
+                    <td><code>PDL_API_KEY</code></td>
+                    <td>People Data Labs</td>
+                    <td><span class="badge-free">100/month</span></td>
+                    <td>Employee headcount data</td>
+                </tr>
+                <tr>
+                    <td>App Store</td>
+                    <td>Apple iTunes</td>
+                    <td><span class="badge-none">No key needed</span></td>
+                    <td>iOS app ratings + reviews</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- Quick Start -->
+<section class="section">
+    <div class="container">
+        <h2>Quick Start</h2>
+        <div class="code-block">
+            <span class="comment"># Install dependencies</span><br>
+            <span class="cmd">uv sync</span><br><br>
+            <span class="comment"># Run the web dashboard</span><br>
+            <span class="cmd">uv run filings-web</span><br>
+            <span class="comment"># Open http://localhost:8000</span><br><br>
+            <span class="comment"># CLI commands</span><br>
+            <span class="cmd">uv run filings search "Berkshire"</span><br>
+            <span class="cmd">uv run filings holdings 1067983</span><br>
+            <span class="cmd">uv run filings compare 1067983</span>
+        </div>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+    <p>
+        <a href="https://paperpanda.io">paperpanda.io</a> &middot;
+        <a href="https://github.com/tevshko14/13F-project">GitHub</a> &middot;
+        MIT License
+    </p>
+    <p style="margin-top: 0.5em;">
+        Data from SEC EDGAR, CNN, Finnhub, ApeWisdom, Alpha Vantage, Glassdoor, People Data Labs, and Apple.
+    </p>
+</footer>
+
+</body>
+</html>
