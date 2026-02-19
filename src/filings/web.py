@@ -486,6 +486,80 @@ async def compare_api(request: Request, cik: str, top_n: int = Query(25)):
     })
 
 
+# --- Portfolio Pie Chart Data (lazy-loaded into investor page) ---
+
+@app.get("/api/portfolio-chart/{cik}")
+async def portfolio_chart_data(request: Request, cik: str):
+    """Return top-10 holdings with cross-investor ownership counts.
+
+    Used by the ECharts donut on the investor profile page.
+    """
+    cache_data = getattr(app.state, "fund_cache", {})
+    cached = cache_data.get(cik)
+    if not cached:
+        return JSONResponse(content=[])
+
+    # Build ownership map once (single pass through all investors)
+    ownership_map = client.build_ticker_ownership_map(
+        cache_data, SUPERINVESTORS_BY_CIK
+    )
+
+    # Get current investor's display name to exclude from "also held by"
+    si = SUPERINVESTORS_BY_CIK.get(cik)
+    current_name = si.display_name if si else None
+
+    # Build changes lookup (cusip -> change dict)
+    change_by_cusip: dict[str, dict] = {}
+    for ch in cached.get("changes", []):
+        change_by_cusip[ch["cusip"]] = ch
+
+    # Period label from latest quarterly_changes
+    period = ""
+    qc = cached.get("quarterly_changes", [])
+    if qc:
+        period = qc[0].get("period", "")
+
+    # Activity label mapping
+    status_labels = {
+        "NEW": "NEW BUY",
+        "CLOSED": "SOLD",
+        "INCREASED": "ADD",
+        "DECREASED": "REDUCE",
+    }
+
+    # Top 10 holdings by value
+    all_h = cached.get("all_holdings", [])
+    top_10 = all_h[:10]
+    result = []
+    for h in top_10:
+        ticker = h.get("ticker") or ""
+        pct = h.get("pct", 0)
+        cusip = h.get("cusip", "")
+
+        # Activity from changes
+        ch = change_by_cusip.get(cusip, {})
+        raw_status = ch.get("status", "")
+        activity = status_labels.get(raw_status, "Unchanged")
+
+        # Cross-investor owners (exclude current investor)
+        t_upper = ticker.upper() if ticker else ""
+        owners = ownership_map.get(t_upper, [])
+        other_owners = [n for n in owners if n != current_name]
+
+        result.append({
+            "ticker": ticker or cusip[:6],
+            "issuer": h.get("issuer", ""),
+            "pct": round(pct, 2),
+            "value": h.get("value", 0),
+            "activity": activity,
+            "quarter": period,
+            "also_held_by": len(other_owners),
+            "owner_names": other_owners[:5],
+        })
+
+    return JSONResponse(content=result)
+
+
 # --- Activity Feed ---
 
 @app.get("/activity", response_class=HTMLResponse)
