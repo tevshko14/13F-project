@@ -234,111 +234,6 @@
 </article>
 {% endif %}
 
-{# ── Employee Sentiment: Glassdoor ── #}
-{% if glassdoor %}
-<article style="margin-bottom: 1.5em;">
-    <header>
-        <strong>Employee Sentiment</strong>
-        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            via Glassdoor
-        </span>
-    </header>
-
-    <div style="display: flex; gap: 2.5em; align-items: flex-start; flex-wrap: wrap;">
-        {# Overall rating with stars #}
-        <div style="text-align: center; min-width: 120px;">
-            <div style="font-size: 2.2em; font-weight: 700; color: {% if glassdoor.overall_rating >= 4.0 %}#2e7d32{% elif glassdoor.overall_rating >= 3.0 %}#e65100{% else %}#c62828{% endif %}; line-height: 1.1;">
-                {{ glassdoor.overall_rating }}
-            </div>
-            <div style="font-size: 0.85em; color: #888; margin-bottom: 0.3em;">/ 5.0</div>
-            {# Star visualization #}
-            <div style="font-size: 1.2em; letter-spacing: 2px;" title="{{ glassdoor.overall_rating }} out of 5 stars">
-                {% set full_stars = glassdoor.overall_rating|int %}
-                {% set has_half = (glassdoor.overall_rating - full_stars) >= 0.3 %}
-                {% for i in range(full_stars) %}<span style="color: #f9a825;">&#9733;</span>{% endfor %}{% if has_half %}<span style="color: #f9a825;">&#9733;</span>{% set remaining = 4 - full_stars %}{% else %}{% set remaining = 5 - full_stars %}{% endif %}{% for i in range(remaining) %}<span style="color: #ddd;">&#9733;</span>{% endfor %}
-            </div>
-            {% if glassdoor.review_count %}
-            <div style="font-size: 0.75em; color: #888; margin-top: 0.3em;">
-                {{ "{:,}".format(glassdoor.review_count) }} reviews
-            </div>
-            {% endif %}
-        </div>
-
-        {# Sub-metrics with progress bars #}
-        <div style="flex: 1; min-width: 250px; max-width: 450px;">
-            {% if glassdoor.recommend_to_friend_pct is not none %}
-            <div style="margin-bottom: 0.8em;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 0.25em;">
-                    <span>Recommend to Friend</span>
-                    <strong style="color: {% if glassdoor.recommend_to_friend_pct >= 70 %}#2e7d32{% elif glassdoor.recommend_to_friend_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
-                        {{ glassdoor.recommend_to_friend_pct|int }}%
-                    </strong>
-                </div>
-                <div style="height: 6px; border-radius: 3px; background: #f0f0f0; overflow: hidden;">
-                    <div style="width: {{ glassdoor.recommend_to_friend_pct }}%; height: 100%; border-radius: 3px;
-                                background: {% if glassdoor.recommend_to_friend_pct >= 70 %}#2e7d32{% elif glassdoor.recommend_to_friend_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
-                </div>
-            </div>
-            {% endif %}
-
-            {% if glassdoor.ceo_approval_pct is not none %}
-            <div style="margin-bottom: 0.8em;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 0.25em;">
-                    <span>CEO Approval{% if glassdoor.ceo_name %} <span class="text-muted">({{ glassdoor.ceo_name }})</span>{% endif %}</span>
-                    <strong style="color: {% if glassdoor.ceo_approval_pct >= 70 %}#2e7d32{% elif glassdoor.ceo_approval_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
-                        {{ glassdoor.ceo_approval_pct|int }}%
-                    </strong>
-                </div>
-                <div style="height: 6px; border-radius: 3px; background: #f0f0f0; overflow: hidden;">
-                    <div style="width: {{ glassdoor.ceo_approval_pct }}%; height: 100%; border-radius: 3px;
-                                background: {% if glassdoor.ceo_approval_pct >= 70 %}#2e7d32{% elif glassdoor.ceo_approval_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
-                </div>
-            </div>
-            {% endif %}
-
-            {% if glassdoor.business_outlook_pct is not none %}
-            <div style="margin-bottom: 0.8em;">
-                <div style="display: flex; justify-content: space-between; font-size: 0.85em; margin-bottom: 0.25em;">
-                    <span>Positive Business Outlook</span>
-                    <strong style="color: {% if glassdoor.business_outlook_pct >= 70 %}#2e7d32{% elif glassdoor.business_outlook_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
-                        {{ glassdoor.business_outlook_pct|int }}%
-                    </strong>
-                </div>
-                <div style="height: 6px; border-radius: 3px; background: #f0f0f0; overflow: hidden;">
-                    <div style="width: {{ glassdoor.business_outlook_pct }}%; height: 100%; border-radius: 3px;
-                                background: {% if glassdoor.business_outlook_pct >= 70 %}#2e7d32{% elif glassdoor.business_outlook_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
-                </div>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
-    <footer class="text-muted text-small" style="margin-top: 0.5em;">
-        <span title="Research shows companies with high employee satisfaction tend to outperform peers long-term">
-            &#x1f4a1; High employee sentiment often correlates with long-term retention and innovation.
-        </span>
-    </footer>
-</article>
-{% elif has_glassdoor_key is defined and has_glassdoor_key %}
-<article style="margin-bottom: 1.5em;">
-    <header>
-        <strong>Employee Sentiment</strong>
-        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            via Glassdoor
-        </span>
-    </header>
-    <p class="text-muted" style="text-align: center; padding: 1em 0;">
-        Employee rating not available for <strong>{{ ticker }}</strong>.
-    </p>
-</article>
-{% elif has_glassdoor_key is defined and not has_glassdoor_key %}
-<article style="margin-bottom: 1.5em;">
-    <p class="text-muted" style="text-align: center; padding: 1em 0;">
-        Employee sentiment requires a <code>GLASSDOOR_RAPIDAPI_KEY</code> environment variable.
-    </p>
-</article>
-{% endif %}
-
 {# ── News Articles: Alpha Vantage ── #}
 {% if alphavantage and alphavantage.articles %}
 <article>
@@ -416,12 +311,12 @@
 {% endif %}
 
 {# ── Fallback: nothing available ── #}
-{% if not cnn and not finnhub and not apewisdom and not alphavantage and not glassdoor %}
+{% if not cnn and not finnhub and not apewisdom and not alphavantage %}
 <article>
     <p class="text-muted" style="text-align: center; padding: 2em 0;">
         No sentiment data available for <strong>{{ ticker }}</strong>.
         <br>
-        <small>Configure <code>FINNHUB_API_KEY</code>, <code>ALPHAVANTAGE_API_KEY</code>, and/or <code>GLASSDOOR_RAPIDAPI_KEY</code> for additional data sources.</small>
+        <small>Configure <code>FINNHUB_API_KEY</code> and/or <code>ALPHAVANTAGE_API_KEY</code> for additional data sources.</small>
     </p>
 </article>
 {% endif %}

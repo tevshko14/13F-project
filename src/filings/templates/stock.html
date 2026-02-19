@@ -65,6 +65,13 @@
                 </button>
             </li>
             <li>
+                <button id="tab-vitals-btn"
+                        class="stock-tab"
+                        onclick="switchTab('vitals')">
+                    Vitals
+                </button>
+            </li>
+            <li>
                 <button id="tab-filings-btn"
                         class="stock-tab"
                         onclick="switchTab('filings')">
@@ -781,6 +788,15 @@
     </div>
 </div>
 
+{# ── Vitals Tab ── #}
+<div id="tab-vitals" class="tab-content">
+    <div id="vitals-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading vitals data...
+        </p>
+    </div>
+</div>
+
 {# ── SEC Filings Tab ── #}
 <div id="tab-filings" class="tab-content">
     <div id="filings-content">
@@ -832,6 +848,7 @@ window.toggleHolders = function(btn) {
 (function() {
     var analystLoaded = false;
     var sentimentLoaded = false;
+    var vitalsLoaded = false;
     var filingsLoaded = false;
     var insiderLoaded = false;
 
@@ -905,6 +922,33 @@ window.toggleHolders = function(btn) {
                 document.getElementById('sentiment-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                     'Sentiment data requires a ticker symbol.</p>';
+            }
+        }
+
+        // Lazy-load vitals data on first click
+        if (tab === 'vitals' && !vitalsLoaded) {
+            vitalsLoaded = true;
+            {% if stock_info.ticker %}
+            var vitalsUrl = '/api/vitals/{{ stock_info.ticker }}';
+            {% else %}
+            var vitalsUrl = null;
+            {% endif %}
+
+            if (vitalsUrl) {
+                fetch(vitalsUrl)
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) {
+                        document.getElementById('vitals-content').innerHTML = html;
+                    })
+                    .catch(function() {
+                        document.getElementById('vitals-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load vitals data. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('vitals-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Vitals data requires a ticker symbol.</p>';
             }
         }
 

@@ -6,6 +6,8 @@ Sources:
   3. ApeWisdom – Reddit mention counts (WSB, r/stocks, etc.)
   4. Alpha Vantage – per-ticker NLP-scored news articles
 
+Glassdoor employee sentiment was migrated to vitals.py (Vitals tab).
+
 All results are cached in memory with aggressive TTLs to avoid
 hitting rate limits and to keep page loads fast.
 """
@@ -29,7 +31,6 @@ _FINNHUB_TTL = 7200       # 2 hours
 _CNN_TTL = 3600            # 1 hour
 _APEWISDOM_TTL = 3600      # 1 hour
 _ALPHAVANTAGE_TTL = 43200  # 12 hours
-_GLASSDOOR_TTL = 2_592_000  # 30 days — ratings change very slowly
 
 # ── LRU max entries for per-ticker caches ─────────────────────────────
 _MAX_CACHE_ENTRIES = 2000
@@ -37,7 +38,6 @@ _MAX_CACHE_ENTRIES = 2000
 # ── Per-ticker caches: {TICKER: (timestamp, data)} ─────────────────
 _finnhub_cache: dict[str, tuple[float, dict | None]] = {}
 _alphavantage_cache: dict[str, tuple[float, dict | None]] = {}
-_glassdoor_cache: dict[str, tuple[float, dict | None]] = {}
 
 # ── Global caches: (timestamp, data) ───────────────────────────────
 _cnn_cache: tuple[float, dict | None] | None = None
@@ -66,10 +66,6 @@ def has_finnhub_key() -> bool:
 
 def has_alphavantage_key() -> bool:
     return bool(os.environ.get("ALPHAVANTAGE_API_KEY"))
-
-
-def has_glassdoor_key() -> bool:
-    return bool(os.environ.get("GLASSDOOR_RAPIDAPI_KEY"))
 
 
 _BROWSER_UA = (
@@ -369,135 +365,6 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 5. Glassdoor Employee Sentiment (via RapidAPI)
-# ═══════════════════════════════════════════════════════════════════
-
-def _resolve_company_name(ticker: str) -> str | None:
-    """Resolve ticker to company name via yfinance for Glassdoor lookup."""
-    try:
-        import yfinance as yf
-        tk = yf.Ticker(ticker.upper())
-        info = tk.info or {}
-        return info.get("longName") or info.get("shortName")
-    except Exception as exc:
-        logger.debug("yfinance company name lookup failed for %s: %s", ticker, exc)
-        return None
-
-
-def _get_glassdoor_data(ticker: str) -> dict | None:
-    """Fetch Glassdoor company ratings via RapidAPI.
-
-    Returns dict with: overall_rating, recommend_to_friend_pct,
-    ceo_approval_pct, ceo_name, review_count, business_outlook_pct,
-    company_name.
-
-    Uses 30-day cache (ratings change very slowly).
-    """
-    key = ticker.upper()
-
-    # Check cache
-    with _lock:
-        if key in _glassdoor_cache:
-            ts, data = _glassdoor_cache[key]
-            if time.time() - ts < _GLASSDOOR_TTL:
-                return data
-
-    api_key = os.environ.get("GLASSDOOR_RAPIDAPI_KEY", "")
-    if not api_key:
-        return None
-
-    # Resolve ticker to company name
-    company_name = _resolve_company_name(key)
-    if not company_name:
-        logger.info("Cannot resolve company name for %s — skipping Glassdoor", key)
-        with _lock:
-            _glassdoor_cache[key] = (time.time(), None)
-            _evict_oldest(_glassdoor_cache)
-        return None
-
-    # Query RapidAPI Glassdoor endpoint
-    import urllib.parse
-    encoded_name = urllib.parse.quote(company_name)
-    url = f"https://real-time-glassdoor-data.p.rapidapi.com/company-overview?companyName={encoded_name}"
-
-    raw = _http_get_json(url, headers={
-        "X-RapidAPI-Key": api_key,
-        "X-RapidAPI-Host": "real-time-glassdoor-data.p.rapidapi.com",
-    }, timeout=15)
-
-    if not raw or not isinstance(raw, dict):
-        logger.info("Glassdoor returned no data for %s (%s)", key, company_name)
-        with _lock:
-            _glassdoor_cache[key] = (time.time(), None)
-            _evict_oldest(_glassdoor_cache)
-        return None
-
-    # Parse response — field names may vary by provider
-    # Try common field patterns from the RapidAPI provider
-    overall = raw.get("overallRating") or raw.get("overall_rating")
-    if overall is None:
-        # Try nested data structure
-        ratings = raw.get("ratings") or raw.get("data") or {}
-        if isinstance(ratings, dict):
-            overall = ratings.get("overallRating") or ratings.get("overall_rating")
-
-    if overall is None:
-        logger.info("Glassdoor response missing rating for %s: keys=%s", key, list(raw.keys())[:10])
-        with _lock:
-            _glassdoor_cache[key] = (time.time(), None)
-            _evict_oldest(_glassdoor_cache)
-        return None
-
-    try:
-        overall_float = round(float(overall), 1)
-    except (ValueError, TypeError):
-        overall_float = 0.0
-
-    # Extract sub-metrics (gracefully handle missing fields)
-    def _pct(val: any) -> float | None:
-        if val is None:
-            return None
-        try:
-            v = float(str(val).replace("%", ""))
-            # If value is 0-1 range, convert to percentage
-            if 0 < v <= 1:
-                v = round(v * 100)
-            return round(v)
-        except (ValueError, TypeError):
-            return None
-
-    result = {
-        "overall_rating": overall_float,
-        "recommend_to_friend_pct": _pct(
-            raw.get("recommendToFriend") or raw.get("recommend_to_friend")
-            or raw.get("recommendPercent")
-        ),
-        "ceo_approval_pct": _pct(
-            raw.get("ceoApproval") or raw.get("ceo_approval")
-            or raw.get("ceoApprovalPercent")
-        ),
-        "ceo_name": (
-            raw.get("ceoName") or raw.get("ceo_name")
-            or raw.get("ceo") or ""
-        ),
-        "review_count": int(raw.get("reviewCount") or raw.get("review_count") or raw.get("numberOfRatings") or 0),
-        "business_outlook_pct": _pct(
-            raw.get("businessOutlook") or raw.get("business_outlook")
-            or raw.get("positiveBusinessOutlookPercent")
-        ),
-        "company_name": raw.get("companyName") or raw.get("name") or company_name,
-    }
-
-    logger.info("Glassdoor data for %s: rating=%.1f, reviews=%d",
-                key, result["overall_rating"], result["review_count"])
-
-    with _lock:
-        _glassdoor_cache[key] = (time.time(), result)
-        _evict_oldest(_glassdoor_cache)
-    return result
-
-
-# ═══════════════════════════════════════════════════════════════════
 # Public API
 # ═══════════════════════════════════════════════════════════════════
 
@@ -506,8 +373,10 @@ def get_sentiment_data(ticker: str) -> dict:
 
     Each source is fetched independently; failures in one do not
     affect the others. Returns dict with keys:
-        finnhub, cnn_fear_greed, apewisdom, alphavantage, glassdoor
+        finnhub, cnn_fear_greed, apewisdom, alphavantage
     Each value is either a dict of data or None.
+
+    Note: Glassdoor data was migrated to vitals.py (Vitals tab).
     """
     result: dict[str, dict | None] = {}
 
@@ -534,11 +403,5 @@ def get_sentiment_data(ticker: str) -> dict:
     except Exception as exc:
         logger.warning("Alpha Vantage failed for %s: %s", ticker, exc)
         result["alphavantage"] = None
-
-    try:
-        result["glassdoor"] = _get_glassdoor_data(ticker)
-    except Exception as exc:
-        logger.warning("Glassdoor failed for %s: %s", ticker, exc)
-        result["glassdoor"] = None
 
     return result
