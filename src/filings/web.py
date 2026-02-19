@@ -552,8 +552,10 @@ async def sentiment_data(request: Request, ticker: str):
         "finnhub": data.get("finnhub"),
         "apewisdom": data.get("apewisdom"),
         "alphavantage": data.get("alphavantage"),
+        "glassdoor": data.get("glassdoor"),
         "has_finnhub_key": sentiment.has_finnhub_key(),
         "has_alphavantage_key": sentiment.has_alphavantage_key(),
+        "has_glassdoor_key": sentiment.has_glassdoor_key(),
     })
 
 
