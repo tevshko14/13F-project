@@ -568,6 +568,8 @@ async def vitals_data(request: Request, ticker: str):
         "appstore": data.get("appstore"),
         "has_glassdoor_key": vitals.has_glassdoor_key(),
         "has_pdl_key": vitals.has_pdl_key(),
+        "glassdoor_age": vitals.get_glassdoor_age_str(ticker),
+        "glassdoor_quota_exhausted": vitals.get_glassdoor_quota_info()["exhausted"],
     })
 
 
