@@ -1,0 +1,424 @@
+{# ── Vitals Tab: Employee Pulse, Culture, Product Sentiment ── #}
+
+<style>
+    .vitals-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1.5em;
+    }
+    @media (min-width: 769px) {
+        .vitals-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+        .vitals-grid .vitals-card-full {
+            grid-column: 1 / -1;
+        }
+    }
+    .vitals-card {
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: 10px;
+        padding: 1.5em;
+        background: #fff;
+    }
+    .vitals-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1em;
+        padding-bottom: 0.6em;
+        border-bottom: 1px solid rgba(0,0,0,0.06);
+    }
+    .vitals-card-header h3 {
+        font-size: 1.05em;
+        font-weight: 700;
+        margin: 0;
+        color: #333;
+    }
+    .vitals-card-header .vitals-source {
+        font-size: 0.75em;
+        color: #999;
+        font-weight: 400;
+    }
+    .vitals-stat-row {
+        display: flex;
+        gap: 2em;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .vitals-stat {
+        text-align: center;
+        min-width: 80px;
+    }
+    .vitals-stat .value {
+        font-size: 1.6em;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .vitals-stat .label {
+        font-size: 0.75em;
+        color: #888;
+        margin-top: 0.2em;
+    }
+    .vitals-progress {
+        margin-bottom: 0.8em;
+    }
+    .vitals-progress .progress-header {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.85em;
+        margin-bottom: 0.25em;
+    }
+    .vitals-progress .progress-bar {
+        height: 6px;
+        border-radius: 3px;
+        background: #f0f0f0;
+        overflow: hidden;
+    }
+    .vitals-progress .progress-fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+    }
+    .vitals-empty {
+        text-align: center;
+        padding: 1.5em 1em;
+        color: #999;
+    }
+    .vitals-footer {
+        font-size: 0.78em;
+        color: #999;
+        margin-top: 0.8em;
+        padding-top: 0.5em;
+        border-top: 1px solid rgba(0,0,0,0.04);
+    }
+</style>
+
+<div class="vitals-grid">
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# Card 1: Employee Pulse (People Data Labs)                          #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+{% if pdl %}
+<div class="vitals-card">
+    <div class="vitals-card-header">
+        <h3>Employee Pulse</h3>
+        <span class="vitals-source">via People Data Labs</span>
+    </div>
+
+    <div class="vitals-stat-row">
+        <div class="vitals-stat">
+            <div class="value" style="color: #1976d2;">
+                {{ "{:,}".format(pdl.employee_count) }}
+            </div>
+            <div class="label">Employees</div>
+        </div>
+
+        {% if pdl.size %}
+        <div class="vitals-stat">
+            <div class="value" style="font-size: 1.1em; color: #555;">
+                {{ pdl.size }}
+            </div>
+            <div class="label">Company Size</div>
+        </div>
+        {% endif %}
+
+        {% if pdl.founded %}
+        <div class="vitals-stat">
+            <div class="value" style="font-size: 1.1em; color: #555;">
+                {{ pdl.founded }}
+            </div>
+            <div class="label">Founded</div>
+        </div>
+        {% endif %}
+
+        {% if pdl.industry %}
+        <div class="vitals-stat">
+            <div style="display: inline-block; padding: 0.3em 0.8em; border-radius: 20px; background: #e3f2fd; color: #1565c0; font-size: 0.85em; font-weight: 600;">
+                {{ pdl.industry | title }}
+            </div>
+            <div class="label">Industry</div>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if pdl.location %}
+    <div class="vitals-footer">
+        &#x1f4cd; {{ pdl.location }}
+        {% if pdl.linkedin_url %}
+        &middot;
+        <a href="{{ pdl.linkedin_url }}" target="_blank" rel="noopener" style="color: #0077b5; text-decoration: none;">
+            LinkedIn &#x2197;
+        </a>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% elif has_pdl_key is defined and has_pdl_key %}
+<div class="vitals-card">
+    <div class="vitals-card-header">
+        <h3>Employee Pulse</h3>
+        <span class="vitals-source">via People Data Labs</span>
+    </div>
+    <div class="vitals-empty">
+        Employee data not available for <strong>{{ ticker }}</strong>.
+    </div>
+</div>
+{% else %}
+<div class="vitals-card">
+    <div class="vitals-card-header">
+        <h3>Employee Pulse</h3>
+        <span class="vitals-source">via People Data Labs</span>
+    </div>
+    <div class="vitals-empty">
+        Configure <code>PDL_API_KEY</code> for employee headcount data.
+        <br>
+        <small class="text-muted">Free tier: 100 requests/month, no credit card required.</small>
+    </div>
+</div>
+{% endif %}
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# Card 2: Culture (Glassdoor)                                       #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+{% if glassdoor %}
+<div class="vitals-card">
+    <div class="vitals-card-header">
+        <h3>Culture</h3>
+        <span class="vitals-source">via Glassdoor</span>
+    </div>
+
+    <div style="display: flex; gap: 2em; align-items: flex-start; flex-wrap: wrap;">
+        {# Overall rating with stars #}
+        <div style="text-align: center; min-width: 110px;">
+            <div class="value" style="font-size: 2.2em; font-weight: 700; line-height: 1.1; color: {% if glassdoor.overall_rating >= 4.0 %}#2e7d32{% elif glassdoor.overall_rating >= 3.0 %}#e65100{% else %}#c62828{% endif %};">
+                {{ glassdoor.overall_rating }}
+            </div>
+            <div style="font-size: 0.85em; color: #888; margin-bottom: 0.3em;">/ 5.0</div>
+            {# Star visualization #}
+            <div style="font-size: 1.2em; letter-spacing: 2px;" title="{{ glassdoor.overall_rating }} out of 5 stars">
+                {% set full_stars = glassdoor.overall_rating|int %}
+                {% set has_half = (glassdoor.overall_rating - full_stars) >= 0.3 %}
+                {% for i in range(full_stars) %}<span style="color: #f9a825;">&#9733;</span>{% endfor %}{% if has_half %}<span style="color: #f9a825;">&#9733;</span>{% set remaining = 4 - full_stars %}{% else %}{% set remaining = 5 - full_stars %}{% endif %}{% for i in range(remaining) %}<span style="color: #ddd;">&#9733;</span>{% endfor %}
+            </div>
+            {% if glassdoor.review_count %}
+            <div style="font-size: 0.75em; color: #888; margin-top: 0.3em;">
+                {{ "{:,}".format(glassdoor.review_count) }} reviews
+            </div>
+            {% endif %}
+        </div>
+
+        {# Sub-metrics with progress bars #}
+        <div style="flex: 1; min-width: 220px;">
+            {% if glassdoor.recommend_to_friend_pct is not none %}
+            <div class="vitals-progress">
+                <div class="progress-header">
+                    <span>Recommend to Friend</span>
+                    <strong style="color: {% if glassdoor.recommend_to_friend_pct >= 70 %}#2e7d32{% elif glassdoor.recommend_to_friend_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
+                        {{ glassdoor.recommend_to_friend_pct|int }}%
+                    </strong>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{ glassdoor.recommend_to_friend_pct }}%;
+                                background: {% if glassdoor.recommend_to_friend_pct >= 70 %}#2e7d32{% elif glassdoor.recommend_to_friend_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if glassdoor.ceo_approval_pct is not none %}
+            <div class="vitals-progress">
+                <div class="progress-header">
+                    <span>CEO Approval{% if glassdoor.ceo_name %} <span style="color: #999;">({{ glassdoor.ceo_name }})</span>{% endif %}</span>
+                    <strong style="color: {% if glassdoor.ceo_approval_pct >= 70 %}#2e7d32{% elif glassdoor.ceo_approval_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
+                        {{ glassdoor.ceo_approval_pct|int }}%
+                    </strong>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{ glassdoor.ceo_approval_pct }}%;
+                                background: {% if glassdoor.ceo_approval_pct >= 70 %}#2e7d32{% elif glassdoor.ceo_approval_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
+                </div>
+            </div>
+            {% endif %}
+
+            {% if glassdoor.business_outlook_pct is not none %}
+            <div class="vitals-progress">
+                <div class="progress-header">
+                    <span>Positive Business Outlook</span>
+                    <strong style="color: {% if glassdoor.business_outlook_pct >= 70 %}#2e7d32{% elif glassdoor.business_outlook_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
+                        {{ glassdoor.business_outlook_pct|int }}%
+                    </strong>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{ glassdoor.business_outlook_pct }}%;
+                                background: {% if glassdoor.business_outlook_pct >= 70 %}#2e7d32{% elif glassdoor.business_outlook_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="vitals-footer">
+        &#x1f4a1; High employee sentiment often correlates with long-term retention and innovation.
+    </div>
+</div>
+{% elif has_glassdoor_key is defined and has_glassdoor_key %}
+<div class="vitals-card">
+    <div class="vitals-card-header">
+        <h3>Culture</h3>
+        <span class="vitals-source">via Glassdoor</span>
+    </div>
+    <div class="vitals-empty">
+        Employee rating not available for <strong>{{ ticker }}</strong>.
+    </div>
+</div>
+{% elif has_glassdoor_key is defined and not has_glassdoor_key %}
+<div class="vitals-card">
+    <div class="vitals-card-header">
+        <h3>Culture</h3>
+        <span class="vitals-source">via Glassdoor</span>
+    </div>
+    <div class="vitals-empty">
+        Configure <code>GLASSDOOR_RAPIDAPI_KEY</code> for employee culture data.
+        <br>
+        <small class="text-muted">Free tier: 25 requests/month via RapidAPI.</small>
+    </div>
+</div>
+{% endif %}
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# Card 3: Product Sentiment (Apple App Store)                        #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+{% if appstore %}
+<div class="vitals-card vitals-card-full">
+    <div class="vitals-card-header">
+        <h3>Product Sentiment</h3>
+        <span class="vitals-source">via Apple App Store</span>
+    </div>
+
+    <div style="display: flex; gap: 2em; align-items: center; flex-wrap: wrap;">
+        {# App icon and name #}
+        <div style="display: flex; align-items: center; gap: 1em;">
+            {% if appstore.app_icon_url %}
+            <img src="{{ appstore.app_icon_url }}"
+                 alt="{{ appstore.app_name }}"
+                 style="width: 56px; height: 56px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);"
+                 onerror="this.style.display='none'">
+            {% endif %}
+            <div>
+                <div style="font-weight: 700; font-size: 1.05em;">
+                    {% if appstore.app_url %}
+                    <a href="{{ appstore.app_url }}" target="_blank" rel="noopener" style="color: #333; text-decoration: none;">
+                        {{ appstore.app_name }}
+                        <span style="font-size: 0.75em; color: #999;">&#x2197;</span>
+                    </a>
+                    {% else %}
+                    {{ appstore.app_name }}
+                    {% endif %}
+                </div>
+                <div style="font-size: 0.8em; color: #888;">
+                    by {{ appstore.developer_name }}
+                    {% if appstore.price and appstore.price != "Free" %}
+                    &middot; {{ appstore.price }}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        {# Rating #}
+        <div class="vitals-stat">
+            <div class="value" style="color: {% if appstore.rating >= 4.0 %}#2e7d32{% elif appstore.rating >= 3.0 %}#e65100{% else %}#c62828{% endif %};">
+                {{ appstore.rating }}
+            </div>
+            <div style="font-size: 1.1em; letter-spacing: 1px; margin: 0.1em 0;" title="{{ appstore.rating }} out of 5 stars">
+                {% set full_stars = appstore.rating|int %}
+                {% set has_half = (appstore.rating - full_stars) >= 0.3 %}
+                {% for i in range(full_stars) %}<span style="color: #f9a825;">&#9733;</span>{% endfor %}{% if has_half %}<span style="color: #f9a825;">&#9733;</span>{% set remaining = 4 - full_stars %}{% else %}{% set remaining = 5 - full_stars %}{% endif %}{% for i in range(remaining) %}<span style="color: #ddd;">&#9733;</span>{% endfor %}
+            </div>
+            <div class="label">All-Time Rating</div>
+        </div>
+
+        {# Review count #}
+        <div class="vitals-stat">
+            <div class="value" style="font-size: 1.3em; color: #555;">
+                {{ "{:,}".format(appstore.rating_count) }}
+            </div>
+            <div class="label">Total Ratings</div>
+        </div>
+
+        {# Current version rating #}
+        {% if appstore.current_version_rating and appstore.current_version_rating_count %}
+        <div class="vitals-stat">
+            <div class="value" style="font-size: 1.3em; color: {% if appstore.current_version_rating >= 4.0 %}#2e7d32{% elif appstore.current_version_rating >= 3.0 %}#e65100{% else %}#c62828{% endif %};">
+                {{ appstore.current_version_rating }}
+                <span style="font-size: 0.5em; color: #888;">/ 5</span>
+            </div>
+            <div class="label">
+                Current Version
+                {% if appstore.version %}
+                <span style="color: #bbb;">(v{{ appstore.version }})</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {# Version rating comparison badge #}
+        {% if appstore.current_version_rating and appstore.rating %}
+        <div class="vitals-stat">
+            {% set diff = appstore.current_version_rating - appstore.rating %}
+            {% if diff > 0.1 %}
+            <div style="display: inline-block; padding: 0.35em 0.8em; border-radius: 20px; background: #e8f5e9; color: #2e7d32; font-size: 0.9em; font-weight: 600;">
+                &#x25B2; Improving
+            </div>
+            {% elif diff < -0.1 %}
+            <div style="display: inline-block; padding: 0.35em 0.8em; border-radius: 20px; background: #ffebee; color: #c62828; font-size: 0.9em; font-weight: 600;">
+                &#x25BC; Declining
+            </div>
+            {% else %}
+            <div style="display: inline-block; padding: 0.35em 0.8em; border-radius: 20px; background: #f5f5f5; color: #616161; font-size: 0.9em; font-weight: 600;">
+                &#x2014; Stable
+            </div>
+            {% endif %}
+            <div class="label">Trend</div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="vitals-footer">
+        &#x1f4f1; App Store ratings reflect real user satisfaction with the company's flagship product.
+    </div>
+</div>
+{% else %}
+<div class="vitals-card vitals-card-full">
+    <div class="vitals-card-header">
+        <h3>Product Sentiment</h3>
+        <span class="vitals-source">via Apple App Store</span>
+    </div>
+    <div class="vitals-empty">
+        No iOS app found for <strong>{{ ticker }}</strong>.
+        <br>
+        <small class="text-muted">This company may not have a consumer-facing mobile app.</small>
+    </div>
+</div>
+{% endif %}
+
+</div>{# end vitals-grid #}
+
+{# ── Fallback: nothing available ── #}
+{% if not glassdoor and not pdl and not appstore %}
+{% if (not has_glassdoor_key or not has_pdl_key) %}
+<div style="margin-top: 1em;">
+    <article>
+        <p class="text-muted" style="text-align: center; padding: 1em 0;">
+            Configure API keys for richer vitals data:
+            <br>
+            <code>PDL_API_KEY</code> (employee data) &middot;
+            <code>GLASSDOOR_RAPIDAPI_KEY</code> (culture ratings)
+            <br>
+            <small>App Store data is free and requires no API key.</small>
+        </p>
+    </article>
+</div>
+{% endif %}
+{% endif %}
