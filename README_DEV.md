@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-19 (Vitals tab, fuzzy search, persistent cache)
+> Last updated: 2026-02-19 (Supabase L2 cache, cache-first endpoints, 3-tier architecture)
 
 ---
 
@@ -44,7 +44,7 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | Analyst data  | `yfinance` (free) + `finnhub-python` (free tier, optional key) |
 | Sentiment     | CNN Fear & Greed, Finnhub, ApeWisdom, Alpha Vantage |
 | Vitals        | People Data Labs, Glassdoor (RapidAPI), Apple iTunes Search |
-| Caching       | JSON files at `~/.13f-cache/` with per-fund TTL (stale-while-revalidate) |
+| Caching       | 3-tier: in-memory (L1) → Supabase Postgres (L2) → disk JSON (L3) |
 | Hosting       | Railway (auto-deploy from main) at [paperpanda.io](https://paperpanda.io) |
 | Entry points  | `filings` (CLI), `filings-web` (web, port 8000) |
 
@@ -80,12 +80,16 @@ uv run filings-web          # starts at http://localhost:8000
 │                      client.py                             │
 │  SEC Data Access Layer — the brain of the application      │
 │                                                            │
-│  LIVE API calls (hit SEC on every invocation):             │
+│  LIVE API calls (only used on cache miss):                  │
 │  • search_managers()       — find fund managers by name    │
 │  • get_holdings()          — single fund's current 13F     │
 │  • get_enriched_holdings() — holdings + activity badges    │
 │  • compare_quarters()      — diff last 2 quarters         │
 │  • get_fund_summary()      — full fund data for caching   │
+│                                                            │
+│  CACHE-FIRST helpers (zero API calls, built from cache):   │
+│  • get_enriched_holdings_from_cache() — from cached dict   │
+│  • get_compare_from_cache()  — quarter diff from cache     │
 │                                                            │
 │  CACHE-ONLY functions (zero API calls, read from cache):   │
 │  • build_activity_feed()   — recent changes, all funds     │
@@ -103,21 +107,23 @@ uv run filings-web          # starts at http://localhost:8000
                      ▼
 ┌────────────────────────────────────────────────────────────┐
 │                      cache.py                              │
-│  Persistent Cache — ~/.13f-cache/fund_data.json            │
+│  3-Tier Cache: L1 in-memory → L2 Supabase → L3 disk       │
 │  Stale-While-Revalidate pattern                            │
 │                                                            │
-│  • load_cache() → dict         (read from disk)            │
-│  • save_cache(data)            (atomic write via tmp swap)  │
+│  • load_cache_from_supabase()  (L2: Supabase hydration)    │
+│  • load_cache() → dict         (L3: read from disk)        │
+│  • save_cache(data)            (L3: atomic write)          │
 │  • is_cache_stale() → bool     (overall file staleness)    │
 │  • is_fund_stale(fund_data)    (per-fund _last_refreshed)  │
 │  • get_stale_ciks(cache, ciks) (selective refresh list)    │
 │  • stamp_fund_data(data)       (add _last_refreshed ts)    │
-│  • refresh_single_fund(cik)    (calls get_fund_summary)    │
+│  • refresh_single_fund(cik)    (fetch + write-through L2)  │
+│  • _get_effective_ttl_seconds()(TTL in seconds for L2)     │
 │  • get_cache_age_str() → str   ("5 min ago")               │
 │                                                            │
 │  TTL: 7 days (off-season) / 12 hours (filing season)       │
 │  Cache keys = CIK without leading zeros ("1067983")        │
-│  No DB. No migration. Delete file to reset.                │
+│  Supabase keys = "13f:{CIK}" with category "13f"           │
 └────────────────────┬───────────────────────────────────────┘
                      │
           ┌──────────┴──────────┐
@@ -145,29 +151,31 @@ uv run filings-web          # starts at http://localhost:8000
                       └─────────────────────────┘
 ```
 
-### Data Flow: Homepage Load (Cold Start)
+### Data Flow: Homepage Load
 
 ```
 1. User visits http://localhost:8000/
-2. web.py lifespan: load_cache() → empty dict (no cache file)
-   Also starts: _prefetch_market_data(app) background task (S&P 500 data, ~30-60s)
+2. web.py lifespan (startup):
+   a. load_cache_from_supabase() → ~100 funds from Supabase (single query)
+   b. If Supabase empty/down → load_cache() from disk (fallback)
+   c. Starts _prefetch_market_data(app) background task (S&P 500 data, ~30-60s)
+   d. If any funds stale → triggers _background_refresh() (per-fund TTL)
 3. index() renders:
-   a. Heatmap section: HTMX fires GET /api/heatmap → returns "loading" stub with
+   a. Heatmap section: HTMX fires GET /api/heatmap → "loading" stub with
       auto-retry (hx-trigger="load delay:5s") until market data is ready
    b. Most-added section: HTMX fires GET /api/most-added → renders table from cache
    c. 84 superinvestor rows, each marked for lazy-load
 4. Browser HTMX fires GET /api/fund-row/{cik} for each row
-5. fund_row() calls get_fund_summary(cik) in a thread:
-   a. edgartools Company(cik).get_filings(form="13F-HR", amendments=False)
-   b. ThirteenF(filings[0]).holdings → current quarter DataFrame
-   c. Iterates up to 8 filing pairs, calling _compare_two_filings() each
-   d. Returns dict with: fund info, top 10, all holdings, flat changes,
-      and 8 quarterly_changes entries
-6. Result saved to app.state.fund_cache[cik] and written to disk
-7. HTMX replaces the loading row with rendered fund_row.html partial
-8. Repeat for all 84 funds (one at a time as HTMX triggers)
-9. Once market data prefetch completes, heatmap auto-retry succeeds →
+5. fund_row() checks cache FIRST:
+   a. Cache hit → returns immediately (zero SEC calls)
+   b. Cache miss → calls get_fund_summary(cik) in a thread, writes through
+      to L1 (in-memory) + L2 (Supabase) + L3 (disk)
+6. HTMX replaces the loading row with rendered fund_row.html partial
+7. Once market data prefetch completes, heatmap auto-retry succeeds →
    full ECharts treemap rendered with sector groups, colors, gold borders
+
+After first deploy with Supabase: all ~100 funds populate in Supabase.
+Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
 ```
 
 ### Data Flow: Stock Detail Page
@@ -205,7 +213,8 @@ uv run filings-web          # starts at http://localhost:8000
     ├── __init__.py                   # version = "0.1.0"
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
-    ├── cache.py                      # Persistent cache (per-fund TTL, stale-while-revalidate)
+    ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
+    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache table)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification engine: detection, matching, persistence, filing season
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
@@ -660,25 +669,33 @@ This logic lives in the `ticker_link.html` Jinja2 macro.
 
 ### 5.7 Cache Refresh Strategy
 
-Uses a **stale-while-revalidate** pattern with per-fund TTL:
+Uses a **3-tier stale-while-revalidate** pattern with per-fund TTL:
 
 ```
+Cache Tiers:
+  L1: app.state.fund_cache (in-memory dict, process lifetime)
+  L2: Supabase api_cache table, category="13f" (survives deploys)
+  L3: Disk JSON at ~/.13f-cache/fund_data.json (local fallback)
+
 TTL Configuration:
   Off-season: 7 days (13F data only changes quarterly)
   Filing season (±15 days of deadline): 12 hours
   Filing deadlines: Feb 14, May 15, Aug 14, Nov 14
 
-Startup:
-  Load cache from disk → check overall staleness → trigger background refresh if needed
+Startup (hydration priority):
+  1. load_cache_from_supabase() → all ~100 funds from Supabase (single query)
+  2. If Supabase empty/down → load_cache() from disk (fallback)
+  3. Check per-fund staleness → trigger background refresh for stale funds
 
-Background refresh (selective):
+Background refresh (selective, write-through):
   1. get_stale_ciks(cache, all_ciks) → only CIKs whose _last_refreshed is expired
   2. For each stale CIK (sequential):
      a. Call get_fund_summary(cik) in a background thread
      b. stamp_fund_data(data) → adds _last_refreshed ISO timestamp
-     c. Store in app.state.fund_cache[cik] (in-memory, instant)
-     d. Save to disk in batches: every 10 funds (non-blocking)
-     e. Sleep 1 second between funds (SEC rate limiting)
+     c. Write to L1: app.state.fund_cache[cik] (in-memory, instant)
+     d. Write to L2: supabase_cache.set_cached() (Supabase, non-fatal)
+     e. Write to L3: save_cache() in batches every 10 funds (non-blocking)
+     f. Sleep 1 second between funds (SEC rate limiting)
   3. Fresh funds are SKIPPED (not re-fetched)
   4. On API failure, old data is preserved (stale-while-revalidate)
 
@@ -686,10 +703,10 @@ Manual refresh:
   POST /refresh → creates same background task
   Prevented from running concurrently via app.state.refreshing flag
 
-HTMX lazy-load (cold start):
-  If fund not in cache when homepage renders:
-    HTMX fires GET /api/fund-row/{cik} (staggered: 3 at a time, 1s delay between batches)
-    Disk save runs in background thread (non-blocking)
+HTMX lazy-load:
+  GET /api/fund-row/{cik} checks L1 cache first:
+    Cache hit → returns immediately (zero SEC calls)
+    Cache miss → fetches from SEC, writes through to L1 + L2 + L3
 ```
 
 ### 5.8 Market Data Module (`market_data.py`)
@@ -783,11 +800,11 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | Method | Path | Handler | Data Source | Template |
 |---|---|---|---|---|
 | GET | `/` | `index` | Cache (read) | `index.html` |
-| GET | `/api/fund-row/{cik}` | `fund_row` | SEC API (live) | `partials/fund_row.html` |
+| GET | `/api/fund-row/{cik}` | `fund_row` | Cache first → SEC on miss | `partials/fund_row.html` |
 | GET | `/search` | `search_page` | SEC API (live) | `search.html` |
-| GET | `/holdings/{cik}` | `holdings` | SEC API (live) | `investor.html` |
+| GET | `/holdings/{cik}` | `holdings` | Cache first → SEC on miss | `investor.html` |
 | GET | `/compare/{cik}` | `compare` | Redirect | → `/holdings/{cik}` (302) |
-| GET | `/api/compare/{cik}` | `compare_api` | SEC API (live) | `partials/compare_content.html` |
+| GET | `/api/compare/{cik}` | `compare_api` | Cache first → SEC on miss | `partials/compare_content.html` |
 | GET | `/activity` | `activity_feed` | Cache only | `activity.html` |
 | GET | `/grand-portfolio` | `grand_portfolio` | Cache only | `grand_portfolio.html` |
 | GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
@@ -810,10 +827,11 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | POST | `/api/notifications/read-all` | `mark_all_read` | Notifications JSON | `partials/notification_bell.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
-**Key pattern:** Pages that aggregate across all 84 funds (activity, grand portfolio,
-stock detail) always read from cache — they never call the SEC API directly.
-Pages for a single fund (investor page holdings tab, compare quarters API) make live SEC API calls.
-The `/compare/{cik}` route now redirects to `/holdings/{cik}` — compare data is lazy-loaded via `/api/compare/{cik}`.
+**Key pattern:** All endpoints are cache-first. SEC EDGAR is only called on cache miss
+(uncached CIK) or during background refresh of stale funds. Pages for single funds
+(`/holdings/{cik}`, `/api/compare/{cik}`, `/api/fund-row/{cik}`) check L1 in-memory
+cache first; if the fund is cached they return instantly with zero API calls.
+The `/compare/{cik}` route redirects to `/holdings/{cik}` — compare data is lazy-loaded via `/api/compare/{cik}`.
 Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
 
 ---
@@ -1133,10 +1151,10 @@ the cache — every CLI command makes live SEC API calls.
    old the data actually is relative to real-time. A "data as of" label on
    each page would help.
 
-3. **get_enriched_holdings() calls compare_quarters() with top_n=9999.**
-   This fetches ALL changes just to get activity badges, which is wasteful
-   for funds with thousands of holdings. Could be optimized to only compare
-   the CUSIPs we actually need.
+3. ~~**get_enriched_holdings() calls compare_quarters() with top_n=9999.**~~
+   **FIXED:** The web endpoint now uses `get_enriched_holdings_from_cache()`
+   which reads activity data from the cached `changes` dict — zero SEC calls.
+   The original function is only used on cache miss (rare).
 
 4. **HTMX lazy-load has no retry on failure.** If a fund fails to load
    (SEC rate limit, network error), the row shows an error with no way to
@@ -1186,6 +1204,8 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Sentiment tab (CNN Fear & Greed, Finnhub news, Reddit buzz, Alpha Vantage NLP)
 - [x] Expanded ticker search: ~8K NYSE/NASDAQ listings via NASDAQ Trader + Fuse.js fuzzy search
 - [x] Persistent caching: per-fund TTL (7d/12h adaptive), stale-while-revalidate, selective refresh
+- [x] Supabase L2 persistent cache: 13F funds, Glassdoor, insider trades survive deploys
+- [x] Cache-first endpoints: all 13F pages serve from cache, SEC only on miss
 - [x] Vitals tab: Glassdoor ratings, People Data Labs employee data, Apple App Store ratings
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
@@ -1195,8 +1215,8 @@ the cache — every CLI command makes live SEC API calls.
 ### Technical Debt
 
 - [ ] CLI should optionally read from cache instead of always hitting SEC API
-- [ ] `get_enriched_holdings()` should not call `compare_quarters(top_n=9999)` —
-      should use cached changes or do a targeted comparison
+- [x] `get_enriched_holdings()` bypassed with `get_enriched_holdings_from_cache()` —
+      now reads from cached data instead of calling SEC API + compare_quarters()
 - [ ] Add proper logging (currently all errors are silently caught with `pass`)
 - [ ] Add error handling for malformed SEC data (corrupt DataFrames, missing columns)
 - [ ] Unit tests (none exist currently)
@@ -1225,6 +1245,6 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-19. If told "Context is drifting,"
+> This file documents the system as of 2026-02-19 (with Supabase L2 cache). If told "Context is drifting,"
 > the first action should be to re-read `/Users/Tevis_1/13F-project/README_DEV.md`
 > and reconcile any discrepancies with the actual code.
