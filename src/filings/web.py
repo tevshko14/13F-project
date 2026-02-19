@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from filings import client, cache, analysts, market_data, sentiment, vitals, company_filings, insider_trading, supabase_cache
+from filings import client, cache, analysts, market_data, sentiment, vitals, company_filings, insider_trading, supabase_cache, auth
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -143,6 +143,9 @@ app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), na
 
 # Template globals
 templates.env.globals["current_year"] = datetime.now().year
+templates.env.globals["supabase_url"] = auth.SUPABASE_URL
+templates.env.globals["supabase_anon_key"] = auth.SUPABASE_ANON_KEY
+templates.env.globals["auth_enabled"] = bool(auth.SUPABASE_ANON_KEY)
 
 # Attach rate limiter
 if _has_limiter:
@@ -178,6 +181,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
+
+# Auth middleware (only when JWT secret is configured)
+if auth.JWT_SECRET:
+    AuthMiddleware = auth._build_auth_middleware()
+    app.add_middleware(AuthMiddleware)
+    logger.info("Auth middleware enabled (Supabase JWT validation)")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -617,6 +626,18 @@ async def sentiment_data(request: Request, ticker: str):
 
 @app.get("/api/vitals/{ticker}", response_class=HTMLResponse)
 async def vitals_data(request: Request, ticker: str):
+    # ── Paywall: Vitals is premium-only when auth is enabled ──
+    if auth.JWT_SECRET:
+        user = getattr(request.state, "user", None)
+        profile = getattr(request.state, "profile", None)
+        is_premium = bool(profile and profile.get("tier") == "premium")
+        if not user or not is_premium:
+            return templates.TemplateResponse("partials/vitals_paywall.html", {
+                "request": request,
+                "ticker": ticker.upper(),
+                "user": user,
+            })
+
     data = await asyncio.to_thread(vitals.get_vitals_data, ticker)
     return templates.TemplateResponse("partials/vitals.html", {
         "request": request,
@@ -785,6 +806,33 @@ async def most_added(request: Request):
         "request": request,
         "entries": entries,
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Authentication pages
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+
+@app.get("/signup", response_class=HTMLResponse)
+async def signup_page(request: Request):
+    return templates.TemplateResponse("signup.html", {"request": request})
+
+
+@app.get("/reset-password", response_class=HTMLResponse)
+async def reset_password_page(request: Request):
+    return templates.TemplateResponse("reset_password.html", {"request": request})
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    response = RedirectResponse(url="/", status_code=302)
+    response.delete_cookie("sb-access-token", path="/")
+    response.delete_cookie("sb-refresh-token", path="/")
+    return response
 
 
 # --- Manual Refresh ---
