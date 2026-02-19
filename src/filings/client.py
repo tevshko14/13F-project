@@ -583,6 +583,29 @@ def build_activity_feed(cache_data: dict, superinvestors_by_cik: dict) -> list[A
     return activities
 
 
+def build_ticker_ownership_map(
+    cache_data: dict,
+    superinvestors_by_cik: dict,
+) -> dict[str, list[str]]:
+    """Build a map of ticker -> list of superinvestor display names who hold it.
+
+    Single pass through the cache. Returns only tickers held by at least one
+    recognized superinvestor.  Zero API calls.
+    """
+    by_ticker: dict[str, list[str]] = {}
+    for cik, fund_data in cache_data.items():
+        si = superinvestors_by_cik.get(cik)
+        if not si:
+            continue
+        for h in fund_data.get("all_holdings", []):
+            t = h.get("ticker")
+            if not t:
+                continue
+            t_upper = t.upper()
+            by_ticker.setdefault(t_upper, []).append(si.display_name)
+    return by_ticker
+
+
 def build_grand_portfolio(cache_data: dict, superinvestors_by_cik: dict) -> list[GrandPortfolioEntry]:
     """Build aggregated grand portfolio from cached data. Zero API calls."""
     # Group by CUSIP across all funds
