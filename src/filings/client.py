@@ -408,6 +408,139 @@ def get_enriched_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Enr
     return fund, holdings
 
 
+# ── Cache-first helpers ─────────────────────────────────────────────
+# These reconstruct model objects from the cached dict produced by
+# ``get_fund_summary()``, avoiding SEC API calls entirely.
+
+
+def get_enriched_holdings_from_cache(
+    fund_data: dict, cik: str, top_n: int = 25,
+) -> tuple[FundInfo, list[EnrichedHolding]]:
+    """Build FundInfo + EnrichedHoldings from cached fund data.
+
+    Equivalent to ``get_enriched_holdings()`` but zero API calls.
+    Returns the same types so templates work unchanged.
+    """
+    total_val = fund_data.get("total_value", 0)
+
+    fund = FundInfo(
+        name=fund_data.get("name", "Unknown"),
+        cik=cik,
+        report_period=fund_data.get("report_period", ""),
+        filing_date=fund_data.get("filing_date", ""),
+        total_value=total_val,
+        total_holdings=fund_data.get("total_holdings", 0),
+    )
+
+    # Build activity lookup from flat changes
+    status_labels = {
+        "NEW": "NEW BUY",
+        "CLOSED": "SOLD",
+        "INCREASED": "ADD",
+        "DECREASED": "REDUCE",
+    }
+    change_by_cusip: dict[str, dict] = {}
+    for ch in fund_data.get("changes", []):
+        change_by_cusip[ch["cusip"]] = ch
+
+    holdings: list[EnrichedHolding] = []
+    for h in fund_data.get("all_holdings", [])[:top_n]:
+        val = h.get("value", 0)
+        cusip = h.get("cusip", "")
+        change = change_by_cusip.get(cusip)
+
+        activity_label = None
+        share_change = 0
+        if change:
+            activity_label = status_labels.get(change.get("status"))
+            share_change = change.get("share_change", 0)
+
+        holdings.append(EnrichedHolding(
+            issuer_name=h.get("issuer", ""),
+            title_of_class="COM",          # not stored in cache; safe default
+            cusip=cusip,
+            value=val,
+            shares=h.get("shares", 0),
+            share_type="SH",               # not stored in cache; safe default
+            ticker=h.get("ticker"),
+            pct_of_portfolio=h.get("pct", round(val / total_val * 100, 2) if total_val else 0),
+            activity=activity_label,
+            share_change=share_change,
+        ))
+
+    return fund, holdings
+
+
+def get_compare_from_cache(
+    fund_data: dict, cik: str, top_n: int = 25,
+) -> tuple[FundInfo, FundInfo | None, list[HoldingChange]]:
+    """Build quarter-over-quarter comparison from cached fund data.
+
+    Reconstructs the same types as ``compare_quarters()`` from
+    the ``quarterly_changes`` stored by ``get_fund_summary()``.
+    Zero API calls.
+
+    Returns (current_info, previous_info, changes).
+    ``previous_info`` may be ``None`` if only one quarter is cached.
+    """
+    quarterly = fund_data.get("quarterly_changes", [])
+
+    current_info = FundInfo(
+        name=fund_data.get("name", "Unknown"),
+        cik=cik,
+        report_period=fund_data.get("report_period", ""),
+        filing_date=fund_data.get("filing_date", ""),
+        total_value=fund_data.get("total_value", 0),
+        total_holdings=fund_data.get("total_holdings", 0),
+    )
+
+    if not quarterly:
+        return current_info, None, []
+
+    # The first quarterly entry is current→previous diff
+    latest_q = quarterly[0]
+
+    # Build previous_info from second quarter if available
+    previous_info = None
+    if len(quarterly) >= 2:
+        q2 = quarterly[1]
+        previous_info = FundInfo(
+            name=fund_data.get("name", "Unknown"),
+            cik=cik,
+            report_period=q2.get("report_period", ""),
+            filing_date=q2.get("filing_date", ""),
+            total_value=0,       # not stored per-quarter in cache
+            total_holdings=0,
+        )
+    else:
+        previous_info = FundInfo(
+            name=fund_data.get("name", "Unknown"),
+            cik=cik,
+            report_period=latest_q.get("report_period", ""),
+            filing_date=latest_q.get("filing_date", ""),
+            total_value=0,
+            total_holdings=0,
+        )
+
+    # Reconstruct HoldingChange objects from the latest quarter's changes
+    status_order = {"NEW": 0, "CLOSED": 1, "INCREASED": 2, "DECREASED": 3, "UNCHANGED": 4}
+    changes: list[HoldingChange] = []
+    for ch in latest_q.get("changes", []):
+        changes.append(HoldingChange(
+            issuer_name=ch.get("issuer", ""),
+            cusip=ch.get("cusip", ""),
+            status=ch.get("status", "UNCHANGED"),
+            current_shares=ch.get("current_shares", 0),
+            previous_shares=ch.get("previous_shares", 0),
+            share_change=ch.get("share_change", 0),
+            current_value=ch.get("current_value", 0),
+            previous_value=0,    # not stored in quarterly cache
+        ))
+
+    changes.sort(key=lambda c: (status_order.get(c.status, 5), -abs(c.share_change)))
+    return current_info, previous_info, changes[:top_n]
+
+
 def build_activity_feed(cache_data: dict, superinvestors_by_cik: dict) -> list[ActivityItem]:
     """Build activity feed from cached data. Zero API calls."""
     status_labels = {

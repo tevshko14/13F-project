@@ -338,6 +338,22 @@ async def superinvestors_page(request: Request):
 async def fund_row(request: Request, cik: str):
     cik_normalized = cik.lstrip("0") or cik
     si = SUPERINVESTORS_BY_CIK.get(cik_normalized) or SUPERINVESTORS_BY_CIK.get(cik)
+
+    # ── Cache hit: serve immediately (zero SEC calls) ──
+    cached = app.state.fund_cache.get(cik_normalized) or app.state.fund_cache.get(cik)
+    if cached:
+        top_tickers = [
+            h.get("ticker") or h.get("issuer", "?")[:8]
+            for h in cached.get("top_holdings", [])[:5]
+        ]
+        return templates.TemplateResponse("partials/fund_row.html", {
+            "request": request,
+            "si": si,
+            "data": cached,
+            "top_tickers": top_tickers,
+        })
+
+    # ── Cache miss: fetch from SEC, persist to all tiers ──
     try:
         data = await asyncio.to_thread(client.get_fund_summary, cik)
         stamped = cache.stamp_fund_data(data)
@@ -392,15 +408,23 @@ async def search_page(request: Request, q: str = Query("")):
 @app.get("/holdings/{cik}", response_class=HTMLResponse)
 async def holdings(request: Request, cik: str, top_n: int = Query(25)):
     si = SUPERINVESTORS_BY_CIK.get(cik)
-    try:
-        fund, holdings_list = await asyncio.to_thread(
-            client.get_enriched_holdings, cik, top_n
-        )
-    except (ValueError, Exception) as e:
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": str(e),
-        }, status_code=404)
+    cache_data = getattr(app.state, "fund_cache", {})
+    cached = cache_data.get(cik)
+
+    if cached:
+        # ── Cache hit: build from stored data (zero SEC calls) ──
+        fund, holdings_list = client.get_enriched_holdings_from_cache(cached, cik, top_n)
+    else:
+        # ── Cache miss: fall back to live SEC API ──
+        try:
+            fund, holdings_list = await asyncio.to_thread(
+                client.get_enriched_holdings, cik, top_n
+            )
+        except (ValueError, Exception) as e:
+            return templates.TemplateResponse("error.html", {
+                "request": request,
+                "message": str(e),
+            }, status_code=404)
 
     return templates.TemplateResponse("investor.html", {
         "request": request,
@@ -422,15 +446,28 @@ async def compare(request: Request, cik: str):
 
 @app.get("/api/compare/{cik}", response_class=HTMLResponse)
 async def compare_api(request: Request, cik: str, top_n: int = Query(25)):
-    try:
-        current, previous, changes = await asyncio.to_thread(
-            client.compare_quarters, cik, top_n
-        )
-    except (ValueError, Exception) as e:
-        return templates.TemplateResponse("partials/compare_content.html", {
-            "request": request,
-            "error": str(e),
-        })
+    cache_data = getattr(app.state, "fund_cache", {})
+    cached = cache_data.get(cik)
+
+    if cached:
+        # ── Cache hit: reconstruct comparison from stored data ──
+        current, previous, changes = client.get_compare_from_cache(cached, cik, top_n)
+        if previous is None:
+            return templates.TemplateResponse("partials/compare_content.html", {
+                "request": request,
+                "error": "Only one quarter available — nothing to compare yet.",
+            })
+    else:
+        # ── Cache miss: fall back to live SEC API ──
+        try:
+            current, previous, changes = await asyncio.to_thread(
+                client.compare_quarters, cik, top_n
+            )
+        except (ValueError, Exception) as e:
+            return templates.TemplateResponse("partials/compare_content.html", {
+                "request": request,
+                "error": str(e),
+            })
 
     return templates.TemplateResponse("partials/compare_content.html", {
         "request": request,
