@@ -258,31 +258,22 @@
         }
         .site-footer a { color: inherit; }
 
-        /* Auth nav styles - override Pico's a:hover via custom properties */
-        a.nav-account-btn {
-            display: inline-flex;
-            align-items: center;
+        /* Auth nav - <button> avoids Pico a:hover color conflicts */
+        button.nav-account-btn {
             padding: 0.4em 1em;
             font-size: 0.85em;
             font-weight: 500;
             border-radius: 8px;
-            text-decoration: none !important;
             white-space: nowrap;
-            border: 1.5px solid var(--pico-primary, #1a73e8);
-            --pico-color: var(--pico-primary, #1a73e8);
-            color: var(--pico-primary, #1a73e8);
-            background: transparent;
-            transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
             cursor: pointer;
+            margin: 0;
         }
-        a.nav-account-btn:hover,
-        a.nav-account-btn:active,
-        a.nav-account-btn:focus {
-            --pico-color: #fff;
-            color: #fff !important;
-            background: var(--pico-primary, #1a73e8) !important;
-            border-color: var(--pico-primary, #1a73e8) !important;
-            text-decoration: none !important;
+        button.nav-account-btn:hover,
+        button.nav-account-btn:active,
+        button.nav-account-btn:focus {
+            --pico-background-color: var(--pico-primary-background) !important;
+            --pico-border-color: var(--pico-primary-border) !important;
+            --pico-color: var(--pico-primary-inverse) !important;
         }
         .nav-account-name {
             font-size: 0.85em;
@@ -319,7 +310,7 @@
     <nav class="site-nav">
         <div class="container">
             <div class="nav-left">
-                <a href="/"><img src="/static/logo-nav.png" alt="PaperPanda" style="height: 80px;"></a>
+                <a href="/"><img src="/static/logo-nav.png" alt="PaperPanda" style="height: 110px;"></a>
             </div>
             <ul class="nav-right">
                 <li><a href="/">Home</a></li>
@@ -352,7 +343,7 @@
                         </ul>
                     </span>
                     {% else %}
-                    <a href="/login" class="nav-account-btn">Sign In</a>
+                    <button class="outline nav-account-btn" onclick="window.location.href='/login'">Sign In</button>
                     {% endif %}
                 </li>
                 {% endif %}

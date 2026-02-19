@@ -73,6 +73,7 @@
         margin-bottom: 1.5em;
         background: #fff;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        overflow: visible;
     }
     .chart-card-header {
         font-size: 1.05em;
@@ -91,11 +92,13 @@
         justify-content: center;
         gap: 2em;
         flex-wrap: wrap;
+        overflow: visible;
     }
     .chart-container {
         width: 340px;
         height: 340px;
         flex-shrink: 0;
+        overflow: visible;
     }
     .chart-legend {
         display: flex;
@@ -200,11 +203,13 @@
             chart.setOption({
                 tooltip: {
                     trigger: 'item',
+                    appendToBody: true,
+                    confine: true,
                     backgroundColor: 'rgba(30, 30, 30, 0.95)',
                     borderColor: 'transparent',
                     textStyle: { color: '#fff', fontSize: 13 },
                     padding: [12, 16],
-                    extraCssText: 'border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);',
+                    extraCssText: 'border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); z-index: 9999;',
                     formatter: function(params) {
                         var d = params.data._raw;
                         if (!d) return '<strong>' + params.name + '</strong><br/>Weight: ' + params.value.toFixed(1) + '%';
