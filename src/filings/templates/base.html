@@ -165,7 +165,45 @@
             text-align: center;
         }
         .site-footer a { color: inherit; }
+
+        /* Auth nav styles */
+        .nav-account-btn {
+            padding: 0.3em 0.8em;
+            font-size: 0.85em;
+            border-radius: 6px;
+            text-decoration: none;
+            white-space: nowrap;
+        }
+        .nav-account-name {
+            font-size: 0.85em;
+            font-weight: 600;
+            color: inherit;
+            text-decoration: none;
+        }
     </style>
+    {% if supabase_anon_key %}
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script>
+        const _supabase = window.supabase.createClient(
+            '{{ supabase_url }}',
+            '{{ supabase_anon_key }}'
+        );
+
+        // Sync Supabase auth tokens to cookies for server-side validation
+        _supabase.auth.onAuthStateChange(function(event, session) {
+            if (session) {
+                document.cookie = 'sb-access-token=' + session.access_token
+                    + '; path=/; max-age=' + session.expires_in
+                    + '; SameSite=Lax';
+                document.cookie = 'sb-refresh-token=' + session.refresh_token
+                    + '; path=/; max-age=604800; SameSite=Lax';
+            } else {
+                document.cookie = 'sb-access-token=; path=/; max-age=0';
+                document.cookie = 'sb-refresh-token=; path=/; max-age=0';
+            }
+        });
+    </script>
+    {% endif %}
 </head>
 <body hx-boost="true">
     <nav class="container">
@@ -182,6 +220,27 @@
             </li>
             <li><a href="/insider-trading">Insider Trading</a></li>
             {% block nav_search %}<li>{% include "partials/ticker_search.html" %}</li>{% endblock %}
+            {% if auth_enabled %}
+            <li>
+                {% if request.state.user is defined and request.state.user %}
+                <span class="nav-dropdown">
+                    <a href="#" class="nav-dropdown-toggle nav-account-name">
+                        {% if request.state.profile is defined and request.state.profile %}
+                            {{ request.state.profile.display_name or 'Account' }}
+                        {% else %}
+                            Account
+                        {% endif %}
+                        <span class="nav-caret">&#9662;</span>
+                    </a>
+                    <ul class="nav-dropdown-menu">
+                        <li><a href="/logout">Sign Out</a></li>
+                    </ul>
+                </span>
+                {% else %}
+                <a href="/login" role="button" class="outline nav-account-btn">Sign In</a>
+                {% endif %}
+            </li>
+            {% endif %}
         </ul>
     </nav>
     <main class="container">
