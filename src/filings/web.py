@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from filings import client, cache, analysts, market_data, sentiment, vitals, company_filings, insider_trading
+from filings import client, cache, analysts, market_data, sentiment, vitals, company_filings, insider_trading, supabase_cache
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -761,6 +761,7 @@ async def health_check(request: Request):
         "total_funds": len(all_ciks),
         "refreshing": getattr(app.state, "refreshing", False),
         "market_data_ready": getattr(app.state, "market_data_ready", False),
+        "supabase_connected": supabase_cache.is_available(),
     })
 
 

@@ -6,10 +6,12 @@ Combines three data sources into a single tab:
   3. Product Sentiment (Apple iTunes Search) – app rating, reviews
 
 Glassdoor uses a **quota-first persistent caching** strategy:
-  - Persistent disk cache at ~/.13f-cache/glassdoor_cache.json (survives deploys)
+  - L2 persistent cache in Supabase Postgres (survives Railway deploys)
+  - L3 fallback: disk cache at ~/.13f-cache/glassdoor_cache.json
   - Monthly quota tracker (hard cap, auto-resets each month)
   - Stale-while-revalidate: returns stale data instantly, refreshes in background
   - Deployments NEVER trigger batch refreshes (lazy hydration only)
+  - Supabase is optional: if SUPABASE_URL is not set, disk cache is used
 
 PDL and App Store use in-memory caches with aggressive TTLs.
 Each source degrades gracefully when its API key is missing.
@@ -27,6 +29,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from filings import supabase_cache
 from filings.cache import CACHE_DIR
 
 logger = logging.getLogger(__name__)
@@ -105,7 +108,23 @@ def _save_glassdoor_disk_cache(disk_data: dict) -> None:
 
 
 def _persist_glassdoor_entry(ticker_key: str, ts: float, data: dict | None) -> None:
-    """Write a single Glassdoor cache entry to disk. Must hold _lock."""
+    """Write a single Glassdoor cache entry.  Must hold _lock.
+
+    Strategy: try Supabase first, then fall back to disk JSON.
+    Both paths are attempted so that Supabase and disk stay in sync
+    when both are available.
+    """
+    # ── Supabase L2 ──
+    if data is not None:
+        payload = {"ts": ts, "data": data}
+        supabase_cache.set_cached(
+            cache_key=f"glassdoor:{ticker_key}",
+            category="glassdoor",
+            data=payload,
+            ttl_seconds=None,  # managed by our own TTL logic
+        )
+
+    # ── Disk fallback (always, keeps local cache warm) ──
     disk = _load_glassdoor_disk_cache()
     entries = disk.setdefault("entries", {})
     entries[ticker_key] = {"ts": ts, "data": data}
@@ -118,9 +137,12 @@ def _persist_glassdoor_entry(ticker_key: str, ts: float, data: dict | None) -> N
 
 
 def _hydrate_glassdoor_cache() -> None:
-    """One-time load from disk into in-memory _glassdoor_cache.
+    """One-time load into in-memory _glassdoor_cache.
 
-    Called lazily on first Glassdoor data request. Does NOT trigger
+    Strategy: try Supabase first (one query for all Glassdoor entries),
+    fall back to local disk JSON if Supabase is unavailable.
+
+    Called lazily on first Glassdoor data request.  Does NOT trigger
     any API calls (requirement: no batch refresh on deploy).
     """
     global _glassdoor_hydrated
@@ -128,6 +150,25 @@ def _hydrate_glassdoor_cache() -> None:
         return
     _glassdoor_hydrated = True
 
+    # ── Try Supabase first ──
+    rows = supabase_cache.get_all_by_category("glassdoor")
+    if rows is not None and len(rows) > 0:
+        loaded = 0
+        for row in rows:
+            cache_key = row.get("cache_key", "")  # e.g. "glassdoor:AAPL"
+            payload = row.get("response_data", {})
+            # Extract ticker from cache_key
+            ticker_key = cache_key.replace("glassdoor:", "", 1) if cache_key.startswith("glassdoor:") else cache_key
+            ts = payload.get("ts", 0.0)
+            data = payload.get("data")
+            if ticker_key:
+                _glassdoor_cache[ticker_key] = (ts, data)
+                loaded += 1
+        if loaded:
+            logger.info("Hydrated Glassdoor in-memory cache with %d entries from Supabase", loaded)
+        return
+
+    # ── Fallback: disk cache ──
     disk = _load_glassdoor_disk_cache()
     entries = disk.get("entries", {})
     loaded = 0
@@ -152,20 +193,27 @@ def _get_current_month_str() -> str:
 def _check_glassdoor_quota(threshold: int = MAX_MONTHLY_QUOTA) -> bool:
     """Return True if we can still make Glassdoor API calls this month.
 
-    Reads quota from the persistent disk cache. If the stored month
-    doesn't match the current month, the counter has auto-reset.
+    Strategy: try Supabase first, fall back to disk.  If the stored
+    month doesn't match the current month, the counter is effectively 0.
 
     Args:
         threshold: The quota limit to check against. Default is
             MAX_MONTHLY_QUOTA (90). Pass _GLASSDOOR_STALE_REFRESH_CAP (80)
             for stale-data background refresh checks.
     """
-    disk = _load_glassdoor_disk_cache()
-    quota = disk.get("quota", {})
     current_month = _get_current_month_str()
 
+    # ── Try Supabase first ──
+    sb_quota = supabase_cache.get_quota("glassdoor", current_month)
+    if sb_quota is not None:
+        return sb_quota.get("count", 0) < threshold
+
+    # ── Fallback: disk ──
+    disk = _load_glassdoor_disk_cache()
+    quota = disk.get("quota", {})
+
     if quota.get("month") != current_month:
-        return True  # New month — counter is effectively 0
+        return True  # New month -- counter is effectively 0
 
     return quota.get("count", 0) < threshold
 
@@ -173,13 +221,20 @@ def _check_glassdoor_quota(threshold: int = MAX_MONTHLY_QUOTA) -> bool:
 def _increment_glassdoor_quota() -> int:
     """Increment the monthly API call counter. Returns new count.
 
+    Strategy: try Supabase first, then always update disk as fallback.
     Auto-resets if the stored month differs from the current month.
-    Persists to disk immediately (each call is precious with 90/month cap).
     Must hold _lock.
     """
+    current_month = _get_current_month_str()
+
+    # ── Supabase L2 ──
+    sb_count = supabase_cache.increment_quota("glassdoor", current_month)
+    if sb_count > 0:
+        logger.info("Glassdoor monthly quota (Supabase): %d/%d", sb_count, MAX_MONTHLY_QUOTA)
+
+    # ── Disk (always update to keep in sync) ──
     disk = _load_glassdoor_disk_cache()
     quota = disk.get("quota", {})
-    current_month = _get_current_month_str()
 
     if quota.get("month") != current_month:
         quota = {"month": current_month, "count": 0}
@@ -188,8 +243,10 @@ def _increment_glassdoor_quota() -> int:
     disk["quota"] = quota
     _save_glassdoor_disk_cache(disk)
 
-    logger.info("Glassdoor monthly quota: %d/%d", quota["count"], MAX_MONTHLY_QUOTA)
-    return quota["count"]
+    # Prefer Supabase count as source of truth when available
+    final_count = sb_count if sb_count > 0 else quota["count"]
+    logger.info("Glassdoor monthly quota: %d/%d", final_count, MAX_MONTHLY_QUOTA)
+    return final_count
 
 
 # ── Shared HTTP helper ────────────────────────────────────────────────
@@ -637,16 +694,23 @@ def get_glassdoor_age_str(ticker: str) -> str:
 def get_glassdoor_quota_info() -> dict:
     """Return current Glassdoor quota status for diagnostics.
 
+    Strategy: try Supabase first, fall back to disk.
     Returns dict with: month, count, max, remaining, exhausted.
     """
-    disk = _load_glassdoor_disk_cache()
-    quota = disk.get("quota", {})
     current_month = _get_current_month_str()
 
-    if quota.get("month") != current_month:
-        count = 0
+    # ── Try Supabase first ──
+    sb_quota = supabase_cache.get_quota("glassdoor", current_month)
+    if sb_quota is not None:
+        count = sb_quota.get("count", 0)
     else:
-        count = quota.get("count", 0)
+        # ── Fallback: disk ──
+        disk = _load_glassdoor_disk_cache()
+        quota = disk.get("quota", {})
+        if quota.get("month") != current_month:
+            count = 0
+        else:
+            count = quota.get("count", 0)
 
     return {
         "month": current_month,
