@@ -64,6 +64,260 @@
 {# ── Holdings Tab (server-rendered) ── #}
 <div id="tab-holdings" class="investor-tab-content active">
 
+{# ── Portfolio Donut Chart (lazy-loaded) ── #}
+<style>
+    .chart-card {
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        border-radius: 12px;
+        padding: 1.5em;
+        margin-bottom: 1.5em;
+        background: #fff;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+    .chart-card-header {
+        font-size: 1.05em;
+        font-weight: 700;
+        margin-bottom: 0.2em;
+        color: #222;
+    }
+    .chart-card-sub {
+        font-size: 0.82em;
+        color: rgba(0, 0, 0, 0.45);
+        margin-bottom: 1em;
+    }
+    .chart-wrapper {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2em;
+        flex-wrap: wrap;
+    }
+    .chart-container {
+        width: 340px;
+        height: 340px;
+        flex-shrink: 0;
+    }
+    .chart-legend {
+        display: flex;
+        flex-direction: column;
+        gap: 0.45em;
+        min-width: 200px;
+    }
+    .chart-legend-item {
+        display: flex;
+        align-items: center;
+        gap: 0.6em;
+        font-size: 0.85em;
+        cursor: pointer;
+        padding: 0.25em 0.4em;
+        border-radius: 6px;
+        transition: background 0.15s ease;
+    }
+    .chart-legend-item:hover {
+        background: rgba(0, 0, 0, 0.04);
+    }
+    .chart-legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .chart-legend-ticker {
+        font-weight: 700;
+        font-family: monospace;
+        min-width: 50px;
+    }
+    .chart-legend-pct {
+        color: rgba(0, 0, 0, 0.45);
+        margin-left: auto;
+        font-size: 0.9em;
+    }
+    .chart-empty {
+        text-align: center;
+        padding: 3em 1em;
+        color: rgba(0, 0, 0, 0.4);
+        font-size: 0.95em;
+    }
+</style>
+
+<div class="chart-card" id="portfolio-chart-card">
+    <div class="chart-card-header">Portfolio Concentration</div>
+    <div class="chart-card-sub">Top 10 holdings by weight - hover for cross-investor insights</div>
+    <div class="chart-wrapper">
+        <div class="chart-container" id="portfolio-donut"></div>
+        <div class="chart-legend" id="portfolio-legend">
+            <div class="chart-empty" id="portfolio-chart-loading">
+                <span aria-busy="true">Loading chart data...</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var chartEl = document.getElementById('portfolio-donut');
+    var legendEl = document.getElementById('portfolio-legend');
+    if (!chartEl) return;
+
+    var COLORS = [
+        '#1976d2', '#388e3c', '#e65100', '#7b1fa2', '#c62828',
+        '#00838f', '#f9a825', '#4e342e', '#546e7a', '#ad1457'
+    ];
+
+    fetch('/api/portfolio-chart/{{ fund.cik }}')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (!data || data.length === 0) {
+                legendEl.innerHTML = '<div class="chart-empty">No portfolio data available</div>';
+                chartEl.style.display = 'none';
+                return;
+            }
+
+            // Calculate "Other" slice
+            var top10Pct = 0;
+            for (var i = 0; i < data.length; i++) top10Pct += data[i].pct;
+            var otherPct = Math.max(0, 100 - top10Pct);
+
+            // Build ECharts data
+            var chartData = data.map(function(d, idx) {
+                return {
+                    name: d.ticker,
+                    value: d.pct,
+                    itemStyle: { color: COLORS[idx % COLORS.length] },
+                    _raw: d
+                };
+            });
+            if (otherPct > 0.5) {
+                chartData.push({
+                    name: 'Other',
+                    value: Math.round(otherPct * 100) / 100,
+                    itemStyle: { color: '#e0e0e0' },
+                    _raw: null
+                });
+            }
+
+            var chart = echarts.init(chartEl);
+            chart.setOption({
+                tooltip: {
+                    trigger: 'item',
+                    backgroundColor: 'rgba(30, 30, 30, 0.95)',
+                    borderColor: 'transparent',
+                    textStyle: { color: '#fff', fontSize: 13 },
+                    padding: [12, 16],
+                    extraCssText: 'border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);',
+                    formatter: function(params) {
+                        var d = params.data._raw;
+                        if (!d) return '<strong>' + params.name + '</strong><br/>Weight: ' + params.value.toFixed(1) + '%';
+
+                        var html = '<strong style="font-size: 1.15em;">' + d.ticker + '</strong>'
+                            + '<span style="opacity: 0.6; margin-left: 6px;">' + d.pct.toFixed(1) + '%</span>'
+                            + '<br/><span style="opacity: 0.7;">' + d.issuer + '</span>';
+
+                        // Value
+                        var valStr = d.value >= 1e9
+                            ? '$' + (d.value / 1e9).toFixed(1) + 'B'
+                            : '$' + (d.value / 1e6).toFixed(0) + 'M';
+                        html += '<br/><br/><span style="opacity: 0.5;">Value:</span> ' + valStr;
+
+                        // Activity + Quarter
+                        var actColor = '#fff';
+                        if (d.activity === 'NEW BUY' || d.activity === 'ADD') actColor = '#66bb6a';
+                        else if (d.activity === 'REDUCE' || d.activity === 'SOLD') actColor = '#ef5350';
+                        html += '<br/><span style="opacity: 0.5;">Activity:</span> <span style="color:' + actColor + ';">' + d.activity + '</span>';
+                        if (d.quarter) html += ' <span style="opacity: 0.4;">(' + d.quarter + ')</span>';
+
+                        // Cross-investor
+                        if (d.also_held_by > 0) {
+                            html += '<br/><br/><span style="opacity: 0.5;">Also held by</span> <strong>' + d.also_held_by + '</strong> <span style="opacity: 0.5;">other superinvestor' + (d.also_held_by > 1 ? 's' : '') + '</span>';
+                            var names = d.owner_names || [];
+                            for (var n = 0; n < names.length; n++) {
+                                html += '<br/><span style="opacity: 0.6; margin-left: 8px;">' + names[n] + '</span>';
+                            }
+                            if (d.also_held_by > 5) {
+                                html += '<br/><span style="opacity: 0.4; margin-left: 8px;">+ ' + (d.also_held_by - 5) + ' more</span>';
+                            }
+                        }
+                        return html;
+                    }
+                },
+                series: [{
+                    type: 'pie',
+                    radius: ['45%', '78%'],
+                    center: ['50%', '50%'],
+                    avoidLabelOverlap: true,
+                    padAngle: 2,
+                    itemStyle: {
+                        borderRadius: 6,
+                        borderColor: '#fff',
+                        borderWidth: 2
+                    },
+                    label: { show: false },
+                    emphasis: {
+                        scaleSize: 8,
+                        label: {
+                            show: true,
+                            fontSize: 14,
+                            fontWeight: 'bold',
+                            formatter: '{b}\n{d}%'
+                        }
+                    },
+                    data: chartData
+                }]
+            });
+
+            // Build custom legend
+            var legendHtml = '';
+            for (var j = 0; j < data.length; j++) {
+                var d = data[j];
+                legendHtml += '<div class="chart-legend-item" data-idx="' + j + '">'
+                    + '<span class="chart-legend-dot" style="background:' + COLORS[j % COLORS.length] + ';"></span>'
+                    + '<span class="chart-legend-ticker">' + d.ticker + '</span>'
+                    + '<span class="chart-legend-pct">' + d.pct.toFixed(1) + '%</span>'
+                    + '</div>';
+            }
+            if (otherPct > 0.5) {
+                legendHtml += '<div class="chart-legend-item">'
+                    + '<span class="chart-legend-dot" style="background:#e0e0e0;"></span>'
+                    + '<span class="chart-legend-ticker" style="font-family:inherit;opacity:0.6;">Other</span>'
+                    + '<span class="chart-legend-pct">' + otherPct.toFixed(1) + '%</span>'
+                    + '</div>';
+            }
+            legendEl.innerHTML = legendHtml;
+
+            // Legend hover highlights chart slice
+            legendEl.querySelectorAll('.chart-legend-item').forEach(function(item) {
+                item.addEventListener('mouseenter', function() {
+                    var idx = parseInt(item.dataset.idx);
+                    if (!isNaN(idx)) {
+                        chart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: idx });
+                    }
+                });
+                item.addEventListener('mouseleave', function() {
+                    chart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
+                });
+                item.addEventListener('click', function() {
+                    var idx = parseInt(item.dataset.idx);
+                    if (!isNaN(idx) && data[idx] && data[idx].ticker) {
+                        window.location.href = '/stock/' + data[idx].ticker;
+                    }
+                });
+            });
+
+            // Click chart slice -> stock page
+            chart.on('click', function(params) {
+                var d = params.data._raw;
+                if (d && d.ticker) window.location.href = '/stock/' + d.ticker;
+            });
+
+            // Responsive
+            window.addEventListener('resize', function() { chart.resize(); });
+        })
+        .catch(function() {
+            legendEl.innerHTML = '<div class="chart-empty">Failed to load chart data</div>';
+        });
+})();
+</script>
+
 <article>
     <header>
         <strong>Total Value:</strong> ${{ "{:,.0f}".format(fund.total_value) }}
