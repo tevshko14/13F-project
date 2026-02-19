@@ -180,7 +180,7 @@
                 </ul>
             </li>
             <li><a href="/insider-trading">Insider Trading</a></li>
-            <li>{% include "partials/ticker_search.html" %}</li>
+            {% block nav_search %}<li>{% include "partials/ticker_search.html" %}</li>{% endblock %}
         </ul>
     </nav>
     <main class="container">
