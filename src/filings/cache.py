@@ -1,17 +1,17 @@
 """Persistent caching layer for 13F filing data.
 
-Uses a Stale-While-Revalidate strategy:
-  1. Serve cached data immediately (never block on API calls)
-  2. Refresh stale funds in the background
-  3. Keep old data on API failure (never lose data)
+Uses a Stale-While-Revalidate strategy with three tiers:
+  - L1: ``app.state.fund_cache`` (in-memory dict, process lifetime)
+  - L2: Supabase ``api_cache`` table, category ``"13f"`` (survives deploys)
+  - L3: Disk JSON at ``~/.13f-cache/fund_data.json`` (local fallback)
 
-Storage: JSON file on disk at ~/.13f-cache/fund_data.json
-  - Configurable via CACHE_DIR environment variable
-  - For Railway: set CACHE_DIR to a mounted volume path for persistence
-    across deployments (e.g. /data/cache)
+On startup the cache is hydrated from Supabase first
+(``load_cache_from_supabase``), falling back to disk
+(``load_cache``).  Every successful SEC EDGAR fetch writes through
+to both Supabase and disk so subsequent deploys are instant.
 
-Per-fund TTL: Each fund entry tracks its own `_last_refreshed` timestamp,
-allowing selective refresh of only stale funds instead of all-or-nothing.
+Per-fund TTL: Each fund entry tracks its own ``_last_refreshed``
+timestamp, allowing selective refresh of only stale funds.
 """
 
 import json
@@ -19,6 +19,8 @@ import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
+
+from filings import supabase_cache
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,11 @@ def _get_effective_ttl() -> timedelta:
         return REFRESH_INTERVAL
 
 
+def _get_effective_ttl_seconds() -> int:
+    """Return the effective TTL in seconds (for Supabase ``ttl_seconds``)."""
+    return int(_get_effective_ttl().total_seconds())
+
+
 # ── Core Cache Operations ────────────────────────────────────────────
 
 def load_cache() -> dict:
@@ -63,6 +70,32 @@ def load_cache() -> dict:
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Cache load failed: %s — starting fresh", e)
         return {}
+
+
+def load_cache_from_supabase() -> dict:
+    """Load all 13F fund data from Supabase L2 cache.
+
+    Returns a dict keyed by CIK (same structure as ``load_cache()``),
+    or ``{}`` if Supabase is unavailable / has no 13F data.
+
+    Called on startup as the primary cache source — the disk cache
+    (``load_cache()``) is the fallback.
+    """
+    rows = supabase_cache.get_all_by_category("13f")
+    if not rows:
+        return {}
+
+    result: dict = {}
+    for row in rows:
+        cache_key = row.get("cache_key", "")      # e.g. "13f:1067983"
+        data = row.get("response_data", {})
+        cik = cache_key.replace("13f:", "", 1) if cache_key.startswith("13f:") else None
+        if cik and isinstance(data, dict):
+            result[cik] = data
+
+    if result:
+        logger.info("Loaded %d funds from Supabase L2 cache", len(result))
+    return result
 
 
 def save_cache(data: dict) -> None:
@@ -180,11 +213,27 @@ def refresh_single_fund(cik: str) -> dict | None:
 
     Returns stamped data dict on success, None on failure.
     On failure, existing cached data is preserved (stale-while-revalidate).
+
+    Write-through: on success the data is also persisted to Supabase L2
+    so that subsequent deploys can hydrate from there instantly.
     """
     from filings.client import get_fund_summary
     try:
         data = get_fund_summary(cik)
-        return stamp_fund_data(data)
+        stamped = stamp_fund_data(data)
+
+        # ── Persist to Supabase L2 (non-fatal) ──
+        try:
+            supabase_cache.set_cached(
+                cache_key=f"13f:{cik}",
+                category="13f",
+                data=stamped,
+                ttl_seconds=_get_effective_ttl_seconds(),
+            )
+        except Exception as sb_exc:
+            logger.debug("Supabase write-through failed for CIK %s: %s", cik, sb_exc)
+
+        return stamped
     except Exception as e:
         logger.warning("Failed to refresh CIK %s: %s — keeping stale data", cik, e)
         return None
