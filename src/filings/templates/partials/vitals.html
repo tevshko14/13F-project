@@ -179,87 +179,173 @@
 {% endif %}
 
 {# ═══════════════════════════════════════════════════════════════════ #}
-{# Card 2: Culture (Glassdoor)                                       #}
+{# Card 2: Culture (Glassdoor) - Full Dashboard Layout               #}
 {# ═══════════════════════════════════════════════════════════════════ #}
 
+{# Helper macro for sub-rating bars (1.0-5.0 scale) #}
+{% macro sub_rating_bar(label, value) %}
+{% if value is not none %}
+<div style="margin-bottom: 0.6em;">
+    <div style="display: flex; justify-content: space-between; font-size: 0.82em; margin-bottom: 0.2em;">
+        <span style="color: #555;">{{ label }}</span>
+        <strong style="color: {% if value >= 4.0 %}#2e7d32{% elif value >= 3.0 %}#555{% else %}#c62828{% endif %};">{{ value }} / 5.0</strong>
+    </div>
+    <div style="height: 5px; border-radius: 3px; background: #f0f0f0; overflow: hidden;">
+        <div style="height: 100%; border-radius: 3px; width: {{ (value / 5.0 * 100)|round }}%;
+                    background: {% if value >= 4.0 %}#2e7d32{% elif value >= 3.0 %}#e65100{% else %}#c62828{% endif %};
+                    transition: width 0.3s ease;"></div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
 {% if glassdoor %}
-<div class="vitals-card">
-    <div class="vitals-card-header">
-        <h3>Culture</h3>
+<div class="vitals-card vitals-card-full">
+    {# ── Header: Company identity + overall rating ── #}
+    <div class="vitals-card-header" style="border-bottom: none; padding-bottom: 0; margin-bottom: 0.6em;">
+        <div style="display: flex; align-items: center; gap: 0.8em;">
+            {% if glassdoor.logo_url %}
+            <img src="{{ glassdoor.logo_url }}" alt="{{ glassdoor.company_name }}"
+                 style="width: 40px; height: 40px; border-radius: 8px; object-fit: contain; border: 1px solid rgba(0,0,0,0.06);"
+                 onerror="this.style.display='none'">
+            {% endif %}
+            <div>
+                <h3 style="margin: 0; font-size: 1.1em; font-weight: 700; color: #333;">
+                    {% if glassdoor.glassdoor_url %}
+                    <a href="{{ glassdoor.glassdoor_url }}" target="_blank" rel="noopener" style="color: #333; text-decoration: none;">
+                        {{ glassdoor.company_name }} <span style="font-size: 0.7em; color: #aaa;">&#x2197;</span>
+                    </a>
+                    {% else %}
+                    {{ glassdoor.company_name }}
+                    {% endif %}
+                </h3>
+                <div style="font-size: 0.75em; color: #999; margin-top: 0.1em;">
+                    {% if glassdoor.headquarters %}{{ glassdoor.headquarters }}{% endif %}
+                    {% if glassdoor.headquarters and glassdoor.industry %} &middot; {% endif %}
+                    {% if glassdoor.industry %}{{ glassdoor.industry }}{% endif %}
+                </div>
+            </div>
+        </div>
         <span class="vitals-source">via Glassdoor</span>
     </div>
 
+    <div style="border-top: 1px solid rgba(0,0,0,0.06); padding-top: 1em;">
+    {# ── Main row: Overall rating + Sentiment Grid ── #}
     <div style="display: flex; gap: 2em; align-items: flex-start; flex-wrap: wrap;">
-        {# Overall rating with stars #}
+
+        {# Left: Overall Rating with stars #}
         <div style="text-align: center; min-width: 110px;">
-            <div class="value" style="font-size: 2.2em; font-weight: 700; line-height: 1.1; color: {% if glassdoor.overall_rating >= 4.0 %}#2e7d32{% elif glassdoor.overall_rating >= 3.0 %}#e65100{% else %}#c62828{% endif %};">
+            <div class="value" style="font-size: 2.4em; font-weight: 700; line-height: 1.1; color: {% if glassdoor.overall_rating >= 4.0 %}#2e7d32{% elif glassdoor.overall_rating >= 3.0 %}#e65100{% else %}#c62828{% endif %};">
                 {{ glassdoor.overall_rating }}
             </div>
-            <div style="font-size: 0.85em; color: #888; margin-bottom: 0.3em;">/ 5.0</div>
-            {# Star visualization #}
+            <div style="font-size: 0.82em; color: #888; margin-bottom: 0.3em;">/ 5.0</div>
             <div style="font-size: 1.2em; letter-spacing: 2px;" title="{{ glassdoor.overall_rating }} out of 5 stars">
                 {% set full_stars = glassdoor.overall_rating|int %}
                 {% set has_half = (glassdoor.overall_rating - full_stars) >= 0.3 %}
                 {% for i in range(full_stars) %}<span style="color: #f9a825;">&#9733;</span>{% endfor %}{% if has_half %}<span style="color: #f9a825;">&#9733;</span>{% set remaining = 4 - full_stars %}{% else %}{% set remaining = 5 - full_stars %}{% endif %}{% for i in range(remaining) %}<span style="color: #ddd;">&#9733;</span>{% endfor %}
             </div>
             {% if glassdoor.review_count %}
-            <div style="font-size: 0.75em; color: #888; margin-top: 0.3em;">
+            <div style="font-size: 0.72em; color: #888; margin-top: 0.3em;">
+                {% if glassdoor.reviews_url %}
+                <a href="{{ glassdoor.reviews_url }}" target="_blank" rel="noopener" style="color: #888; text-decoration: none;">
+                    {{ "{:,}".format(glassdoor.review_count) }} reviews &#x2197;
+                </a>
+                {% else %}
                 {{ "{:,}".format(glassdoor.review_count) }} reviews
+                {% endif %}
             </div>
             {% endif %}
         </div>
 
-        {# Sub-metrics with progress bars #}
-        <div style="flex: 1; min-width: 220px;">
-            {% if glassdoor.recommend_to_friend_pct is not none %}
-            <div class="vitals-progress">
-                <div class="progress-header">
-                    <span>Recommend to Friend</span>
-                    <strong style="color: {% if glassdoor.recommend_to_friend_pct >= 70 %}#2e7d32{% elif glassdoor.recommend_to_friend_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
-                        {{ glassdoor.recommend_to_friend_pct|int }}%
-                    </strong>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: {{ glassdoor.recommend_to_friend_pct }}%;
-                                background: {% if glassdoor.recommend_to_friend_pct >= 70 %}#2e7d32{% elif glassdoor.recommend_to_friend_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
-                </div>
-            </div>
-            {% endif %}
-
-            {% if glassdoor.ceo_approval_pct is not none %}
-            <div class="vitals-progress">
-                <div class="progress-header">
-                    <span>CEO Approval{% if glassdoor.ceo_name %} <span style="color: #999;">({{ glassdoor.ceo_name }})</span>{% endif %}</span>
-                    <strong style="color: {% if glassdoor.ceo_approval_pct >= 70 %}#2e7d32{% elif glassdoor.ceo_approval_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
+        {# Center: Sentiment Grid (2x2 key metrics) #}
+        <div style="flex: 1; min-width: 240px;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.6em;">
+                {# CEO Approval #}
+                {% if glassdoor.ceo_approval_pct is not none %}
+                <div style="background: #f8f9fa; border-radius: 8px; padding: 0.7em 0.9em; text-align: center;">
+                    <div style="font-size: 1.5em; font-weight: 700; color: {% if glassdoor.ceo_approval_pct >= 70 %}#2e7d32{% elif glassdoor.ceo_approval_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
                         {{ glassdoor.ceo_approval_pct|int }}%
-                    </strong>
+                    </div>
+                    <div style="font-size: 0.72em; color: #888; margin-top: 0.1em;">
+                        CEO Approval{% if glassdoor.ceo_name %}<br><span style="color: #aaa;">{{ glassdoor.ceo_name }}</span>{% endif %}
+                    </div>
                 </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: {{ glassdoor.ceo_approval_pct }}%;
-                                background: {% if glassdoor.ceo_approval_pct >= 70 %}#2e7d32{% elif glassdoor.ceo_approval_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
-                </div>
-            </div>
-            {% endif %}
+                {% endif %}
 
-            {% if glassdoor.business_outlook_pct is not none %}
-            <div class="vitals-progress">
-                <div class="progress-header">
-                    <span>Positive Business Outlook</span>
-                    <strong style="color: {% if glassdoor.business_outlook_pct >= 70 %}#2e7d32{% elif glassdoor.business_outlook_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
+                {# Business Outlook #}
+                {% if glassdoor.business_outlook_pct is not none %}
+                <div style="background: #f8f9fa; border-radius: 8px; padding: 0.7em 0.9em; text-align: center;">
+                    <div style="font-size: 1.5em; font-weight: 700; color: {% if glassdoor.business_outlook_pct >= 70 %}#2e7d32{% elif glassdoor.business_outlook_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
                         {{ glassdoor.business_outlook_pct|int }}%
-                    </strong>
+                    </div>
+                    <div style="font-size: 0.72em; color: #888; margin-top: 0.1em;">Business Outlook</div>
                 </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: {{ glassdoor.business_outlook_pct }}%;
-                                background: {% if glassdoor.business_outlook_pct >= 70 %}#2e7d32{% elif glassdoor.business_outlook_pct >= 50 %}#e65100{% else %}#c62828{% endif %};"></div>
+                {% endif %}
+
+                {# Recommend to Friend #}
+                {% if glassdoor.recommend_to_friend_pct is not none %}
+                <div style="background: #f8f9fa; border-radius: 8px; padding: 0.7em 0.9em; text-align: center;">
+                    <div style="font-size: 1.5em; font-weight: 700; color: {% if glassdoor.recommend_to_friend_pct >= 70 %}#2e7d32{% elif glassdoor.recommend_to_friend_pct >= 50 %}#e65100{% else %}#c62828{% endif %};">
+                        {{ glassdoor.recommend_to_friend_pct|int }}%
+                    </div>
+                    <div style="font-size: 0.72em; color: #888; margin-top: 0.1em;">Recommend to Friend</div>
                 </div>
+                {% endif %}
+
+                {# Culture & Values #}
+                {% if glassdoor.culture_and_values_rating is not none %}
+                <div style="background: #f8f9fa; border-radius: 8px; padding: 0.7em 0.9em; text-align: center;">
+                    <div style="font-size: 1.5em; font-weight: 700; color: {% if glassdoor.culture_and_values_rating >= 4.0 %}#2e7d32{% elif glassdoor.culture_and_values_rating >= 3.0 %}#e65100{% else %}#c62828{% endif %};">
+                        {{ glassdoor.culture_and_values_rating }}
+                    </div>
+                    <div style="font-size: 0.72em; color: #888; margin-top: 0.1em;">Culture & Values <span style="color: #bbb;">/ 5.0</span></div>
+                </div>
+                {% endif %}
             </div>
-            {% endif %}
         </div>
     </div>
 
+    {# ── Sub-ratings section ── #}
+    {% set has_sub_ratings = glassdoor.work_life_balance_rating is not none
+        or glassdoor.senior_management_rating is not none
+        or glassdoor.compensation_and_benefits_rating is not none
+        or glassdoor.career_opportunities_rating is not none
+        or glassdoor.diversity_and_inclusion_rating is not none %}
+
+    {% if has_sub_ratings %}
+    <div style="margin-top: 1.2em; padding-top: 0.8em; border-top: 1px solid rgba(0,0,0,0.06);">
+        <div style="font-size: 0.78em; font-weight: 600; color: #999; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.6em;">
+            Detailed Ratings
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 1.5em;">
+            <div>
+                {{ sub_rating_bar("Work-Life Balance", glassdoor.work_life_balance_rating) }}
+                {{ sub_rating_bar("Senior Management", glassdoor.senior_management_rating) }}
+                {{ sub_rating_bar("Career Opportunities", glassdoor.career_opportunities_rating) }}
+            </div>
+            <div>
+                {{ sub_rating_bar("Compensation & Benefits", glassdoor.compensation_and_benefits_rating) }}
+                {{ sub_rating_bar("Diversity & Inclusion", glassdoor.diversity_and_inclusion_rating) }}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    </div>
+
+    {# ── Footer ── #}
     <div class="vitals-footer">
-        &#x1f4a1; High employee sentiment often correlates with long-term retention and innovation.
+        {% if glassdoor_age is defined and glassdoor_age %}
+        <span style="float: right; color: #aaa; font-style: italic;">{{ glassdoor_age }}</span>
+        {% endif %}
+        {% if glassdoor.website %}
+        <a href="{{ glassdoor.website }}" target="_blank" rel="noopener" style="color: #999; text-decoration: none;">{{ glassdoor.website | replace("https://", "") | replace("http://", "") }} &#x2197;</a>
+        {% endif %}
+        {% if glassdoor.company_size %}
+         &middot; {{ glassdoor.company_size }}
+        {% endif %}
+        {% if glassdoor.revenue %}
+         &middot; {{ glassdoor.revenue }}
+        {% endif %}
     </div>
 </div>
 {% elif has_glassdoor_key is defined and has_glassdoor_key %}
@@ -269,7 +355,18 @@
         <span class="vitals-source">via Glassdoor</span>
     </div>
     <div class="vitals-empty">
-        Employee rating not available for <strong>{{ ticker }}</strong>.
+        {% if glassdoor_quota_exhausted is defined and glassdoor_quota_exhausted %}
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-size: 1.2em;">&#x23F8;</span>
+            </div>
+            Data currently unavailable for <strong>{{ ticker }}</strong>.
+            <br>
+            <small class="text-muted">
+                Monthly API quota reached. Data will refresh automatically next month.
+            </small>
+        {% else %}
+            Employee rating not available for <strong>{{ ticker }}</strong>.
+        {% endif %}
     </div>
 </div>
 {% elif has_glassdoor_key is defined and not has_glassdoor_key %}
