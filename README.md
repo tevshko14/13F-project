@@ -52,7 +52,7 @@ A web dashboard for tracking SEC 13F institutional holdings filings from 84 supe
 | Analyst Data | `yfinance` (free) + `finnhub-python` (optional) |
 | Sentiment | CNN, Finnhub, ApeWisdom, Alpha Vantage |
 | Vitals | People Data Labs, Glassdoor (RapidAPI), Apple iTunes |
-| Caching | JSON files at `~/.13f-cache/` with per-fund TTL |
+| Caching | Supabase Postgres (L2, survives deploys) + disk JSON (L3 fallback) |
 | Hosting | Railway (auto-deploy from main) |
 | Domain | [paperpanda.io](https://paperpanda.io) |
 
@@ -91,10 +91,14 @@ railway up
 | `ALPHAVANTAGE_API_KEY` | No | 25 calls/day | NLP news sentiment analysis |
 | `GLASSDOOR_RAPIDAPI_KEY` | No | 25 calls/month | Employee culture ratings |
 | `PDL_API_KEY` | No | 100 calls/month | Employee headcount data |
+| `SUPABASE_URL` | No | Free tier | Supabase project URL (persistent cache) |
+| `SUPABASE_SERVICE_KEY` | No | Free tier | Supabase service role JWT |
+| `SUPABASE_DB_PASSWORD` | No | Free tier | Supabase DB password (auto-migration) |
 | `CACHE_DIR` | No | - | Cache directory (default: `~/.13f-cache/`) |
 | `POSTHOG_API_KEY` | No | Free tier | Product analytics |
 
 > **Note:** The App Store ratings feature requires no API key (Apple's public iTunes API).
+> Without Supabase env vars, the app works identically using disk-only cache.
 
 ## Project Structure
 
@@ -107,7 +111,8 @@ src/filings/
 ├── market_data.py      # S&P 500 heatmap, most-added, ticker search (~8K listings)
 ├── sentiment.py        # Market sentiment (CNN, Finnhub, ApeWisdom, Alpha Vantage)
 ├── vitals.py           # Alternative data (Glassdoor, People Data Labs, App Store)
-├── cache.py            # Persistent cache (per-fund TTL: 7d/12h adaptive)
+├── cache.py            # Cache layer (3-tier: in-memory → Supabase → disk)
+├── supabase_cache.py   # Supabase L2 persistent cache (survives deploys)
 ├── models.py           # Dataclasses (data contracts)
 ├── watchlist.py        # Watchlist persistence
 ├── notifications.py    # Filing notification engine + filing season detection
@@ -134,15 +139,32 @@ src/filings/
 
 ## Caching Strategy
 
-The cache uses a **stale-while-revalidate** pattern:
-1. Serve cached data immediately (never block on API calls)
-2. Refresh stale funds in the background (per-fund TTL)
-3. Keep old data on API failure (never lose data)
+All endpoints are **cache-first** — data is always served from cache, and external APIs are only called when data is stale or missing. The cache uses a 3-tier **stale-while-revalidate** pattern:
+
+| Tier | Storage | Survives Deploy? | Speed |
+|------|---------|-------------------|-------|
+| L1 | In-memory (`app.state`) | No | Sub-ms |
+| L2 | Supabase Postgres (`api_cache` table) | **Yes** | ~50ms |
+| L3 | Disk JSON (`~/.13f-cache/`) | Only with volume mount | ~5ms |
+
+On startup, L1 is hydrated from Supabase (one query for all ~100 funds). If Supabase is unavailable, falls back to disk. Every successful API fetch writes through to all tiers.
+
+### What gets cached in Supabase
+
+| Category | Data | TTL |
+|----------|------|-----|
+| `13f` | All ~100 superinvestor fund holdings, changes, quarterly history | 7 days / 12 hours (filing season) |
+| `glassdoor` | Company culture ratings per ticker | 90 days |
+| `glassdoor_quota` | Monthly API call counter | Never expires |
+| `insider` | Insider trades (global + per-ticker) | 5-10 minutes |
+
+### TTL by data type
 
 | Data Type | TTL | Reason |
 |-----------|-----|--------|
 | 13F Fund Data | 7 days (off-season) / 12 hours (filing season) | 13F data changes quarterly |
-| Glassdoor Ratings | 30 days | Employee ratings change very slowly |
+| Glassdoor Ratings | 90 days | Employee ratings change very slowly |
+| Insider Trades | 5-10 minutes | Form 4 filings update frequently |
 | People Data Labs | 7 days | Headcount changes slowly |
 | App Store Ratings | 7 days | App ratings change slowly |
 | Finnhub Sentiment | 2 hours | News changes frequently |
