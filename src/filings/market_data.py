@@ -30,6 +30,9 @@ _52W_TTL = 1_800  # 30 minutes
 _most_added_cache: tuple[float, list[dict]] | None = None
 _MOST_ADDED_TTL = 1_800  # 30 minutes
 
+_all_listings_cache: tuple[float, list[dict]] | None = None
+_ALL_LISTINGS_TTL = 86_400  # 24 hours — listings change infrequently
+
 
 # ── S&P 500 Constituents ──────────────────────────────────────────────
 
@@ -423,39 +426,144 @@ def build_most_added_table(
     return entries
 
 
-# ── Ticker Search Index ───────────────────────────────────────────────
+# ── All US Listed Tickers (NYSE + NASDAQ) ────────────────────────────
 
-def _guess_exchange(ticker: str) -> str:
-    """Guess exchange from ticker symbol (heuristic).
+_EXCHANGE_MAP = {"Q": "NASDAQ", "N": "NYSE", "A": "AMEX", "P": "ARCA", "Z": "BATS"}
 
-    Common NASDAQ tickers have 4-5 letters; NYSE tickers tend to be 1-3.
-    This is a rough heuristic, not authoritative.
+_NASDAQTRADED_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt"
+
+
+def get_all_listed_tickers() -> list[dict]:
+    """Fetch all NYSE + NASDAQ listed tickers from NASDAQ Trader.
+
+    Returns list of dicts: [{"ticker", "name", "exchange"}, ...]
+    Uses 24-hour in-memory cache. Falls back to empty list on failure.
+    File is pipe-delimited with a timestamp footer row to strip.
     """
-    # Well-known NYSE single/double/triple-letter tickers
-    _NYSE_KNOWN = {
-        "A", "AA", "ABT", "ACN", "AIG", "ALL", "AMGN", "AXP", "BA", "BAC",
-        "BLK", "BMY", "BRK-B", "C", "CAT", "CI", "CL", "CMA", "COP", "CVS",
-        "CVX", "D", "DD", "DE", "DHR", "DIS", "DOW", "DUK", "EMR", "F",
-        "FDX", "GD", "GE", "GM", "GS", "HD", "HON", "HPQ", "IBM", "IP",
-        "JNJ", "JPM", "K", "KO", "LIN", "LLY", "LMT", "LOW", "MA", "MCD",
-        "MDT", "MET", "MMM", "MO", "MRK", "MS", "NEE", "NKE", "NOC", "OXY",
-        "PEP", "PFE", "PG", "PM", "RTX", "SO", "SPG", "SYK", "T", "TGT",
-        "TMO", "TRV", "UNH", "UNP", "UPS", "USB", "V", "VZ", "WBA", "WFC",
-        "WM", "WMT", "XOM",
-    }
-    t = ticker.upper()
-    if t in _NYSE_KNOWN:
-        return "NYSE"
-    # Most 4-5 letter tickers are NASDAQ
-    if len(t) >= 4:
-        return "NASDAQ"
-    return "NYSE"
+    global _all_listings_cache
+
+    with _lock:
+        if _all_listings_cache is not None:
+            ts, data = _all_listings_cache
+            if time.time() - ts < _ALL_LISTINGS_TTL:
+                return data
+
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            _NASDAQTRADED_URL,
+            headers={"User-Agent": "PaperPanda/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+
+        lines = raw.strip().split("\n")
+        if len(lines) < 2:
+            logger.warning("nasdaqtraded.txt returned fewer than 2 lines")
+            return []
+
+        # First line is header, last line is timestamp footer
+        header = lines[0].split("|")
+        col = {name.strip(): i for i, name in enumerate(header)}
+
+        # Required columns
+        sym_col = col.get("Symbol")
+        name_col = col.get("Security Name")
+        exch_col = col.get("Listing Exchange")
+        test_col = col.get("Test Issue")
+        etf_col = col.get("ETF")
+
+        if sym_col is None or name_col is None:
+            logger.warning("nasdaqtraded.txt missing expected columns: %s", header)
+            return []
+
+        results: list[dict] = []
+        for line in lines[1:-1]:  # skip header and footer
+            parts = line.split("|")
+            if len(parts) <= max(sym_col, name_col):
+                continue
+
+            symbol = parts[sym_col].strip()
+            security_name = parts[name_col].strip()
+
+            # Skip test issues
+            if test_col is not None and len(parts) > test_col:
+                if parts[test_col].strip().upper() == "Y":
+                    continue
+
+            # Skip if no valid symbol
+            if not symbol or not security_name:
+                continue
+
+            # Skip symbols with special characters (warrants, units, etc.)
+            # Keep only standard tickers: letters, dots, dashes
+            if any(c in symbol for c in ["$", " ", "+"]):
+                continue
+
+            # Determine exchange
+            exchange = ""
+            if exch_col is not None and len(parts) > exch_col:
+                exchange = _EXCHANGE_MAP.get(parts[exch_col].strip(), "")
+
+            # Only include NYSE and NASDAQ (skip AMEX, ARCA, BATS)
+            if exchange not in ("NYSE", "NASDAQ"):
+                continue
+
+            # Check if ETF — include but tag
+            is_etf = False
+            if etf_col is not None and len(parts) > etf_col:
+                is_etf = parts[etf_col].strip().upper() == "Y"
+
+            # Clean up security name: remove common suffixes for brevity
+            clean_name = security_name
+            for suffix in [
+                " - Common Stock",
+                " - Common Shares",
+                " Common Stock",
+                " Common Shares",
+                " - Ordinary Shares",
+                " Ordinary Shares",
+                " - Class A",
+                " - Class B",
+                " - Class C",
+            ]:
+                if clean_name.endswith(suffix):
+                    clean_name = clean_name[: -len(suffix)].strip()
+                    break
+
+            results.append({
+                "ticker": symbol,
+                "name": clean_name,
+                "exchange": exchange,
+                "is_etf": is_etf,
+            })
+
+        logger.info(
+            "Fetched %d NYSE/NASDAQ listings from NASDAQ Trader", len(results)
+        )
+        with _lock:
+            _all_listings_cache = (time.time(), results)
+        return results
+
+    except Exception as e:
+        logger.warning("NASDAQ Trader listings fetch failed: %s — search will use S&P 500 + holdings only", e)
+        return []
+
+
+# ── Ticker Search Index ───────────────────────────────────────────────
 
 
 def get_ticker_search_list(cache_data: dict) -> list[dict]:
-    """Build the autocomplete search index from cache + S&P 500 + superinvestors.
+    """Build the comprehensive autocomplete search index.
 
-    Returns deduplicated list of tickers and investors with exchange/sector:
+    Merges data from four sources (in priority order):
+    1. Superinvestor holdings (from 13F cache)
+    2. S&P 500 constituents (from Wikipedia — includes sector info)
+    3. All NYSE/NASDAQ listings (from NASDAQ Trader — ~6000 tickers)
+    4. Superinvestor profiles (investors, not tickers)
+
+    Returns deduplicated list with metadata for Fuse.js client-side search:
     [{"ticker": "AAPL", "name": "Apple Inc.", "held_by_super": true,
       "in_sp500": true, "type": "ticker", "exchange": "NASDAQ", "sector": "..."},
      {"ticker": "Warren Buffett", "name": "Berkshire Hathaway",
@@ -463,7 +571,7 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
     """
     from filings.superinvestors import SUPERINVESTORS
 
-    # Collect tickers held by superinvestors
+    # ── 1. Collect tickers held by superinvestors ──
     super_tickers: dict[str, str] = {}  # ticker -> issuer name
     for cik, fund_data in cache_data.items():
         for h in fund_data.get("all_holdings", []):
@@ -473,7 +581,7 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
                 if t_upper not in super_tickers:
                     super_tickers[t_upper] = h.get("issuer", t_upper)
 
-    # Get S&P 500 constituents (includes sector)
+    # ── 2. Get S&P 500 constituents (includes sector) ──
     try:
         constituents = get_sp500_constituents()
     except Exception:
@@ -482,34 +590,60 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
     sp500_set = {c["ticker"].upper() for c in constituents}
     sector_map = {c["ticker"].upper(): c.get("sector", "") for c in constituents}
 
-    # Merge tickers
+    # ── 3. Get all NYSE/NASDAQ listings ──
+    all_listings = get_all_listed_tickers()
+    listings_map = {item["ticker"].upper(): item for item in all_listings}
+
+    # ── Build merged index ──
     all_items: dict[str, dict] = {}
 
+    # Start with all listings (lowest priority — will be overwritten)
+    for listing in all_listings:
+        t = listing["ticker"].upper()
+        all_items[t] = {
+            "ticker": t,
+            "name": listing["name"],
+            "held_by_super": False,
+            "in_sp500": t in sp500_set,
+            "type": "ticker",
+            "exchange": listing["exchange"],
+            "sector": sector_map.get(t, ""),
+        }
+
+    # Overlay S&P 500 data (better names, sector info)
     for c in constituents:
         t = c["ticker"].upper()
+        listing = listings_map.get(t)
         all_items[t] = {
             "ticker": t,
             "name": c["name"],
             "held_by_super": t in super_tickers,
             "in_sp500": True,
             "type": "ticker",
-            "exchange": _guess_exchange(t),
+            "exchange": listing["exchange"] if listing else "",
             "sector": c.get("sector", ""),
         }
 
+    # Overlay superinvestor holdings (highest priority for names)
     for t, issuer in super_tickers.items():
-        if t not in all_items:
+        if t in all_items:
+            all_items[t]["held_by_super"] = True
+            # Keep existing better name if it's longer/better
+            if len(issuer) > len(all_items[t]["name"]):
+                all_items[t]["name"] = issuer
+        else:
+            listing = listings_map.get(t)
             all_items[t] = {
                 "ticker": t,
                 "name": issuer,
                 "held_by_super": True,
                 "in_sp500": t in sp500_set,
                 "type": "ticker",
-                "exchange": _guess_exchange(t),
+                "exchange": listing["exchange"] if listing else "",
                 "sector": sector_map.get(t, ""),
             }
 
-    # Add superinvestors
+    # ── 4. Add superinvestor profiles ──
     for si in SUPERINVESTORS:
         key = f"_investor_{si.cik}"
         all_items[key] = {
@@ -527,6 +661,7 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
         key=lambda x: (
             x.get("type", "ticker") != "ticker",  # tickers first
             not x.get("held_by_super", False),
+            not x.get("in_sp500", False),
             x.get("ticker", ""),
         ),
     )

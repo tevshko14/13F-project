@@ -580,7 +580,22 @@ async def stock_insider_trades_api(request: Request, ticker: str):
 async def ticker_search_index(request: Request):
     cache_data = getattr(app.state, "fund_cache", {})
     data = await asyncio.to_thread(market_data.get_ticker_search_list, cache_data)
-    return JSONResponse(content=data)
+    # Strip fields the client doesn't need to reduce payload (~8000 items)
+    slim = []
+    for item in data:
+        entry: dict = {"ticker": item["ticker"], "name": item["name"], "type": item["type"]}
+        if item.get("held_by_super"):
+            entry["held_by_super"] = True
+        if item.get("in_sp500"):
+            entry["in_sp500"] = True
+        if item.get("exchange"):
+            entry["exchange"] = item["exchange"]
+        if item.get("sector"):
+            entry["sector"] = item["sector"]
+        if item.get("cik"):
+            entry["cik"] = item["cik"]
+        slim.append(entry)
+    return JSONResponse(content=slim)
 
 
 @app.get("/api/heatmap", response_class=HTMLResponse)
