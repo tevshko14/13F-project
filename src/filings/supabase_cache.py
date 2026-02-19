@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,45 @@ def get_cached(cache_key: str) -> dict | None:
         return None
 
 
+def get_cached_with_stale(cache_key: str) -> tuple[dict | list | None, bool]:
+    """Fetch a cache row, distinguishing fresh hits from stale data.
+
+    Returns a tuple ``(data, is_fresh)``:
+      - ``(data, True)``  -- cache hit, data is not expired
+      - ``(data, False)`` -- cache hit but expired (stale; useful for fallback)
+      - ``(None, False)`` -- complete miss (key not found, or Supabase unavailable)
+    """
+    client = _get_client()
+    if client is None:
+        return None, False
+
+    try:
+        resp = (
+            client
+            .table(_TABLE)
+            .select("response_data, expires_at")
+            .eq("cache_key", cache_key)
+            .maybe_single()
+            .execute()
+        )
+        if resp.data is None:
+            return None, False
+
+        response_data = resp.data.get("response_data")
+
+        # Check expiry
+        expires_at = resp.data.get("expires_at")
+        if expires_at is not None:
+            exp_dt = datetime.fromisoformat(expires_at)
+            if exp_dt < datetime.now(timezone.utc):
+                return response_data, False  # Stale but available
+
+        return response_data, True  # Fresh hit
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return None, False
+
+
 def set_cached(
     cache_key: str,
     category: str,
@@ -300,3 +340,145 @@ def increment_quota(category: str, month: str) -> int:
     except Exception as exc:
         logger.warning("Supabase increment_quota(%s, %s) failed: %s", category, month, exc)
         return -1
+
+
+# ── High-level cache-first fetch utilities ───────────────────────
+
+
+def fetch_with_cache(
+    cache_key: str,
+    category: str,
+    ttl_days: float,
+    api_fetch_fn: Callable[[], dict | list | None],
+    symbol: str | None = None,
+) -> dict | list | None:
+    """Centralized cache-first fetching utility.
+
+    Wraps any API call with Supabase-backed caching:
+      1. Check Supabase for *cache_key* -- if fresh, return immediately
+      2. If miss or expired, call *api_fetch_fn()*
+      3. On success: upsert result to Supabase with new ``expires_at``
+      4. On failure: return stale data from Supabase as fallback
+      5. All wrapped in try/except -- **never** raises
+
+    Args:
+        cache_key:    Unique identifier, e.g. ``"insider_global:p:100"``
+        category:     Grouping label, e.g. ``"insider"``, ``"sentiment"``
+        ttl_days:     How many days before data is considered stale
+        api_fetch_fn: Zero-argument callable that returns fresh data
+                      (dict, list, or ``None`` on failure)
+        symbol:       Optional ticker for log messages
+
+    Returns:
+        Cached or freshly-fetched data, or ``None`` if both fail.
+    """
+    log_label = f"{category}:{symbol}" if symbol else cache_key
+
+    try:
+        # Step 1: Check Supabase cache
+        cached_data, is_fresh = get_cached_with_stale(cache_key)
+
+        if cached_data is not None and is_fresh:
+            logger.debug("Cache HIT (fresh) for %s", log_label)
+            return cached_data
+
+        # Step 2: Cache miss or stale -- call the API
+        if cached_data is not None:
+            logger.debug("Cache STALE for %s -- calling API", log_label)
+        else:
+            logger.debug("Cache MISS for %s -- calling API", log_label)
+
+        fresh_data = None
+        try:
+            fresh_data = api_fetch_fn()
+        except Exception as exc:
+            logger.warning("API call failed for %s: %s", log_label, exc)
+
+        # Step 3: On success -- upsert to Supabase
+        if fresh_data is not None:
+            ttl_seconds = int(ttl_days * 86_400)
+            set_cached(cache_key, category, fresh_data, ttl_seconds=ttl_seconds)
+            logger.info("Cache SET for %s (ttl=%.2fd)", log_label, ttl_days)
+            return fresh_data
+
+        # Step 4: On failure -- return stale data as fallback
+        if cached_data is not None:
+            logger.info("API failed for %s -- returning stale cached data", log_label)
+            return cached_data
+
+        # Step 5: Both cache and API failed
+        logger.warning("No data available for %s (cache miss + API failure)", log_label)
+        return None
+
+    except Exception as exc:
+        logger.error("fetch_with_cache failed for %s: %s", log_label, exc)
+        return None
+
+
+def fetch_with_cache_and_quota(
+    cache_key: str,
+    category: str,
+    ttl_days: float,
+    api_fetch_fn: Callable[[], dict | list | None],
+    quota_category: str,
+    max_monthly: int,
+    symbol: str | None = None,
+) -> dict | list | None:
+    """Like :func:`fetch_with_cache`, but with a monthly quota guard.
+
+    Before calling the API, checks whether the monthly call count for
+    *quota_category* has been exceeded.  If so, returns stale data (if
+    available) or ``None`` without touching the external API.
+
+    Args:
+        quota_category: Quota bucket name, e.g. ``"glassdoor"``
+        max_monthly:    Hard cap on API calls per calendar month
+        (all other args identical to :func:`fetch_with_cache`)
+    """
+    log_label = f"{category}:{symbol}" if symbol else cache_key
+
+    try:
+        # Step 1: Check Supabase cache
+        cached_data, is_fresh = get_cached_with_stale(cache_key)
+
+        if cached_data is not None and is_fresh:
+            return cached_data
+
+        # Step 2: Check quota before calling API
+        current_month = datetime.now(timezone.utc).strftime("%Y-%m")
+        quota_data = get_quota(quota_category, current_month)
+        current_count = (quota_data or {}).get("count", 0)
+
+        if current_count >= max_monthly:
+            logger.warning(
+                "Quota exhausted for %s (%d/%d) -- returning %s data for %s",
+                quota_category, current_count, max_monthly,
+                "stale" if cached_data else "no",
+                log_label,
+            )
+            return cached_data  # May be None
+
+        # Step 3: Increment quota and call API
+        fresh_data = None
+        try:
+            fresh_data = api_fetch_fn()
+            increment_quota(quota_category, current_month)
+        except Exception as exc:
+            logger.warning("API call failed for %s: %s", log_label, exc)
+
+        # Step 4: On success -- upsert
+        if fresh_data is not None:
+            ttl_seconds = int(ttl_days * 86_400)
+            set_cached(cache_key, category, fresh_data, ttl_seconds=ttl_seconds)
+            return fresh_data
+
+        # Step 5: Fallback to stale
+        if cached_data is not None:
+            logger.info("API failed for %s -- returning stale data", log_label)
+            return cached_data
+
+        return None
+
+    except Exception as exc:
+        logger.error("fetch_with_cache_and_quota failed for %s: %s", log_label, exc)
+        return None

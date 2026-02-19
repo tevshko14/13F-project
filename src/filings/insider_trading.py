@@ -1,12 +1,16 @@
-"""Insider trading screener — scrapes OpenInsider for SEC Form 4 data.
+"""Insider trading screener -- scrapes OpenInsider for SEC Form 4 data.
 
 Two modes:
   1. Global screener: latest insider buys/sells across all stocks
   2. Per-ticker: insider trades for a specific company
 
-Data is cached in memory with short TTLs since insider trades are
-time-sensitive.  OpenInsider aggregates SEC Form 4 filings into
-clean HTML tables, so we avoid parsing raw XML.
+Caching strategy:
+  - L1: in-memory dict with 5-10 min TTL (fast path, sub-ms)
+  - L2: Supabase via ``fetch_with_cache`` (survives Railway deploys,
+        returns stale data on API failure)
+
+OpenInsider aggregates SEC Form 4 filings into clean HTML tables,
+so we avoid parsing raw XML.
 """
 
 from __future__ import annotations
@@ -19,6 +23,8 @@ from dataclasses import dataclass, asdict
 
 import httpx
 from bs4 import BeautifulSoup
+
+from filings import supabase_cache
 
 logger = logging.getLogger(__name__)
 
@@ -164,54 +170,111 @@ def get_latest_insider_trades(
 ) -> list[InsiderTrade]:
     """Fetch latest insider trades from OpenInsider (global screener).
 
+    Uses a two-tier cache:
+      - L1: in-memory dict (5 min TTL, sub-ms reads)
+      - L2: Supabase via ``fetch_with_cache`` (survives Railway deploys)
+
     Args:
         trade_type: "p" for purchases only, "s" for sales only, "" for all.
         count: Number of trades to fetch (max 100).
     """
     cache_key = f"global:{trade_type or 'all'}:{count}"
+
+    # ── L1: in-memory fast path ──
     cached = _get_cached(cache_key, _GLOBAL_TTL)
     if cached is not None:
         return cached
 
-    url = f"{_OI_BASE}/screener"
-    params: dict[str, str] = {
-        "s": "", "o": "", "pl": "", "ph": "",
-        "st": "0", "tc": "1",
-        "t": trade_type,
-        "vf": "", "o2d": "2", "sortcol": "0",
-        "cnt": str(min(count, 100)), "page": "1",
-    }
+    # ── L2: Supabase-backed fetch with stale fallback ──
+    supabase_key = f"insider_{cache_key}"
 
-    try:
-        resp = httpx.get(url, params=params, headers=_HEADERS,
-                         timeout=15, follow_redirects=True)
-        resp.raise_for_status()
-        trades = _parse_table(resp.text, has_company_col=True)
-    except Exception:
-        logger.exception("Failed to fetch OpenInsider global screener")
-        trades = []
+    def _fetch_from_openinsider() -> list[dict] | None:
+        url = f"{_OI_BASE}/screener"
+        params: dict[str, str] = {
+            "s": "", "o": "", "pl": "", "ph": "",
+            "st": "0", "tc": "1",
+            "t": trade_type,
+            "vf": "", "o2d": "2", "sortcol": "0",
+            "cnt": str(min(count, 100)), "page": "1",
+        }
+        try:
+            resp = httpx.get(url, params=params, headers=_HEADERS,
+                             timeout=15, follow_redirects=True)
+            resp.raise_for_status()
+            trades = _parse_table(resp.text, has_company_col=True)
+            if trades:
+                return [t.to_dict() for t in trades]
+        except Exception:
+            logger.exception("Failed to fetch OpenInsider global screener")
+        return None
+
+    result_data = supabase_cache.fetch_with_cache(
+        cache_key=supabase_key,
+        category="insider",
+        ttl_days=1.0 / 288,  # 5 minutes
+        api_fetch_fn=_fetch_from_openinsider,
+        symbol="global",
+    )
+
+    # Reconstruct InsiderTrade objects from dicts
+    trades: list[InsiderTrade] = []
+    if result_data and isinstance(result_data, list):
+        for d in result_data:
+            try:
+                trades.append(InsiderTrade(**d))
+            except Exception:
+                continue
 
     _set_cached(cache_key, trades)
     return trades
 
 
 def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
-    """Fetch insider trades for a specific ticker from OpenInsider."""
+    """Fetch insider trades for a specific ticker from OpenInsider.
+
+    Uses a two-tier cache:
+      - L1: in-memory dict (10 min TTL, sub-ms reads)
+      - L2: Supabase via ``fetch_with_cache`` (survives Railway deploys)
+    """
     key = ticker.upper()
     cache_key = f"ticker:{key}"
+
+    # ── L1: in-memory fast path ──
     cached = _get_cached(cache_key, _TICKER_TTL)
     if cached is not None:
         return cached
 
-    url = f"{_OI_BASE}/{key}"
-    try:
-        resp = httpx.get(url, headers=_HEADERS, timeout=15,
-                         follow_redirects=True)
-        resp.raise_for_status()
-        trades = _parse_table(resp.text, has_company_col=False)
-    except Exception:
-        logger.exception("Failed to fetch OpenInsider data for %s", key)
-        trades = []
+    # ── L2: Supabase-backed fetch with stale fallback ──
+    supabase_key = f"insider_ticker:{key}"
+
+    def _fetch_ticker() -> list[dict] | None:
+        try:
+            resp = httpx.get(f"{_OI_BASE}/{key}", headers=_HEADERS,
+                             timeout=15, follow_redirects=True)
+            resp.raise_for_status()
+            trades = _parse_table(resp.text, has_company_col=False)
+            if trades:
+                return [t.to_dict() for t in trades]
+        except Exception:
+            logger.exception("Failed to fetch OpenInsider data for %s", key)
+        return None
+
+    result_data = supabase_cache.fetch_with_cache(
+        cache_key=supabase_key,
+        category="insider",
+        ttl_days=1.0 / 144,  # 10 minutes
+        api_fetch_fn=_fetch_ticker,
+        symbol=key,
+    )
+
+    # Reconstruct InsiderTrade objects from dicts
+    trades: list[InsiderTrade] = []
+    if result_data and isinstance(result_data, list):
+        for d in result_data:
+            try:
+                trades.append(InsiderTrade(**d))
+            except Exception:
+                continue
 
     _set_cached(cache_key, trades)
     return trades
