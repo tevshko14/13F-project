@@ -314,88 +314,226 @@
     })();
     </script>
 
+    <style>
+        /* ── Search dropdown categories ── */
+        .ts-category {
+            padding: 6px 14px 4px;
+            font-size: 0.7em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(0,0,0,0.4);
+            border-top: 1px solid rgba(0,0,0,0.06);
+        }
+        .ts-category:first-child { border-top: none; }
+        .ts-item {
+            padding: 8px 14px;
+            cursor: pointer;
+            font-size: 0.9em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: background 0.1s;
+        }
+        .ts-item:hover, .ts-item.ts-active {
+            background: rgba(0,0,0,0.05);
+        }
+        .ts-item-ticker {
+            font-weight: 700;
+            font-family: monospace;
+            min-width: 60px;
+            color: var(--pico-color, #333);
+        }
+        .ts-item-name {
+            flex: 1;
+            color: rgba(0,0,0,0.65);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ts-item-meta {
+            font-size: 0.78em;
+            color: rgba(0,0,0,0.38);
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .ts-empty {
+            padding: 16px 14px;
+            text-align: center;
+            color: rgba(0,0,0,0.4);
+            font-size: 0.9em;
+        }
+    </style>
     <script>
-    // ── Unified Search Autocomplete (tickers + investors) ──
+    // ── Multi-Category Search Autocomplete ──
     (function() {
         var _tickerIndex = null;
         var _selectedIdx = -1;
+        var _flatItems = [];     // flat list of selectable items for keyboard nav
+        var _debounceTimer = null;
 
-        // Fetch the search index on page load
+        // Fetch search index on load
         fetch("/api/ticker-search-index")
             .then(function(r) { return r.json(); })
             .then(function(data) { _tickerIndex = data; })
             .catch(function() { _tickerIndex = []; });
 
+        function escHtml(s) {
+            if (!s) return '';
+            var d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
         window.tickerSearchFilter = function(query) {
+            // Debounce: wait 80ms after last keystroke
+            clearTimeout(_debounceTimer);
+            _debounceTimer = setTimeout(function() { _doFilter(query); }, 80);
+        };
+
+        function _doFilter(query) {
             var container = document.getElementById("ticker-search-results");
             if (!container || !_tickerIndex) return;
 
-            query = (query || "").trim().toUpperCase();
-            if (query.length < 1) {
+            query = (query || "").trim();
+            var qUpper = query.toUpperCase();
+            if (qUpper.length < 1) {
                 container.style.display = "none";
+                _flatItems = [];
                 return;
             }
 
-            var matches = _tickerIndex.filter(function(item) {
-                return item.ticker.toUpperCase().indexOf(query) === 0
-                    || item.name.toUpperCase().indexOf(query) !== -1;
-            }).slice(0, 12);
+            // Filter matches
+            var stocks = [];
+            var investors = [];
 
-            if (matches.length === 0) {
-                container.style.display = "none";
+            for (var i = 0; i < _tickerIndex.length; i++) {
+                var item = _tickerIndex[i];
+                var tickerUpper = item.ticker.toUpperCase();
+                var nameUpper = item.name.toUpperCase();
+
+                var matchesTicker = tickerUpper.indexOf(qUpper) === 0;
+                var matchesName = nameUpper.indexOf(qUpper) !== -1;
+
+                if (!matchesTicker && !matchesName) continue;
+
+                if (item.type === 'investor') {
+                    if (investors.length < 5) investors.push(item);
+                } else {
+                    if (stocks.length < 8) stocks.push(item);
+                }
+
+                if (stocks.length >= 8 && investors.length >= 5) break;
+            }
+
+            // No results
+            if (stocks.length === 0 && investors.length === 0) {
+                container.innerHTML = '<div class="ts-empty">No results found for &ldquo;' + escHtml(query) + '&rdquo;</div>';
+                container.style.display = "block";
+                _flatItems = [];
+                _selectedIdx = -1;
                 return;
+            }
+
+            // Build categorized HTML
+            var html = '';
+            _flatItems = [];
+            var globalIdx = 0;
+
+            // ── STOCKS section ──
+            if (stocks.length > 0) {
+                html += '<div class="ts-category">Stocks</div>';
+                for (var s = 0; s < stocks.length; s++) {
+                    var st = stocks[s];
+                    var exchange = st.exchange || '';
+                    var superStar = st.held_by_super
+                        ? '<span style="color:#f9a825;margin-right:2px;" title="Held by superinvestors">&#9733;</span>'
+                        : '';
+                    var metaParts = [];
+                    if (exchange) metaParts.push(exchange);
+                    if (st.in_sp500) metaParts.push('S&P 500');
+                    var metaStr = metaParts.join(' &middot; ');
+
+                    html += '<div class="ts-item" data-gidx="' + globalIdx + '"'
+                        + ' data-ticker="' + escHtml(st.ticker) + '"'
+                        + ' data-type="ticker" data-cik="">'
+                        + superStar
+                        + '<span class="ts-item-ticker">' + escHtml(st.ticker) + '</span>'
+                        + '<span class="ts-item-name">' + escHtml(st.name) + '</span>'
+                        + (metaStr ? '<span class="ts-item-meta">' + metaStr + '</span>' : '')
+                        + '</div>';
+                    _flatItems.push({ ticker: st.ticker, type: 'ticker', cik: '' });
+                    globalIdx++;
+                }
+            }
+
+            // ── INVESTORS section ──
+            if (investors.length > 0) {
+                html += '<div class="ts-category">Investors</div>';
+                for (var v = 0; v < investors.length; v++) {
+                    var inv = investors[v];
+                    html += '<div class="ts-item" data-gidx="' + globalIdx + '"'
+                        + ' data-ticker="' + escHtml(inv.ticker) + '"'
+                        + ' data-type="investor" data-cik="' + escHtml(inv.cik || '') + '">'
+                        + '<span style="margin-right:2px;">&#128100;</span>'
+                        + '<span class="ts-item-ticker" style="font-family:inherit;min-width:auto;">' + escHtml(inv.ticker) + '</span>'
+                        + '<span class="ts-item-name">' + escHtml(inv.name) + '</span>'
+                        + '<span class="ts-item-meta">Fund</span>'
+                        + '</div>';
+                    _flatItems.push({ ticker: inv.ticker, type: 'investor', cik: inv.cik || '' });
+                    globalIdx++;
+                }
             }
 
             _selectedIdx = -1;
-            container.innerHTML = matches.map(function(m, i) {
-                var isInvestor = m.type === 'investor';
-                var icon = isInvestor
-                    ? '<span style="margin-right: 0.3em;" title="Superinvestor">&#128100;</span>'
-                    : (m.held_by_super ? '<span style="color: #f9a825; margin-right: 0.3em;" title="Held by superinvestors">&#9733;</span>' : '');
-                var badge = isInvestor
-                    ? '<span style="opacity:0.5; font-size:0.75em; background:#e8eaf6; padding:0 0.3em; border-radius:2px;"> Investor</span>'
-                    : (m.in_sp500 ? '<span style="opacity:0.5; font-size:0.75em;"> S&P</span>' : '');
-
-                return '<div class="ts-item" data-idx="' + i + '" data-ticker="' + m.ticker + '"'
-                    + ' data-type="' + (m.type || 'ticker') + '" data-cik="' + (m.cik || '') + '"'
-                    + ' style="padding: 0.4em 0.6em; cursor: pointer; font-size: 0.85em; display: flex; justify-content: space-between; align-items: center;"'
-                    + ' onmouseenter="this.style.background=\'rgba(0,0,0,0.06)\'" onmouseleave="this.style.background=\'\'"'
-                    + ' onclick="tickerSearchGo(\'' + m.ticker.replace(/'/g, "\\'") + '\', \'' + (m.type || 'ticker') + '\', \'' + (m.cik || '') + '\')">'
-                    + '<span>' + icon + '<strong>' + m.ticker + '</strong> <span class="text-muted">' + m.name + '</span></span>'
-                    + badge
-                    + '</div>';
-            }).join("");
+            container.innerHTML = html;
             container.style.display = "block";
-        };
+
+            // Attach click handlers
+            var items = container.querySelectorAll(".ts-item");
+            items.forEach(function(el) {
+                el.addEventListener("click", function() {
+                    var idx = parseInt(el.dataset.gidx);
+                    if (_flatItems[idx]) {
+                        tickerSearchGo(_flatItems[idx].ticker, _flatItems[idx].type, _flatItems[idx].cik);
+                    }
+                });
+            });
+        }
 
         window.tickerSearchKeydown = function(e) {
             var container = document.getElementById("ticker-search-results");
-            if (!container || container.style.display === "none") return;
-            var items = container.querySelectorAll(".ts-item");
-            if (items.length === 0) return;
+            if (!container || container.style.display === "none" || _flatItems.length === 0) return;
 
             if (e.key === "ArrowDown") {
                 e.preventDefault();
-                _selectedIdx = Math.min(_selectedIdx + 1, items.length - 1);
-                highlightItem(items);
+                _selectedIdx = Math.min(_selectedIdx + 1, _flatItems.length - 1);
+                _highlightItems(container);
             } else if (e.key === "ArrowUp") {
                 e.preventDefault();
                 _selectedIdx = Math.max(_selectedIdx - 1, 0);
-                highlightItem(items);
+                _highlightItems(container);
             } else if (e.key === "Enter") {
                 e.preventDefault();
-                var sel = (_selectedIdx >= 0 && items[_selectedIdx]) ? items[_selectedIdx] : items[0];
-                if (sel) {
-                    tickerSearchGo(sel.dataset.ticker, sel.dataset.type, sel.dataset.cik);
+                var idx = _selectedIdx >= 0 ? _selectedIdx : 0;
+                if (_flatItems[idx]) {
+                    tickerSearchGo(_flatItems[idx].ticker, _flatItems[idx].type, _flatItems[idx].cik);
                 }
             } else if (e.key === "Escape") {
                 container.style.display = "none";
             }
         };
 
-        function highlightItem(items) {
-            items.forEach(function(el, i) {
-                el.style.background = i === _selectedIdx ? "rgba(0,0,0,0.08)" : "";
+        function _highlightItems(container) {
+            var items = container.querySelectorAll(".ts-item");
+            items.forEach(function(el) {
+                var idx = parseInt(el.dataset.gidx);
+                if (idx === _selectedIdx) {
+                    el.classList.add("ts-active");
+                    el.scrollIntoView({ block: "nearest" });
+                } else {
+                    el.classList.remove("ts-active");
+                }
             });
         }
 
@@ -407,7 +545,7 @@
             }
         };
 
-        // Close dropdown when clicking outside
+        // Close dropdown on outside click
         document.addEventListener("click", function(e) {
             var search = document.getElementById("ticker-search");
             var results = document.getElementById("ticker-search-results");
