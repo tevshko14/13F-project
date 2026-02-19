@@ -19,6 +19,7 @@
     <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
     <script>
         !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
         posthog.init('phc_lfPdPHESAEYVdD5AibTWwGjXgIrPiwFwhLnzzUT08av',{api_host:'https://us.i.posthog.com',person_profiles:'identified_only'})
@@ -365,18 +366,65 @@
         }
     </style>
     <script>
-    // ── Multi-Category Search Autocomplete ──
+    // ── Fuzzy Search Autocomplete (Fuse.js) ──
     (function() {
-        var _tickerIndex = null;
+        var _fuseStocks = null;   // Fuse instance for stocks
+        var _fuseInvestors = null; // Fuse instance for investors
+        var _indexReady = false;
         var _selectedIdx = -1;
-        var _flatItems = [];     // flat list of selectable items for keyboard nav
+        var _flatItems = [];
         var _debounceTimer = null;
 
-        // Fetch search index on load
+        // Lazy-load search index then build Fuse instances
         fetch("/api/ticker-search-index")
             .then(function(r) { return r.json(); })
-            .then(function(data) { _tickerIndex = data; })
-            .catch(function() { _tickerIndex = []; });
+            .then(function(data) {
+                var stocks = [];
+                var investors = [];
+                for (var i = 0; i < data.length; i++) {
+                    if (data[i].type === 'investor') {
+                        investors.push(data[i]);
+                    } else {
+                        stocks.push(data[i]);
+                    }
+                }
+                // Build Fuse indexes with weighted keys
+                _fuseStocks = new Fuse(stocks, {
+                    keys: [
+                        { name: 'ticker', weight: 1.0 },
+                        { name: 'name', weight: 0.5 }
+                    ],
+                    threshold: 0.3,         // 0=exact, 1=anything
+                    distance: 100,
+                    includeScore: true,
+                    minMatchCharLength: 1,
+                    shouldSortByScore: true,
+                    // Custom sort: boost superinvestor & S&P stocks
+                    sortFn: function(a, b) {
+                        // Lower score = better match in Fuse
+                        var scoreDiff = a.score - b.score;
+                        if (Math.abs(scoreDiff) > 0.05) return scoreDiff;
+                        // Break ties: prefer superinvestor-held, then S&P 500
+                        var aItem = a.item || {};
+                        var bItem = b.item || {};
+                        var aBoost = (aItem.held_by_super ? 0 : 1) * 10 + (aItem.in_sp500 ? 0 : 1);
+                        var bBoost = (bItem.held_by_super ? 0 : 1) * 10 + (bItem.in_sp500 ? 0 : 1);
+                        return aBoost - bBoost;
+                    }
+                });
+                _fuseInvestors = new Fuse(investors, {
+                    keys: [
+                        { name: 'ticker', weight: 1.0 },  // display_name
+                        { name: 'name', weight: 0.7 }     // fund_name
+                    ],
+                    threshold: 0.35,
+                    distance: 100,
+                    includeScore: true,
+                    minMatchCharLength: 1,
+                });
+                _indexReady = true;
+            })
+            .catch(function() { _indexReady = true; });
 
         function escHtml(s) {
             if (!s) return '';
@@ -386,45 +434,41 @@
         }
 
         window.tickerSearchFilter = function(query) {
-            // Debounce: wait 80ms after last keystroke
+            // Debounce: wait 150ms after last keystroke
             clearTimeout(_debounceTimer);
-            _debounceTimer = setTimeout(function() { _doFilter(query); }, 80);
+            _debounceTimer = setTimeout(function() { _doFilter(query); }, 150);
         };
 
         function _doFilter(query) {
             var container = document.getElementById("ticker-search-results");
-            if (!container || !_tickerIndex) return;
+            if (!container || !_indexReady) return;
 
             query = (query || "").trim();
-            var qUpper = query.toUpperCase();
-            if (qUpper.length < 1) {
+            if (query.length < 1) {
                 container.style.display = "none";
                 _flatItems = [];
                 return;
             }
 
-            // Filter matches
-            var stocks = [];
-            var investors = [];
+            // Search with Fuse.js
+            var stockResults = _fuseStocks ? _fuseStocks.search(query, { limit: 10 }) : [];
+            var investorResults = _fuseInvestors ? _fuseInvestors.search(query, { limit: 5 }) : [];
 
-            for (var i = 0; i < _tickerIndex.length; i++) {
-                var item = _tickerIndex[i];
-                var tickerUpper = item.ticker.toUpperCase();
-                var nameUpper = item.name.toUpperCase();
+            // Extract items from Fuse results
+            var stocks = stockResults.map(function(r) { return r.item; });
+            var investors = investorResults.map(function(r) { return r.item; });
 
-                var matchesTicker = tickerUpper.indexOf(qUpper) === 0;
-                var matchesName = nameUpper.indexOf(qUpper) !== -1;
-
-                if (!matchesTicker && !matchesName) continue;
-
-                if (item.type === 'investor') {
-                    if (investors.length < 5) investors.push(item);
-                } else {
-                    if (stocks.length < 8) stocks.push(item);
-                }
-
-                if (stocks.length >= 8 && investors.length >= 5) break;
-            }
+            // Boost exact ticker prefix matches to the top
+            var qUpper = query.toUpperCase();
+            stocks.sort(function(a, b) {
+                var aExact = a.ticker.toUpperCase().indexOf(qUpper) === 0 ? 0 : 1;
+                var bExact = b.ticker.toUpperCase().indexOf(qUpper) === 0 ? 0 : 1;
+                if (aExact !== bExact) return aExact - bExact;
+                // Then by superinvestor status
+                var aSuper = a.held_by_super ? 0 : 1;
+                var bSuper = b.held_by_super ? 0 : 1;
+                return aSuper - bSuper;
+            });
 
             // No results
             if (stocks.length === 0 && investors.length === 0) {
