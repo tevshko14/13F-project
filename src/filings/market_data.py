@@ -425,12 +425,41 @@ def build_most_added_table(
 
 # ── Ticker Search Index ───────────────────────────────────────────────
 
+def _guess_exchange(ticker: str) -> str:
+    """Guess exchange from ticker symbol (heuristic).
+
+    Common NASDAQ tickers have 4-5 letters; NYSE tickers tend to be 1-3.
+    This is a rough heuristic, not authoritative.
+    """
+    # Well-known NYSE single/double/triple-letter tickers
+    _NYSE_KNOWN = {
+        "A", "AA", "ABT", "ACN", "AIG", "ALL", "AMGN", "AXP", "BA", "BAC",
+        "BLK", "BMY", "BRK-B", "C", "CAT", "CI", "CL", "CMA", "COP", "CVS",
+        "CVX", "D", "DD", "DE", "DHR", "DIS", "DOW", "DUK", "EMR", "F",
+        "FDX", "GD", "GE", "GM", "GS", "HD", "HON", "HPQ", "IBM", "IP",
+        "JNJ", "JPM", "K", "KO", "LIN", "LLY", "LMT", "LOW", "MA", "MCD",
+        "MDT", "MET", "MMM", "MO", "MRK", "MS", "NEE", "NKE", "NOC", "OXY",
+        "PEP", "PFE", "PG", "PM", "RTX", "SO", "SPG", "SYK", "T", "TGT",
+        "TMO", "TRV", "UNH", "UNP", "UPS", "USB", "V", "VZ", "WBA", "WFC",
+        "WM", "WMT", "XOM",
+    }
+    t = ticker.upper()
+    if t in _NYSE_KNOWN:
+        return "NYSE"
+    # Most 4-5 letter tickers are NASDAQ
+    if len(t) >= 4:
+        return "NASDAQ"
+    return "NYSE"
+
+
 def get_ticker_search_list(cache_data: dict) -> list[dict]:
     """Build the autocomplete search index from cache + S&P 500 + superinvestors.
 
-    Returns deduplicated list of tickers and investors:
-    [{"ticker": "AAPL", "name": "Apple Inc.", "held_by_super": true, "in_sp500": true, "type": "ticker"},
-     {"ticker": "Warren Buffett", "name": "Berkshire Hathaway", "type": "investor", "cik": "1067983"}]
+    Returns deduplicated list of tickers and investors with exchange/sector:
+    [{"ticker": "AAPL", "name": "Apple Inc.", "held_by_super": true,
+      "in_sp500": true, "type": "ticker", "exchange": "NASDAQ", "sector": "..."},
+     {"ticker": "Warren Buffett", "name": "Berkshire Hathaway",
+      "type": "investor", "cik": "1067983"}]
     """
     from filings.superinvestors import SUPERINVESTORS
 
@@ -444,13 +473,14 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
                 if t_upper not in super_tickers:
                     super_tickers[t_upper] = h.get("issuer", t_upper)
 
-    # Get S&P 500 constituents
+    # Get S&P 500 constituents (includes sector)
     try:
         constituents = get_sp500_constituents()
     except Exception:
         constituents = []
 
     sp500_set = {c["ticker"].upper() for c in constituents}
+    sector_map = {c["ticker"].upper(): c.get("sector", "") for c in constituents}
 
     # Merge tickers
     all_items: dict[str, dict] = {}
@@ -463,6 +493,8 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
             "held_by_super": t in super_tickers,
             "in_sp500": True,
             "type": "ticker",
+            "exchange": _guess_exchange(t),
+            "sector": c.get("sector", ""),
         }
 
     for t, issuer in super_tickers.items():
@@ -473,6 +505,8 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
                 "held_by_super": True,
                 "in_sp500": t in sp500_set,
                 "type": "ticker",
+                "exchange": _guess_exchange(t),
+                "sector": sector_map.get(t, ""),
             }
 
     # Add superinvestors
