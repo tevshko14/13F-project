@@ -1,7 +1,8 @@
 """13F Filing Viewer — FastAPI web application.
 
 Production-ready with: security headers, request logging, exception
-handlers, rate limiting, health check, structured logging, and Sentry.
+handlers, rate limiting, health check, structured logging, Sentry,
+and Supabase-backed persistent cache.
 """
 
 import os as _os
@@ -971,6 +972,24 @@ def _try_migrate(psycopg2, db_url: str, derived: bool) -> dict:
         return {"status": "ok", "tables": tables, "derived": derived, "url_prefix": masked}
     except Exception as e:
         return {"error": f"{masked}: {str(e)[:300]}", "derived": derived}
+
+
+@app.get("/admin/debug-cache")
+async def admin_debug_cache(request: Request):
+    """Debug: test Supabase cache load from Railway."""
+    try:
+        rows = await asyncio.to_thread(supabase_cache.get_all_by_category, "13f")
+        if rows is None:
+            return JSONResponse({"error": "get_all_by_category returned None"})
+        result = cache.load_cache_from_supabase()
+        return JSONResponse({
+            "raw_rows": len(rows) if rows else 0,
+            "parsed_funds": len(result),
+            "sample_ciks": list(result.keys())[:5] if result else [],
+            "app_cache_entries": len(getattr(app.state, "fund_cache", {})),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:500]})
 
 
 @app.get("/robots.txt")
