@@ -36,11 +36,11 @@ _TABLE = "api_cache"
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS api_cache (
     cache_key     TEXT PRIMARY KEY,
-    category      TEXT NOT NULL,
+    category      TEXT NOT NULL DEFAULT 'general',
     response_data JSONB NOT NULL,
-    expires_at    TIMESTAMPTZ,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    expires_at    TIMESTAMPTZ,
+    ttl_seconds   INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_api_cache_category
     ON api_cache (category);
@@ -278,7 +278,6 @@ def set_cached(
     if client is None:
         return False
 
-    now = datetime.now(timezone.utc).isoformat()
     expires_at = None
     if ttl_seconds is not None:
         expires_at = (
@@ -290,7 +289,6 @@ def set_cached(
         "category": category,
         "response_data": data,
         "expires_at": expires_at,
-        "updated_at": now,
     }
 
     try:
@@ -318,7 +316,7 @@ def get_all_by_category(category: str) -> list[dict] | None:
         resp = (
             client
             .table(_TABLE)
-            .select("cache_key, response_data, updated_at")
+            .select("cache_key, response_data, created_at")
             .eq("category", category)
             .execute()
         )
