@@ -302,28 +302,43 @@ def set_cached(
 # ── Bulk read by category ────────────────────────────────────────
 
 
-def get_all_by_category(category: str) -> list[dict] | None:
-    """Fetch all rows for a given category.
+def get_all_by_category(category: str, page_size: int = 10) -> list[dict] | None:
+    """Fetch all rows for a given category, paginated to avoid timeouts.
 
     Returns a list of row dicts (each with ``cache_key``,
     ``response_data``, etc.) on success, or ``None`` on error.
+
+    Large categories (e.g. 84 × 300KB 13f rows ≈ 28MB) are fetched
+    in pages of *page_size* to stay within Supabase/network limits.
     """
     client = _get_client()
     if client is None:
         return None
 
+    all_rows: list[dict] = []
+    offset = 0
+
     try:
-        resp = (
-            client
-            .table(_TABLE)
-            .select("cache_key, response_data, created_at")
-            .eq("category", category)
-            .execute()
-        )
-        return resp.data  # list[dict]
+        while True:
+            resp = (
+                client
+                .table(_TABLE)
+                .select("cache_key, response_data, created_at")
+                .eq("category", category)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = resp.data or []
+            all_rows.extend(batch)
+            if len(batch) < page_size:
+                break  # Last page
+            offset += page_size
+
+        return all_rows
     except Exception as exc:
         _handle_table_missing(exc)
-        return None
+        # Return whatever we collected so far (partial > nothing)
+        return all_rows if all_rows else None
 
 
 # ── Quota helpers (stored as a special cache row) ────────────────
