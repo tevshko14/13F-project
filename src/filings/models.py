@@ -95,6 +95,9 @@ class EnrichedActivityItem:
     price_at_filing: float | None    # stock price near filing_date (future)
     current_price: float | None      # latest stock price
     price_change_pct: float | None   # % change from filing to current
+    fund_total_holdings: int = 0     # number of positions in this fund
+    portfolio_impact: float = 0.0    # current_value / fund_aum * 100 (trade as % of AUM)
+    pct_share_change: float | None = None  # share_change / previous_shares * 100
 
 
 @dataclass

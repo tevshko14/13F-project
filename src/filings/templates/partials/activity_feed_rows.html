@@ -1,0 +1,51 @@
+{% from "partials/ticker_link.html" import ticker_link %}
+{% from "partials/signal_badge.html" import signal_badge %}
+
+{% for item in solo_items %}
+<tr data-fund-aum="{{ item.fund_aum }}">
+    <td>
+        <a href="/holdings/{{ item.fund_cik }}">
+            <strong>{{ item.fund_display_name }}</strong>
+        </a>
+        <small class="fund-aum">${{ "{:,.0f}".format(item.fund_aum / 1e9) }}B AUM - {{ item.fund_total_holdings }} names</small>
+    </td>
+    <td>{{ signal_badge(item.signal) }}</td>
+    <td>{{ ticker_link(item.ticker, item.cusip) }}</td>
+    <td>{{ item.issuer_name }}</td>
+    <td class="text-right conviction{% if item.conviction > 50 %} high-conviction{% endif %}"
+        title="Conviction = |Share Change| x Portfolio Weight / 100">
+        {{ "{:.1f}".format(item.conviction) }}
+    </td>
+    <td class="text-right portfolio-impact"
+        title="This trade = {{ "%.2f"|format(item.portfolio_impact) }}% of fund AUM">
+        {{ "%.1f"|format(item.portfolio_impact) }}%
+    </td>
+    <td class="text-right">
+        {% if item.share_change != 0 %}
+        <span class="{% if item.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+            {{ "{:+,}".format(item.share_change) }}
+        </span>
+        {% else %}-{% endif %}
+    </td>
+    <td class="text-right">${{ "{:,.0f}".format(item.current_value) }}</td>
+    {% if has_prices and item.current_price %}
+    <td class="text-right">${{ "{:,.2f}".format(item.current_price) }}</td>
+    {% elif has_prices %}
+    <td class="text-right">-</td>
+    {% endif %}
+    <td class="text-small">{{ item.filing_date }}</td>
+</tr>
+{% endfor %}
+{% if has_more %}
+<tr id="load-more-row">
+    <td colspan="{% if has_prices %}10{% else %}9{% endif %}" style="text-align:center;padding:1em;">
+        <button class="gp-expand-btn"
+                hx-get="/api/activity-feed?timeframe={{ timeframe }}&ptype={{ ptype }}&page={{ next_page }}"
+                hx-target="closest tr"
+                hx-swap="outerHTML">
+            Load More ({{ total_solo - (page * 50) }} remaining)
+            <span class="gp-expand-arrow">&#9660;</span>
+        </button>
+    </td>
+</tr>
+{% endif %}
