@@ -29,6 +29,7 @@ test = [
 [project.scripts]
 filings = "filings.cli:main"
 filings-web = "filings.web:main"
+filings-sync = "filings.sync_worker:main"
 
 [build-system]
 requires = ["hatchling"]

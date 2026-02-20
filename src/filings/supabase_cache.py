@@ -49,6 +49,24 @@ CREATE INDEX IF NOT EXISTS idx_api_cache_expires_at
     WHERE expires_at IS NOT NULL;
 """
 
+# Idempotent migrations — safe to run on every startup.
+_MIGRATE_SQL = """
+-- Sync worker tracking columns on api_cache
+ALTER TABLE api_cache ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;
+ALTER TABLE api_cache ADD COLUMN IF NOT EXISTS sync_status TEXT DEFAULT 'pending';
+
+-- Sync run log table
+CREATE TABLE IF NOT EXISTS sync_logs (
+    run_id          TEXT PRIMARY KEY,
+    started_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at    TIMESTAMPTZ,
+    funds_updated   INTEGER DEFAULT 0,
+    funds_failed    INTEGER DEFAULT 0,
+    funds_skipped   INTEGER DEFAULT 0,
+    error_messages  JSONB DEFAULT '[]'::jsonb
+);
+"""
+
 
 def _auto_migrate() -> None:
     """Create the api_cache table if it doesn't exist.
@@ -84,10 +102,11 @@ def _auto_migrate() -> None:
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute(_CREATE_TABLE_SQL)
+        cur.execute(_MIGRATE_SQL)
         cur.close()
         conn.close()
         _table_verified = True
-        logger.info("Supabase api_cache table verified/created via auto-migration")
+        logger.info("Supabase api_cache + sync_logs tables verified via auto-migration")
     except ImportError:
         logger.debug("psycopg2 not installed -- skipping auto-migration")
     except Exception as exc:
@@ -482,3 +501,109 @@ def fetch_with_cache_and_quota(
     except Exception as exc:
         logger.error("fetch_with_cache_and_quota failed for %s: %s", log_label, exc)
         return None
+
+
+# ── Sync worker helpers ──────────────────────────────────────────
+
+
+def update_sync_status(cache_key: str, status: str) -> bool:
+    """Update ``last_synced_at`` and ``sync_status`` for a cache row.
+
+    Called by the sync worker after each fund refresh attempt.
+    """
+    client = _get_client()
+    if client is None:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        client.table(_TABLE).update({
+            "last_synced_at": now,
+            "sync_status": status,
+        }).eq("cache_key", cache_key).execute()
+        return True
+    except Exception as exc:
+        logger.warning("update_sync_status failed for %s: %s", cache_key, exc)
+        return False
+
+
+def get_stale_sync_keys(max_age_hours: int = 24) -> list[str]:
+    """Return ``cache_key`` values for 13f rows needing a sync.
+
+    A row is considered stale if ``last_synced_at`` is NULL or older
+    than *max_age_hours*.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    ).isoformat()
+
+    try:
+        # Keys where never synced
+        resp_null = (
+            client.table(_TABLE)
+            .select("cache_key")
+            .eq("category", "13f")
+            .is_("last_synced_at", "null")
+            .execute()
+        )
+        # Keys where sync is stale
+        resp_old = (
+            client.table(_TABLE)
+            .select("cache_key")
+            .eq("category", "13f")
+            .lt("last_synced_at", cutoff)
+            .execute()
+        )
+        keys: set[str] = set()
+        for row in resp_null.data or []:
+            keys.add(row["cache_key"])
+        for row in resp_old.data or []:
+            keys.add(row["cache_key"])
+        return sorted(keys)
+    except Exception as exc:
+        logger.warning("get_stale_sync_keys failed: %s", exc)
+        return []
+
+
+def create_sync_log(run_id: str) -> bool:
+    """Insert a new sync_logs row when a sync run starts."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        client.table("sync_logs").insert({
+            "run_id": run_id,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning("create_sync_log failed: %s", exc)
+        return False
+
+
+def complete_sync_log(
+    run_id: str,
+    funds_updated: int,
+    funds_failed: int,
+    funds_skipped: int,
+    errors: list[str],
+) -> bool:
+    """Finalise a sync_logs row when the run completes."""
+    client = _get_client()
+    if client is None:
+        return False
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        client.table("sync_logs").update({
+            "completed_at": now,
+            "funds_updated": funds_updated,
+            "funds_failed": funds_failed,
+            "funds_skipped": funds_skipped,
+            "error_messages": errors[:50],  # Cap stored errors
+        }).eq("run_id", run_id).execute()
+        return True
+    except Exception as exc:
+        logger.warning("complete_sync_log failed: %s", exc)
+        return False

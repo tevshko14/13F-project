@@ -105,11 +105,10 @@ _app_start_time = time_module.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load cache on startup, trigger background refresh if stale.
+    """Load cache from Supabase on startup.  No background SEC refresh.
 
-    Hydration priority:
-      1. Supabase L2 (survives Railway deploys)
-      2. Disk cache (local dev / Supabase down)
+    Data is kept fresh by the standalone sync worker (Railway Cron Job).
+    The web process only reads from the cache — it never calls SEC EDGAR.
     """
     # ── Try Supabase first (persists across Railway deploys) ──
     app.state.fund_cache = await asyncio.to_thread(cache.load_cache_from_supabase)
@@ -118,20 +117,10 @@ async def lifespan(app: FastAPI):
         # Fallback: load from disk (local dev, or Supabase unavailable)
         app.state.fund_cache = cache.load_cache()
 
-    app.state.refreshing = False
-
-    if cache.is_cache_stale_for_startup(app.state.fund_cache) and app.state.fund_cache:
-        asyncio.create_task(_background_refresh(app))
-
-    # Start periodic polling for new filings
-    poll_task = asyncio.create_task(_poll_loop(app))
-
     # Prefetch S&P 500 market data in background (~30-60s on cold start)
     asyncio.create_task(_prefetch_market_data(app))
 
     yield
-
-    poll_task.cancel()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -226,90 +215,6 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # Background tasks
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _background_refresh(app: FastAPI):
-    """Refresh stale superinvestor funds in background.
-
-    Uses per-fund TTL: only re-fetches funds whose ``_last_refreshed``
-    timestamp is older than the effective TTL.  Skips recently-refreshed
-    funds to avoid unnecessary SEC EDGAR API calls.
-
-    Rate-limiting safeguards:
-      - 2 s sleep between individual funds
-      - 10 s batch pause every 10 funds
-      - Hard cap via ``cache._check_sec_rate_limit()``
-
-    On failure, keeps existing stale data (stale-while-revalidate).
-    """
-    app.state.refreshing = True
-    all_ciks = [si.cik for si in SUPERINVESTORS]
-    stale_ciks = cache.get_stale_ciks(app.state.fund_cache, all_ciks)
-
-    if not stale_ciks:
-        logger.info("No stale funds to refresh (%d funds all fresh)", len(all_ciks))
-        app.state.refreshing = False
-        return
-
-    logger.info("Refreshing %d/%d stale funds", len(stale_ciks), len(all_ciks))
-    dirty_count = 0
-    for idx, cik in enumerate(stale_ciks):
-        # Respect per-session SEC call cap
-        if not cache._check_sec_rate_limit():
-            logger.warning(
-                "SEC rate limit reached — stopping refresh at %d/%d",
-                idx, len(stale_ciks),
-            )
-            break
-
-        try:
-            data = await asyncio.to_thread(cache.refresh_single_fund, cik)
-            if data:
-                app.state.fund_cache[cik] = data
-                dirty_count += 1
-                if dirty_count % 10 == 0:
-                    await asyncio.to_thread(cache.save_cache, app.state.fund_cache)
-        except Exception:
-            pass
-
-        await asyncio.sleep(2)  # 2s between individual funds
-
-        # Batch pause every 10 funds to avoid SEC throttling
-        if (idx + 1) % cache._SEC_BATCH_SIZE == 0:
-            logger.info(
-                "Refreshed %d/%d stale funds — pausing %ds",
-                idx + 1, len(stale_ciks), cache._SEC_BATCH_PAUSE,
-            )
-            await asyncio.sleep(cache._SEC_BATCH_PAUSE)
-
-    if dirty_count > 0 and dirty_count % 10 != 0:
-        await asyncio.to_thread(cache.save_cache, app.state.fund_cache)
-
-    logger.info("Background refresh complete: %d funds updated", dirty_count)
-    app.state.refreshing = False
-
-
-async def _poll_loop(app: FastAPI):
-    """Periodically trigger background refresh to detect new filings.
-
-    Uses smart polling intervals from notifications module:
-      - Filing season (±15 days of deadline): every 2 hours
-      - Off-season: every 12 hours
-
-    The background refresh itself only re-fetches stale funds (per-fund TTL),
-    so even frequent polling doesn't cause excessive API calls when data is fresh.
-    """
-    while True:
-        try:
-            from filings.notifications import get_poll_interval_seconds
-            interval = get_poll_interval_seconds()
-            await asyncio.sleep(interval)
-            if not getattr(app.state, "refreshing", False):
-                asyncio.create_task(_background_refresh(app))
-        except asyncio.CancelledError:
-            break
-        except Exception:
-            await asyncio.sleep(3600)  # fallback: retry in 1h
-
-
 async def _prefetch_market_data(app: FastAPI):
     """Prefetch S&P 500 market data on startup (runs in background thread)."""
     try:
@@ -348,7 +253,7 @@ async def fund_row(request: Request, cik: str):
     cik_normalized = cik.lstrip("0") or cik
     si = SUPERINVESTORS_BY_CIK.get(cik_normalized) or SUPERINVESTORS_BY_CIK.get(cik)
 
-    # ── Cache hit: serve immediately (zero SEC calls) ──
+    # ── Serve from cache only (no live SEC fallback) ──
     cached = app.state.fund_cache.get(cik_normalized) or app.state.fund_cache.get(cik)
     if cached:
         top_tickers = [
@@ -362,37 +267,12 @@ async def fund_row(request: Request, cik: str):
             "top_tickers": top_tickers,
         })
 
-    # ── Cache miss: fetch from SEC, persist to all tiers ──
-    try:
-        data = await asyncio.to_thread(client.get_fund_summary, cik)
-        stamped = cache.stamp_fund_data(data)
-        app.state.fund_cache[cik_normalized] = stamped
-
-        # Persist to Supabase L2 (non-fatal)
-        supabase_cache.set_cached(
-            cache_key=f"13f:{cik_normalized}",
-            category="13f",
-            data=stamped,
-            ttl_seconds=cache._get_effective_ttl_seconds(),
-        )
-
-        asyncio.create_task(asyncio.to_thread(cache.save_cache, app.state.fund_cache))
-        top_tickers = [
-            h.get("ticker") or h.get("issuer", "?")[:8]
-            for h in stamped.get("top_holdings", [])[:5]
-        ]
-        return templates.TemplateResponse("partials/fund_row.html", {
-            "request": request,
-            "si": si,
-            "data": stamped,
-            "top_tickers": top_tickers,
-        })
-    except Exception as e:
-        return templates.TemplateResponse("partials/fund_row_error.html", {
-            "request": request,
-            "si": si,
-            "error": str(e),
-        })
+    # Cache miss: data not yet synced by the background worker
+    return templates.TemplateResponse("partials/fund_row_error.html", {
+        "request": request,
+        "si": si,
+        "error": "Data not yet synced. It will be available after the next sync cycle.",
+    })
 
 
 # --- Search page ---
@@ -424,16 +304,12 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
         # ── Cache hit: build from stored data (zero SEC calls) ──
         fund, holdings_list = client.get_enriched_holdings_from_cache(cached, cik, top_n)
     else:
-        # ── Cache miss: fall back to live SEC API ──
-        try:
-            fund, holdings_list = await asyncio.to_thread(
-                client.get_enriched_holdings, cik, top_n
-            )
-        except (ValueError, Exception) as e:
-            return templates.TemplateResponse("error.html", {
-                "request": request,
-                "message": str(e),
-            }, status_code=404)
+        # ── Cache miss: data not yet synced (no live SEC fallback) ──
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "message": f"Data for this fund (CIK {cik}) has not been synced yet. "
+                       "It will be available after the next automatic sync cycle.",
+        }, status_code=404)
 
     # Build quarterly changes with ticker enrichment
     quarterly_changes = []
@@ -496,16 +372,11 @@ async def compare_api(request: Request, cik: str, top_n: int = Query(25)):
                 "error": "Only one quarter available — nothing to compare yet.",
             })
     else:
-        # ── Cache miss: fall back to live SEC API ──
-        try:
-            current, previous, changes = await asyncio.to_thread(
-                client.compare_quarters, cik, top_n
-            )
-        except (ValueError, Exception) as e:
-            return templates.TemplateResponse("partials/compare_content.html", {
-                "request": request,
-                "error": str(e),
-            })
+        # ── Cache miss: data not yet synced (no live SEC fallback) ──
+        return templates.TemplateResponse("partials/compare_content.html", {
+            "request": request,
+            "error": "Data not yet synced. Comparison will be available after the next sync cycle.",
+        })
 
     return templates.TemplateResponse("partials/compare_content.html", {
         "request": request,
@@ -640,7 +511,6 @@ async def grand_portfolio(request: Request, view: str = "funds"):
             "superinvestors": SUPERINVESTORS,
             "summaries": si_summaries,
             "cache_age": cache.get_cache_age_str(cache_data),
-            "refreshing": getattr(app.state, "refreshing", False),
         })
 
     entries = client.build_grand_portfolio(cache_data, SUPERINVESTORS_BY_CIK)
@@ -1027,18 +897,6 @@ async def logout(request: Request):
     return response
 
 
-# --- Manual Refresh ---
-
-@app.post("/refresh", response_class=HTMLResponse)
-async def trigger_refresh(request: Request):
-    if not getattr(app.state, "refreshing", False):
-        asyncio.create_task(_background_refresh(app))
-    return HTMLResponse(
-        '<p aria-busy="true">Refreshing data in the background... '
-        "This page will update automatically.</p>"
-    )
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # Infrastructure endpoints
 # ═══════════════════════════════════════════════════════════════════════
@@ -1047,17 +905,12 @@ async def trigger_refresh(request: Request):
 async def health_check(request: Request):
     uptime = round(time_module.time() - _app_start_time)
     cache_data = getattr(app.state, "fund_cache", {})
-    all_ciks = [si.cik for si in SUPERINVESTORS]
-    stale_ciks = cache.get_stale_ciks(cache_data, all_ciks)
     return JSONResponse({
         "status": "ok",
         "uptime_seconds": uptime,
         "cache_entries": len(cache_data),
         "cache_age": cache.get_cache_age_str(cache_data),
-        "cache_ttl": str(cache._get_effective_ttl()),
-        "stale_funds": len(stale_ciks),
-        "total_funds": len(all_ciks),
-        "refreshing": getattr(app.state, "refreshing", False),
+        "total_funds": len(SUPERINVESTORS),
         "market_data_ready": getattr(app.state, "market_data_ready", False),
         "supabase_connected": supabase_cache.is_available(),
     })
@@ -1069,7 +922,6 @@ async def robots_txt():
         "User-agent: *\n"
         "Allow: /\n"
         "Disallow: /api/\n"
-        "Disallow: /refresh\n"
         "\n"
         "Sitemap: https://paperpanda.io/sitemap.xml\n"
     )
@@ -1113,7 +965,6 @@ if _has_limiter:
     company_filings_tab = limiter.limit("30/minute")(company_filings_tab)
     insider_trades_api = limiter.limit("20/minute")(insider_trades_api)
     stock_insider_trades_api = limiter.limit("30/minute")(stock_insider_trades_api)
-    trigger_refresh = limiter.limit("5/minute")(trigger_refresh)
 
 
 # ═══════════════════════════════════════════════════════════════════════
