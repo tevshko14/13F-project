@@ -161,6 +161,115 @@ def _clean_trade_type(raw: str) -> str:
     return raw
 
 
+def parse_dollar_value(val: str) -> float:
+    """Parse formatted value string to float.
+
+    '+$150,000' -> 150000.0
+    '-$1,234,567' -> -1234567.0
+    '$42' -> 42.0
+    '' or invalid -> 0.0
+    """
+    if not val:
+        return 0.0
+    cleaned = val.replace("$", "").replace(",", "").replace("+", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
+def aggregate_top_tickers(
+    trades: list[InsiderTrade],
+    limit: int = 10,
+) -> list[dict]:
+    """Aggregate trades by ticker, return top N by total absolute dollar volume.
+
+    Returns list of dicts for JSON serialization, each containing:
+    ticker, company_name, buy_value, sell_value, net_flow, trade_count,
+    insider_details [{name, buy_value, sell_value, count}], date_range.
+    """
+    from collections import defaultdict
+
+    ticker_data: dict[str, dict] = {}
+
+    for t in trades:
+        if not t.ticker:
+            continue
+        key = t.ticker.upper()
+        abs_val = abs(parse_dollar_value(t.value))
+        is_buy = "Purchase" in t.trade_type
+
+        if key not in ticker_data:
+            ticker_data[key] = {
+                "ticker": t.ticker.upper(),
+                "company_name": t.company_name,
+                "buy_value": 0.0,
+                "sell_value": 0.0,
+                "trade_count": 0,
+                "insiders": defaultdict(lambda: {"buy_value": 0.0, "sell_value": 0.0, "count": 0}),
+                "dates": [],
+            }
+
+        entry = ticker_data[key]
+        if is_buy:
+            entry["buy_value"] += abs_val
+        else:
+            entry["sell_value"] += abs_val
+        entry["trade_count"] += 1
+        if t.trade_date:
+            entry["dates"].append(t.trade_date)
+
+        insider = entry["insiders"][t.insider_name]
+        if is_buy:
+            insider["buy_value"] += abs_val
+        else:
+            insider["sell_value"] += abs_val
+        insider["count"] += 1
+
+    # Sort by total absolute volume, take top N
+    sorted_tickers = sorted(
+        ticker_data.values(),
+        key=lambda d: d["buy_value"] + d["sell_value"],
+        reverse=True,
+    )[:limit]
+
+    result = []
+    for d in sorted_tickers:
+        dates = sorted(d["dates"])
+        date_range = (
+            f"{dates[0]} to {dates[-1]}"
+            if len(dates) > 1
+            else (dates[0] if dates else "")
+        )
+
+        insider_details = [
+            {
+                "name": name,
+                "buy_value": round(info["buy_value"], 2),
+                "sell_value": round(info["sell_value"], 2),
+                "count": info["count"],
+            }
+            for name, info in sorted(
+                d["insiders"].items(),
+                key=lambda x: x[1]["buy_value"] + x[1]["sell_value"],
+                reverse=True,
+            )
+        ]
+
+        result.append({
+            "ticker": d["ticker"],
+            "company_name": d["company_name"],
+            "buy_value": round(d["buy_value"], 2),
+            "sell_value": round(d["sell_value"], 2),
+            "net_flow": round(d["buy_value"] - d["sell_value"], 2),
+            "trade_count": d["trade_count"],
+            "insider_details": insider_details,
+            "date_range": date_range,
+        })
+
+    return result
+
+
 # ── Public API ───────────────────────────────────────────────────────
 
 
