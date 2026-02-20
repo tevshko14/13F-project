@@ -507,7 +507,6 @@ async def grand_portfolio(request: Request, view: str = "funds"):
             "empty": True,
             "consensus_json": "[]",
             "momentum_json": "[]",
-            "activities": [],
             "view": view,
             "superinvestors": SUPERINVESTORS,
             "summaries": si_summaries,
@@ -565,15 +564,13 @@ async def grand_portfolio(request: Request, view: str = "funds"):
             "link": f"/stock/{ma['ticker']}" if ma.get("ticker") else None,
         })
 
-    # ── Build Activity Feed data (for the Activity tab) ──
-    activities = client.build_activity_feed(cache_data, SUPERINVESTORS_BY_CIK)
+    # Activity feed is now lazy-loaded via HTMX → /api/activity-feed
 
     return templates.TemplateResponse("grand_portfolio.html", {
         "request": request,
         "entries": entries[:100],
         "consensus_json": json_module.dumps(consensus_data),
         "momentum_json": json_module.dumps(momentum_data),
-        "activities": activities[:100],
         "view": view,
         "superinvestors": SUPERINVESTORS,
         "summaries": si_summaries,
@@ -774,6 +771,115 @@ async def ticker_search_index(request: Request):
             entry["cik"] = item["cik"]
         slim.append(entry)
     return JSONResponse(content=slim)
+
+
+# --- Activity Feed Intelligence Dashboard (HTMX partial) ---
+
+@app.get("/api/activity-feed", response_class=HTMLResponse)
+async def api_activity_feed(request: Request, timeframe: str = "ALL"):
+    """Enriched activity feed with conviction scores, clusters, and stats.
+
+    Lazy-loaded via HTMX from the Activity tab on /grand-portfolio.
+    Returns a partial HTML template (no <html>/<body> wrapper).
+    Cached in Supabase for 30 minutes per timeframe.
+    """
+    if timeframe not in ("1W", "1M", "ALL"):
+        timeframe = "ALL"
+
+    cache_data = getattr(app.state, "fund_cache", {})
+    if not cache_data:
+        return HTMLResponse(
+            '<article><p class="text-muted">No activity data available yet. '
+            'Data will load as superinvestor portfolios are cached.</p></article>'
+        )
+
+    # ── Check Supabase cache ──
+    sb_cache_key = f"activity_feed:{timeframe}"
+    try:
+        cached = supabase_cache.get_cached(sb_cache_key)
+        if cached and isinstance(cached, dict):
+            clusters_raw = cached.get("clusters", [])
+            solo_raw = cached.get("solo_items", [])
+            stats = cached.get("stats", {})
+            has_prices = cached.get("has_prices", False)
+
+            # Reconstruct dataclass instances from dicts
+            from filings.models import EnrichedActivityItem, ActivityCluster
+            solo_items = [EnrichedActivityItem(**s) for s in solo_raw]
+            clusters = []
+            for c in clusters_raw:
+                items = [EnrichedActivityItem(**i) for i in c.pop("items", [])]
+                clusters.append(ActivityCluster(**c, items=items))
+
+            return templates.TemplateResponse(
+                "partials/activity_feed_content.html",
+                {
+                    "request": request,
+                    "clusters": clusters,
+                    "solo_items": solo_items,
+                    "stats": stats,
+                    "timeframe": timeframe,
+                    "has_prices": has_prices,
+                },
+            )
+    except Exception as e:
+        logger.debug("Activity feed cache miss: %s", e)
+
+    # ── Build fresh data ──
+    # Collect unique tickers for price lookup
+    all_tickers = set()
+    for fund_data in cache_data.values():
+        for h in fund_data.get("all_holdings", []):
+            t = h.get("ticker")
+            if t:
+                all_tickers.add(t)
+
+    # Fetch current prices (non-blocking)
+    price_data = await asyncio.to_thread(
+        market_data.get_current_prices_batch, list(all_tickers)
+    )
+
+    # Build enriched feed
+    clusters, solo_items, stats = await asyncio.to_thread(
+        client.build_enriched_activity_feed,
+        cache_data, SUPERINVESTORS_BY_CIK, price_data, timeframe,
+    )
+
+    has_prices = bool(price_data)
+
+    # ── Cache to Supabase (serialize dataclass instances to dicts) ──
+    try:
+        from dataclasses import asdict
+        serialized = {
+            "clusters": [
+                {**{k: v for k, v in asdict(c).items() if k != "items"},
+                 "items": [asdict(i) for i in c.items]}
+                for c in clusters
+            ],
+            "solo_items": [asdict(i) for i in solo_items],
+            "stats": stats,
+            "has_prices": has_prices,
+        }
+        supabase_cache.set_cached(
+            cache_key=sb_cache_key,
+            category="activity_feed",
+            data=serialized,
+            ttl_seconds=1800,  # 30 minutes
+        )
+    except Exception as e:
+        logger.debug("Activity feed cache write failed: %s", e)
+
+    return templates.TemplateResponse(
+        "partials/activity_feed_content.html",
+        {
+            "request": request,
+            "clusters": clusters,
+            "solo_items": solo_items,
+            "stats": stats,
+            "timeframe": timeframe,
+            "has_prices": has_prices,
+        },
+    )
 
 
 @app.get("/api/heatmap", response_class=HTMLResponse)

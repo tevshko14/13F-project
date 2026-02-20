@@ -1,0 +1,213 @@
+{% from "partials/ticker_link.html" import ticker_link %}
+{% from "partials/signal_badge.html" import signal_badge %}
+
+{# ── Sticky Sentiment Header ── #}
+<div class="activity-stats-bar">
+    <div class="stat">
+        <span class="stat-label">Sentiment</span>
+        <span class="stat-value">
+            <span class="bullish">{{ stats.buying_pct }}% Buying</span> /
+            <span class="bearish">{{ stats.selling_pct }}% Selling</span>
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Most Active Sector</span>
+        <span class="stat-value">{{ stats.most_active_sector }}</span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Consensus Moves</span>
+        <span class="stat-value">{{ stats.consensus_count }}</span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Total Activities</span>
+        <span class="stat-value">{{ stats.total_activities }}</span>
+    </div>
+</div>
+
+{# ── Controls Bar: Timeframe + AUM Filter ── #}
+<div class="activity-controls">
+    <div class="activity-toggle" id="activity-toggle">
+        <button class="activity-pill{% if timeframe == '1W' %} active{% endif %}"
+                hx-get="/api/activity-feed?timeframe=1W"
+                hx-target="#activity-dashboard"
+                hx-swap="innerHTML">1W</button>
+        <button class="activity-pill{% if timeframe == '1M' %} active{% endif %}"
+                hx-get="/api/activity-feed?timeframe=1M"
+                hx-target="#activity-dashboard"
+                hx-swap="innerHTML">1M</button>
+        <button class="activity-pill{% if timeframe == 'ALL' %} active{% endif %}"
+                hx-get="/api/activity-feed?timeframe=ALL"
+                hx-target="#activity-dashboard"
+                hx-swap="innerHTML">ALL</button>
+    </div>
+    <div class="aum-filter">
+        <label>Min AUM: <strong id="aum-label">All</strong></label>
+        <input type="range" id="aum-slider" min="0" max="5" value="0"
+               list="aum-ticks">
+        <datalist id="aum-ticks">
+            <option value="0" label="All">
+            <option value="1" label="$1B">
+            <option value="2" label="$5B">
+            <option value="3" label="$10B">
+            <option value="4" label="$50B">
+            <option value="5" label="$100B">
+        </datalist>
+    </div>
+</div>
+
+{# ── Consensus Clusters (multi-investor moves) ── #}
+{% if clusters %}
+<h4 class="section-label">Consensus Moves ({{ clusters|length }})</h4>
+{% for c in clusters %}
+<div class="activity-cluster">
+    <div class="cluster-header" onclick="toggleCluster(this)">
+        <span class="cluster-ticker">{{ ticker_link(c.ticker, c.cusip) }}</span>
+        <span class="cluster-name">{{ c.issuer_name }}</span>
+        <span class="badge badge-{{ c.net_sentiment|lower }}">{{ c.net_sentiment }}</span>
+        <span class="cluster-summary">{{ c.action_summary }}</span>
+        <span class="cluster-value">${{ "{:,.0f}".format(c.combined_value) }}</span>
+        <span class="cluster-expand">&#9656;</span>
+    </div>
+    <div class="cluster-detail" style="display:none">
+        <table class="cluster-table">
+            {% for item in c.items %}
+            <tr data-fund-aum="{{ item.fund_aum }}">
+                <td>
+                    <a href="/holdings/{{ item.fund_cik }}">{{ item.fund_display_name }}</a>
+                    <small class="fund-aum">${{ "{:,.0f}".format(item.fund_aum / 1e9) }}B</small>
+                </td>
+                <td>{{ signal_badge(item.signal) }}</td>
+                <td class="text-right conviction" title="Conviction = |Share Change| &times; Portfolio Weight / 100">
+                    {{ "{:.1f}".format(item.conviction) }}
+                </td>
+                <td class="text-right">
+                    <span class="{% if item.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                        {{ "{:+,}".format(item.share_change) }}
+                    </span>
+                </td>
+                <td class="text-right">${{ "{:,.0f}".format(item.current_value) }}</td>
+                {% if has_prices and item.current_price %}
+                <td class="text-right">${{ "{:,.2f}".format(item.current_price) }}</td>
+                {% elif has_prices %}
+                <td class="text-right">&mdash;</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{# ── Individual Moves (single-investor, non-clustered) ── #}
+{% if solo_items %}
+<h4 class="section-label">Individual Moves ({{ solo_items|length }})</h4>
+<figure>
+<table class="gp-table activity-table">
+    <thead>
+        <tr>
+            <th data-sort="text">Investor</th>
+            <th data-sort="activity">Signal</th>
+            <th data-sort="text">Ticker</th>
+            <th data-sort="text">Stock</th>
+            <th class="text-right" data-sort="number">Conviction</th>
+            <th class="text-right" data-sort="number">Share &Delta;</th>
+            <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
+            {% if has_prices %}
+            <th class="text-right" data-sort="number">Price</th>
+            {% endif %}
+            <th data-sort="date">Filed</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in solo_items %}
+        <tr data-fund-aum="{{ item.fund_aum }}">
+            <td>
+                <a href="/holdings/{{ item.fund_cik }}">
+                    <strong>{{ item.fund_display_name }}</strong>
+                </a>
+                <small class="fund-aum">${{ "{:,.0f}".format(item.fund_aum / 1e9) }}B AUM</small>
+            </td>
+            <td>{{ signal_badge(item.signal) }}</td>
+            <td>{{ ticker_link(item.ticker, item.cusip) }}</td>
+            <td>{{ item.issuer_name }}</td>
+            <td class="text-right conviction" title="Conviction = |Share Change| &times; Portfolio Weight / 100">
+                {{ "{:.1f}".format(item.conviction) }}
+            </td>
+            <td class="text-right">
+                {% if item.share_change != 0 %}
+                <span class="{% if item.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                    {{ "{:+,}".format(item.share_change) }}
+                </span>
+                {% else %}-{% endif %}
+            </td>
+            <td class="text-right">${{ "{:,.0f}".format(item.current_value) }}</td>
+            {% if has_prices and item.current_price %}
+            <td class="text-right">${{ "{:,.2f}".format(item.current_price) }}</td>
+            {% elif has_prices %}
+            <td class="text-right">&mdash;</td>
+            {% endif %}
+            <td class="text-small">{{ item.filing_date }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% endif %}
+
+{% if not clusters and not solo_items %}
+<article>
+    <p>No activity data available{% if timeframe != 'ALL' %} for this timeframe{% endif %}. Data will load as superinvestor portfolios are cached.</p>
+    <p><a href="/grand-portfolio?view=funds" role="button">View Superinvestors</a> to trigger data loading.</p>
+</article>
+{% endif %}
+
+<script>
+/* Cluster expand/collapse */
+function toggleCluster(header) {
+    var detail = header.nextElementSibling;
+    header.classList.toggle('open');
+    detail.style.display = detail.style.display === 'none' ? '' : 'none';
+}
+
+/* AUM slider filtering (client-side, instant) */
+(function() {
+    var slider = document.getElementById('aum-slider');
+    var label = document.getElementById('aum-label');
+    var thresholds = [0, 1e9, 5e9, 10e9, 50e9, 100e9];
+    var labels = ['All', '$1B+', '$5B+', '$10B+', '$50B+', '$100B+'];
+    if (!slider) return;
+    slider.addEventListener('input', function() {
+        var idx = parseInt(this.value);
+        label.textContent = labels[idx];
+        var minAum = thresholds[idx];
+        /* Hide/show rows by data-fund-aum */
+        document.querySelectorAll('[data-fund-aum]').forEach(function(el) {
+            var aum = parseInt(el.dataset.fundAum || '0');
+            el.style.display = aum >= minAum ? '' : 'none';
+        });
+        /* Hide clusters where all children hidden */
+        document.querySelectorAll('.activity-cluster').forEach(function(cl) {
+            var rows = cl.querySelectorAll('.cluster-table tr');
+            var anyVisible = false;
+            rows.forEach(function(r) {
+                if (r.style.display !== 'none') anyVisible = true;
+            });
+            cl.style.display = anyVisible ? '' : 'none';
+        });
+    });
+
+    /* Pill toggle active state */
+    var toggle = document.getElementById('activity-toggle');
+    if (toggle) {
+        toggle.addEventListener('click', function(e) {
+            var btn = e.target.closest('.activity-pill');
+            if (!btn) return;
+            toggle.querySelectorAll('.activity-pill').forEach(function(b) {
+                b.classList.remove('active');
+            });
+            btn.classList.add('active');
+        });
+    }
+})();
+</script>
