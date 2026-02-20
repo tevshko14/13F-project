@@ -100,17 +100,30 @@
     </div>
 </div>
 
-{# -- Consensus Clusters (multi-investor moves) -- #}
+{# -- Consensus Clusters (10-row accordion preview) -- #}
 {% if clusters %}
 <h4 class="section-label">Consensus Moves ({{ clusters|length }})</h4>
+<div class="consensus-fade{% if clusters|length <= 10 %} expanded{% endif %}" id="consensus-wrap">
 {% for c in clusters %}
-<div class="activity-cluster">
+<div class="activity-cluster{% if loop.index > 10 %} consensus-overflow{% endif %}"
+     data-fund-aum="{{ c.items[0].fund_aum if c.items else 0 }}">
     <div class="cluster-header" onclick="toggleCluster(this)">
         <span class="cluster-ticker">{{ ticker_link(c.ticker, c.cusip) }}</span>
         <span class="cluster-name">{{ c.issuer_name }}</span>
-        <span class="badge badge-{{ c.net_sentiment|lower }}">{{ c.net_sentiment }}</span>
+        <span class="cluster-sentiment-wrap">
+            <span class="badge badge-{{ c.net_sentiment|lower }}"
+                  title="{% set buy_count = c.items|selectattr('action', 'in', ['NEW BUY', 'ADD'])|list|length %}{% set sell_count = c.items|selectattr('action', 'in', ['SOLD', 'REDUCE'])|list|length %}{{ buy_count }} bought {% if c.buy_value >= 1e9 %}${{ '%.1f'|format(c.buy_value / 1e9) }}B{% else %}${{ '%.0f'|format(c.buy_value / 1e6) }}M{% endif %}, {{ sell_count }} sold {% if c.sell_value >= 1e9 %}${{ '%.1f'|format(c.sell_value / 1e9) }}B{% else %}${{ '%.0f'|format(c.sell_value / 1e6) }}M{% endif %}. Net: {% if c.net_flow >= 0 %}+{% endif %}{% if c.net_flow >= 1e9 or c.net_flow <= -1e9 %}${{ '%.1f'|format(c.net_flow / 1e9) }}B{% elif c.net_flow >= 1e6 or c.net_flow <= -1e6 %}${{ '%.0f'|format(c.net_flow / 1e6) }}M{% else %}${{ '{:,.0f}'.format(c.net_flow) }}{% endif %}">{{ c.net_sentiment }}</span>
+        </span>
         <span class="cluster-summary">{{ c.action_summary }}</span>
-        <span class="cluster-value">${{ "{:,.0f}".format(c.combined_value) }}</span>
+        <span class="cluster-flow {% if c.net_flow > 0 %}bullish{% elif c.net_flow < 0 %}bearish{% endif %}">
+            {% if c.net_flow >= 1e9 or c.net_flow <= -1e9 %}
+                {% if c.net_flow >= 0 %}+{% endif %}${{ "%.1f"|format(c.net_flow / 1e9) }}B
+            {% elif c.net_flow >= 1e6 or c.net_flow <= -1e6 %}
+                {% if c.net_flow >= 0 %}+{% endif %}${{ "%.0f"|format(c.net_flow / 1e6) }}M
+            {% else %}
+                {% if c.net_flow >= 0 %}+{% endif %}${{ "{:,.0f}".format(c.net_flow) }}
+            {% endif %}
+        </span>
         <span class="cluster-expand">&#9656;</span>
     </div>
     <div class="cluster-detail" style="display:none">
@@ -147,6 +160,13 @@
     </div>
 </div>
 {% endfor %}
+</div>
+{% if clusters|length > 10 %}
+<button class="gp-expand-btn" id="consensus-expand-btn" onclick="toggleConsensusAccordion(this)">
+    <span>View All Consensus Moves ({{ clusters|length }} total)</span>
+    <span class="gp-expand-arrow">&#9660;</span>
+</button>
+{% endif %}
 {% endif %}
 
 {# -- Individual Moves (12-row accordion preview) -- #}
@@ -247,6 +267,25 @@ function toggleCluster(header) {
     header.classList.toggle('open');
     detail.style.display = detail.style.display === 'none' ? '' : 'none';
 }
+
+/* Consensus 10-row accordion expand/collapse */
+window.toggleConsensusAccordion = function(btn) {
+    var rows = document.querySelectorAll('.consensus-overflow');
+    var wrap = document.getElementById('consensus-wrap');
+    var arrow = btn.querySelector('.gp-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+    var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+    rows.forEach(function(row) {
+        row.style.display = expanded ? 'none' : '';
+    });
+    wrap.classList.toggle('expanded', !expanded);
+    arrow.classList.toggle('expanded', !expanded);
+
+    label.textContent = expanded
+        ? 'View All Consensus Moves ({{ clusters|length }} total)'
+        : 'Collapse';
+};
 
 /* 12-row accordion expand/collapse */
 window.toggleActivityAccordion = function(btn) {

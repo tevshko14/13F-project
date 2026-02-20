@@ -223,6 +223,27 @@
         }
         .aum-filter input[type="range"] { width: 150px; }
 
+        /* Consensus 10-row accordion */
+        .consensus-overflow { display: none; }
+        .consensus-fade { position: relative; }
+        .consensus-fade::after {
+            content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+            height: 60px; background: linear-gradient(transparent, #fff);
+            pointer-events: none; transition: opacity 0.3s ease;
+        }
+        .consensus-fade.expanded::after { opacity: 0; height: 0; }
+
+        /* Cluster net flow column */
+        .cluster-flow {
+            font-family: monospace; font-weight: 600; font-size: 0.88em;
+            min-width: 5em; text-align: right; white-space: nowrap;
+        }
+        .cluster-flow.bullish { color: #166534; }
+        .cluster-flow.bearish { color: #9f1239; }
+
+        /* Sentiment tooltip (native title, styled wrapper for spacing) */
+        .cluster-sentiment-wrap { position: relative; }
+
         /* Activity cluster rows */
         .activity-cluster {
             border: 1px solid #f4f4f5;

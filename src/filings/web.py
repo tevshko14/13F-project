@@ -835,6 +835,9 @@ async def api_activity_feed(
             clusters = []
             for c in clusters_raw:
                 raw_items = c.pop("items", [])
+                c.setdefault("buy_value", 0.0)
+                c.setdefault("sell_value", 0.0)
+                c.setdefault("net_flow", 0.0)
                 items = []
                 for i in raw_items:
                     i.setdefault("fund_total_holdings", 0)
