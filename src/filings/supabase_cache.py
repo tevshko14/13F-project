@@ -139,9 +139,13 @@ CREATE TABLE IF NOT EXISTS youtube_channels (
     avg_views_30d       BIGINT DEFAULT 0,
     avg_posts_per_week  NUMERIC(5,2) DEFAULT 0,
     last_polled_at      TIMESTAMPTZ,
+    thumbnail_url       TEXT NOT NULL DEFAULT '',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Backfill: add thumbnail_url if table already exists
+ALTER TABLE youtube_channels ADD COLUMN IF NOT EXISTS thumbnail_url TEXT NOT NULL DEFAULT '';
 """
 
 
