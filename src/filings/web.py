@@ -309,36 +309,8 @@ async def homepage(request: Request):
 
 @app.get("/superinvestors", response_class=HTMLResponse)
 async def superinvestors_page(request: Request):
-    cache_data = getattr(app.state, "fund_cache", {})
-
-    summaries = []
-    for si in SUPERINVESTORS:
-        cached = cache_data.get(si.cik)
-        if cached:
-            top_tickers = [
-                h.get("ticker") or h.get("issuer", "?")[:8]
-                for h in cached.get("top_holdings", [])[:5]
-            ]
-            summaries.append(SuperinvestorSummary(
-                cik=si.cik,
-                display_name=si.display_name,
-                fund_name=cached.get("name", si.fund_name),
-                portfolio_value=cached.get("total_value", 0),
-                num_holdings=cached.get("total_holdings", 0),
-                top_holdings=top_tickers,
-                report_period=cached.get("report_period", ""),
-                filing_date=cached.get("filing_date", ""),
-            ))
-        else:
-            summaries.append(None)
-
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "superinvestors": SUPERINVESTORS,
-        "summaries": summaries,
-        "cache_age": cache.get_cache_age_str(),
-        "refreshing": getattr(app.state, "refreshing", False),
-    })
+    """Redirect to grand portfolio with investors tab active."""
+    return RedirectResponse(url="/grand-portfolio?view=investors", status_code=302)
 
 
 # --- Lazy-load a single fund row (HTMX) ---
@@ -611,8 +583,34 @@ async def activity_feed(request: Request):
 # --- Grand Portfolio ---
 
 @app.get("/grand-portfolio", response_class=HTMLResponse)
-async def grand_portfolio(request: Request):
+async def grand_portfolio(request: Request, view: str = "holdings"):
+    if view not in ("holdings", "investors"):
+        view = "holdings"
+
     cache_data = getattr(app.state, "fund_cache", {})
+
+    # ── Build superinvestor summaries (for the Superinvestors tab) ──
+    si_summaries = []
+    for si in SUPERINVESTORS:
+        cached = cache_data.get(si.cik)
+        if cached:
+            top_tickers = [
+                h.get("ticker") or h.get("issuer", "?")[:8]
+                for h in cached.get("top_holdings", [])[:5]
+            ]
+            si_summaries.append(SuperinvestorSummary(
+                cik=si.cik,
+                display_name=si.display_name,
+                fund_name=cached.get("name", si.fund_name),
+                portfolio_value=cached.get("total_value", 0),
+                num_holdings=cached.get("total_holdings", 0),
+                top_holdings=top_tickers,
+                report_period=cached.get("report_period", ""),
+                filing_date=cached.get("filing_date", ""),
+            ))
+        else:
+            si_summaries.append(None)
+
     if not cache_data:
         return templates.TemplateResponse("grand_portfolio.html", {
             "request": request,
@@ -620,6 +618,11 @@ async def grand_portfolio(request: Request):
             "empty": True,
             "consensus_json": "[]",
             "momentum_json": "[]",
+            "view": view,
+            "superinvestors": SUPERINVESTORS,
+            "summaries": si_summaries,
+            "cache_age": cache.get_cache_age_str(),
+            "refreshing": getattr(app.state, "refreshing", False),
         })
 
     entries = client.build_grand_portfolio(cache_data, SUPERINVESTORS_BY_CIK)
@@ -678,6 +681,11 @@ async def grand_portfolio(request: Request):
         "entries": entries[:100],
         "consensus_json": json_module.dumps(consensus_data),
         "momentum_json": json_module.dumps(momentum_data),
+        "view": view,
+        "superinvestors": SUPERINVESTORS,
+        "summaries": si_summaries,
+        "cache_age": cache.get_cache_age_str(),
+        "refreshing": getattr(app.state, "refreshing", False),
     })
 
 

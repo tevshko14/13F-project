@@ -1,20 +1,49 @@
 {% extends "base.html" %}
 {% block title %}Grand Portfolio - PaperPanda{% endblock %}
+{% block meta_description %}Track 13F holdings of top superinvestors like Warren Buffett, Bill Ackman, and more. See portfolio values, top holdings, and recent changes.{% endblock %}
 {% block content %}
 {% from "partials/ticker_link.html" import ticker_link %}
 <hgroup>
     <h1>Grand Portfolio</h1>
-    <p>Stocks held by the most superinvestors, aggregated across all tracked portfolios.</p>
+    <p>Aggregated holdings across all tracked superinvestors, powered by SEC EDGAR data.</p>
 </hgroup>
 
-{% if empty is defined and empty %}
-<article>
-    <p>No portfolio data available yet. Data will load as superinvestor portfolios are cached.</p>
-    <p><a href="/superinvestors" role="button">Go to Superinvestors</a> to trigger data loading.</p>
-</article>
-{% else %}
-
+{# ── Subtab Navigation ── #}
 <style>
+    /* ── Subtab bar ── */
+    .gp-subtabs {
+        display: flex;
+        gap: 0;
+        margin-bottom: 1.5em;
+        border-bottom: 2px solid rgba(0,0,0,0.1);
+        overflow-x: auto;
+    }
+    .gp-subtab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.5em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: rgba(0,0,0,0.5);
+        transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+    }
+    .gp-subtab:hover {
+        color: rgba(0,0,0,0.8);
+    }
+    .gp-subtab.active {
+        color: #1976d2;
+        border-bottom-color: #1976d2;
+    }
+
+    /* ── Tab content panels with fade transition ── */
+    .gp-panel { display: none; opacity: 0; transition: opacity 0.25s ease; }
+    .gp-panel.active { display: block; opacity: 1; }
+
     /* ── Dashboard Cards ── */
     .dash-card {
         border: 1px solid rgba(0, 0, 0, 0.08);
@@ -33,12 +62,8 @@
         color: rgba(0, 0, 0, 0.45);
         margin-bottom: 1em;
     }
-    .dash-spacing {
-        margin-bottom: 2rem;
-    }
-    .dash-top-spacing {
-        margin-bottom: 3rem;
-    }
+    .dash-spacing { margin-bottom: 2rem; }
+    .dash-top-spacing { margin-bottom: 3rem; }
 
     /* ── Table styling (matches stock/investor page) ── */
     .gp-table {
@@ -75,6 +100,10 @@
         font-size: 0.78em;
         font-weight: 500;
         white-space: nowrap;
+        text-decoration: none;
+    }
+    a.tag:hover {
+        background: rgba(25, 118, 210, 0.15);
     }
 
     /* ── Holdings overflow + expand ── */
@@ -122,10 +151,14 @@
         transform: rotate(180deg);
     }
 
-    /* ── Cross-highlight glow for synced charts ── */
-    @keyframes barGlow {
-        0%, 100% { filter: brightness(1); }
-        50% { filter: brightness(1.3); }
+    /* ── Cache info bar ── */
+    .cache-info {
+        display: flex;
+        align-items: center;
+        gap: 1em;
+        margin-bottom: 1em;
+        font-size: 0.85em;
+        color: rgba(0,0,0,0.5);
     }
 
     /* ── Responsive ── */
@@ -134,30 +167,51 @@
         .gp-table td {
             font-size: 14px;
         }
+        .gp-subtabs {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
     }
 </style>
 
+<nav class="gp-subtabs">
+    <button class="gp-subtab{% if view == 'holdings' %} active{% endif %}"
+            data-view="holdings" onclick="switchGPView('holdings')">
+        Holdings
+    </button>
+    <button class="gp-subtab{% if view == 'investors' %} active{% endif %}"
+            data-view="investors" onclick="switchGPView('investors')">
+        Superinvestors
+    </button>
+</nav>
+
 {# ══════════════════════════════════════════════════════════════════ #}
-{# ── Visualization 1: Consensus Leaders (horizontal bar chart)      #}
+{# ── Panel 1: Holdings (Charts + Table)                             #}
 {# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-holdings" class="gp-panel{% if view == 'holdings' %} active{% endif %}">
+
+{% if empty is defined and empty %}
+<article>
+    <p>No portfolio data available yet. Data will load as superinvestor portfolios are cached.</p>
+    <p><a href="/grand-portfolio?view=investors" role="button">View Superinvestors</a> to trigger data loading.</p>
+</article>
+{% else %}
+
+{# ── Consensus Leaders ── #}
 <div class="dash-card dash-spacing">
     <div class="dash-card-header">Consensus Leaders</div>
     <div class="dash-card-sub">Top 10 stocks by total superinvestor ownership - the most universally held names</div>
     <div id="consensus-chart" style="width: 100%; height: 360px;"></div>
 </div>
 
-{# ══════════════════════════════════════════════════════════════════ #}
-{# ── Visualization 2: Recent Momentum (vertical bar chart)          #}
-{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Recent Momentum ── #}
 <div class="dash-card dash-top-spacing">
     <div class="dash-card-header">Recent Momentum</div>
     <div class="dash-card-sub">Top stocks added by superinvestors this quarter - hover to see who is buying</div>
     <div id="momentum-chart" style="width: 100%; height: 320px;"></div>
 </div>
 
-{# ══════════════════════════════════════════════════════════════════ #}
-{# ── Dual Chart Script with Cross-Highlighting                      #}
-{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Dual Chart Script ── #}
 <script>
 (function() {
     var consensusData = {{ consensus_json | safe }};
@@ -167,7 +221,6 @@
     var momentumEl  = document.getElementById('momentum-chart');
     if (!consensusEl || !momentumEl) return;
 
-    // ── Build ticker→index maps for cross-highlighting ──
     var consensusTickerMap = {};
     for (var i = 0; i < consensusData.length; i++) {
         if (consensusData[i].ticker) consensusTickerMap[consensusData[i].ticker.toUpperCase()] = i;
@@ -177,7 +230,6 @@
         if (momentumData[j].ticker) momentumTickerMap[momentumData[j].ticker.toUpperCase()] = j;
     }
 
-    // ═══ Consensus Leaders Chart (horizontal bar) ═══
     var consensusChart = echarts.init(consensusEl);
     var cTickers = consensusData.map(function(d) { return d.ticker; }).reverse();
     var cCounts  = consensusData.map(function(d) { return d.holders; }).reverse();
@@ -185,208 +237,82 @@
 
     consensusChart.setOption({
         grid: { left: 80, right: 30, top: 10, bottom: 20 },
-        xAxis: {
-            type: 'value',
-            name: 'Holders',
-            nameTextStyle: { fontSize: 10 },
-            minInterval: 1
-        },
-        yAxis: {
-            type: 'category',
-            data: cTickers,
-            axisLabel: {
-                fontSize: 11,
-                fontWeight: 'bold',
-                fontFamily: 'monospace'
-            }
-        },
+        xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10 }, minInterval: 1 },
+        yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' } },
         tooltip: {
-            trigger: 'axis',
-            axisPointer: { type: 'shadow' },
+            trigger: 'axis', axisPointer: { type: 'shadow' },
             formatter: function(params) {
                 if (!params || params.length === 0) return '';
-                var idx = params[0].dataIndex;
-                var d = cDataRev[idx];
-                if (!d) return '';
-
+                var d = cDataRev[params[0].dataIndex]; if (!d) return '';
                 var html = '<strong style="font-size: 1.15em;">' + d.ticker + '</strong>'
                     + '<br/><span style="opacity: 0.7;">' + d.issuer + '</span>'
-                    + '<br/><br/>Owned by <strong>' + d.holders + '</strong> superinvestor'
-                    + (d.holders > 1 ? 's' : '');
-
-                if (d.avg_weight > 0) {
-                    html += '<br/>Avg. Weight: <strong>' + d.avg_weight.toFixed(1) + '%</strong>';
-                }
-
-                var valStr = d.combined_value >= 1e9
-                    ? '$' + (d.combined_value / 1e9).toFixed(1) + 'B'
-                    : '$' + (d.combined_value / 1e6).toFixed(0) + 'M';
+                    + '<br/><br/>Owned by <strong>' + d.holders + '</strong> superinvestor' + (d.holders > 1 ? 's' : '');
+                if (d.avg_weight > 0) html += '<br/>Avg. Weight: <strong>' + d.avg_weight.toFixed(1) + '%</strong>';
+                var valStr = d.combined_value >= 1e9 ? '$' + (d.combined_value / 1e9).toFixed(1) + 'B' : '$' + (d.combined_value / 1e6).toFixed(0) + 'M';
                 html += '<br/>Combined Value: <strong>' + valStr + '</strong>';
-
                 if (d.top_holders && d.top_holders.length > 0) {
                     html += '<br/><br/><span style="opacity: 0.5;">Top Holders:</span>';
-                    for (var i = 0; i < d.top_holders.length; i++) {
-                        html += '<br/>&nbsp;&nbsp;' + d.top_holders[i];
-                    }
+                    for (var i = 0; i < d.top_holders.length; i++) html += '<br/>&nbsp;&nbsp;' + d.top_holders[i];
                 }
-
                 return html;
             }
         },
         series: [{
-            type: 'bar',
-            data: cCounts,
-            itemStyle: {
-                color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-                    { offset: 0, color: '#1976d2' },
-                    { offset: 1, color: '#42a5f5' }
-                ]),
-                borderRadius: [0, 4, 4, 0]
-            },
-            emphasis: {
-                itemStyle: {
-                    color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-                        { offset: 0, color: '#1565c0' },
-                        { offset: 1, color: '#1976d2' }
-                    ])
-                }
-            },
+            type: 'bar', data: cCounts,
+            itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#1976d2' }, { offset: 1, color: '#42a5f5' }]), borderRadius: [0, 4, 4, 0] },
+            emphasis: { itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#1565c0' }, { offset: 1, color: '#1976d2' }]) } },
             barMaxWidth: 28,
-            label: {
-                show: true,
-                position: 'right',
-                fontSize: 11,
-                fontWeight: 'bold',
-                color: 'rgba(0,0,0,0.5)',
-                formatter: '{c}'
-            }
+            label: { show: true, position: 'right', fontSize: 11, fontWeight: 'bold', color: 'rgba(0,0,0,0.5)', formatter: '{c}' }
         }]
     });
+    consensusChart.on('click', function(params) { var d = cDataRev[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
 
-    // Click → stock page
-    consensusChart.on('click', function(params) {
-        var d = cDataRev[params.dataIndex];
-        if (d && d.link) window.location.href = d.link;
-    });
-
-    // ═══ Recent Momentum Chart (vertical bar) ═══
     var momentumChart = echarts.init(momentumEl);
     var mTickers = momentumData.map(function(d) { return d.ticker || '?'; });
     var mCounts  = momentumData.map(function(d) { return d.add_count; });
-    var mColors  = momentumData.map(function(d) {
-        return d.is_trending ? '#e65100' : '#1976d2';
-    });
+    var mColors  = momentumData.map(function(d) { return d.is_trending ? '#e65100' : '#1976d2'; });
 
     momentumChart.setOption({
         grid: { left: 40, right: 16, top: 10, bottom: 60 },
-        xAxis: {
-            type: 'category',
-            data: mTickers,
-            axisLabel: {
-                rotate: 45,
-                fontSize: 10,
-                fontWeight: 'bold',
-                fontFamily: 'monospace'
-            },
-            axisTick: { alignWithLabel: true }
-        },
-        yAxis: {
-            type: 'value',
-            name: '# Added',
-            nameTextStyle: { fontSize: 10 },
-            minInterval: 1
-        },
+        xAxis: { type: 'category', data: mTickers, axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }, axisTick: { alignWithLabel: true } },
+        yAxis: { type: 'value', name: '# Added', nameTextStyle: { fontSize: 10 }, minInterval: 1 },
         tooltip: {
             trigger: 'axis',
             formatter: function(params) {
                 if (!params || params.length === 0) return '';
-                var idx = params[0].dataIndex;
-                var d = momentumData[idx];
-                if (!d) return '';
-
-                var ticker = d.ticker || '?';
-                var badge = d.is_trending
-                    ? ' <span style="background: #e65100; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 0.85em; margin-left: 4px;">Trending</span>'
-                    : '';
-                var html = '<strong style="font-size: 1.1em;">' + ticker + '</strong>' + badge
+                var d = momentumData[params[0].dataIndex]; if (!d) return '';
+                var badge = d.is_trending ? ' <span style="background:#e65100;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em;margin-left:4px;">Trending</span>' : '';
+                var html = '<strong style="font-size: 1.1em;">' + (d.ticker || '?') + '</strong>' + badge
                     + '<br/><span style="opacity: 0.8;">' + d.issuer + '</span>'
-                    + '<br/><br/>Added by <strong>' + d.add_count + '</strong> superinvestor'
-                    + (d.add_count > 1 ? 's' : '') + ':';
-
-                var adders = d.adders || [];
-                var show = adders.slice(0, 5);
-                for (var i = 0; i < show.length; i++) {
-                    html += '<br/>&nbsp;&nbsp;' + show[i];
-                }
-                if (adders.length > 5) {
-                    html += '<br/>&nbsp;&nbsp;+ ' + (adders.length - 5) + ' more';
-                }
-
+                    + '<br/><br/>Added by <strong>' + d.add_count + '</strong> superinvestor' + (d.add_count > 1 ? 's' : '') + ':';
+                var adders = d.adders || []; var show = adders.slice(0, 5);
+                for (var i = 0; i < show.length; i++) html += '<br/>&nbsp;&nbsp;' + show[i];
+                if (adders.length > 5) html += '<br/>&nbsp;&nbsp;+ ' + (adders.length - 5) + ' more';
                 return html;
             }
         },
         series: [{
             type: 'bar',
-            data: mCounts.map(function(count, idx) {
-                return {
-                    value: count,
-                    itemStyle: {
-                        color: mColors[idx],
-                        borderRadius: [3, 3, 0, 0]
-                    }
-                };
-            }),
-            emphasis: {
-                itemStyle: { color: '#1565c0' }
-            },
-            barMaxWidth: 40
+            data: mCounts.map(function(count, idx) { return { value: count, itemStyle: { color: mColors[idx], borderRadius: [3, 3, 0, 0] } }; }),
+            emphasis: { itemStyle: { color: '#1565c0' } }, barMaxWidth: 40
         }]
     });
+    momentumChart.on('click', function(params) { var d = momentumData[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
 
-    // Click → stock page
-    momentumChart.on('click', function(params) {
-        var d = momentumData[params.dataIndex];
-        if (d && d.link) window.location.href = d.link;
-    });
+    // Cross-highlighting
+    consensusChart.on('mouseover', function(params) { var d = cDataRev[params.dataIndex]; if (d && d.ticker) { var m = momentumTickerMap[d.ticker.toUpperCase()]; if (m !== undefined) momentumChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: m }); } });
+    consensusChart.on('mouseout', function() { momentumChart.dispatchAction({ type: 'downplay', seriesIndex: 0 }); });
+    momentumChart.on('mouseover', function(params) { var d = momentumData[params.dataIndex]; if (d && d.ticker) { var c = consensusTickerMap[d.ticker.toUpperCase()]; if (c !== undefined) consensusChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: consensusData.length - 1 - c }); } });
+    momentumChart.on('mouseout', function() { consensusChart.dispatchAction({ type: 'downplay', seriesIndex: 0 }); });
 
-    // ═══ Cross-Highlighting ═══
-    consensusChart.on('mouseover', function(params) {
-        var d = cDataRev[params.dataIndex];
-        if (!d || !d.ticker) return;
-        var mIdx = momentumTickerMap[d.ticker.toUpperCase()];
-        if (mIdx !== undefined) {
-            momentumChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: mIdx });
-        }
-    });
-    consensusChart.on('mouseout', function() {
-        momentumChart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
-    });
+    window.addEventListener('resize', function() { consensusChart.resize(); momentumChart.resize(); });
 
-    momentumChart.on('mouseover', function(params) {
-        var d = momentumData[params.dataIndex];
-        if (!d || !d.ticker) return;
-        var cIdx = consensusTickerMap[d.ticker.toUpperCase()];
-        if (cIdx !== undefined) {
-            // Reverse index since chart data is reversed
-            var revIdx = consensusData.length - 1 - cIdx;
-            consensusChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: revIdx });
-        }
-    });
-    momentumChart.on('mouseout', function() {
-        consensusChart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
-    });
-
-    // ═══ Responsive ═══
-    window.addEventListener('resize', function() {
-        consensusChart.resize();
-        momentumChart.resize();
-    });
+    // Resize charts when holdings panel becomes visible
+    window._gpCharts = { consensus: consensusChart, momentum: momentumChart };
 })();
 </script>
 
-{# ══════════════════════════════════════════════════════════════════ #}
-{# ── Holdings Table: Top 25 Preview with Expand                     #}
-{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Holdings Table ── #}
 <article style="margin-top: 2rem;">
     <header>
         <strong>All Holdings</strong>
@@ -394,7 +320,6 @@
             Top {{ entries|length }} stocks sorted by number of holders
         </span>
     </header>
-
     <div class="gp-fade{% if entries|length <= 25 %} expanded{% endif %}" id="gp-table-wrap">
     <figure>
     <table class="gp-table">
@@ -431,7 +356,6 @@
     </table>
     </figure>
     </div>
-
     {% if entries|length > 25 %}
     <button class="gp-expand-btn" onclick="toggleGrandPortfolio(this)">
         <span>View All {{ entries|length }} Stocks</span>
@@ -439,6 +363,129 @@
     </button>
     {% endif %}
 </article>
+{% endif %}
+
+</div>{# end panel-holdings #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 2: Superinvestors (Investor listing table)               #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-investors" class="gp-panel{% if view == 'investors' %} active{% endif %}">
+
+<div class="cache-info">
+    <small>Cache: {{ cache_age }}</small>
+    {% if refreshing %}
+        <small aria-busy="true">Refreshing in background...</small>
+    {% else %}
+        <button class="outline secondary text-small"
+                hx-post="/refresh" hx-target="#refresh-status" hx-swap="innerHTML"
+                style="padding: 0.2em 0.6em; font-size: 0.8em;">
+            Refresh Data
+        </button>
+    {% endif %}
+    <span id="refresh-status"></span>
+</div>
+
+<figure>
+<table class="gp-table">
+    <thead>
+        <tr>
+            <th data-sort="text">Investor</th>
+            <th data-sort="text">Fund</th>
+            <th class="text-right" data-sort="number" data-sort-default="desc">Portfolio Value</th>
+            <th class="text-right" data-sort="number">Holdings</th>
+            <th>Top Holdings</th>
+            <th data-sort="text">Period</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for i in range(superinvestors|length) %}
+        {% set si = superinvestors[i] %}
+        {% set summary = summaries[i] %}
+        {% if summary %}
+        <tr>
+            <td>
+                <a href="/holdings/{{ si.cik }}"><strong>{{ summary.display_name }}</strong></a>
+            </td>
+            <td class="text-small">
+                <a href="/holdings/{{ si.cik }}">{{ summary.fund_name }}</a>
+            </td>
+            <td class="text-right">${{ "{:,.0f}".format(summary.portfolio_value) }}</td>
+            <td class="text-right">{{ summary.num_holdings }}</td>
+            <td>
+                <div class="tag-list">
+                    {% for t in summary.top_holdings %}
+                    <a href="/stock/{{ t }}" class="tag">{{ t }}</a>
+                    {% endfor %}
+                </div>
+            </td>
+            <td class="text-small">{{ summary.report_period }}</td>
+        </tr>
+        {% else %}
+        <tr hx-get="/api/fund-row/{{ si.cik }}"
+            hx-trigger="load delay:{{ (loop.index0 // 3) }}s"
+            hx-swap="outerHTML">
+            <td>
+                <a href="/holdings/{{ si.cik }}"><strong>{{ si.display_name }}</strong></a>
+            </td>
+            <td class="text-small">
+                <a href="/holdings/{{ si.cik }}">{{ si.fund_name }}</a>
+            </td>
+            <td colspan="4" aria-busy="true">
+                <span class="spinner"></span> Loading from SEC EDGAR...
+            </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+
+</div>{# end panel-investors #}
+
+{# ── Tab Switching + URL Sync Script ── #}
+<script>
+(function() {
+    window.switchGPView = function(view) {
+        // Toggle subtab buttons
+        document.querySelectorAll('.gp-subtab').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.view === view);
+        });
+
+        // Toggle panels
+        document.querySelectorAll('.gp-panel').forEach(function(panel) {
+            panel.classList.remove('active');
+        });
+        var target = document.getElementById('panel-' + view);
+        if (target) {
+            target.classList.add('active');
+        }
+
+        // Resize charts when switching to holdings (they may have been hidden)
+        if (view === 'holdings' && window._gpCharts) {
+            setTimeout(function() {
+                if (window._gpCharts.consensus) window._gpCharts.consensus.resize();
+                if (window._gpCharts.momentum) window._gpCharts.momentum.resize();
+            }, 50);
+        }
+
+        // Re-init sortable tables for the new visible content
+        if (window.initSortableTables) window.initSortableTables();
+
+        // Update URL without page reload
+        var url = new URL(window.location);
+        url.searchParams.set('view', view);
+        history.replaceState(null, '', url.toString());
+    };
+
+    // Handle browser back/forward
+    window.addEventListener('popstate', function() {
+        var params = new URLSearchParams(window.location.search);
+        var view = params.get('view') || 'holdings';
+        switchGPView(view);
+    });
+})();
+</script>
 
 <script>
 window.toggleGrandPortfolio = function(btn) {
@@ -460,6 +507,4 @@ window.toggleGrandPortfolio = function(btn) {
     if (window.initSortableTables) window.initSortableTables();
 };
 </script>
-
-{% endif %}
 {% endblock %}
