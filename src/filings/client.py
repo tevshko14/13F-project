@@ -7,7 +7,8 @@ from edgar.entity.search import CompanySearchResults
 
 from filings.models import (
     SearchResult, Holding, FundInfo, HoldingChange,
-    EnrichedHolding, ActivityItem, GrandPortfolioEntry,
+    EnrichedHolding, ActivityItem, EnrichedActivityItem, ActivityCluster,
+    GrandPortfolioEntry,
     StockHolder, StockDetail, StockQuarterEntry, StockQuarter,
     StockInfo,
 )
@@ -581,6 +582,221 @@ def build_activity_feed(cache_data: dict, superinvestors_by_cik: dict) -> list[A
     # Sort by absolute value descending
     activities.sort(key=lambda a: -abs(a.current_value))
     return activities
+
+
+def build_enriched_activity_feed(
+    cache_data: dict,
+    superinvestors_by_cik: dict,
+    price_data: dict[str, float] | None = None,
+    timeframe: str = "ALL",
+) -> tuple[list[ActivityCluster], list[EnrichedActivityItem], dict]:
+    """Build enriched activity feed with conviction scores and clustering.
+
+    Returns ``(clusters, solo_items, stats)``.
+
+    *clusters* – list of ``ActivityCluster`` where ≥2 investors acted on the
+    same ticker.  Sorted by investor_count desc, combined_value desc.
+
+    *solo_items* – remaining ``EnrichedActivityItem`` entries where only one
+    investor acted.  Sorted by current_value desc.
+
+    *stats* – dict with sentiment summary & sector breakdown for the header.
+    """
+    from collections import defaultdict
+    from datetime import datetime, timedelta
+
+    status_labels = {
+        "NEW": "NEW BUY",
+        "CLOSED": "SOLD",
+        "INCREASED": "ADD",
+        "DECREASED": "REDUCE",
+    }
+
+    if price_data is None:
+        price_data = {}
+
+    # ── 1. Build all enriched items ──────────────────────────────────
+    all_items: list[EnrichedActivityItem] = []
+
+    for cik, fund_data in cache_data.items():
+        si = superinvestors_by_cik.get(cik)
+        if not si:
+            continue
+
+        fund_aum = fund_data.get("total_value", 0)
+        filing_date = fund_data.get("filing_date", "")
+
+        # Build cusip → portfolio weight + ticker maps
+        weight_by_cusip: dict[str, float] = {}
+        ticker_by_cusip: dict[str, str | None] = {}
+        for h in fund_data.get("all_holdings", []):
+            weight_by_cusip[h["cusip"]] = h.get("pct", 0.0)
+            ticker_by_cusip[h["cusip"]] = h.get("ticker")
+
+        for change in fund_data.get("changes", []):
+            label = status_labels.get(change["status"])
+            if not label:
+                continue
+
+            cusip = change["cusip"]
+            ticker = ticker_by_cusip.get(cusip)
+            pct_weight = weight_by_cusip.get(cusip, 0.0)
+            conviction = abs(change["share_change"]) * pct_weight / 100.0
+
+            current_price = price_data.get(ticker) if ticker else None
+
+            all_items.append(EnrichedActivityItem(
+                fund_display_name=si.display_name,
+                fund_cik=cik,
+                fund_aum=fund_aum,
+                issuer_name=change["issuer"],
+                ticker=ticker,
+                cusip=cusip,
+                action=label,
+                signal="",  # assigned below after threshold calc
+                share_change=change["share_change"],
+                current_value=change["current_value"],
+                portfolio_weight=round(pct_weight, 2),
+                conviction=round(conviction, 2),
+                filing_date=filing_date,
+                price_at_filing=None,
+                current_price=current_price,
+                price_change_pct=None,
+            ))
+
+    # ── 2. Filter by timeframe ───────────────────────────────────────
+    if timeframe != "ALL" and all_items:
+        now = datetime.now()
+        if timeframe == "1W":
+            cutoff = now - timedelta(days=7)
+        elif timeframe == "1M":
+            cutoff = now - timedelta(days=30)
+        else:
+            cutoff = None
+
+        if cutoff:
+            filtered = []
+            for item in all_items:
+                try:
+                    fd = datetime.strptime(item.filing_date, "%Y-%m-%d")
+                    if fd >= cutoff:
+                        filtered.append(item)
+                except (ValueError, TypeError):
+                    filtered.append(item)  # keep items with unparseable dates
+            all_items = filtered
+
+    # ── 3. Assign signal labels ──────────────────────────────────────
+    # Compute conviction threshold (75th percentile) for "HEAVY" signals
+    add_convictions = sorted(
+        [it.conviction for it in all_items if it.action in ("ADD", "NEW BUY")],
+    )
+    reduce_convictions = sorted(
+        [it.conviction for it in all_items if it.action in ("REDUCE", "SOLD")],
+    )
+
+    def _p75(vals: list[float]) -> float:
+        if not vals:
+            return float("inf")
+        idx = int(len(vals) * 0.75)
+        return vals[min(idx, len(vals) - 1)]
+
+    add_threshold = _p75(add_convictions)
+    reduce_threshold = _p75(reduce_convictions)
+
+    for item in all_items:
+        if item.action == "NEW BUY":
+            item.signal = "NEW ENTRY"
+        elif item.action == "SOLD":
+            item.signal = "LIQUIDATED"
+        elif item.action == "ADD":
+            item.signal = "HEAVY ADD" if item.conviction >= add_threshold else "ADD"
+        elif item.action == "REDUCE":
+            item.signal = "TRIM" if item.conviction >= reduce_threshold else "REDUCE"
+
+    # ── 4. Build clusters (group by ticker or cusip) ─────────────────
+    groups: dict[str, list[EnrichedActivityItem]] = defaultdict(list)
+    for item in all_items:
+        key = (item.ticker or item.cusip).upper()
+        groups[key].append(item)
+
+    clusters: list[ActivityCluster] = []
+    solo_items: list[EnrichedActivityItem] = []
+
+    for _key, items in groups.items():
+        if len(items) >= 2:
+            buy_count = sum(1 for i in items if i.action in ("NEW BUY", "ADD"))
+            sell_count = sum(1 for i in items if i.action in ("SOLD", "REDUCE"))
+
+            buy_part = f"{buy_count} Buying" if buy_count else ""
+            sell_part = f"{sell_count} Selling" if sell_count else ""
+            action_summary = " / ".join(filter(None, [buy_part, sell_part]))
+
+            if buy_count > sell_count:
+                sentiment = "BULLISH"
+            elif sell_count > buy_count:
+                sentiment = "BEARISH"
+            else:
+                sentiment = "MIXED"
+
+            convictions = [i.conviction for i in items]
+            avg_conv = round(sum(convictions) / len(convictions), 2) if convictions else 0
+
+            # Sort items within cluster by conviction desc
+            items.sort(key=lambda i: -i.conviction)
+
+            clusters.append(ActivityCluster(
+                ticker=items[0].ticker,
+                cusip=items[0].cusip,
+                issuer_name=items[0].issuer_name,
+                action_summary=action_summary,
+                net_sentiment=sentiment,
+                investor_count=len(items),
+                combined_value=sum(i.current_value for i in items),
+                avg_conviction=avg_conv,
+                items=items,
+            ))
+        else:
+            solo_items.extend(items)
+
+    # Sort clusters by investor_count desc, then combined_value desc
+    clusters.sort(key=lambda c: (-c.investor_count, -c.combined_value))
+    # Sort solo items by current_value desc
+    solo_items.sort(key=lambda i: -abs(i.current_value))
+
+    # ── 5. Compute stats ─────────────────────────────────────────────
+    total = len(all_items)
+    buy_count = sum(1 for i in all_items if i.action in ("NEW BUY", "ADD"))
+    sell_count = sum(1 for i in all_items if i.action in ("SOLD", "REDUCE"))
+
+    buying_pct = round(buy_count / total * 100) if total else 0
+    selling_pct = round(sell_count / total * 100) if total else 0
+
+    # Sector breakdown (cross-ref with S&P 500 constituents)
+    sector_counts: dict[str, int] = defaultdict(int)
+    try:
+        from filings.market_data import get_sp500_constituents
+        constituents = get_sp500_constituents()
+        ticker_to_sector = {c["ticker"].upper(): c.get("sector", "Other") for c in constituents}
+        for item in all_items:
+            if item.ticker:
+                sector = ticker_to_sector.get(item.ticker.upper(), "Other")
+                sector_counts[sector] += 1
+    except Exception:
+        pass
+
+    most_active_sector = max(sector_counts, key=sector_counts.get, default="N/A") if sector_counts else "N/A"
+
+    consensus_count = len(clusters)
+
+    stats = {
+        "total_activities": total,
+        "buying_pct": buying_pct,
+        "selling_pct": selling_pct,
+        "most_active_sector": most_active_sector,
+        "consensus_count": consensus_count,
+    }
+
+    return clusters, solo_items, stats
 
 
 def build_ticker_ownership_map(
