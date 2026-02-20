@@ -577,7 +577,6 @@ async def grand_portfolio(request: Request, view: str = "funds"):
         "superinvestors": SUPERINVESTORS,
         "summaries": si_summaries,
         "cache_age": cache.get_cache_age_str(cache_data),
-        "refreshing": getattr(app.state, "refreshing", False),
     })
 
 
