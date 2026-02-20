@@ -152,6 +152,15 @@
         font-size: 0.85em;
         color: rgba(0,0,0,0.5);
     }
+    .sync-badge {
+        display: inline-block;
+        background: rgba(76, 175, 80, 0.12);
+        color: #2e7d32;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.78em;
+        font-weight: 500;
+    }
 
     /* ── Responsive ── */
     @media (max-width: 768px) {
@@ -374,18 +383,9 @@
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-funds" class="gp-panel{% if view == 'funds' %} active{% endif %}">
 
-<div class="cache-info">
-    <small>Cache: {{ cache_age }}</small>
-    {% if refreshing %}
-        <small aria-busy="true">Refreshing in background...</small>
-    {% else %}
-        <button class="outline secondary text-small"
-                hx-post="/refresh" hx-target="#refresh-status" hx-swap="innerHTML"
-                style="padding: 0.2em 0.6em; font-size: 0.8em;">
-            Refresh Data
-        </button>
-    {% endif %}
-    <span id="refresh-status"></span>
+<div class="cache-info" title="This data is automatically synchronized with official SEC filings every 24 hours.">
+    <small>Data as of {{ cache_age }}</small>
+    <small class="sync-badge">Auto-synced</small>
 </div>
 
 <figure>
