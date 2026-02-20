@@ -1,12 +1,13 @@
 """YouTube event calendar data layer.
 
-Provides read access to youtube_events from Supabase with an
-in-memory cache (L1) for fast page loads.
+Provides read access to youtube_events from Supabase with a
+tiered fallback system so users never see errors.
 
 Data flow:
-  L1: thread-safe in-memory dict with short TTL
+  L1: thread-safe in-memory cache with short TTL (fresh hit)
   L2: Supabase youtube_events + youtube_channels tables
-  (No L3 fallback -- data is only populated by youtube_sync worker)
+  L3: Static channel list fallback (always available)
+  L4: Stale L1 data (never show empty/error to users)
 """
 from __future__ import annotations
 
@@ -25,48 +26,138 @@ _EVENTS_TTL = 300    # 5 minutes
 _CHANNELS_TTL = 600  # 10 minutes
 
 
+# ── L3 static fallback: always available even when Supabase is down ──
+
+_STATIC_CHANNELS: list[dict] = [
+    {"channel_id": "UCUvvj5lwue7PspotMDjk5UA", "channel_name": "Meet Kevin", "handle": "@MeetKevin", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCV6KDgJskWaEckne5aPA0aQ", "channel_name": "Graham Stephan", "handle": "@GrahamStephan", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 3.5},
+    {"channel_id": "UCGy7SkBjcIAgTiwkXEtPnYg", "channel_name": "Andrei Jikh", "handle": "@AndreiJikh", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 2.5},
+    {"channel_id": "UCJwKCyEIFHwUOPQQ-4kC1Zw", "channel_name": "Tom Nash", "handle": "@TomNashYT", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 3.5},
+    {"channel_id": "UCnMn36GT_H0X-w5_ckLtlgQ", "channel_name": "Financial Education", "handle": "@FinancialEducation", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCbta0n8i6Rljh0obO7HzG9A", "channel_name": "Joseph Carlson", "handle": "@JosephCarlsonShow", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 2.0},
+    {"channel_id": "UChvd7RCRJS50RWlwbfcwr3A", "channel_name": "Fun of Investing", "handle": "@FunofInvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCyZNir5FhvazX5L3_Q77UbA", "channel_name": "Real Matt Money", "handle": "@RealMattMoney", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCqlIWs2hwTzS8wIE-_pkC1A", "channel_name": "Kross Roads", "handle": "@Kross_Roads", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCDO_NH0PaRjo5Cn9gS-MH0w", "channel_name": "Dividend Streams", "handle": "@DividendStreams", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCvWx0-NX-9qVLCSW9yjdX-g", "channel_name": "Futurenvesting", "handle": "@Futurenvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCjZnbgPb08NFg7MHyPQRZ3Q", "channel_name": "Amit Investing", "handle": "@amitinvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCGJIGkEd46TER3y2Zvcwe0w", "channel_name": "Couch Investor", "handle": "@couch_Investor", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCgYKMfmLTViSE7Qj0Mj_Mhw", "channel_name": "Endicott Invests", "handle": "@EndicottInvests", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+    {"channel_id": "UCEXnaoFOX1P-4pyq2LbruYA", "channel_name": "Kris Patel", "handle": "@KrisPatel99", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0},
+]
+
+
+# ── Stale-while-revalidate cache helpers ─────────────────────────────
+
+
+def _get_cached_with_stale(
+    cache_ref: tuple[float, list[dict]] | None,
+    ttl: int,
+) -> tuple[list[dict] | None, bool]:
+    """Return ``(data, is_fresh)`` -- stale data returned instead of None.
+
+    Unlike a strict TTL check that returns None on expiry, this always
+    returns the last cached value (even if stale) so users never see an
+    empty/error state while upstream sources are refreshing.
+    """
+    if cache_ref is not None:
+        ts, data = cache_ref
+        is_fresh = (time.time() - ts) < ttl
+        return data, is_fresh
+    return None, False
+
+
+# ── Public API ───────────────────────────────────────────────────────
+
+
 def get_upcoming_events(limit: int = 50) -> list[dict]:
-    """Return upcoming YouTube events, newest scheduled first. L1-cached."""
+    """Return upcoming YouTube events with 4-tier fallback.
+
+    L1: Fresh in-memory cache (5 min TTL)
+    L2: Supabase youtube_events query
+    L3: (no upstream for events -- only populated by sync worker)
+    L4: Stale L1 data -- never show empty/error to users
+    """
     global _events_cache
 
+    # ── L1: fresh in-memory cache ──
     with _lock:
-        if _events_cache is not None:
-            ts, data = _events_cache
-            if time.time() - ts < _EVENTS_TTL:
-                return data[:limit]
+        stale_data, is_fresh = _get_cached_with_stale(_events_cache, _EVENTS_TTL)
+    if stale_data is not None and is_fresh:
+        return stale_data[:limit]
 
-    events = supabase_cache.get_youtube_events(limit=limit) or []
+    # ── L2: Supabase query ──
+    events = supabase_cache.get_youtube_events(limit=limit)
+    if events is not None:
+        with _lock:
+            _events_cache = (time.time(), events)
+        return events[:limit]
 
-    with _lock:
-        _events_cache = (time.time(), events)
+    logger.warning("YouTube events L2 (Supabase) returned None")
 
-    return events[:limit]
+    # ── L4: stale L1 data -- better than nothing ──
+    if stale_data is not None:
+        logger.info(
+            "Returning stale YouTube events (%d items)", len(stale_data),
+        )
+        return stale_data[:limit]
+
+    return []
 
 
 def get_channels() -> list[dict]:
-    """Return tracked YouTube channels with metadata. L1-cached."""
+    """Return tracked YouTube channels with 4-tier fallback.
+
+    L1: Fresh in-memory cache (10 min TTL)
+    L2: Supabase youtube_channels query
+    L3: Static channel list (hardcoded, always available)
+    L4: Stale L1 data
+    """
     global _channels_cache
 
+    # ── L1: fresh in-memory cache ──
     with _lock:
-        if _channels_cache is not None:
-            ts, data = _channels_cache
-            if time.time() - ts < _CHANNELS_TTL:
-                return data
+        stale_data, is_fresh = _get_cached_with_stale(
+            _channels_cache, _CHANNELS_TTL,
+        )
+    if stale_data is not None and is_fresh:
+        return stale_data
 
-    channels = supabase_cache.get_youtube_channels() or []
+    # ── L2: Supabase query ──
+    channels = supabase_cache.get_youtube_channels()
+    if channels:
+        with _lock:
+            _channels_cache = (time.time(), channels)
+        return channels
 
-    with _lock:
-        _channels_cache = (time.time(), channels)
+    logger.warning("YouTube channels L2 (Supabase) returned None/empty")
 
-    return channels
+    # ── L3: static fallback -- always available ──
+    # This guarantees the channels table always renders even on first
+    # deploy before the sync worker has run.
+    if not stale_data:
+        logger.info("Using static channel list fallback (L3)")
+        with _lock:
+            _channels_cache = (time.time(), _STATIC_CHANNELS)
+        return _STATIC_CHANNELS
+
+    # ── L4: stale L1 data ──
+    logger.info(
+        "Returning stale YouTube channels (%d items)", len(stale_data),
+    )
+    return stale_data
 
 
 def get_high_impact_events(min_score: int = 9) -> list[dict]:
     """Return upcoming events with impact >= min_score (for toast notifications).
 
-    Not cached -- called infrequently (on page load only).
+    Wrapped in try/except -- toast failure should never break page load.
     """
-    return supabase_cache.get_high_impact_youtube_events(min_score) or []
+    try:
+        return supabase_cache.get_high_impact_youtube_events(min_score) or []
+    except Exception as exc:
+        logger.warning("get_high_impact_events failed: %s", exc)
+        return []
 
 
 def build_calendar_data(events: list[dict], channels: list[dict]) -> dict:

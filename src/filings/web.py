@@ -848,9 +848,18 @@ async def retail_leaderboard_data(request: Request):
 
 @app.get("/api/retail/calendar", response_class=HTMLResponse)
 async def retail_calendar_api(request: Request):
-    """HTML partial for the Calendar tab (lazy-loaded)."""
-    events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
-    channels = await asyncio.to_thread(youtube.get_channels)
+    """HTML partial for the Calendar tab (lazy-loaded).
+
+    Uses tiered fallback -- channels always available via L3 static list.
+    Never returns an error: worst case is empty events + static channels.
+    """
+    try:
+        events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
+        channels = await asyncio.to_thread(youtube.get_channels)
+    except Exception:
+        logger.exception("Calendar API: unexpected error in data fetch")
+        events, channels = [], youtube._STATIC_CHANNELS
+
     calendar_data = youtube.build_calendar_data(events, channels)
     return templates.TemplateResponse("partials/retail_calendar.html", {
         "request": request,
@@ -864,8 +873,13 @@ async def retail_calendar_api(request: Request):
 @app.get("/api/retail/calendar-data")
 async def retail_calendar_data(request: Request):
     """JSON data for calendar charts/interactivity."""
-    events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
-    channels = await asyncio.to_thread(youtube.get_channels)
+    try:
+        events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
+        channels = await asyncio.to_thread(youtube.get_channels)
+    except Exception:
+        logger.exception("Calendar data API: unexpected error in data fetch")
+        events, channels = [], youtube._STATIC_CHANNELS
+
     calendar_data = youtube.build_calendar_data(events, channels)
     return JSONResponse(content=calendar_data)
 
