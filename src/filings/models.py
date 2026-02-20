@@ -108,11 +108,14 @@ class ActivityCluster:
     cusip: str
     issuer_name: str
     action_summary: str              # "5 Buying / 2 Selling"
-    net_sentiment: str               # "BULLISH", "BEARISH", "MIXED"
+    net_sentiment: str               # "BULLISH", "BEARISH", "NEUTRAL"
     investor_count: int
     combined_value: int
     avg_conviction: float
     items: list[EnrichedActivityItem]  # Individual entries (for expand)
+    buy_value: float = 0.0           # total $ bought by all investors in cluster
+    sell_value: float = 0.0          # total $ sold by all investors in cluster
+    net_flow: float = 0.0            # buy_value - sell_value (signed net dollar flow)
 
 
 @dataclass
