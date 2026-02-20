@@ -98,6 +98,50 @@ CREATE INDEX IF NOT EXISTS idx_insider_trades_type_date
     ON insider_trades (trade_type, trade_date DESC);
 CREATE INDEX IF NOT EXISTS idx_insider_trades_filing_date
     ON insider_trades (filing_date DESC);
+
+-- ── YouTube calendar events ──
+CREATE TABLE IF NOT EXISTS youtube_events (
+    id                BIGSERIAL PRIMARY KEY,
+    video_id          TEXT NOT NULL UNIQUE,
+    channel_id        TEXT NOT NULL,
+    channel_name      TEXT NOT NULL DEFAULT '',
+    title             TEXT NOT NULL DEFAULT '',
+    scheduled_at      TIMESTAMPTZ,
+    event_type        TEXT NOT NULL DEFAULT 'upcoming',
+    sentiment         TEXT NOT NULL DEFAULT 'neutral',
+    tickers           JSONB NOT NULL DEFAULT '[]'::jsonb,
+    impact_score      SMALLINT NOT NULL DEFAULT 0,
+    subscriber_count  BIGINT DEFAULT 0,
+    avg_views         BIGINT DEFAULT 0,
+    frequency_alert   BOOLEAN NOT NULL DEFAULT FALSE,
+    frequency_detail  TEXT NOT NULL DEFAULT '',
+    thumbnail_url     TEXT NOT NULL DEFAULT '',
+    video_url         TEXT NOT NULL DEFAULT '',
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_youtube_events_scheduled
+    ON youtube_events (scheduled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_youtube_events_channel
+    ON youtube_events (channel_id, scheduled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_youtube_events_impact
+    ON youtube_events (impact_score DESC)
+    WHERE impact_score >= 9;
+CREATE INDEX IF NOT EXISTS idx_youtube_events_sentiment
+    ON youtube_events (sentiment, scheduled_at DESC);
+
+-- ── YouTube channel metadata cache ──
+CREATE TABLE IF NOT EXISTS youtube_channels (
+    channel_id          TEXT PRIMARY KEY,
+    channel_name        TEXT NOT NULL DEFAULT '',
+    handle              TEXT NOT NULL DEFAULT '',
+    subscriber_count    BIGINT DEFAULT 0,
+    avg_views_30d       BIGINT DEFAULT 0,
+    avg_posts_per_week  NUMERIC(5,2) DEFAULT 0,
+    last_polled_at      TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 
@@ -836,3 +880,118 @@ def complete_sync_log(
     except Exception as exc:
         logger.warning("complete_sync_log failed: %s", exc)
         return False
+
+
+# ── YouTube helpers ──────────────────────────────────────────────
+
+
+def upsert_youtube_events(rows: list[dict]) -> int:
+    """Batch upsert rows into ``youtube_events``.
+
+    Uses ``ON CONFLICT (video_id) DO UPDATE`` for deduplication.
+    Returns the number of rows upserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    upserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("youtube_events").upsert(
+                chunk, on_conflict="video_id"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_youtube_events chunk %d failed: %s", i, exc)
+
+    return upserted
+
+
+def upsert_youtube_channels(rows: list[dict]) -> int:
+    """Upsert rows into ``youtube_channels``.
+
+    Uses ``ON CONFLICT (channel_id) DO UPDATE``.
+    Returns the number of rows upserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    upserted = 0
+    for row in rows:
+        try:
+            client.table("youtube_channels").upsert(
+                row, on_conflict="channel_id"
+            ).execute()
+            upserted += 1
+        except Exception as exc:
+            logger.warning(
+                "upsert_youtube_channels failed for %s: %s",
+                row.get("channel_id"), exc,
+            )
+
+    return upserted
+
+
+def get_youtube_events(
+    limit: int = 50,
+    sentiment: str | None = None,
+    min_impact: int | None = None,
+) -> list[dict] | None:
+    """Query ``youtube_events``, newest scheduled first."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        query = (
+            client.table("youtube_events")
+            .select("*")
+            .order("scheduled_at", desc=True)
+            .limit(limit)
+        )
+        if sentiment:
+            query = query.eq("sentiment", sentiment)
+        if min_impact is not None:
+            query = query.gte("impact_score", min_impact)
+        resp = query.execute()
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_youtube_events failed: %s", exc)
+        return None
+
+
+def get_youtube_channels() -> list[dict] | None:
+    """Return all tracked ``youtube_channels`` rows."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = client.table("youtube_channels").select("*").execute()
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_youtube_channels failed: %s", exc)
+        return None
+
+
+def get_high_impact_youtube_events(min_score: int = 9) -> list[dict] | None:
+    """Return upcoming events with ``impact_score >= min_score``."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("youtube_events")
+            .select("*")
+            .gte("impact_score", min_score)
+            .eq("event_type", "upcoming")
+            .order("scheduled_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_high_impact_youtube_events failed: %s", exc)
+        return None

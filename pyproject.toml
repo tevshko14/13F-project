@@ -17,6 +17,7 @@ dependencies = [
     "supabase>=2.0",
     "psycopg2-binary>=2.9",
     "PyJWT>=2.0",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +32,7 @@ filings = "filings.cli:main"
 filings-web = "filings.web:main"
 filings-sync = "filings.sync_worker:main"
 filings-insider-sync = "filings.insider_sync:main"
+filings-youtube-sync = "filings.youtube_sync:main"
 
 [build-system]
 requires = ["hatchling"]
