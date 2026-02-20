@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-19 (Supabase L2 cache, cache-first endpoints, 3-tier architecture)
+> Last updated: 2026-02-20 (Retail page, nav restructure, /funds URL, insider stale-while-revalidate)
 
 ---
 
@@ -204,7 +204,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
 ```
 13F-project/
 ├── pyproject.toml                    # deps, entry points, build config
-├── README.md                         # (minimal)
+├── README.md                         # Project overview
 ├── README_DEV.md                     # THIS FILE — source of truth
 ├── .python-version                   # 3.12
 ├── .gitignore
@@ -214,7 +214,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
-    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache table)
+    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache + insider_trades tables)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification engine: detection, matching, persistence, filing season
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
@@ -222,38 +222,44 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── vitals.py                     # Alternative data (Glassdoor, People Data Labs, App Store)
     ├── market_data.py                # S&P 500 heatmap, most-added, ticker search (~8K NYSE/NASDAQ listings)
     ├── company_filings.py            # SEC filing links for stock pages
-    ├── insider_trading.py            # Form 4 insider transaction data
+    ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale)
+    ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
+    ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
     ├── cli.py                        # CLI entry point (search/holdings/compare)
-    ├── web.py                        # FastAPI app (30+ routes + background refresh + SSE + polling + market data)
+    ├── web.py                        # FastAPI app (40+ routes + background refresh + SSE + polling + market data)
     └── templates/
-        ├── base.html                 # Master layout: nav, PicoCSS, HTMX, ECharts, Fuse.js, sidebar, sortable tables, ticker search
-        ├── index.html                # Homepage: heatmap + most-added + superinvestor list
+        ├── base.html                 # Master layout: nav (Home|Retail|Funds|Insiders), PicoCSS, HTMX, ECharts, Fuse.js, sidebar, sortable tables
+        ├── home.html                 # Homepage: heatmap + most-added + Retail/Funds/Insiders cards
+        ├── retail.html               # Retail page: Sentiment, Leaderboard, Calendar sub-tabs
+        ├── grand_portfolio.html      # Top Funds page: Funds, Holdings, Activity sub-tabs (URL: /funds)
+        ├── insider_trading.html      # Insider trading screener: global buys/sells with chart
         ├── search.html               # Fund manager search
-        ├── investor.html             # Superinvestor page (tabbed: Holdings + Compare Quarters)
+        ├── investor.html             # Individual fund page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
-        ├── grand_portfolio.html      # Aggregated holdings across all funds
         ├── stock.html                # Stock detail (7 tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
         ├── notifications.html        # Notification history page
         ├── error.html                # Error page
         └── partials/
-            ├── fund_row.html         # HTMX partial: loaded fund row
-            ├── fund_row_error.html   # HTMX partial: error fund row
-            ├── ticker_link.html      # Jinja2 macro: clickable ticker/CUSIP
-            ├── watchlist_sidebar.html # Sidebar content: ticker list + remove buttons
-            ├── watchlist_star.html    # Star button (filled/outline) for stock pages
-            ├── watchlist_response.html # OOB response: star + sidebar update
-            ├── notification_bell.html # Navbar bell icon with unread badge
-            ├── heatmap.html          # S&P 500 ECharts treemap (lazy-loaded via HTMX)
-            ├── most_added.html       # Most-added-by-superinvestors table (lazy-loaded)
-            ├── ticker_search.html    # Nav autocomplete search input (Fuse.js fuzzy search)
-            ├── analyst_ratings.html  # Analyst consensus + ratings table (lazy-loaded)
-            ├── sentiment.html        # Market/news sentiment cards (CNN, Finnhub, Reddit, Alpha Vantage)
-            ├── vitals.html           # Employee pulse, culture, product sentiment (3-card grid)
-            ├── company_filings.html  # SEC filing links (lazy-loaded)
-            ├── insider_trades.html   # Insider trading table (lazy-loaded)
-            └── compare_content.html  # Compare quarters partial (lazy-loaded into investor page)
+            ├── fund_row.html           # HTMX partial: loaded fund row
+            ├── fund_row_error.html     # HTMX partial: error fund row
+            ├── ticker_link.html        # Jinja2 macro: clickable ticker/CUSIP
+            ├── watchlist_sidebar.html   # Sidebar content: ticker list + remove buttons
+            ├── watchlist_star.html      # Star button (filled/outline) for stock pages
+            ├── watchlist_response.html  # OOB response: star + sidebar update
+            ├── notification_bell.html   # Navbar bell icon with unread badge
+            ├── heatmap.html            # S&P 500 ECharts treemap (lazy-loaded via HTMX)
+            ├── most_added.html         # Most-added-by-superinvestors table (lazy-loaded)
+            ├── ticker_search.html      # Nav autocomplete search input (Fuse.js fuzzy search)
+            ├── analyst_ratings.html    # Analyst consensus + ratings table (lazy-loaded)
+            ├── sentiment.html          # Market/news sentiment cards (CNN, Finnhub, Reddit, Alpha Vantage)
+            ├── vitals.html             # Employee pulse, culture, product sentiment (3-card grid)
+            ├── company_filings.html    # SEC filing links (lazy-loaded)
+            ├── insider_trades.html     # Insider trading table — global screener (lazy-loaded)
+            ├── stock_insider_trades.html # Insider trading table — per-ticker (lazy-loaded)
+            ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded into retail page)
+            └── compare_content.html    # Compare quarters partial (lazy-loaded into investor page)
 ```
 
 ---
@@ -669,13 +675,20 @@ This logic lives in the `ticker_link.html` Jinja2 macro.
 
 ### 5.7 Cache Refresh Strategy
 
-Uses a **3-tier stale-while-revalidate** pattern with per-fund TTL:
+#### 13F Fund Data (3-tier stale-while-revalidate)
 
 ```
 Cache Tiers:
   L1: app.state.fund_cache (in-memory dict, process lifetime)
   L2: Supabase api_cache table, category="13f" (survives deploys)
   L3: Disk JSON at ~/.13f-cache/fund_data.json (local fallback)
+
+Key behavior:
+  - load_cache_from_supabase() uses get_cached_with_stale() so expired
+    data is returned as stale fallback — NEVER dropped on TTL expiry
+  - Fund endpoints (fund-row, holdings, compare, portfolio-chart) have
+    L2 Supabase fallback: on L1 miss, query Supabase directly, then
+    promote result to L1 for fast subsequent access
 
 TTL Configuration:
   Off-season: 7 days (13F data only changes quarterly)
@@ -706,7 +719,31 @@ Manual refresh:
 HTMX lazy-load:
   GET /api/fund-row/{cik} checks L1 cache first:
     Cache hit → returns immediately (zero SEC calls)
-    Cache miss → fetches from SEC, writes through to L1 + L2 + L3
+    L1 miss → try L2 Supabase (stale OK) → promote to L1
+    Both miss → fetches from SEC, writes through to L1 + L2 + L3
+```
+
+#### Insider Trades (4-tier stale-while-revalidate)
+
+```
+Cache Tiers:
+  L1: in-memory dict with 5-10 min TTL (sub-ms)
+  L2: Supabase insider_trades dedicated table (no TTL, typed columns)
+  L3: OpenInsider scrape (fallback when DB empty/unavailable)
+  L4: Stale L1 data (last resort — never show empty/error to users)
+
+Data flow (insider_trading.py):
+  _get_cached_with_stale(key, ttl) → returns (data, is_fresh) tuple
+  - Fresh L1 hit → return immediately
+  - L1 expired → try L2 Supabase query
+  - L2 fails → try L3 OpenInsider scrape
+  - All fail → return stale L1 data (L4) instead of empty list
+
+Sync worker (insider_sync.py, Railway cron every 30 min):
+  1. Scrape 3 OpenInsider pages (all, purchases, sales)
+  2. Deduplicate by sec_url
+  3. Upsert to Supabase (ON CONFLICT sec_url DO UPDATE)
+  4. Never deletes old data — only adds/updates
 ```
 
 ### 5.8 Market Data Module (`market_data.py`)
@@ -774,7 +811,60 @@ the ticker doesn't map to the main consumer app (e.g., GOOG → "Google", META �
 Falls back to yfinance company name search. Picks the result with the most ratings for
 override tickers.
 
-### 5.11 Performance Optimizations
+### 5.11 Insider Trading Module (`insider_trading.py` + `insider_sync.py`)
+
+Dedicated insider trading system with its own Supabase table and sync worker.
+
+**Architecture:**
+- `insider_trades` table in Supabase (dedicated, typed columns — NOT the `api_cache` JSONB table)
+- `insider_sync.py` cron worker scrapes OpenInsider every 30 min, upserts via `ON CONFLICT (sec_url) DO UPDATE`
+- `insider_trading.py` serves data with 4-tier stale-while-revalidate fallback
+
+**Data model (`InsiderTrade` dataclass):**
+- `filing_date`, `trade_date`, `ticker`, `company_name`, `insider_name`, `title`
+- `trade_type` (Purchase, Sale, Sale+OE), `price`, `qty`, `owned`, `delta_own`, `value`
+- `sec_url` (unique key, link to SEC Form 4 filing)
+
+**Key functions:**
+| Function | Description |
+|---|---|
+| `get_latest_insider_trades(trade_type, count)` | Global screener: L1→L2→L3→L4 stale fallback |
+| `get_ticker_insider_trades(ticker)` | Per-ticker: L1→L2→L3 scrape+backfill→L4 stale |
+| `aggregate_top_tickers(trades, limit)` | Aggregate by ticker for chart (net flow, insider details) |
+| `_scrape_openinsider_global(trade_type, count)` | L3 fallback: direct scrape of OpenInsider |
+| `_scrape_and_backfill_ticker(ticker)` | L3 fallback: scrape + upsert back to Supabase |
+
+**Sync worker (`insider_sync.py`):**
+- Entry point: `uv run filings-insider-sync`
+- Scrapes 3 OpenInsider pages (all, purchases, sales) with 3-second delays
+- Deduplicates by `sec_url`, upserts to Supabase in chunks of 50
+- Logs to `sync_logs` table for observability
+
+### 5.12 Retail Page (`retail.html`)
+
+The `/retail` page aggregates retail trader sentiment data with 3 sub-tabs.
+
+**Sub-tab pattern:** Uses `.rt-subtab` buttons + `.rt-panel` divs + `switchRetailView()`
+JS function (same pattern as grand_portfolio's `.gp-subtab`). URL synced via `history.replaceState`.
+
+| Tab | Data Source | Rendering |
+|---|---|---|
+| Sentiment | CNN Fear & Greed + ApeWisdom top stocks | Server-rendered: gauge + summary cards |
+| Leaderboard | ApeWisdom all-stocks (pages 1-5) | Lazy-loaded via `fetch('/api/retail/leaderboard')` |
+| Calendar | `_FINANCE_YOUTUBERS` static list in `web.py` | Server-rendered: YouTuber schedule table |
+
+**Summary cards (Sentiment tab):**
+- Most Mentioned: ticker with highest mention count
+- Biggest Rank Mover: ticker with largest positive rank change (24h)
+- Top 5 Trending: links to top 5 tickers by mention count
+
+**Leaderboard features:**
+- Sortable columns (Rank, Ticker, Name, Mentions, ΔMentions, Upvotes, Rank Change)
+- Accordion: top 25 shown by default, expandable to all ~250 tickers
+- Green/red badges for rank changes and mention deltas
+- Fear & Greed badge at the top with color-coded mood
+
+### 5.13 Performance Optimizations
 
 **Problem:** With 84 superinvestors, synchronous file I/O was blocking the async event loop.
 Per-fund TTL now skips fresh funds during background refresh, reducing API calls significantly.
@@ -799,21 +889,27 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 
 | Method | Path | Handler | Data Source | Template |
 |---|---|---|---|---|
-| GET | `/` | `index` | Cache (read) | `index.html` |
-| GET | `/api/fund-row/{cik}` | `fund_row` | Cache first → SEC on miss | `partials/fund_row.html` |
+| GET | `/` | `index` | Cache (read) | `home.html` |
+| GET | `/retail` | `retail_page` | CNN, ApeWisdom, YouTubers (static) | `retail.html` |
+| GET | `/funds` | `funds_page` | Cache only | `grand_portfolio.html` |
+| GET | `/insider-trading` | `insider_trading_page` | — (JS lazy-loads) | `insider_trading.html` |
+| GET | `/grand-portfolio` | `grand_portfolio_redirect` | 301 redirect → `/funds` | — |
+| GET | `/superinvestors` | `superinvestors_page` | 301 redirect → `/funds?view=funds` | — |
+| GET | `/api/fund-row/{cik}` | `fund_row` | Cache first → SEC on miss (L2 Supabase fallback) | `partials/fund_row.html` |
 | GET | `/search` | `search_page` | SEC API (live) | `search.html` |
 | GET | `/holdings/{cik}` | `holdings` | Cache first → SEC on miss | `investor.html` |
 | GET | `/compare/{cik}` | `compare` | Redirect | → `/holdings/{cik}` (302) |
 | GET | `/api/compare/{cik}` | `compare_api` | Cache first → SEC on miss | `partials/compare_content.html` |
 | GET | `/activity` | `activity_feed` | Cache only | `activity.html` |
-| GET | `/grand-portfolio` | `grand_portfolio` | Cache only | `grand_portfolio.html` |
 | GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
 | GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only | `stock.html` |
 | GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (live, 5-min cache) | `partials/analyst_ratings.html` |
 | GET | `/api/sentiment/{ticker}` | `sentiment_data` | CNN, Finnhub, ApeWisdom, Alpha Vantage | `partials/sentiment.html` |
 | GET | `/api/vitals/{ticker}` | `vitals_data` | Glassdoor, PDL, Apple iTunes | `partials/vitals.html` |
 | GET | `/api/company-filings/{ticker}` | `company_filings_tab` | SEC EDGAR | `partials/company_filings.html` |
-| GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | SEC EDGAR Form 4 | `partials/insider_trades.html` |
+| GET | `/api/insider-trades` | `insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/insider_trades.html` |
+| GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/stock_insider_trades.html` |
+| GET | `/api/retail/leaderboard` | `retail_leaderboard_api` | ApeWisdom + CNN Fear & Greed | `partials/retail_leaderboard.html` |
 | GET | `/api/ticker-search-index` | `ticker_search_index` | NASDAQ Trader + S&P 500 + cache | JSON response |
 | GET | `/api/heatmap` | `heatmap` | yfinance (30-min cache) + Wikipedia | `partials/heatmap.html` |
 | GET | `/api/most-added` | `most_added` | Cache + analysts + yfinance | `partials/most_added.html` |
@@ -827,12 +923,12 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | POST | `/api/notifications/read-all` | `mark_all_read` | Notifications JSON | `partials/notification_bell.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
-**Key pattern:** All endpoints are cache-first. SEC EDGAR is only called on cache miss
-(uncached CIK) or during background refresh of stale funds. Pages for single funds
-(`/holdings/{cik}`, `/api/compare/{cik}`, `/api/fund-row/{cik}`) check L1 in-memory
-cache first; if the fund is cached they return instantly with zero API calls.
-The `/compare/{cik}` route redirects to `/holdings/{cik}` — compare data is lazy-loaded via `/api/compare/{cik}`.
-Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
+**Key patterns:**
+- All endpoints are cache-first. SEC EDGAR is only called on cache miss or during background refresh.
+- Fund data endpoints (`/api/fund-row`, `/api/holdings`, `/api/compare`) have L2 Supabase fallback with L1 promotion when L1 misses.
+- Insider trade endpoints use 4-tier fallback: L1 fresh → L2 Supabase → L3 scrape → L4 stale L1 (never empty).
+- Backward-compat redirects: `/grand-portfolio` → `/funds` (301), `/superinvestors` → `/funds?view=funds` (301).
+- Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
 
 ---
 
@@ -873,22 +969,29 @@ Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund
 ### Template Hierarchy
 
 ```
-base.html (nav + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SSE + sortable tables + fuzzy search)
+base.html (nav: Home|Retail|Funds|Insiders + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SSE + sortable tables)
   ├── includes partials/watchlist_sidebar.html (in <aside> via hx-preserve)
   ├── includes partials/notification_bell.html (in <nav>, HTMX-polls every 60s)
   ├── includes partials/ticker_search.html (in <nav>, Fuse.js fuzzy autocomplete)
-  ├── index.html (homepage)
+  ├── home.html (homepage)
   │     ├── lazy-loads partials/heatmap.html via HTMX (/api/heatmap)
   │     ├── lazy-loads partials/most_added.html via HTMX (/api/most-added)
-  │     ├── uses partials/fund_row.html (HTMX lazy-load)
-  │     └── uses partials/fund_row_error.html (HTMX error)
+  │     └── 3 quick-access cards: Retail, Funds, Insiders
+  ├── retail.html (sub-tabs: Sentiment | Leaderboard | Calendar)
+  │     ├── Sentiment tab: CNN Fear & Greed gauge + summary cards (server-rendered)
+  │     ├── Leaderboard tab: lazy-loads partials/retail_leaderboard.html via fetch(/api/retail/leaderboard)
+  │     └── Calendar tab: static YouTuber table (server-rendered)
+  ├── grand_portfolio.html (URL: /funds, sub-tabs: Funds | Holdings | Activity)
+  │     ├── Funds tab: HTMX lazy-loads partials/fund_row.html for each of 84 investors
+  │     ├── Holdings tab: aggregated cross-fund portfolio
+  │     └── Activity tab: recent buys/sells across all funds
+  ├── insider_trading.html (global insider trades screener)
+  │     └── lazy-loads partials/insider_trades.html via fetch(/api/insider-trades)
   ├── search.html
   ├── investor.html (Tabbed: Holdings + Compare Quarters, lazy-loads compare)
   │     ├── imports partials/ticker_link.html (macro)
   │     └── lazy-loads partials/compare_content.html via fetch(/api/compare/{cik})
   ├── activity.html
-  │     └── imports partials/ticker_link.html (macro)
-  ├── grand_portfolio.html
   │     └── imports partials/ticker_link.html (macro)
   ├── stock.html (7 Tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
   │     ├── includes partials/watchlist_star.html
@@ -896,7 +999,7 @@ base.html (nav + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SS
   │     ├── lazy-loads partials/sentiment.html via fetch(/api/sentiment/{ticker})
   │     ├── lazy-loads partials/vitals.html via fetch(/api/vitals/{ticker})
   │     ├── lazy-loads partials/company_filings.html via fetch(/api/company-filings/{ticker})
-  │     └── lazy-loads partials/insider_trades.html via fetch(/api/insider-trades/{ticker})
+  │     └── lazy-loads partials/stock_insider_trades.html via fetch(/api/insider-trades/{ticker})
   ├── notifications.html (notification history)
   └── error.html
 ```
@@ -1207,6 +1310,12 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Supabase L2 persistent cache: 13F funds, Glassdoor, insider trades survive deploys
 - [x] Cache-first endpoints: all 13F pages serve from cache, SEC only on miss
 - [x] Vitals tab: Glassdoor ratings, People Data Labs employee data, Apple App Store ratings
+- [x] Insider trading global screener page (dedicated `/insider-trading` route)
+- [x] Insider sync cron worker: scrape OpenInsider → upsert to Supabase every 30 min
+- [x] Retail page (`/retail`): Sentiment, Leaderboard (ApeWisdom), Calendar (YouTuber schedules)
+- [x] Nav restructure: Home | Retail | Funds | Insiders (renamed `/grand-portfolio` → `/funds`)
+- [x] Stale-while-revalidate for 13F fund data (never drop data on TTL expiry)
+- [x] Stale-while-revalidate for insider trades (4-tier fallback, never show errors)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
 - [ ] Comparison across multiple funds on the same page
@@ -1238,6 +1347,8 @@ they don't get re-introduced.
 | CIK cache key mismatch | `fund_row` stored cache with zero-padded CIK ("0001067983") but lookups used stripped CIK ("1067983") | Added `cik_normalized = cik.lstrip("0") or cik` in fund_row endpoint |
 | Stale cache after multi-quarter update | Old cache lacked `quarterly_changes` field | Graceful degradation with `.get("quarterly_changes", [])` + delete cache to regenerate |
 | Server unresponsive after 84 superinvestor expansion | `save_cache()` called synchronously after every fund during background refresh (84× disk writes blocking event loop); `notifications.json` and `watchlist.json` read from disk on every HTTP request; 84 HTMX lazy-loads fired simultaneously | Batched cache writes (every 10 funds, via `asyncio.to_thread`); in-memory caching for notification/watchlist state; staggered HTMX lazy-loads (3 per second); fire-and-forget disk saves in fund_row endpoint |
+| 13F fund data disappearing after TTL expiry | `load_cache_from_supabase()` called `get_cached()` which returns `None` when TTL expires, causing all fund data to vanish until the sync worker refreshes | Switched to `get_cached_with_stale()` which returns expired data as stale fallback; added L2 Supabase fallback to all fund web endpoints with L1 promotion |
+| Insider trades "failed to load" on deploy | When L1 TTL expires and Supabase query fails (transient), `get_latest_insider_trades()` fell through to OpenInsider scrape which also failed, returning empty list | Added `_get_cached_with_stale()` to insider_trading.py; both global and per-ticker functions now use 4-tier fallback (L1 fresh → L2 Supabase → L3 scrape → L4 stale L1), never returning empty results if data was previously loaded |
 
 ---
 
@@ -1245,6 +1356,7 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-19 (with Supabase L2 cache). If told "Context is drifting,"
+> This file documents the system as of 2026-02-20 (retail page, nav restructure,
+> /funds URL, insider stale-while-revalidate). If told "Context is drifting,"
 > the first action should be to re-read `/Users/Tevis_1/13F-project/README_DEV.md`
 > and reconcile any discrepancies with the actual code.
