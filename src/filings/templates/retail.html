@@ -306,49 +306,14 @@
 
 
 {# ══════════════════════════════════════════════════════════════════ #}
-{# ── Panel 3: Calendar (static, server-rendered)                    #}
+{# ── Panel 3: Calendar (lazy-loaded)                                #}
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-calendar" class="rt-panel{% if view == 'calendar' %} active{% endif %}">
-<article>
-    <header>
-        <strong>Finance YouTubers</strong>
-        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            Popular channels covering stocks &amp; markets
-        </span>
-    </header>
-    <figure>
-    <table class="yt-table">
-        <thead>
-            <tr>
-                <th>Channel</th>
-                <th>Schedule</th>
-                <th>Topics</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for yt in youtubers %}
-            <tr>
-                <td>
-                    <a href="{{ yt.channel }}" target="_blank" rel="noopener"
-                       style="font-weight: 600; text-decoration: none;">
-                        {{ yt.name }}
-                    </a>
-                </td>
-                <td class="text-muted">{{ yt.schedule }}</td>
-                <td>
-                    {% for topic in yt.topics.split(', ') %}
-                    <span class="tag" style="font-size: 0.8em;">{{ topic }}</span>
-                    {% endfor %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    </figure>
-    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.5em;">
-        Schedules are approximate. Check individual channels for exact times.
-    </footer>
-</article>
+    <div id="retail-calendar-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading event calendar...
+        </p>
+    </div>
 </div>{# end panel-calendar #}
 
 
@@ -356,6 +321,7 @@
 <script>
 (function() {
     var leaderboardLoaded = false;
+    var calendarLoaded = false;
     var bubbleChart = null;
     window._retailData = null;
 
@@ -629,6 +595,11 @@
             loadLeaderboard();
         }
 
+        if (view === 'calendar' && !calendarLoaded) {
+            calendarLoaded = true;
+            loadCalendar();
+        }
+
         if (window.initSortableTables) window.initSortableTables();
 
         var url = new URL(window.location);
@@ -658,10 +629,31 @@
         });
     }
 
+    /* ── Calendar lazy-load ── */
+    function loadCalendar() {
+        fetch('/api/retail/calendar')
+            .then(function(r) { return r.text(); })
+            .then(function(html) {
+                document.getElementById('retail-calendar-content').innerHTML = html;
+                if (window.initSortableTables) window.initSortableTables();
+            })
+            .catch(function() {
+                document.getElementById('retail-calendar-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Failed to load calendar. Please try again later.</p>';
+            });
+    }
+
     /* Auto-load leaderboard if it's the active tab on page load */
     {% if view == 'leaderboard' %}
     leaderboardLoaded = true;
     loadLeaderboard();
+    {% endif %}
+
+    /* Auto-load calendar if it's the active tab on page load */
+    {% if view == 'calendar' %}
+    calendarLoaded = true;
+    loadCalendar();
     {% endif %}
 
     /* Handle browser back/forward */
@@ -672,4 +664,26 @@
     });
 })();
 </script>
+
+{# ── Toast notifications for high-impact YouTube events ── #}
+{% if high_impact_events and high_impact_events|length > 0 %}
+<script>
+(function() {
+    {% for event in high_impact_events[:3] %}
+    setTimeout(function() {
+        if (window.ppToast) {
+            window.ppToast({
+                title: '{{ event.channel_name|e }} going live!',
+                message: '{{ event.title|e|truncate(80) }}',
+                icon: '{% if event.sentiment == "bullish" %}&#x1F4C8;{% elif event.sentiment == "bearish" %}&#x1F4C9;{% else %}&#x1F4FA;{% endif %}',
+                type: '{% if event.sentiment == "bullish" %}bullish{% elif event.sentiment == "bearish" %}bearish{% else %}alert{% endif %}',
+                link: '/retail?view=calendar',
+                duration: 10000,
+            });
+        }
+    }, {{ loop.index0 * 1500 }});
+    {% endfor %}
+})();
+</script>
+{% endif %}
 {% endblock %}

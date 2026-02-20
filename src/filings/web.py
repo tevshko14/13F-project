@@ -28,7 +28,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from filings import client, cache, analysts, market_data, sentiment, vitals, company_filings, insider_trading, supabase_cache, auth
+from filings import client, cache, analysts, market_data, sentiment, vitals, company_filings, insider_trading, supabase_cache, auth, youtube
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -790,6 +790,9 @@ async def retail_page(request: Request, view: str = "sentiment"):
 
     has_guru_data = bool(getattr(app.state, "fund_cache", {}))
 
+    # High-impact YouTube events for toast notifications
+    high_impact_events = await asyncio.to_thread(youtube.get_high_impact_events, 9)
+
     return templates.TemplateResponse("retail.html", {
         "request": request,
         "view": view,
@@ -798,6 +801,7 @@ async def retail_page(request: Request, view: str = "sentiment"):
         "biggest_mover": biggest_mover,
         "youtubers": _FINANCE_YOUTUBERS,
         "has_guru_data": has_guru_data,
+        "high_impact_events": high_impact_events,
     })
 
 
@@ -831,6 +835,30 @@ async def retail_leaderboard_data(request: Request):
     )
     result = sentiment.build_retail_leaderboard_data(all_data, ownership_map, fear_greed)
     return JSONResponse(content=result)
+
+
+@app.get("/api/retail/calendar", response_class=HTMLResponse)
+async def retail_calendar_api(request: Request):
+    """HTML partial for the Calendar tab (lazy-loaded)."""
+    events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
+    channels = await asyncio.to_thread(youtube.get_channels)
+    calendar_data = youtube.build_calendar_data(events, channels)
+    return templates.TemplateResponse("partials/retail_calendar.html", {
+        "request": request,
+        "events": calendar_data["events"],
+        "channels": calendar_data["channels"],
+        "stats": calendar_data["stats"],
+        "high_impact": calendar_data["high_impact"],
+    })
+
+
+@app.get("/api/retail/calendar-data")
+async def retail_calendar_data(request: Request):
+    """JSON data for calendar charts/interactivity."""
+    events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
+    channels = await asyncio.to_thread(youtube.get_channels)
+    calendar_data = youtube.build_calendar_data(events, channels)
+    return JSONResponse(content=calendar_data)
 
 
 @app.get("/api/insider-trades", response_class=HTMLResponse)

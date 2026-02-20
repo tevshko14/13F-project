@@ -1,0 +1,309 @@
+{# ── YouTube Event Calendar (lazy-loaded partial) ── #}
+
+{# ── Stats summary row ── #}
+{% if stats %}
+<div style="display: flex; align-items: center; gap: 0.75em; margin-bottom: 1em; flex-wrap: wrap;">
+    <span style="background: #f4f4f5; color: #3f3f46; font-size: 0.85em; padding: 0.3em 0.8em; border-radius: 6px; font-weight: 500;">
+        {{ stats.total_upcoming }} Upcoming
+    </span>
+    {% if stats.bullish_count %}
+    <span style="background: #dcfce7; color: #166534; font-size: 0.82em; padding: 0.25em 0.7em; border-radius: 6px; font-weight: 500;">
+        {{ stats.bullish_count }} Bullish
+    </span>
+    {% endif %}
+    {% if stats.bearish_count %}
+    <span style="background: #ffe4e6; color: #9f1239; font-size: 0.82em; padding: 0.25em 0.7em; border-radius: 6px; font-weight: 500;">
+        {{ stats.bearish_count }} Bearish
+    </span>
+    {% endif %}
+    {% if stats.frequency_alerts %}
+    <span style="background: #fff7ed; color: #c2410c; font-size: 0.82em; padding: 0.25em 0.7em; border-radius: 6px; font-weight: 500;">
+        &#x26A0; {{ stats.frequency_alerts }} Retail Alert{{ 's' if stats.frequency_alerts > 1 else '' }}
+    </span>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ── Event timeline ── #}
+{% if events and events|length > 0 %}
+<article>
+    <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5em;">
+        <div>
+            <strong>Upcoming Live Streams</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Finance YouTuber event calendar
+            </span>
+        </div>
+        <div style="display: flex; gap: 0.4em;">
+            <button class="calendar-filter-pill active" data-filter="all"
+                    onclick="filterCalendar('all')">All</button>
+            <button class="calendar-filter-pill" data-filter="bullish"
+                    onclick="filterCalendar('bullish')">Bullish</button>
+            <button class="calendar-filter-pill" data-filter="bearish"
+                    onclick="filterCalendar('bearish')">Bearish</button>
+        </div>
+    </header>
+
+    <div id="calendar-events-list">
+        {% for event in events %}
+        <div class="calendar-event-card" data-sentiment="{{ event.sentiment }}"
+             style="display: flex; gap: 1em; padding: 1em 0;
+                    border-bottom: 1px solid #f4f4f5; align-items: flex-start;">
+
+            {# Sentiment indicator bar #}
+            <div style="width: 4px; min-height: 60px; border-radius: 2px; flex-shrink: 0;
+                        background: {% if event.sentiment == 'bullish' %}#166534{% elif event.sentiment == 'bearish' %}#9f1239{% else %}#a1a1aa{% endif %};">
+            </div>
+
+            {# Thumbnail #}
+            {% if event.thumbnail_url %}
+            <a href="{{ event.video_url }}" target="_blank" rel="noopener"
+               style="flex-shrink: 0;">
+                <img src="{{ event.thumbnail_url }}" alt=""
+                     style="width: 120px; height: 68px; object-fit: cover; border-radius: 6px;"
+                     loading="lazy">
+            </a>
+            {% endif %}
+
+            {# Content #}
+            <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; margin-bottom: 0.3em;">
+                    <span style="font-weight: 600; font-size: 0.8em; color: #71717a;">
+                        {{ event.channel_name }}
+                    </span>
+                    {% if event.scheduled_at %}
+                    <span class="text-muted" style="font-size: 0.75em;">
+                        {{ event.scheduled_at[:16]|replace('T', ' ') }} UTC
+                    </span>
+                    {% endif %}
+                    {% if event.frequency_alert %}
+                    <span style="background: #fff7ed; color: #c2410c; font-size: 0.7em;
+                                 padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;"
+                          title="{{ event.frequency_detail }}">
+                        &#x26A0; Retail Alert
+                    </span>
+                    {% endif %}
+                </div>
+
+                <a href="{{ event.video_url }}" target="_blank" rel="noopener"
+                   style="text-decoration: none; font-weight: 500; color: #18181b;
+                          font-size: 0.95em; line-height: 1.3;">
+                    {{ event.title }}
+                </a>
+
+                {# Ticker pills #}
+                {% if event.tickers and event.tickers|length > 0 %}
+                <div style="display: flex; gap: 0.3em; flex-wrap: wrap; margin-top: 0.4em;">
+                    {% for ticker in event.tickers %}
+                    <a href="/stock/{{ ticker }}"
+                       style="font-size: 0.75em; text-decoration: none; font-weight: 600;
+                              background: #f4f4f5; color: #3f3f46; padding: 0.15em 0.5em;
+                              border-radius: 4px; font-family: monospace;">
+                        ${{ ticker }}
+                    </a>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+
+            {# Impact score + sentiment badge #}
+            <div style="flex-shrink: 0; text-align: center; min-width: 50px;">
+                <div style="font-size: 1.4em; font-weight: 700;
+                            color: {% if event.impact_score >= 9 %}#FFD700{% elif event.impact_score >= 7 %}#18181b{% else %}#a1a1aa{% endif %};">
+                    {{ event.impact_score }}
+                </div>
+                <div style="font-size: 0.6em; text-transform: uppercase;
+                            letter-spacing: 0.05em; color: #a1a1aa;">
+                    Impact
+                </div>
+                <div style="margin-top: 0.3em;">
+                    {% if event.sentiment == 'bullish' %}
+                    <span style="background: #dcfce7; color: #166534; font-size: 0.7em;
+                                 padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;">
+                        Bullish
+                    </span>
+                    {% elif event.sentiment == 'bearish' %}
+                    <span style="background: #ffe4e6; color: #9f1239; font-size: 0.7em;
+                                 padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;">
+                        Bearish
+                    </span>
+                    {% else %}
+                    <span style="background: #f4f4f5; color: #71717a; font-size: 0.7em;
+                                 padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;">
+                        Neutral
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.75em;">
+        Data from YouTube Data API v3 - Updated every 6 hours. Sentiment is keyword-based (approximate).
+    </footer>
+</article>
+
+{# ── Channels overview ── #}
+{% if channels and channels|length > 0 %}
+<article style="margin-top: 1em;">
+    <header>
+        <strong>Tracked Channels</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            {{ channels|length }} finance creators
+        </span>
+    </header>
+    <figure>
+    <div class="pp-table-wrap">
+    <table class="pp-table">
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th style="text-align: right;">Subscribers</th>
+                <th style="text-align: right;">Avg Views</th>
+                <th style="text-align: right;">Posts/Week</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ch in channels %}
+            <tr>
+                <td>
+                    <a href="https://youtube.com/{{ ch.handle }}" target="_blank" rel="noopener"
+                       style="font-weight: 600; text-decoration: none;">
+                        {{ ch.channel_name }}
+                    </a>
+                </td>
+                <td style="text-align: right;">
+                    {% if ch.subscriber_count %}
+                        {{ "{:,}".format(ch.subscriber_count) }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td style="text-align: right;">
+                    {% if ch.avg_views_30d %}
+                        {{ "{:,}".format(ch.avg_views_30d) }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td style="text-align: right;">
+                    {% if ch.avg_posts_per_week %}
+                        {{ "%.1f"|format(ch.avg_posts_per_week|float) }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    </figure>
+</article>
+{% endif %}
+
+{% else %}
+{# ── Fallback: no events yet ── #}
+<article>
+    <header>
+        <strong>Finance YouTuber Calendar</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Live event calendar - Updated every 6 hours
+        </span>
+    </header>
+    <p class="text-muted" style="text-align: center; padding: 2em 0;">
+        No upcoming live streams found. The calendar syncs with YouTube every 6 hours.
+    </p>
+
+    {# Show static channel list as fallback #}
+    {% if channels and channels|length > 0 %}
+    <div class="pp-table-wrap">
+    <table class="pp-table">
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th style="text-align: right;">Subscribers</th>
+                <th style="text-align: right;">Posts/Week</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ch in channels %}
+            <tr>
+                <td>
+                    <a href="https://youtube.com/{{ ch.handle }}" target="_blank" rel="noopener"
+                       style="font-weight: 600; text-decoration: none;">
+                        {{ ch.channel_name }}
+                    </a>
+                </td>
+                <td style="text-align: right;">
+                    {% if ch.subscriber_count %}
+                        {{ "{:,}".format(ch.subscriber_count) }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td style="text-align: right;">
+                    {% if ch.avg_posts_per_week %}
+                        {{ "%.1f"|format(ch.avg_posts_per_week|float) }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+</article>
+{% endif %}
+
+{# ── Filter styles + script ── #}
+<style>
+    .calendar-filter-pill {
+        background: none;
+        border: 1px solid #e4e4e7;
+        border-radius: 6px;
+        padding: 0.25em 0.8em;
+        font-size: 0.8em;
+        font-weight: 500;
+        cursor: pointer;
+        color: #71717a;
+        transition: all 0.15s;
+    }
+    .calendar-filter-pill:hover {
+        background: #fafafa;
+        color: #3f3f46;
+    }
+    .calendar-filter-pill.active {
+        background: #18181b;
+        color: #fff;
+        border-color: #18181b;
+    }
+
+    @media (max-width: 768px) {
+        .calendar-event-card {
+            flex-direction: column !important;
+        }
+        .calendar-event-card img {
+            width: 100% !important;
+            height: auto !important;
+        }
+    }
+</style>
+
+<script>
+window.filterCalendar = function(sentiment) {
+    document.querySelectorAll('.calendar-filter-pill').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.filter === sentiment);
+    });
+    document.querySelectorAll('.calendar-event-card').forEach(function(card) {
+        if (sentiment === 'all' || card.dataset.sentiment === sentiment) {
+            card.style.display = '';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+};
+</script>
