@@ -1,0 +1,171 @@
+{# ── Enhanced Retail Leaderboard (lazy-loaded partial) ── #}
+
+{% if fear_greed %}
+<div style="display: flex; align-items: center; gap: 1em; margin-bottom: 1em; flex-wrap: wrap;">
+    {% set score = fear_greed.score %}
+    {% if score <= 25 %}
+        {% set mood_color = "#c62828" %}
+        {% set mood_bg = "#ffebee" %}
+    {% elif score <= 45 %}
+        {% set mood_color = "#e65100" %}
+        {% set mood_bg = "#fff3e0" %}
+    {% elif score <= 55 %}
+        {% set mood_color = "#616161" %}
+        {% set mood_bg = "#f5f5f5" %}
+    {% elif score <= 75 %}
+        {% set mood_color = "#2e7d32" %}
+        {% set mood_bg = "#e8f5e9" %}
+    {% else %}
+        {% set mood_color = "#1b5e20" %}
+        {% set mood_bg = "#c8e6c9" %}
+    {% endif %}
+    <span class="badge" style="background: {{ mood_bg }}; color: {{ mood_color }}; font-size: 0.9em; padding: 0.3em 0.8em;">
+        Market Mood: {{ fear_greed.rating }} ({{ score|round(0)|int }}/100)
+    </span>
+    {% if metadata %}
+    <span class="text-muted text-small">{{ metadata.count }} tickers tracked - Updated {{ metadata.timestamp }}</span>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if rows and rows|length > 0 %}
+<article>
+    <header style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <strong>Retail Velocity Leaderboard</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Reddit mentions, velocity, and smart money overlap
+            </span>
+        </div>
+        <span class="text-muted text-small">{{ rows|length }} tickers</span>
+    </header>
+    <figure>
+    <table class="pp-table" id="retail-leaderboard-table">
+        <thead>
+            <tr>
+                <th class="text-right" data-sort="number" style="width: 50px;">Rank</th>
+                <th data-sort="text">Ticker</th>
+                <th style="width: 40px; text-align: center;" data-sort="number">Heat</th>
+                <th class="text-right" data-sort="number">Mentions</th>
+                <th class="text-right" data-sort="number">Velocity</th>
+                <th class="text-right" data-sort="number">Engagement</th>
+                <th data-sort="number" style="text-align: center;">Smart Money</th>
+                <th class="text-right" data-sort="number">Rank Change</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr{% if loop.index > 10 %} class="retail-overflow" style="display: none;"{% endif %}
+               data-guru-count="{{ row.guru_count }}"
+               {% if row.guru_count > 0 %}style="{% if loop.index > 10 %}display: none; {% endif %}border-left: 3px solid #FFD700;"{% endif %}>
+                <td class="text-right text-muted">{{ row.rank }}</td>
+                <td>
+                    <a href="/stock/{{ row.ticker }}" class="ticker" style="text-decoration: none; font-weight: 600;">
+                        {{ row.ticker }}
+                    </a>
+                    {% if row.name %}
+                    <span class="pp-secondary" style="display: block; font-size: 0.75em; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        {{ row.name }}
+                    </span>
+                    {% endif %}
+                </td>
+                <td style="text-align: center;" data-value="{{ row.heat }}">
+                    {% if row.heat >= 4 %}
+                        <span style="font-size: 1.3em; filter: saturate(2);" title="Velocity: {{ row.velocity_pct }}%">&#x1F525;</span>
+                    {% elif row.heat >= 2 %}
+                        <span style="font-size: 1em;" title="Velocity: {{ row.velocity_pct }}%">&#x1F525;</span>
+                    {% elif row.heat >= 1 %}
+                        <span style="font-size: 0.8em; filter: saturate(0.5);" title="Velocity: {{ row.velocity_pct }}%">&#x1F525;</span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td class="text-right" data-value="{{ row.mentions }}">
+                    <strong>{{ "{:,}".format(row.mentions) }}</strong>
+                </td>
+                <td class="text-right" data-value="{{ row.velocity_pct }}">
+                    {% if row.velocity_pct > 0 %}
+                        <span style="color: #2e7d32; font-weight: 600;">+{{ "%.1f"|format(row.velocity_pct) }}%</span>
+                    {% elif row.velocity_pct < 0 %}
+                        <span style="color: #c62828; font-weight: 600;">{{ "%.1f"|format(row.velocity_pct) }}%</span>
+                    {% else %}
+                        <span class="text-muted">0%</span>
+                    {% endif %}
+                </td>
+                <td class="text-right" data-value="{{ row.engagement_ratio }}">
+                    <span class="text-muted">{{ row.engagement_ratio }}</span>
+                    <span style="font-size: 0.7em; color: #a1a1aa;">upv/m</span>
+                </td>
+                <td style="text-align: center;" data-value="{{ row.guru_count }}">
+                    {% if row.guru_count >= 3 %}
+                        <span class="badge" style="background: #FFF8E1; color: #F57F17; font-size: 0.75em; padding: 0.15em 0.5em;"
+                              title="{{ row.guru_names|join(', ') }}">
+                            &#9733; {{ row.guru_count }} Gurus
+                        </span>
+                    {% elif row.guru_count >= 1 %}
+                        <span class="badge" style="background: #f5f5f5; color: #616161; font-size: 0.75em; padding: 0.15em 0.5em;"
+                              title="{{ row.guru_names|join(', ') }}">
+                            {{ row.guru_count }} Guru{{ 's' if row.guru_count > 1 else '' }}
+                        </span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td class="text-right" data-value="{{ row.rank_change }}">
+                    {% if row.rank_change > 0 %}
+                        <span class="badge badge-add" style="font-size: 0.8em; padding: 0.15em 0.5em;">
+                            &#x25B2; +{{ row.rank_change }}
+                        </span>
+                    {% elif row.rank_change < 0 %}
+                        <span class="badge badge-reduce" style="font-size: 0.8em; padding: 0.15em 0.5em;">
+                            &#x25BC; {{ row.rank_change }}
+                        </span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+
+    {% if rows|length > 10 %}
+    <div style="text-align: center; margin-top: 0.5em;">
+        <button id="retail-expand-btn" class="secondary outline"
+                style="font-size: 0.85em; padding: 0.3em 1.2em;"
+                onclick="toggleRetailAccordion()">
+            Expand All ({{ rows|length }} Tickers)
+        </button>
+    </div>
+    {% endif %}
+
+    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.5em;">
+        Data from ApeWisdom - Mentions aggregated from Reddit communities (r/wallstreetbets, r/stocks, r/investing, etc.)
+    </footer>
+</article>
+
+<script>
+(function() {
+    var expanded = false;
+    window.toggleRetailAccordion = function() {
+        expanded = !expanded;
+        var rows = document.querySelectorAll('.retail-overflow');
+        var btn = document.getElementById('retail-expand-btn');
+        rows.forEach(function(row) {
+            row.style.display = expanded ? '' : 'none';
+        });
+        btn.textContent = expanded
+            ? 'Show Top 10 Only'
+            : 'Expand All ({{ rows|length }} Tickers)';
+    };
+})();
+</script>
+
+{% else %}
+<article>
+    <p class="text-muted" style="text-align: center; padding: 2em 0;">
+        No Reddit trending data available right now. Please try again later.
+    </p>
+</article>
+{% endif %}
