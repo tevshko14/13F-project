@@ -1,0 +1,371 @@
+{% extends "base.html" %}
+{% block title %}Retail Sentiment - PaperPanda{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>Retail Traders</h1>
+    <p>Reddit sentiment, trending tickers, and finance YouTuber schedules.</p>
+</hgroup>
+
+{# ── Sub-tab CSS (same pattern as grand_portfolio.html) ── #}
+<style>
+    .rt-subtab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: rgba(0,0,0,0.5);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .rt-subtab:hover { color: rgba(0,0,0,0.8); }
+    .rt-subtab.active {
+        color: #1976d2;
+        border-bottom-color: #1976d2;
+    }
+    .rt-panel { display: none; opacity: 0; transition: opacity 0.25s ease; }
+    .rt-panel.active { display: block; opacity: 1; }
+
+    /* Summary cards */
+    .rt-cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1em;
+        margin-bottom: 1.5em;
+    }
+    .rt-card {
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        border-radius: 12px;
+        padding: 1.25em;
+        background: #fff;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+    .rt-card-label {
+        font-size: 0.75em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #71717a;
+        margin-bottom: 0.3em;
+    }
+    .rt-card-value {
+        font-size: 1.6em;
+        font-weight: 700;
+        color: #222;
+        line-height: 1.2;
+    }
+    .rt-card-sub {
+        font-size: 0.8em;
+        color: #999;
+        margin-top: 0.2em;
+    }
+
+    /* YouTuber table */
+    .yt-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: max(14px, 0.875rem);
+    }
+    .yt-table thead th {
+        padding: 12px 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #71717a;
+        background: #fafafa;
+        border-bottom: 1px solid #e4e4e7;
+        text-align: left;
+    }
+    .yt-table tbody td {
+        padding: 14px 20px;
+        border-bottom: 1px solid #f4f4f5;
+        vertical-align: middle;
+    }
+    .yt-table tbody tr:hover { background: #fafafa; }
+</style>
+
+{# ── Sub-tab navigation ── #}
+<div style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+            <li>
+                <button class="rt-subtab{% if view == 'sentiment' %} active{% endif %}"
+                        data-view="sentiment" onclick="switchRetailView('sentiment')">
+                    Sentiment
+                </button>
+            </li>
+            <li>
+                <button class="rt-subtab{% if view == 'leaderboard' %} active{% endif %}"
+                        data-view="leaderboard" onclick="switchRetailView('leaderboard')">
+                    Leaderboard
+                </button>
+            </li>
+            <li>
+                <button class="rt-subtab{% if view == 'calendar' %} active{% endif %}"
+                        data-view="calendar" onclick="switchRetailView('calendar')">
+                    Calendar
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 1: Sentiment                                             #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-sentiment" class="rt-panel{% if view == 'sentiment' %} active{% endif %}">
+
+{# ── CNN Fear & Greed ── #}
+{% if fear_greed %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>Market Mood</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            CNN Fear &amp; Greed Index
+        </span>
+    </header>
+
+    {% set score = fear_greed.score %}
+    {% if score <= 25 %}
+        {% set mood_color = "#c62828" %}
+        {% set mood_bg = "#ffebee" %}
+    {% elif score <= 45 %}
+        {% set mood_color = "#e65100" %}
+        {% set mood_bg = "#fff3e0" %}
+    {% elif score <= 55 %}
+        {% set mood_color = "#616161" %}
+        {% set mood_bg = "#f5f5f5" %}
+    {% elif score <= 75 %}
+        {% set mood_color = "#2e7d32" %}
+        {% set mood_bg = "#e8f5e9" %}
+    {% else %}
+        {% set mood_color = "#1b5e20" %}
+        {% set mood_bg = "#c8e6c9" %}
+    {% endif %}
+
+    <div style="display: flex; gap: 2em; align-items: center; flex-wrap: wrap;">
+        <div style="text-align: center;">
+            <span style="display: inline-block; font-size: 2.2em; font-weight: 700; color: {{ mood_color }};">
+                {{ score|round(0)|int }}
+            </span>
+            <span style="font-size: 0.9em; color: #888;">/100</span>
+            <div>
+                <span class="badge" style="background: {{ mood_bg }}; color: {{ mood_color }}; font-size: 0.85em; padding: 0.2em 0.7em;">
+                    {{ fear_greed.rating }}
+                </span>
+            </div>
+        </div>
+
+        <div style="flex: 1; min-width: 200px; max-width: 600px;">
+            <div style="position: relative; height: 12px; border-radius: 6px; overflow: hidden;
+                        background: linear-gradient(to right, #c62828, #e65100, #9e9e9e, #2e7d32, #1b5e20);">
+                <div style="position: absolute; left: {{ score }}%; top: -3px;
+                            width: 4px; height: 18px; background: #000; border-radius: 2px;
+                            transform: translateX(-50%);"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 0.7em; color: #999; margin-top: 0.3em;">
+                <span>Extreme Fear</span>
+                <span>Neutral</span>
+                <span>Extreme Greed</span>
+            </div>
+        </div>
+
+        <div style="font-size: 0.85em; color: #666;">
+            {% if fear_greed.previous_close is not none %}
+            <div>Previous close: <strong>{{ fear_greed.previous_close|round(0)|int }}</strong></div>
+            {% endif %}
+            {% if fear_greed.one_week_ago is not none %}
+            <div>1 week ago: <strong>{{ fear_greed.one_week_ago|round(0)|int }}</strong></div>
+            {% endif %}
+            {% if fear_greed.one_month_ago is not none %}
+            <div>1 month ago: <strong>{{ fear_greed.one_month_ago|round(0)|int }}</strong></div>
+            {% endif %}
+            {% if fear_greed.one_year_ago is not none %}
+            <div>1 year ago: <strong>{{ fear_greed.one_year_ago|round(0)|int }}</strong></div>
+            {% endif %}
+        </div>
+    </div>
+</article>
+{% else %}
+<article style="margin-bottom: 1.5em;">
+    <p class="text-muted" style="text-align: center; padding: 1em 0;">
+        Market mood data is temporarily unavailable.
+    </p>
+</article>
+{% endif %}
+
+{# ── Summary cards ── #}
+<div class="rt-cards">
+    {% if top_stocks and top_stocks|length > 0 %}
+    <div class="rt-card">
+        <div class="rt-card-label">Most Mentioned</div>
+        <div class="rt-card-value">
+            <a href="/stock/{{ top_stocks[0].ticker }}" class="ticker" style="text-decoration: none;">
+                {{ top_stocks[0].ticker }}
+            </a>
+        </div>
+        <div class="rt-card-sub">{{ "{:,}".format(top_stocks[0].mentions) }} mentions &middot; {{ "{:,}".format(top_stocks[0].upvotes) }} upvotes</div>
+    </div>
+    {% endif %}
+
+    {% if biggest_mover %}
+    <div class="rt-card">
+        <div class="rt-card-label">Biggest Rank Mover</div>
+        <div class="rt-card-value" style="color: #2e7d32;">
+            <a href="/stock/{{ biggest_mover.ticker }}" class="ticker" style="text-decoration: none; color: #2e7d32;">
+                {{ biggest_mover.ticker }}
+            </a>
+            <span style="font-size: 0.5em; vertical-align: middle;">
+                &#x25B2; +{{ (biggest_mover.rank_24h_ago or biggest_mover.rank) - biggest_mover.rank }}
+            </span>
+        </div>
+        <div class="rt-card-sub">Rank #{{ biggest_mover.rank }} (was #{{ biggest_mover.rank_24h_ago }})</div>
+    </div>
+    {% endif %}
+
+    {% if top_stocks and top_stocks|length >= 2 %}
+    <div class="rt-card">
+        <div class="rt-card-label">Top 5 Trending</div>
+        <div style="display: flex; gap: 0.5em; flex-wrap: wrap; margin-top: 0.3em;">
+            {% for s in top_stocks %}
+            <a href="/stock/{{ s.ticker }}" class="ticker tag" style="text-decoration: none; font-size: 0.9em;">
+                {{ s.ticker }}
+            </a>
+            {% endfor %}
+        </div>
+        <div class="rt-card-sub">by Reddit mention count (24h)</div>
+    </div>
+    {% endif %}
+</div>
+
+</div>{# end panel-sentiment #}
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 2: Leaderboard (lazy-loaded)                             #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-leaderboard" class="rt-panel{% if view == 'leaderboard' %} active{% endif %}">
+    <div id="retail-leaderboard-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading leaderboard...
+        </p>
+    </div>
+</div>
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 3: Calendar (static, server-rendered)                    #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-calendar" class="rt-panel{% if view == 'calendar' %} active{% endif %}">
+<article>
+    <header>
+        <strong>Finance YouTubers</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Popular channels covering stocks &amp; markets
+        </span>
+    </header>
+    <figure>
+    <table class="yt-table">
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th>Schedule</th>
+                <th>Topics</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for yt in youtubers %}
+            <tr>
+                <td>
+                    <a href="{{ yt.channel }}" target="_blank" rel="noopener"
+                       style="font-weight: 600; text-decoration: none;">
+                        {{ yt.name }}
+                    </a>
+                </td>
+                <td class="text-muted">{{ yt.schedule }}</td>
+                <td>
+                    {% for topic in yt.topics.split(', ') %}
+                    <span class="tag" style="font-size: 0.8em;">{{ topic }}</span>
+                    {% endfor %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.5em;">
+        Schedules are approximate. Check individual channels for exact times.
+    </footer>
+</article>
+</div>{# end panel-calendar #}
+
+
+{# ── Tab Switching + URL Sync Script ── #}
+<script>
+(function() {
+    var leaderboardLoaded = false;
+
+    window.switchRetailView = function(view) {
+        // Toggle subtab buttons
+        document.querySelectorAll('.rt-subtab').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.view === view);
+        });
+
+        // Toggle panels
+        document.querySelectorAll('.rt-panel').forEach(function(panel) {
+            panel.classList.remove('active');
+        });
+        var target = document.getElementById('panel-' + view);
+        if (target) {
+            target.classList.add('active');
+        }
+
+        // Lazy-load leaderboard on first visit
+        if (view === 'leaderboard' && !leaderboardLoaded) {
+            leaderboardLoaded = true;
+            loadLeaderboard();
+        }
+
+        // Re-init sortable tables
+        if (window.initSortableTables) window.initSortableTables();
+
+        // Update URL without page reload
+        var url = new URL(window.location);
+        url.searchParams.set('view', view);
+        history.replaceState(null, '', url.toString());
+    };
+
+    function loadLeaderboard() {
+        fetch('/api/retail/leaderboard')
+            .then(function(resp) { return resp.text(); })
+            .then(function(html) {
+                document.getElementById('retail-leaderboard-content').innerHTML = html;
+                if (window.initSortableTables) window.initSortableTables();
+            })
+            .catch(function() {
+                document.getElementById('retail-leaderboard-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Failed to load leaderboard. Please try again later.</p>';
+            });
+    }
+
+    // Auto-load leaderboard if it's the active tab on page load
+    {% if view == 'leaderboard' %}
+    leaderboardLoaded = true;
+    loadLeaderboard();
+    {% endif %}
+
+    // Handle browser back/forward
+    window.addEventListener('popstate', function() {
+        var params = new URLSearchParams(window.location.search);
+        var v = params.get('view') || 'sentiment';
+        switchRetailView(v);
+    });
+})();
+</script>
+{% endblock %}

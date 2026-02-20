@@ -749,6 +749,59 @@ async def insider_trading_page(request: Request):
     })
 
 
+# --- Retail Traders (hidden — no nav link) ---
+
+_FINANCE_YOUTUBERS = [
+    {"name": "Meet Kevin", "channel": "https://youtube.com/@MeetKevin", "schedule": "Daily ~9am ET", "topics": "Markets, Real Estate, Fed"},
+    {"name": "Graham Stephan", "channel": "https://youtube.com/@GrahamStephan", "schedule": "3-4x/week", "topics": "Personal Finance, Real Estate"},
+    {"name": "Andrei Jikh", "channel": "https://youtube.com/@AndreiJikh", "schedule": "2-3x/week", "topics": "Investing, Crypto"},
+    {"name": "Tom Nash", "channel": "https://youtube.com/@TomNashYT", "schedule": "3-4x/week", "topics": "Tech Stocks, Growth Investing"},
+    {"name": "Financial Education", "channel": "https://youtube.com/@FinancialEducation", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
+    {"name": "Joseph Carlson", "channel": "https://youtube.com/@JosephCarlsonShow", "schedule": "2x/week", "topics": "Dividend Investing, Portfolio Updates"},
+]
+
+
+@app.get("/retail", response_class=HTMLResponse)
+async def retail_page(request: Request, view: str = "sentiment"):
+    if view not in ("sentiment", "leaderboard", "calendar"):
+        view = "sentiment"
+
+    fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
+    apewisdom = await asyncio.to_thread(sentiment._get_apewisdom_all)
+
+    # Compute summary stats from ApeWisdom data
+    top_stocks = apewisdom[:5] if apewisdom else []
+    biggest_mover = None
+    if apewisdom:
+        best = max(
+            apewisdom,
+            key=lambda s: (s.get("rank_24h_ago") or s.get("rank", 0)) - s.get("rank", 0),
+            default=None,
+        )
+        if best and (best.get("rank_24h_ago") or 0) > best.get("rank", 0):
+            biggest_mover = best
+
+    return templates.TemplateResponse("retail.html", {
+        "request": request,
+        "view": view,
+        "fear_greed": fear_greed,
+        "top_stocks": top_stocks,
+        "biggest_mover": biggest_mover,
+        "youtubers": _FINANCE_YOUTUBERS,
+    })
+
+
+@app.get("/api/retail/leaderboard", response_class=HTMLResponse)
+async def retail_leaderboard_api(request: Request):
+    all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
+    fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
+    return templates.TemplateResponse("partials/retail_leaderboard.html", {
+        "request": request,
+        "stocks": all_data,
+        "fear_greed": fear_greed,
+    })
+
+
 @app.get("/api/insider-trades", response_class=HTMLResponse)
 async def insider_trades_api(request: Request, filter: str = "all"):
     trade_type = {"buys": "p", "sells": "s", "all": ""}.get(filter, "")
