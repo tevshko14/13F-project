@@ -676,6 +676,16 @@ def build_enriched_activity_feed(
             # Portfolio impact = trade value as % of fund AUM
             portfolio_impact = round(change["current_value"] / fund_aum * 100, 2) if fund_aum > 0 else 0.0
 
+            # Estimate dollar value of this specific trade
+            current_shares = change.get("current_shares", 0)
+            if current_price and abs(change["share_change"]) > 0:
+                trade_value = abs(change["share_change"]) * current_price
+            elif current_shares > 0 and change["current_value"] > 0:
+                implied_price = change["current_value"] / current_shares
+                trade_value = abs(change["share_change"]) * implied_price
+            else:
+                trade_value = float(abs(change["current_value"]))
+
             all_items.append(EnrichedActivityItem(
                 fund_display_name=si.display_name,
                 fund_cik=cik,
@@ -696,6 +706,7 @@ def build_enriched_activity_feed(
                 fund_total_holdings=total_holdings,
                 portfolio_impact=portfolio_impact,
                 pct_share_change=pct_share_change,
+                trade_value=round(trade_value, 2),
             ))
 
     # ── 2. Filter by timeframe ───────────────────────────────────────
@@ -754,12 +765,16 @@ def build_enriched_activity_feed(
             sell_part = f"{sell_count} Selling" if sell_count else ""
             action_summary = " / ".join(filter(None, [buy_part, sell_part]))
 
-            if buy_count > sell_count:
-                sentiment = "BULLISH"
-            elif sell_count > buy_count:
-                sentiment = "BEARISH"
+            # Value-weighted sentiment (dollar flow, not transaction count)
+            buy_value = sum(i.trade_value for i in items if i.action in ("NEW BUY", "ADD"))
+            sell_value = sum(i.trade_value for i in items if i.action in ("SOLD", "REDUCE"))
+            net_flow = buy_value - sell_value
+            gross_flow = buy_value + sell_value
+
+            if gross_flow > 0 and abs(net_flow) / gross_flow > 0.05:
+                sentiment = "BULLISH" if net_flow > 0 else "BEARISH"
             else:
-                sentiment = "MIXED"
+                sentiment = "NEUTRAL"
 
             convictions = [i.conviction for i in items]
             avg_conv = round(sum(convictions) / len(convictions), 2) if convictions else 0
@@ -794,6 +809,17 @@ def build_enriched_activity_feed(
     buying_pct = round(buy_count / total * 100) if total else 0
     selling_pct = round(sell_count / total * 100) if total else 0
 
+    # Value-weighted sentiment (net dollar flow)
+    total_buy_value = sum(i.trade_value for i in all_items if i.action in ("NEW BUY", "ADD"))
+    total_sell_value = sum(i.trade_value for i in all_items if i.action in ("SOLD", "REDUCE"))
+    net_dollar_flow = total_buy_value - total_sell_value
+    gross_dollar_flow = total_buy_value + total_sell_value
+
+    if gross_dollar_flow > 0 and abs(net_dollar_flow) / gross_dollar_flow > 0.05:
+        value_sentiment = "BULLISH" if net_dollar_flow > 0 else "BEARISH"
+    else:
+        value_sentiment = "NEUTRAL"
+
     # Sector breakdown (cross-ref with S&P 500 constituents)
     sector_counts: dict[str, int] = defaultdict(int)
     try:
@@ -815,6 +841,10 @@ def build_enriched_activity_feed(
         "total_activities": total,
         "buying_pct": buying_pct,
         "selling_pct": selling_pct,
+        "total_buy_value": round(total_buy_value, 2),
+        "total_sell_value": round(total_sell_value, 2),
+        "net_dollar_flow": round(net_dollar_flow, 2),
+        "value_sentiment": value_sentiment,
         "most_active_sector": most_active_sector,
         "consensus_count": consensus_count,
     }

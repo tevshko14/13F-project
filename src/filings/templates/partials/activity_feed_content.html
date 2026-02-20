@@ -1,13 +1,44 @@
 {% from "partials/ticker_link.html" import ticker_link %}
 {% from "partials/signal_badge.html" import signal_badge %}
 
-{# -- Sticky Sentiment Header -- #}
+{# -- Sticky Sentiment Header (Value-Weighted) -- #}
 <div class="activity-stats-bar">
     <div class="stat">
-        <span class="stat-label">Sentiment</span>
+        <span class="stat-label">$Value Sentiment</span>
         <span class="stat-value">
-            <span class="bullish">{{ stats.buying_pct }}% Buying</span> /
-            <span class="bearish">{{ stats.selling_pct }}% Selling</span>
+            <span class="badge badge-{{ stats.value_sentiment|lower }}">{{ stats.value_sentiment }}</span>
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Net Dollar Flow</span>
+        <span class="stat-value {% if stats.net_dollar_flow > 0 %}bullish{% elif stats.net_dollar_flow < 0 %}bearish{% endif %}">
+            {% if stats.net_dollar_flow >= 1e9 or stats.net_dollar_flow <= -1e9 %}
+                {% if stats.net_dollar_flow >= 0 %}+{% endif %}${{ "%.1f"|format(stats.net_dollar_flow / 1e9) }}B
+            {% elif stats.net_dollar_flow >= 1e6 or stats.net_dollar_flow <= -1e6 %}
+                {% if stats.net_dollar_flow >= 0 %}+{% endif %}${{ "%.0f"|format(stats.net_dollar_flow / 1e6) }}M
+            {% else %}
+                {% if stats.net_dollar_flow >= 0 %}+{% endif %}${{ "{:,.0f}".format(stats.net_dollar_flow) }}
+            {% endif %}
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Buying</span>
+        <span class="stat-value bullish">
+            {% if stats.total_buy_value >= 1e9 %}
+                ${{ "%.1f"|format(stats.total_buy_value / 1e9) }}B
+            {% else %}
+                ${{ "%.0f"|format(stats.total_buy_value / 1e6) }}M
+            {% endif %}
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Selling</span>
+        <span class="stat-value bearish">
+            {% if stats.total_sell_value >= 1e9 %}
+                ${{ "%.1f"|format(stats.total_sell_value / 1e9) }}B
+            {% else %}
+                ${{ "%.0f"|format(stats.total_sell_value / 1e6) }}M
+            {% endif %}
         </span>
     </div>
     <div class="stat">
@@ -118,11 +149,12 @@
 {% endfor %}
 {% endif %}
 
-{# -- Individual Moves (single-investor, non-clustered) -- #}
+{# -- Individual Moves (12-row accordion preview) -- #}
 {% if solo_items %}
 <h4 class="section-label">Individual Moves ({{ total_solo }})</h4>
+<div class="activity-fade{% if solo_items|length <= 12 %} expanded{% endif %}" id="activity-table-wrap">
 <figure>
-<table class="gp-table activity-table">
+<table class="gp-table activity-table" id="activity-solo-table">
     <thead>
         <tr>
             <th data-sort="text">Investor</th>
@@ -141,7 +173,8 @@
     </thead>
     <tbody>
         {% for item in solo_items %}
-        <tr data-fund-aum="{{ item.fund_aum }}">
+        <tr{% if loop.index > 12 %} class="activity-overflow"{% endif %}
+           data-fund-aum="{{ item.fund_aum }}">
             <td>
                 <a href="/holdings/{{ item.fund_cik }}">
                     <strong>{{ item.fund_display_name }}</strong>
@@ -176,7 +209,7 @@
         </tr>
         {% endfor %}
         {% if has_more %}
-        <tr id="load-more-row">
+        <tr id="load-more-row" class="activity-overflow">
             <td colspan="{% if has_prices %}10{% else %}9{% endif %}" style="text-align:center;padding:1em;">
                 <button class="gp-expand-btn"
                         hx-get="/api/activity-feed?timeframe={{ timeframe }}&ptype={{ ptype }}&page={{ next_page }}"
@@ -191,6 +224,13 @@
     </tbody>
 </table>
 </figure>
+</div>
+{% if solo_items|length > 12 or has_more %}
+<button class="gp-expand-btn" id="activity-expand-btn" onclick="toggleActivityAccordion(this)">
+    <span>Expand All Activity ({{ total_solo }} total)</span>
+    <span class="gp-expand-arrow">&#9660;</span>
+</button>
+{% endif %}
 {% endif %}
 
 {% if not clusters and not solo_items %}
@@ -207,6 +247,33 @@ function toggleCluster(header) {
     header.classList.toggle('open');
     detail.style.display = detail.style.display === 'none' ? '' : 'none';
 }
+
+/* 12-row accordion expand/collapse */
+window.toggleActivityAccordion = function(btn) {
+    var rows = document.querySelectorAll('.activity-overflow');
+    var wrap = document.getElementById('activity-table-wrap');
+    var arrow = btn.querySelector('.gp-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+    var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+    rows.forEach(function(row) {
+        row.style.display = expanded ? 'none' : '';
+    });
+    wrap.classList.toggle('expanded', !expanded);
+    arrow.classList.toggle('expanded', !expanded);
+
+    /* Toggle sticky thead */
+    var thead = document.querySelector('#activity-solo-table thead');
+    if (thead) {
+        thead.classList.toggle('sticky-head', !expanded);
+    }
+
+    label.textContent = expanded
+        ? 'Expand All Activity ({{ total_solo }} total)'
+        : 'Collapse';
+
+    if (window.initSortableTables) window.initSortableTables();
+};
 
 (function() {
     /* AUM slider filtering (client-side, instant) */
