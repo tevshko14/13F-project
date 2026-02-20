@@ -197,15 +197,20 @@ def _parse_table(html: str, *, has_company_col: bool) -> list[InsiderTrade]:
         if not has_company_col and len(texts) < 16:
             continue
 
-        # Extract SEC filing link from the first cell
+        # Extract SEC filing link (check first 2 cells -- cell 0 may be
+        # empty; the link is typically in cell 1, the filing date cell)
         sec_url = ""
-        first_a = cells[0].find("a")
-        if first_a and first_a.get("href"):
-            href = first_a["href"]
-            if href.startswith("/"):
-                sec_url = f"https://www.sec.gov{href}"
-            elif href.startswith("http"):
-                sec_url = href
+        for cell_idx in range(min(2, len(cells))):
+            for a_tag in cells[cell_idx].find_all("a"):
+                href = a_tag.get("href", "")
+                if "sec.gov" in href:
+                    sec_url = href
+                    break
+                if href.startswith("/") and "edgar" in href.lower():
+                    sec_url = f"https://www.sec.gov{href}"
+                    break
+            if sec_url:
+                break
 
         if has_company_col:
             # Global: X Filing Trade Ticker Company Insider Title Type Price Qty Owned dOwn Value 1d 1w 1m 6m
