@@ -602,8 +602,8 @@
     <header>
         <strong>Superinvestor Holders</strong>
     </header>
-    <figure>
-    <table>
+    <div class="pp-table-wrap">
+    <table class="pp-table">
         <thead>
             <tr>
                 <th>#</th>
@@ -653,7 +653,7 @@
             {% endfor %}
         </tbody>
     </table>
-    </figure>
+    </div>{# end pp-table-wrap #}
     {% if stock.holders | length > 10 %}
     <button class="holders-expand-btn" onclick="toggleHolders(this)">
         <span>Show all {{ stock.holders | length }} holders</span>
@@ -692,8 +692,8 @@
     {# ── Quarter Tab Panels ── #}
     {% for quarter in history %}
     <div class="quarter-panel{% if loop.first %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
-        <figure>
-        <table>
+        <div class="pp-table-wrap">
+        <table class="pp-table">
             <thead>
                 <tr>
                     <th data-sort="text">Investor</th>
@@ -749,7 +749,7 @@
                 {% endfor %}
             </tbody>
         </table>
-        </figure>
+        </div>{# end pp-table-wrap #}
     </div>
     {% endfor %}
 </article>
