@@ -565,26 +565,15 @@ async def portfolio_chart_data(request: Request, cik: str):
 
 @app.get("/activity", response_class=HTMLResponse)
 async def activity_feed(request: Request):
-    cache_data = getattr(app.state, "fund_cache", {})
-    if not cache_data:
-        return templates.TemplateResponse("activity.html", {
-            "request": request,
-            "activities": [],
-            "empty": True,
-        })
-
-    activities = client.build_activity_feed(cache_data, SUPERINVESTORS_BY_CIK)
-    return templates.TemplateResponse("activity.html", {
-        "request": request,
-        "activities": activities[:100],
-    })
+    """Redirect to grand portfolio with activity tab active."""
+    return RedirectResponse(url="/grand-portfolio?view=activity", status_code=302)
 
 
 # --- Grand Portfolio ---
 
 @app.get("/grand-portfolio", response_class=HTMLResponse)
 async def grand_portfolio(request: Request, view: str = "holdings"):
-    if view not in ("holdings", "investors"):
+    if view not in ("holdings", "investors", "activity"):
         view = "holdings"
 
     cache_data = getattr(app.state, "fund_cache", {})
@@ -618,6 +607,7 @@ async def grand_portfolio(request: Request, view: str = "holdings"):
             "empty": True,
             "consensus_json": "[]",
             "momentum_json": "[]",
+            "activities": [],
             "view": view,
             "superinvestors": SUPERINVESTORS,
             "summaries": si_summaries,
@@ -676,11 +666,15 @@ async def grand_portfolio(request: Request, view: str = "holdings"):
             "link": f"/stock/{ma['ticker']}" if ma.get("ticker") else None,
         })
 
+    # ── Build Activity Feed data (for the Activity tab) ──
+    activities = client.build_activity_feed(cache_data, SUPERINVESTORS_BY_CIK)
+
     return templates.TemplateResponse("grand_portfolio.html", {
         "request": request,
         "entries": entries[:100],
         "consensus_json": json_module.dumps(consensus_data),
         "momentum_json": json_module.dumps(momentum_data),
+        "activities": activities[:100],
         "view": view,
         "superinvestors": SUPERINVESTORS,
         "summaries": si_summaries,
