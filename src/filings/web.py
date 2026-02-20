@@ -1166,16 +1166,22 @@ async def most_added(request: Request):
             market_data.get_52_week_range_bulk, tickers_to_lookup
         )
 
+    # Parallelize analyst lookups (was sequential: ~25 tickers × 1-3s each)
+    async def _lookup_consensus(t: str) -> tuple[str, dict | None]:
+        try:
+            ratings = await asyncio.to_thread(analysts.get_analyst_ratings, t)
+            return t, analysts.get_consensus_summary(ratings)
+        except Exception:
+            return t, None
+
+    tasks = [_lookup_consensus(e["ticker"]) for e in entries if e.get("ticker")]
+    results = await asyncio.gather(*tasks)
+    consensus_map = dict(results)
+
     for entry in entries:
         ticker = entry.get("ticker")
         if ticker:
-            try:
-                ratings = await asyncio.to_thread(analysts.get_analyst_ratings, ticker)
-                consensus = analysts.get_consensus_summary(ratings)
-                entry["consensus"] = consensus
-            except Exception:
-                entry["consensus"] = None
-
+            entry["consensus"] = consensus_map.get(ticker)
             r = range_data.get(ticker)
             entry["range_pct"] = r["pct_of_range"] if r else None
             entry["current_price"] = r["current"] if r else None
@@ -1282,6 +1288,7 @@ async def sitemap_xml():
 # ═══════════════════════════════════════════════════════════════════════
 
 if _has_limiter:
+    # Existing per-ticker endpoints
     fund_row = limiter.limit("10/minute")(fund_row)
     analyst_ratings = limiter.limit("30/minute")(analyst_ratings)
     sentiment_data = limiter.limit("30/minute")(sentiment_data)
@@ -1289,6 +1296,20 @@ if _has_limiter:
     company_filings_tab = limiter.limit("30/minute")(company_filings_tab)
     insider_trades_api = limiter.limit("20/minute")(insider_trades_api)
     stock_insider_trades_api = limiter.limit("30/minute")(stock_insider_trades_api)
+    # Expensive aggregate / external-API endpoints
+    retail_leaderboard_api = limiter.limit("15/minute")(retail_leaderboard_api)
+    retail_leaderboard_data = limiter.limit("15/minute")(retail_leaderboard_data)
+    retail_calendar_api = limiter.limit("15/minute")(retail_calendar_api)
+    retail_calendar_data = limiter.limit("15/minute")(retail_calendar_data)
+    heatmap = limiter.limit("10/minute")(heatmap)
+    most_added = limiter.limit("10/minute")(most_added)
+    api_activity_feed = limiter.limit("15/minute")(api_activity_feed)
+    portfolio_chart_data = limiter.limit("15/minute")(portfolio_chart_data)
+    compare_api = limiter.limit("15/minute")(compare_api)
+    # Auth pages (bot/scraper prevention)
+    login_page = limiter.limit("10/minute")(login_page)
+    signup_page = limiter.limit("10/minute")(signup_page)
+    reset_password_page = limiter.limit("5/minute")(reset_password_page)
 
 
 # ═══════════════════════════════════════════════════════════════════════

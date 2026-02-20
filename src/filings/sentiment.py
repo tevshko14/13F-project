@@ -251,14 +251,23 @@ def _get_apewisdom_for_ticker(ticker: str) -> dict | None:
 # 4. Alpha Vantage News Sentiment
 # ═══════════════════════════════════════════════════════════════════
 
-def _check_av_budget() -> bool:
-    """Return True if we can still make Alpha Vantage calls today."""
+def _check_and_increment_av_budget() -> bool:
+    """Atomically check and increment the Alpha Vantage daily budget.
+
+    Returns ``True`` if the call is allowed (and the counter has already
+    been incremented).  Returns ``False`` if the daily limit is reached.
+    Thread-safe: holds ``_lock`` for the entire check-then-increment.
+    """
     global _av_daily_count, _av_daily_reset
-    now = time.time()
-    if now - _av_daily_reset > 86400:
-        _av_daily_count = 0
-        _av_daily_reset = now
-    return _av_daily_count < _AV_DAILY_MAX
+    with _lock:
+        now = time.time()
+        if now - _av_daily_reset > 86400:
+            _av_daily_count = 0
+            _av_daily_reset = now
+        if _av_daily_count >= _AV_DAILY_MAX:
+            return False
+        _av_daily_count += 1
+        return True
 
 
 def _get_alphavantage_sentiment(ticker: str) -> dict | None:
@@ -282,7 +291,7 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
     if not api_key:
         return None
 
-    if not _check_av_budget():
+    if not _check_and_increment_av_budget():
         logger.info("Alpha Vantage daily budget exhausted (%d/%d)", _av_daily_count, _AV_DAILY_MAX)
         return None
 
@@ -291,7 +300,6 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
         f"?function=NEWS_SENTIMENT&tickers={key}&apikey={api_key}&limit=10"
     )
     raw = _http_get_json(url, timeout=15)
-    _av_daily_count += 1
 
     if not raw or not isinstance(raw, dict):
         with _lock:
