@@ -589,12 +589,66 @@ async def grand_portfolio(request: Request):
             "request": request,
             "entries": [],
             "empty": True,
+            "consensus_json": "[]",
+            "momentum_json": "[]",
         })
 
     entries = client.build_grand_portfolio(cache_data, SUPERINVESTORS_BY_CIK)
+
+    # ── Build Consensus Leaders data (top 10 by holder count) ──
+    # Compute avg portfolio weight per ticker across holders
+    ticker_weights: dict[str, list[float]] = {}
+    for cik, fund_data in cache_data.items():
+        if cik not in SUPERINVESTORS_BY_CIK:
+            continue
+        for h in fund_data.get("all_holdings", []):
+            t = h.get("ticker")
+            if t:
+                t_upper = t.upper()
+                ticker_weights.setdefault(t_upper, []).append(h.get("pct", 0))
+
+    consensus_data = []
+    for e in entries[:10]:
+        ticker_key = e.ticker.upper() if e.ticker else None
+        weights = ticker_weights.get(ticker_key, []) if ticker_key else []
+        avg_weight = round(sum(weights) / len(weights), 2) if weights else 0
+        top_holders = e.holders[:3]
+        consensus_data.append({
+            "ticker": e.ticker or e.cusip[:6],
+            "issuer": e.issuer_name,
+            "holders": e.num_holders,
+            "avg_weight": avg_weight,
+            "top_holders": top_holders,
+            "combined_value": e.combined_value,
+            "link": f"/stock/{e.ticker}" if e.ticker else None,
+        })
+
+    # ── Build Recent Momentum data (most added this quarter) ──
+    most_added = await asyncio.to_thread(
+        market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK
+    )
+
+    # Cross-reference: tickers in both consensus and momentum
+    consensus_tickers = {d["ticker"].upper() for d in consensus_data if d["ticker"]}
+    momentum_data = []
+    for ma in most_added[:15]:
+        ticker = ma.get("ticker") or (ma.get("cusip", "")[:6])
+        is_trending = ticker.upper() in consensus_tickers if ticker else False
+        momentum_data.append({
+            "ticker": ticker,
+            "issuer": ma.get("issuer_name", ""),
+            "add_count": ma.get("add_count", 0),
+            "adders": ma.get("adders", []),
+            "total_value": ma.get("total_value", 0),
+            "is_trending": is_trending,
+            "link": f"/stock/{ma['ticker']}" if ma.get("ticker") else None,
+        })
+
     return templates.TemplateResponse("grand_portfolio.html", {
         "request": request,
         "entries": entries[:100],
+        "consensus_json": json_module.dumps(consensus_data),
+        "momentum_json": json_module.dumps(momentum_data),
     })
 
 

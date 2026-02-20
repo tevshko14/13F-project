@@ -13,41 +13,453 @@
     <p><a href="/superinvestors" role="button">Go to Superinvestors</a> to trigger data loading.</p>
 </article>
 {% else %}
-<p class="text-muted">Showing top {{ entries|length }} stocks (sorted by number of holders)</p>
 
-<figure>
-<table>
-    <thead>
-        <tr>
-            <th>#</th>
-            <th data-sort="text">Ticker</th>
-            <th data-sort="text">Stock</th>
-            <th class="text-right" data-sort="number">Holders</th>
-            <th class="text-right" data-sort="number" data-sort-default="desc">Combined Value ($)</th>
-            <th class="text-right" data-sort="number">% of Aggregate</th>
-            <th>Held By</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for e in entries %}
-        <tr>
-            <td>{{ loop.index }}</td>
-            <td>{{ ticker_link(e.ticker, e.cusip) }}</td>
-            <td><strong>{{ e.issuer_name }}</strong></td>
-            <td class="text-right"><strong>{{ e.num_holders }}</strong></td>
-            <td class="text-right">${{ "{:,.0f}".format(e.combined_value) }}</td>
-            <td class="text-right">{{ "%.2f"|format(e.pct_of_aggregate) }}%</td>
-            <td>
-                <div class="tag-list">
-                    {% for h in e.holders %}
-                    <span class="tag">{{ h }}</span>
-                    {% endfor %}
-                </div>
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-</figure>
+<style>
+    /* ── Dashboard Cards ── */
+    .dash-card {
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        border-radius: 12px;
+        padding: 1.5em;
+        background: #fff;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+    }
+    .dash-card-header {
+        font-size: 1.05em;
+        font-weight: 700;
+        color: #222;
+    }
+    .dash-card-sub {
+        font-size: 0.82em;
+        color: rgba(0, 0, 0, 0.45);
+        margin-bottom: 1em;
+    }
+    .dash-spacing {
+        margin-bottom: 2rem;
+    }
+    .dash-top-spacing {
+        margin-bottom: 3rem;
+    }
+
+    /* ── Table styling (matches stock/investor page) ── */
+    .gp-table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+    }
+    .gp-table th,
+    .gp-table td {
+        padding: 10px 14px;
+        line-height: 1.5;
+        vertical-align: middle;
+        font-size: max(14px, 0.875rem);
+        height: auto;
+        white-space: normal;
+        overflow: visible;
+    }
+    .gp-table tr {
+        height: auto;
+        min-height: 44px;
+    }
+
+    /* ── Tag list for holders ── */
+    .tag-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    .tag {
+        background: rgba(25, 118, 210, 0.08);
+        color: #1565c0;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.78em;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    /* ── Holdings overflow + expand ── */
+    .gp-overflow { display: none; }
+    .gp-fade { position: relative; }
+    .gp-fade::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 60px;
+        background: linear-gradient(transparent, #fff);
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+    }
+    .gp-fade.expanded::after {
+        opacity: 0;
+        height: 0;
+    }
+    .gp-expand-btn {
+        background: none;
+        border: 1px solid rgba(0,0,0,0.15);
+        border-radius: 6px;
+        padding: 0.4em 1.2em;
+        cursor: pointer;
+        font-size: 0.85em;
+        color: rgba(0,0,0,0.6);
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+        margin: 0.5em auto 0;
+        transition: background 0.15s, color 0.15s;
+    }
+    .gp-expand-btn:hover {
+        background: rgba(0,0,0,0.04);
+        color: rgba(0,0,0,0.8);
+    }
+    .gp-expand-arrow {
+        display: inline-block;
+        transition: transform 0.2s;
+        font-size: 0.75em;
+    }
+    .gp-expand-arrow.expanded {
+        transform: rotate(180deg);
+    }
+
+    /* ── Cross-highlight glow for synced charts ── */
+    @keyframes barGlow {
+        0%, 100% { filter: brightness(1); }
+        50% { filter: brightness(1.3); }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+        .gp-table th,
+        .gp-table td {
+            font-size: 14px;
+        }
+    }
+</style>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Visualization 1: Consensus Leaders (horizontal bar chart)      #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div class="dash-card dash-spacing">
+    <div class="dash-card-header">Consensus Leaders</div>
+    <div class="dash-card-sub">Top 10 stocks by total superinvestor ownership - the most universally held names</div>
+    <div id="consensus-chart" style="width: 100%; height: 360px;"></div>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Visualization 2: Recent Momentum (vertical bar chart)          #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div class="dash-card dash-top-spacing">
+    <div class="dash-card-header">Recent Momentum</div>
+    <div class="dash-card-sub">Top stocks added by superinvestors this quarter - hover to see who is buying</div>
+    <div id="momentum-chart" style="width: 100%; height: 320px;"></div>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Dual Chart Script with Cross-Highlighting                      #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<script>
+(function() {
+    var consensusData = {{ consensus_json | safe }};
+    var momentumData  = {{ momentum_json | safe }};
+
+    var consensusEl = document.getElementById('consensus-chart');
+    var momentumEl  = document.getElementById('momentum-chart');
+    if (!consensusEl || !momentumEl) return;
+
+    // ── Build ticker→index maps for cross-highlighting ──
+    var consensusTickerMap = {};
+    for (var i = 0; i < consensusData.length; i++) {
+        if (consensusData[i].ticker) consensusTickerMap[consensusData[i].ticker.toUpperCase()] = i;
+    }
+    var momentumTickerMap = {};
+    for (var j = 0; j < momentumData.length; j++) {
+        if (momentumData[j].ticker) momentumTickerMap[momentumData[j].ticker.toUpperCase()] = j;
+    }
+
+    // ═══ Consensus Leaders Chart (horizontal bar) ═══
+    var consensusChart = echarts.init(consensusEl);
+    var cTickers = consensusData.map(function(d) { return d.ticker; }).reverse();
+    var cCounts  = consensusData.map(function(d) { return d.holders; }).reverse();
+    var cDataRev = consensusData.slice().reverse();
+
+    consensusChart.setOption({
+        grid: { left: 80, right: 30, top: 10, bottom: 20 },
+        xAxis: {
+            type: 'value',
+            name: 'Holders',
+            nameTextStyle: { fontSize: 10 },
+            minInterval: 1
+        },
+        yAxis: {
+            type: 'category',
+            data: cTickers,
+            axisLabel: {
+                fontSize: 11,
+                fontWeight: 'bold',
+                fontFamily: 'monospace'
+            }
+        },
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: { type: 'shadow' },
+            formatter: function(params) {
+                if (!params || params.length === 0) return '';
+                var idx = params[0].dataIndex;
+                var d = cDataRev[idx];
+                if (!d) return '';
+
+                var html = '<strong style="font-size: 1.15em;">' + d.ticker + '</strong>'
+                    + '<br/><span style="opacity: 0.7;">' + d.issuer + '</span>'
+                    + '<br/><br/>Owned by <strong>' + d.holders + '</strong> superinvestor'
+                    + (d.holders > 1 ? 's' : '');
+
+                if (d.avg_weight > 0) {
+                    html += '<br/>Avg. Weight: <strong>' + d.avg_weight.toFixed(1) + '%</strong>';
+                }
+
+                var valStr = d.combined_value >= 1e9
+                    ? '$' + (d.combined_value / 1e9).toFixed(1) + 'B'
+                    : '$' + (d.combined_value / 1e6).toFixed(0) + 'M';
+                html += '<br/>Combined Value: <strong>' + valStr + '</strong>';
+
+                if (d.top_holders && d.top_holders.length > 0) {
+                    html += '<br/><br/><span style="opacity: 0.5;">Top Holders:</span>';
+                    for (var i = 0; i < d.top_holders.length; i++) {
+                        html += '<br/>&nbsp;&nbsp;' + d.top_holders[i];
+                    }
+                }
+
+                return html;
+            }
+        },
+        series: [{
+            type: 'bar',
+            data: cCounts,
+            itemStyle: {
+                color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                    { offset: 0, color: '#1976d2' },
+                    { offset: 1, color: '#42a5f5' }
+                ]),
+                borderRadius: [0, 4, 4, 0]
+            },
+            emphasis: {
+                itemStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                        { offset: 0, color: '#1565c0' },
+                        { offset: 1, color: '#1976d2' }
+                    ])
+                }
+            },
+            barMaxWidth: 28,
+            label: {
+                show: true,
+                position: 'right',
+                fontSize: 11,
+                fontWeight: 'bold',
+                color: 'rgba(0,0,0,0.5)',
+                formatter: '{c}'
+            }
+        }]
+    });
+
+    // Click → stock page
+    consensusChart.on('click', function(params) {
+        var d = cDataRev[params.dataIndex];
+        if (d && d.link) window.location.href = d.link;
+    });
+
+    // ═══ Recent Momentum Chart (vertical bar) ═══
+    var momentumChart = echarts.init(momentumEl);
+    var mTickers = momentumData.map(function(d) { return d.ticker || '?'; });
+    var mCounts  = momentumData.map(function(d) { return d.add_count; });
+    var mColors  = momentumData.map(function(d) {
+        return d.is_trending ? '#e65100' : '#1976d2';
+    });
+
+    momentumChart.setOption({
+        grid: { left: 40, right: 16, top: 10, bottom: 60 },
+        xAxis: {
+            type: 'category',
+            data: mTickers,
+            axisLabel: {
+                rotate: 45,
+                fontSize: 10,
+                fontWeight: 'bold',
+                fontFamily: 'monospace'
+            },
+            axisTick: { alignWithLabel: true }
+        },
+        yAxis: {
+            type: 'value',
+            name: '# Added',
+            nameTextStyle: { fontSize: 10 },
+            minInterval: 1
+        },
+        tooltip: {
+            trigger: 'axis',
+            formatter: function(params) {
+                if (!params || params.length === 0) return '';
+                var idx = params[0].dataIndex;
+                var d = momentumData[idx];
+                if (!d) return '';
+
+                var ticker = d.ticker || '?';
+                var badge = d.is_trending
+                    ? ' <span style="background: #e65100; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 0.85em; margin-left: 4px;">Trending</span>'
+                    : '';
+                var html = '<strong style="font-size: 1.1em;">' + ticker + '</strong>' + badge
+                    + '<br/><span style="opacity: 0.8;">' + d.issuer + '</span>'
+                    + '<br/><br/>Added by <strong>' + d.add_count + '</strong> superinvestor'
+                    + (d.add_count > 1 ? 's' : '') + ':';
+
+                var adders = d.adders || [];
+                var show = adders.slice(0, 5);
+                for (var i = 0; i < show.length; i++) {
+                    html += '<br/>&nbsp;&nbsp;' + show[i];
+                }
+                if (adders.length > 5) {
+                    html += '<br/>&nbsp;&nbsp;+ ' + (adders.length - 5) + ' more';
+                }
+
+                return html;
+            }
+        },
+        series: [{
+            type: 'bar',
+            data: mCounts.map(function(count, idx) {
+                return {
+                    value: count,
+                    itemStyle: {
+                        color: mColors[idx],
+                        borderRadius: [3, 3, 0, 0]
+                    }
+                };
+            }),
+            emphasis: {
+                itemStyle: { color: '#1565c0' }
+            },
+            barMaxWidth: 40
+        }]
+    });
+
+    // Click → stock page
+    momentumChart.on('click', function(params) {
+        var d = momentumData[params.dataIndex];
+        if (d && d.link) window.location.href = d.link;
+    });
+
+    // ═══ Cross-Highlighting ═══
+    consensusChart.on('mouseover', function(params) {
+        var d = cDataRev[params.dataIndex];
+        if (!d || !d.ticker) return;
+        var mIdx = momentumTickerMap[d.ticker.toUpperCase()];
+        if (mIdx !== undefined) {
+            momentumChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: mIdx });
+        }
+    });
+    consensusChart.on('mouseout', function() {
+        momentumChart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
+    });
+
+    momentumChart.on('mouseover', function(params) {
+        var d = momentumData[params.dataIndex];
+        if (!d || !d.ticker) return;
+        var cIdx = consensusTickerMap[d.ticker.toUpperCase()];
+        if (cIdx !== undefined) {
+            // Reverse index since chart data is reversed
+            var revIdx = consensusData.length - 1 - cIdx;
+            consensusChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: revIdx });
+        }
+    });
+    momentumChart.on('mouseout', function() {
+        consensusChart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
+    });
+
+    // ═══ Responsive ═══
+    window.addEventListener('resize', function() {
+        consensusChart.resize();
+        momentumChart.resize();
+    });
+})();
+</script>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Holdings Table: Top 25 Preview with Expand                     #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<article style="margin-top: 2rem;">
+    <header>
+        <strong>All Holdings</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Top {{ entries|length }} stocks sorted by number of holders
+        </span>
+    </header>
+
+    <div class="gp-fade{% if entries|length <= 25 %} expanded{% endif %}" id="gp-table-wrap">
+    <figure>
+    <table class="gp-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th data-sort="text">Ticker</th>
+                <th data-sort="text">Stock</th>
+                <th class="text-right" data-sort="number">Holders</th>
+                <th class="text-right" data-sort="number" data-sort-default="desc">Combined Value ($)</th>
+                <th class="text-right" data-sort="number">% of Aggregate</th>
+                <th>Held By</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in entries %}
+            <tr{% if loop.index > 25 %} class="gp-overflow"{% endif %}>
+                <td>{{ loop.index }}</td>
+                <td>{{ ticker_link(e.ticker, e.cusip) }}</td>
+                <td><strong>{{ e.issuer_name }}</strong></td>
+                <td class="text-right"><strong>{{ e.num_holders }}</strong></td>
+                <td class="text-right">${{ "{:,.0f}".format(e.combined_value) }}</td>
+                <td class="text-right">{{ "%.2f"|format(e.pct_of_aggregate) }}%</td>
+                <td>
+                    <div class="tag-list">
+                        {% for h in e.holders %}
+                        <span class="tag">{{ h }}</span>
+                        {% endfor %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </figure>
+    </div>
+
+    {% if entries|length > 25 %}
+    <button class="gp-expand-btn" onclick="toggleGrandPortfolio(this)">
+        <span>View All {{ entries|length }} Stocks</span>
+        <span class="gp-expand-arrow">&#9660;</span>
+    </button>
+    {% endif %}
+</article>
+
+<script>
+window.toggleGrandPortfolio = function(btn) {
+    var rows = document.querySelectorAll('.gp-overflow');
+    var wrap = document.getElementById('gp-table-wrap');
+    var arrow = btn.querySelector('.gp-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+    var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+    rows.forEach(function(row) {
+        row.style.display = expanded ? 'none' : '';
+    });
+    wrap.classList.toggle('expanded', !expanded);
+    arrow.classList.toggle('expanded', !expanded);
+    label.textContent = expanded
+        ? 'View All ' + (rows.length + 25) + ' Stocks'
+        : 'Show Top 25';
+
+    if (window.initSortableTables) window.initSortableTables();
+};
+</script>
+
 {% endif %}
 {% endblock %}
