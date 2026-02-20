@@ -294,13 +294,15 @@ def parse_dollar_value(val: str) -> float:
 def aggregate_top_tickers(
     trades: list[InsiderTrade],
     limit: int = 10,
+    mixed: bool = True,
 ) -> list[dict]:
-    """Aggregate trades by ticker, return top N with buys and sells.
+    """Aggregate trades by ticker, return top N for the chart.
 
-    Selects the top N/2 tickers by buy volume and top N/2 by sell
-    volume, then merges.  This guarantees the chart always shows both
-    green (purchases) and red (sales) bars, even though insider selling
-    vastly outnumbers buying.
+    Args:
+        mixed: When ``True`` (Latest tab), selects top N/2 by buy volume
+            and top N/2 by sell volume so both sides are always visible.
+            When ``False`` (Purchases / Sales tab), simply picks the top
+            N by total dollar volume.
 
     Returns list of dicts for JSON serialization, each containing:
     ticker, company_name, buy_value, sell_value, net_flow, trade_count,
@@ -344,41 +346,47 @@ def aggregate_top_tickers(
             insider["sell_value"] += abs_val
         insider["count"] += 1
 
-    # Select top tickers ensuring BOTH buys and sells are represented.
-    # Take the top half by buy volume + top half by sell volume, then
-    # deduplicate.  This guarantees the chart shows green and red bars
-    # even though sell volume vastly outnumbers buy volume.
-    half = max(limit // 2, 1)
     all_tickers = list(ticker_data.values())
 
-    top_buyers = sorted(
-        [d for d in all_tickers if d["buy_value"] > 0],
-        key=lambda d: d["buy_value"],
-        reverse=True,
-    )[:half]
+    if mixed:
+        # ── Latest tab: top N/2 by buy volume + top N/2 by sell volume ──
+        # Guarantees the chart shows green and red bars even though sell
+        # volume vastly outnumbers buy volume.
+        half = max(limit // 2, 1)
 
-    top_sellers = sorted(
-        [d for d in all_tickers if d["sell_value"] > 0],
-        key=lambda d: d["sell_value"],
-        reverse=True,
-    )[:half]
+        top_buyers = sorted(
+            [d for d in all_tickers if d["buy_value"] > 0],
+            key=lambda d: d["buy_value"],
+            reverse=True,
+        )[:half]
 
-    # Merge: buyers first, then sellers (skip duplicates)
-    seen = set()
-    sorted_tickers = []
-    for d in top_buyers + top_sellers:
-        if d["ticker"] not in seen:
-            seen.add(d["ticker"])
-            sorted_tickers.append(d)
+        top_sellers = sorted(
+            [d for d in all_tickers if d["sell_value"] > 0],
+            key=lambda d: d["sell_value"],
+            reverse=True,
+        )[:half]
 
-    # If we still have room, fill with remaining tickers by total volume
-    if len(sorted_tickers) < limit:
-        remaining = sorted(
-            [d for d in all_tickers if d["ticker"] not in seen],
+        seen = set()
+        sorted_tickers = []
+        for d in top_buyers + top_sellers:
+            if d["ticker"] not in seen:
+                seen.add(d["ticker"])
+                sorted_tickers.append(d)
+
+        if len(sorted_tickers) < limit:
+            remaining = sorted(
+                [d for d in all_tickers if d["ticker"] not in seen],
+                key=lambda d: d["buy_value"] + d["sell_value"],
+                reverse=True,
+            )
+            sorted_tickers.extend(remaining[: limit - len(sorted_tickers)])
+    else:
+        # ── Purchases / Sales tab: simple top N by total dollar volume ──
+        sorted_tickers = sorted(
+            all_tickers,
             key=lambda d: d["buy_value"] + d["sell_value"],
             reverse=True,
-        )
-        sorted_tickers.extend(remaining[: limit - len(sorted_tickers)])
+        )[:limit]
 
     result = []
     for d in sorted_tickers:
@@ -519,38 +527,49 @@ def get_latest_insider_trades(
     return []
 
 
-def get_insider_chart_data(limit: int = 10) -> list[dict]:
+def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
     """Fetch aggregated chart data for the insider momentum chart.
 
-    Uses a 30-day time window (not a row-count limit) to ensure both
-    buys **and** sells are represented.  Falls back gracefully through
-    the same L1→L2→L3→L4 tiers as the table data.
+    Args:
+        limit: Number of tickers to include in the chart (default 10).
+        trade_type: ``""`` for Latest (mixed buys+sells), ``"p"`` for
+            Purchases only, ``"s"`` for Sales only.
 
-    Returns pre-aggregated chart data (list of dicts from
-    :func:`aggregate_top_tickers`).
+    When ``trade_type`` is ``""`` (Latest tab), fetches buys and sells
+    separately from Supabase and uses ``mixed=True`` aggregation so both
+    sides are represented.  When filtered to Purchases or Sales, uses
+    the standard table query with ``mixed=False`` (simple top-N sort).
     """
-    cache_key = "chart:insider_momentum"
+    is_mixed = trade_type == ""
+    cache_key = f"chart:insider_momentum:{trade_type or 'all'}"
 
     # ── L1: in-memory fast path ──
     stale_data, is_fresh = _get_cached_with_stale(cache_key, _GLOBAL_TTL)
     if stale_data is not None and is_fresh:
-        return aggregate_top_tickers(stale_data, limit=limit)
+        return aggregate_top_tickers(stale_data, limit=limit, mixed=is_mixed)
 
-    # ── L2: Supabase time-bounded query (30 days, 500 rows) ──
-    rows = supabase_cache.get_insider_trades_for_chart(days=30, limit_per_type=250)
-    if rows:
-        trades = [InsiderTrade.from_db_row(r) for r in rows]
-        _set_cached(cache_key, trades)
-        return aggregate_top_tickers(trades, limit=limit)
+    if is_mixed:
+        # ── L2: Supabase — separate buy + sell queries (30 days) ──
+        rows = supabase_cache.get_insider_trades_for_chart(days=30, limit_per_type=250)
+        if rows:
+            trades = [InsiderTrade.from_db_row(r) for r in rows]
+            _set_cached(cache_key, trades)
+            return aggregate_top_tickers(trades, limit=limit, mixed=True)
+    else:
+        # ── L2: Supabase — single-type query (more rows for richer chart) ──
+        trades = get_latest_insider_trades(trade_type=trade_type, count=200)
+        if trades:
+            _set_cached(cache_key, trades)
+            return aggregate_top_tickers(trades, limit=limit, mixed=False)
 
     # ── L3: Fall back to standard 100-row fetch (degraded) ──
-    trades = get_latest_insider_trades(trade_type="", count=100)
+    trades = get_latest_insider_trades(trade_type=trade_type, count=100)
     if trades:
-        return aggregate_top_tickers(trades, limit=limit)
+        return aggregate_top_tickers(trades, limit=limit, mixed=is_mixed)
 
     # ── L4: Stale data — never show empty chart ──
     if stale_data:
-        return aggregate_top_tickers(stale_data, limit=limit)
+        return aggregate_top_tickers(stale_data, limit=limit, mixed=is_mixed)
 
     return []
 
