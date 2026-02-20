@@ -29,7 +29,7 @@ _lock = threading.Lock()
 # ── Cache TTLs ──────────────────────────────────────────────────────
 _FINNHUB_TTL = 7200       # 2 hours
 _CNN_TTL = 3600            # 1 hour
-_APEWISDOM_TTL = 3600      # 1 hour
+_APEWISDOM_TTL = 1800      # 30 minutes
 _ALPHAVANTAGE_TTL = 43200  # 12 hours
 
 # ── LRU max entries for per-ticker caches ─────────────────────────────
@@ -42,6 +42,8 @@ _alphavantage_cache: dict[str, tuple[float, dict | None]] = {}
 # ── Global caches: (timestamp, data) ───────────────────────────────
 _cnn_cache: tuple[float, dict | None] | None = None
 _apewisdom_cache: tuple[float, list[dict]] | None = None
+_leaderboard_cache: tuple[float, dict] | None = None
+_LEADERBOARD_TTL = 1800    # 30 minutes
 
 # ── Alpha Vantage daily budget tracker ──────────────────────────────
 _av_daily_count = 0
@@ -403,5 +405,161 @@ def get_sentiment_data(ticker: str) -> dict:
     except Exception as exc:
         logger.warning("Alpha Vantage failed for %s: %s", ticker, exc)
         result["alphavantage"] = None
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 5. Retail Leaderboard Data Builder
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _velocity_to_color(velocity_pct: float) -> str:
+    """Map mention velocity % to hex color (red-gray-green gradient).
+
+    Mirrors ``market_data._pct_to_color`` but normalises the wider
+    velocity range (divides by 20 to clamp -100..+100 % into -5..+5).
+    """
+    clamped = max(-5.0, min(5.0, velocity_pct / 20.0))
+    if clamped >= 0:
+        t = clamped / 5.0
+        r = int(153 + (27 - 153) * t)
+        g = int(153 + (94 - 153) * t)
+        b = int(153 + (32 - 153) * t)
+    else:
+        t = abs(clamped) / 5.0
+        r = int(153 + (183 - 153) * t)
+        g = int(153 + (28 - 153) * t)
+        b = int(153 + (28 - 153) * t)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def build_retail_leaderboard_data(
+    apewisdom_data: list[dict],
+    superinvestor_tickers: dict[str, list[str]] | None = None,
+    fear_greed: dict | None = None,
+    treemap_limit: int = 40,
+    bubble_limit: int = 10,
+) -> dict:
+    """Build enriched leaderboard data with velocity, engagement and guru overlap.
+
+    Args:
+        apewisdom_data: Raw ApeWisdom ranked stock list.
+        superinvestor_tickers: Mapping of ``TICKER -> [display_name, ...]``
+            from ``client.build_ticker_ownership_map``.
+        fear_greed: CNN Fear & Greed dict (included in metadata).
+        treemap_limit: Max tickers in the treemap (default 40).
+        bubble_limit: Max tickers in the bubble chart (default 10).
+
+    Returns dict with keys:
+        treemap_data  - list for ECharts treemap
+        bubble_data   - list for Chart.js bubble chart
+        leaderboard_rows - full enriched list for the HTML table
+        metadata      - count, timestamp, market_mood
+    """
+    global _leaderboard_cache
+
+    # ── Fast path: cached result ──
+    with _lock:
+        if _leaderboard_cache is not None:
+            ts, data = _leaderboard_cache
+            if time.time() - ts < _LEADERBOARD_TTL:
+                return data
+
+    if superinvestor_tickers is None:
+        superinvestor_tickers = {}
+
+    rows: list[dict] = []
+    for item in apewisdom_data:
+        ticker = (item.get("ticker") or "").upper()
+        if not ticker:
+            continue
+
+        mentions = int(item.get("mentions") or 0)
+        mentions_24h = int(item.get("mentions_24h_ago") or 0)
+        upvotes = int(item.get("upvotes") or 0)
+        rank = int(item.get("rank") or 0)
+        rank_24h = item.get("rank_24h_ago")
+
+        # Velocity: % change in mentions over 24h
+        velocity_pct = (
+            ((mentions - mentions_24h) / max(mentions_24h, 1)) * 100
+            if mentions_24h > 0
+            else 0.0
+        )
+
+        # Engagement ratio: upvotes per mention (quality proxy)
+        engagement_ratio = round(upvotes / max(mentions, 1), 1)
+
+        # Rank change
+        rank_change = (int(rank_24h) if rank_24h else rank) - rank
+
+        # Superinvestor overlap
+        guru_names = superinvestor_tickers.get(ticker, [])
+        guru_count = len(guru_names)
+
+        # Heat level 0-5 (based on absolute velocity)
+        heat = min(5, max(0, int(abs(velocity_pct) / 20)))
+
+        rows.append({
+            "rank": rank,
+            "ticker": ticker,
+            "name": item.get("name") or "",
+            "mentions": mentions,
+            "mentions_24h_ago": mentions_24h,
+            "velocity_pct": round(velocity_pct, 1),
+            "upvotes": upvotes,
+            "engagement_ratio": engagement_ratio,
+            "rank_change": rank_change,
+            "guru_count": guru_count,
+            "guru_names": guru_names[:5],  # cap for JSON size
+            "heat": heat,
+        })
+
+    # ── Treemap data: top N by mentions ──
+    treemap_sorted = sorted(rows, key=lambda r: r["mentions"], reverse=True)
+    treemap_data = []
+    for r in treemap_sorted[:treemap_limit]:
+        treemap_data.append({
+            "name": r["ticker"],
+            "value": max(r["mentions"], 1),  # treemap needs value > 0
+            "velocity_pct": r["velocity_pct"],
+            "mentions": r["mentions"],
+            "engagement_ratio": r["engagement_ratio"],
+            "upvotes": r["upvotes"],
+            "guru_count": r["guru_count"],
+            "guru_names": r["guru_names"],
+            "link": f"/stock/{r['ticker']}",
+            "itemStyle": {"color": _velocity_to_color(r["velocity_pct"])},
+        })
+
+    # ── Bubble data: top N by absolute velocity ──
+    bubble_sorted = sorted(rows, key=lambda r: abs(r["velocity_pct"]), reverse=True)
+    bubble_data = []
+    for r in bubble_sorted[:bubble_limit]:
+        bubble_data.append({
+            "ticker": r["ticker"],
+            "name": r["name"],
+            "x": r["engagement_ratio"],
+            "y": r["velocity_pct"],
+            "r": r["mentions"],
+            "guru_count": r["guru_count"],
+            "rank": r["rank"],
+        })
+
+    result = {
+        "treemap_data": treemap_data,
+        "bubble_data": bubble_data,
+        "leaderboard_rows": rows,
+        "metadata": {
+            "count": len(rows),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+            "market_mood": fear_greed.get("rating") if fear_greed else None,
+            "market_score": fear_greed.get("score") if fear_greed else None,
+        },
+    }
+
+    with _lock:
+        _leaderboard_cache = (time.time(), result)
 
     return result

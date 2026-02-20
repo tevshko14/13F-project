@@ -788,6 +788,8 @@ async def retail_page(request: Request, view: str = "sentiment"):
         if best and (best.get("rank_24h_ago") or 0) > best.get("rank", 0):
             biggest_mover = best
 
+    has_guru_data = bool(getattr(app.state, "fund_cache", {}))
+
     return templates.TemplateResponse("retail.html", {
         "request": request,
         "view": view,
@@ -795,6 +797,7 @@ async def retail_page(request: Request, view: str = "sentiment"):
         "top_stocks": top_stocks,
         "biggest_mover": biggest_mover,
         "youtubers": _FINANCE_YOUTUBERS,
+        "has_guru_data": has_guru_data,
     })
 
 
@@ -802,11 +805,32 @@ async def retail_page(request: Request, view: str = "sentiment"):
 async def retail_leaderboard_api(request: Request):
     all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
     fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
-    return templates.TemplateResponse("partials/retail_leaderboard.html", {
+    cache_data = getattr(app.state, "fund_cache", {})
+    ownership_map = (
+        client.build_ticker_ownership_map(cache_data, SUPERINVESTORS_BY_CIK)
+        if cache_data else {}
+    )
+    enriched = sentiment.build_retail_leaderboard_data(all_data, ownership_map, fear_greed)
+    return templates.TemplateResponse("partials/retail_leaderboard_v2.html", {
         "request": request,
-        "stocks": all_data,
+        "rows": enriched["leaderboard_rows"],
         "fear_greed": fear_greed,
+        "metadata": enriched["metadata"],
     })
+
+
+@app.get("/api/retail/leaderboard-data")
+async def retail_leaderboard_data(request: Request):
+    """Enriched leaderboard JSON for treemap, bubble chart, and guru toggle."""
+    all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
+    fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
+    cache_data = getattr(app.state, "fund_cache", {})
+    ownership_map = (
+        client.build_ticker_ownership_map(cache_data, SUPERINVESTORS_BY_CIK)
+        if cache_data else {}
+    )
+    result = sentiment.build_retail_leaderboard_data(all_data, ownership_map, fear_greed)
+    return JSONResponse(content=result)
 
 
 @app.get("/api/insider-trades", response_class=HTMLResponse)

@@ -86,6 +86,11 @@
         vertical-align: middle;
     }
     .yt-table tbody tr:hover { background: #fafafa; }
+
+    /* Responsive: stack charts on mobile */
+    @media (max-width: 768px) {
+        .retail-charts-row { grid-template-columns: 1fr !important; }
+    }
 </style>
 
 {# ── Sub-tab navigation ── #}
@@ -250,6 +255,48 @@
 {# ── Panel 2: Leaderboard (lazy-loaded)                             #}
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-leaderboard" class="rt-panel{% if view == 'leaderboard' %} active{% endif %}">
+
+    {# Controls bar #}
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em; flex-wrap: wrap; gap: 0.5em;">
+        <div>
+            <strong>Retail Buzz Dashboard</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Reddit mention velocity and smart money overlap
+            </span>
+        </div>
+        {% if has_guru_data %}
+        <label style="display: flex; align-items: center; gap: 0.4em; cursor: pointer; font-size: 0.85em; margin: 0;">
+            <input type="checkbox" id="guru-toggle" onchange="toggleGuruFilter(this.checked)" style="margin: 0;">
+            <span>Gurus Only</span>
+        </label>
+        {% endif %}
+    </div>
+
+    {# Charts row #}
+    <div class="retail-charts-row" style="display: grid; grid-template-columns: 3fr 2fr; gap: 1em; margin-bottom: 1.5em;">
+        <article style="margin: 0;">
+            <header>
+                <strong>Sentiment Heatmap</strong>
+                <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                    Size = mentions, Color = velocity
+                </span>
+            </header>
+            <div id="retail-treemap" style="width: 100%; height: 360px;"></div>
+        </article>
+        <article style="margin: 0;">
+            <header>
+                <strong>Hype vs. Quality</strong>
+                <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                    Quadrant = signal type
+                </span>
+            </header>
+            <div style="position: relative; width: 100%; height: 360px;">
+                <canvas id="retail-bubble-chart"></canvas>
+            </div>
+        </article>
+    </div>
+
+    {# Leaderboard table (lazy-loaded partial) #}
     <div id="retail-leaderboard-content">
         <p aria-busy="true" style="text-align: center; padding: 2em 0;">
             Loading leaderboard...
@@ -305,18 +352,270 @@
 </div>{# end panel-calendar #}
 
 
-{# ── Tab Switching + URL Sync Script ── #}
+{# ── Tab Switching + URL Sync + Charts Script ── #}
 <script>
 (function() {
     var leaderboardLoaded = false;
+    var bubbleChart = null;
+    window._retailData = null;
 
+    /* ── Number formatting ── */
+    function fmtNum(n) {
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return n.toLocaleString();
+    }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── ECharts Treemap (pattern from heatmap.html)              ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    function renderRetailTreemap(data) {
+        var container = document.getElementById('retail-treemap');
+        if (!container || !data || data.length === 0) return;
+
+        var existing = echarts.getInstanceByDom(container);
+        if (existing) existing.dispose();
+
+        var chart = echarts.init(container);
+
+        chart.setOption({
+            tooltip: {
+                appendToBody: true,
+                confine: true,
+                formatter: function(info) {
+                    var d = info.data;
+                    if (!d || d.velocity_pct === undefined) return info.name;
+                    var sign = d.velocity_pct >= 0 ? '+' : '';
+                    var color = d.velocity_pct >= 0 ? '#2e7d32' : '#c62828';
+                    var guruTag = '';
+                    if (d.guru_count > 0) {
+                        guruTag = '<br/><span style="color:#FFD700;">&#9733; '
+                            + d.guru_count + ' superinvestor'
+                            + (d.guru_count > 1 ? 's' : '') + '</span>';
+                        if (d.guru_names && d.guru_names.length > 0) {
+                            guruTag += '<br/><span style="font-size:0.85em;color:#888;">'
+                                + d.guru_names.join(', ') + '</span>';
+                        }
+                    }
+                    return '<strong>' + d.name + '</strong>'
+                        + '<br/>' + fmtNum(d.mentions) + ' mentions'
+                        + ' &middot; ' + fmtNum(d.upvotes) + ' upvotes'
+                        + '<br/><span style="color:' + color + ';font-weight:bold;">'
+                        + sign + d.velocity_pct.toFixed(1) + '% velocity (24h)</span>'
+                        + '<br/>Engagement: ' + d.engagement_ratio.toFixed(1) + ' upvotes/mention'
+                        + guruTag;
+                }
+            },
+            series: [{
+                type: 'treemap',
+                data: data,
+                width: '100%',
+                height: '100%',
+                roam: false,
+                nodeClick: false,
+                breadcrumb: { show: false },
+                levels: [{
+                    label: {
+                        show: true,
+                        formatter: function(params) {
+                            var d = params.data;
+                            if (!d || d.velocity_pct === undefined) return params.name;
+                            var sign = d.velocity_pct >= 0 ? '+' : '';
+                            return d.name + '\n' + sign + d.velocity_pct.toFixed(0) + '%';
+                        },
+                        fontSize: 11,
+                        color: '#fff',
+                        fontWeight: 'bold',
+                        textShadowColor: 'rgba(0,0,0,0.5)',
+                        textShadowBlur: 2
+                    },
+                    itemStyle: { gapWidth: 1 }
+                }]
+            }]
+        });
+
+        chart.on('click', function(params) {
+            if (params.data && params.data.link) {
+                window.location.href = params.data.link;
+            }
+        });
+
+        window.addEventListener('resize', function() { chart.resize(); });
+    }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Chart.js Bubble Chart                                    ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    function renderBubbleChart(data) {
+        if (!data || data.length === 0) return;
+        var ctx = document.getElementById('retail-bubble-chart');
+        if (!ctx) return;
+        if (bubbleChart) { bubbleChart.destroy(); bubbleChart = null; }
+
+        var maxMentions = Math.max.apply(null, data.map(function(d) { return d.r; })) || 1;
+
+        bubbleChart = new Chart(ctx, {
+            type: 'bubble',
+            data: {
+                datasets: [{
+                    data: data.map(function(d) {
+                        return {
+                            x: d.x,
+                            y: d.y,
+                            r: 5 + (d.r / maxMentions) * 35,
+                            ticker: d.ticker,
+                            guru_count: d.guru_count,
+                            mentions: d.r,
+                            name: d.name
+                        };
+                    }),
+                    backgroundColor: data.map(function(d) {
+                        return d.y >= 0
+                            ? 'rgba(46, 125, 50, 0.6)'
+                            : 'rgba(198, 40, 40, 0.6)';
+                    }),
+                    borderColor: data.map(function(d) {
+                        return d.guru_count > 0 ? '#FFD700' : 'rgba(0,0,0,0.15)';
+                    }),
+                    borderWidth: data.map(function(d) {
+                        return d.guru_count > 0 ? 2.5 : 1;
+                    }),
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 600, easing: 'easeInOutQuart' },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        titleFont: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 13 },
+                        bodyFont: { family: "'Inter', 'system-ui', sans-serif", size: 12 },
+                        padding: 10,
+                        callbacks: {
+                            title: function(items) {
+                                var d = items[0].raw;
+                                return d.ticker + (d.name ? ' - ' + d.name : '');
+                            },
+                            label: function(item) {
+                                var d = item.raw;
+                                var lines = [
+                                    'Velocity: ' + (d.y >= 0 ? '+' : '') + d.y.toFixed(1) + '% (24h)',
+                                    'Engagement: ' + d.x.toFixed(1) + ' upvotes/mention',
+                                    'Mentions: ' + fmtNum(d.mentions)
+                                ];
+                                if (d.guru_count > 0) {
+                                    lines.push('Held by ' + d.guru_count + ' superinvestor(s)');
+                                }
+                                return lines;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Engagement (upvotes/mention)',
+                            font: { family: "'Inter', 'system-ui', sans-serif", size: 11, weight: '500' },
+                            color: '#a1a1aa'
+                        },
+                        grid: { color: 'rgba(0,0,0,0.05)' },
+                        ticks: {
+                            font: { family: "'Inter', 'system-ui', sans-serif", size: 10 },
+                            color: '#71717a'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Mention Velocity (% 24h)',
+                            font: { family: "'Inter', 'system-ui', sans-serif", size: 11, weight: '500' },
+                            color: '#a1a1aa'
+                        },
+                        grid: {
+                            color: function(ctx) {
+                                return ctx.tick.value === 0 ? 'rgba(0,0,0,0.2)' : 'rgba(0,0,0,0.05)';
+                            }
+                        },
+                        ticks: {
+                            font: { family: "'Inter', 'system-ui', sans-serif", size: 10 },
+                            color: '#71717a'
+                        }
+                    }
+                }
+            },
+            plugins: [{
+                id: 'quadrantLabels',
+                afterDraw: function(chart) {
+                    var ctx2 = chart.ctx;
+                    var xScale = chart.scales.x;
+                    var yScale = chart.scales.y;
+                    ctx2.save();
+                    ctx2.font = "10px 'Inter', system-ui, sans-serif";
+                    ctx2.globalAlpha = 0.35;
+
+                    ctx2.fillStyle = '#2e7d32';
+                    ctx2.textAlign = 'right';
+                    ctx2.fillText('MOONING', xScale.right - 8, yScale.top + 14);
+
+                    ctx2.fillStyle = '#c62828';
+                    ctx2.textAlign = 'left';
+                    ctx2.fillText('FUD ALERT', xScale.left + 8, yScale.top + 14);
+
+                    ctx2.fillStyle = '#616161';
+                    ctx2.textAlign = 'right';
+                    ctx2.fillText('STEADY', xScale.right - 8, yScale.bottom - 8);
+
+                    ctx2.fillStyle = '#9e9e9e';
+                    ctx2.textAlign = 'left';
+                    ctx2.fillText('FADING', xScale.left + 8, yScale.bottom - 8);
+
+                    ctx2.restore();
+                }
+            }]
+        });
+    }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Gurus Only Toggle                                        ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    window.toggleGuruFilter = function(enabled) {
+        /* Dim table rows */
+        var rows = document.querySelectorAll('#retail-leaderboard-table tbody tr');
+        rows.forEach(function(row) {
+            var guruCount = parseInt(row.getAttribute('data-guru-count') || '0', 10);
+            if (enabled && guruCount === 0) {
+                row.style.opacity = '0.3';
+                row.style.pointerEvents = 'none';
+            } else {
+                row.style.opacity = '';
+                row.style.pointerEvents = '';
+            }
+        });
+
+        /* Re-render charts filtered */
+        if (window._retailData) {
+            var treeData = enabled
+                ? window._retailData.treemap_data.filter(function(d) { return d.guru_count > 0; })
+                : window._retailData.treemap_data;
+            renderRetailTreemap(treeData);
+
+            var bubData = enabled
+                ? window._retailData.bubble_data.filter(function(d) { return d.guru_count > 0; })
+                : window._retailData.bubble_data;
+            renderBubbleChart(bubData);
+        }
+    };
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Tab Switching + Lazy Load                                ── */
+    /* ══════════════════════════════════════════════════════════════ */
     window.switchRetailView = function(view) {
-        // Toggle subtab buttons
         document.querySelectorAll('.rt-subtab').forEach(function(btn) {
             btn.classList.toggle('active', btn.dataset.view === view);
         });
 
-        // Toggle panels
         document.querySelectorAll('.rt-panel').forEach(function(panel) {
             panel.classList.remove('active');
         });
@@ -325,42 +624,47 @@
             target.classList.add('active');
         }
 
-        // Lazy-load leaderboard on first visit
         if (view === 'leaderboard' && !leaderboardLoaded) {
             leaderboardLoaded = true;
             loadLeaderboard();
         }
 
-        // Re-init sortable tables
         if (window.initSortableTables) window.initSortableTables();
 
-        // Update URL without page reload
         var url = new URL(window.location);
         url.searchParams.set('view', view);
         history.replaceState(null, '', url.toString());
     };
 
     function loadLeaderboard() {
-        fetch('/api/retail/leaderboard')
-            .then(function(resp) { return resp.text(); })
-            .then(function(html) {
-                document.getElementById('retail-leaderboard-content').innerHTML = html;
-                if (window.initSortableTables) window.initSortableTables();
-            })
-            .catch(function() {
-                document.getElementById('retail-leaderboard-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Failed to load leaderboard. Please try again later.</p>';
-            });
+        /* Fetch JSON (charts) + HTML (table) in parallel */
+        Promise.all([
+            fetch('/api/retail/leaderboard-data').then(function(r) { return r.json(); }),
+            fetch('/api/retail/leaderboard').then(function(r) { return r.text(); })
+        ]).then(function(results) {
+            var data = results[0];
+            var tableHtml = results[1];
+
+            window._retailData = data;
+            renderRetailTreemap(data.treemap_data);
+            renderBubbleChart(data.bubble_data);
+
+            document.getElementById('retail-leaderboard-content').innerHTML = tableHtml;
+            if (window.initSortableTables) window.initSortableTables();
+        }).catch(function() {
+            document.getElementById('retail-leaderboard-content').innerHTML =
+                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                'Failed to load leaderboard. Please try again later.</p>';
+        });
     }
 
-    // Auto-load leaderboard if it's the active tab on page load
+    /* Auto-load leaderboard if it's the active tab on page load */
     {% if view == 'leaderboard' %}
     leaderboardLoaded = true;
     loadLeaderboard();
     {% endif %}
 
-    // Handle browser back/forward
+    /* Handle browser back/forward */
     window.addEventListener('popstate', function() {
         var params = new URLSearchParams(window.location.search);
         var v = params.get('view') || 'sentiment';
