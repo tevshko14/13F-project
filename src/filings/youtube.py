@@ -22,8 +22,10 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 _events_cache: tuple[float, list[dict]] | None = None
 _channels_cache: tuple[float, list[dict]] | None = None
+_recent_cache: tuple[float, list[dict]] | None = None
 _EVENTS_TTL = 300    # 5 minutes
 _CHANNELS_TTL = 600  # 10 minutes
+_RECENT_TTL = 300    # 5 minutes
 
 
 # ── L3 static fallback: always available even when Supabase is down ──
@@ -148,6 +150,40 @@ def get_channels() -> list[dict]:
     return stale_data
 
 
+def get_recent_uploads(limit: int = 20) -> list[dict]:
+    """Return recently posted videos with 3-tier fallback.
+
+    L1: Fresh in-memory cache (5 min TTL)
+    L2: Supabase youtube_events query (event_type = 'recent_upload')
+    L4: Stale L1 data -- never show empty/error to users
+    """
+    global _recent_cache
+
+    # ── L1: fresh in-memory cache ──
+    with _lock:
+        stale_data, is_fresh = _get_cached_with_stale(_recent_cache, _RECENT_TTL)
+    if stale_data is not None and is_fresh:
+        return stale_data[:limit]
+
+    # ── L2: Supabase query ──
+    uploads = supabase_cache.get_recent_youtube_uploads(limit=limit)
+    if uploads is not None:
+        with _lock:
+            _recent_cache = (time.time(), uploads)
+        return uploads[:limit]
+
+    logger.warning("Recent uploads L2 (Supabase) returned None")
+
+    # ── L4: stale L1 data -- better than nothing ──
+    if stale_data is not None:
+        logger.info(
+            "Returning stale recent uploads (%d items)", len(stale_data),
+        )
+        return stale_data[:limit]
+
+    return []
+
+
 def get_high_impact_events(min_score: int = 9) -> list[dict]:
     """Return upcoming events with impact >= min_score (for toast notifications).
 
@@ -160,22 +196,25 @@ def get_high_impact_events(min_score: int = 9) -> list[dict]:
         return []
 
 
-def build_calendar_data(events: list[dict], channels: list[dict]) -> dict:
+def build_calendar_data(events: list[dict], channels: list[dict], recent_uploads: list[dict] | None = None) -> dict:
     """Build enriched calendar data for the frontend.
 
     Returns:
         {
             "events": [...],
             "channels": [...],
+            "recent_uploads": [...],
             "high_impact": [...],
             "stats": {
                 "total_upcoming": int,
                 "bullish_count": int,
                 "bearish_count": int,
                 "frequency_alerts": int,
+                "recent_count": int,
             }
         }
     """
+    recent = recent_uploads or []
     bullish = sum(1 for e in events if e.get("sentiment") == "bullish")
     bearish = sum(1 for e in events if e.get("sentiment") == "bearish")
     freq_alerts = sum(1 for e in events if e.get("frequency_alert"))
@@ -184,11 +223,13 @@ def build_calendar_data(events: list[dict], channels: list[dict]) -> dict:
     return {
         "events": events,
         "channels": channels,
+        "recent_uploads": recent,
         "high_impact": high_impact,
         "stats": {
             "total_upcoming": len(events),
             "bullish_count": bullish,
             "bearish_count": bearish,
             "frequency_alerts": freq_alerts,
+            "recent_count": len(recent),
         },
     }

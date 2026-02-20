@@ -856,20 +856,24 @@ async def retail_calendar_api(request: Request):
     try:
         events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
         channels = await asyncio.to_thread(youtube.get_channels)
+        recent = await asyncio.to_thread(youtube.get_recent_uploads, 20)
     except Exception:
         logger.exception("Calendar API: unexpected error in data fetch")
-        events, channels = [], youtube._STATIC_CHANNELS
+        events, channels, recent = [], youtube._STATIC_CHANNELS, []
 
-    # Inject channel thumbnail into each event for avatar display
+    # Inject channel thumbnail into each event + recent upload for avatar display
     ch_thumbs = {ch["channel_id"]: ch.get("thumbnail_url", "") for ch in channels}
     for ev in events:
         ev["channel_thumbnail"] = ch_thumbs.get(ev.get("channel_id", ""), "")
+    for upl in recent:
+        upl["channel_thumbnail"] = ch_thumbs.get(upl.get("channel_id", ""), "")
 
-    calendar_data = youtube.build_calendar_data(events, channels)
+    calendar_data = youtube.build_calendar_data(events, channels, recent)
     return templates.TemplateResponse("partials/retail_calendar.html", {
         "request": request,
         "events": calendar_data["events"],
         "channels": calendar_data["channels"],
+        "recent_uploads": calendar_data["recent_uploads"],
         "stats": calendar_data["stats"],
         "high_impact": calendar_data["high_impact"],
     })
@@ -881,16 +885,19 @@ async def retail_calendar_data(request: Request):
     try:
         events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
         channels = await asyncio.to_thread(youtube.get_channels)
+        recent = await asyncio.to_thread(youtube.get_recent_uploads, 20)
     except Exception:
         logger.exception("Calendar data API: unexpected error in data fetch")
-        events, channels = [], youtube._STATIC_CHANNELS
+        events, channels, recent = [], youtube._STATIC_CHANNELS, []
 
-    # Inject channel thumbnail into each event for avatar display
+    # Inject channel thumbnail into each event + recent upload for avatar display
     ch_thumbs = {ch["channel_id"]: ch.get("thumbnail_url", "") for ch in channels}
     for ev in events:
         ev["channel_thumbnail"] = ch_thumbs.get(ev.get("channel_id", ""), "")
+    for upl in recent:
+        upl["channel_thumbnail"] = ch_thumbs.get(upl.get("channel_id", ""), "")
 
-    calendar_data = youtube.build_calendar_data(events, channels)
+    calendar_data = youtube.build_calendar_data(events, channels, recent)
     return JSONResponse(content=calendar_data)
 
 

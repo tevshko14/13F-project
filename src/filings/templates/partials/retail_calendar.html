@@ -3,6 +3,11 @@
 {# ── Stats summary row ── #}
 {% if stats %}
 <div style="display: flex; align-items: center; gap: 0.75em; margin-bottom: 1em; flex-wrap: wrap;">
+    {% if stats.recent_count %}
+    <span style="background: #eff6ff; color: #1e40af; font-size: 0.85em; padding: 0.3em 0.8em; border-radius: 6px; font-weight: 500;">
+        {{ stats.recent_count }} Recently Posted
+    </span>
+    {% endif %}
     <span style="background: #f4f4f5; color: #3f3f46; font-size: 0.85em; padding: 0.3em 0.8em; border-radius: 6px; font-weight: 500;">
         {{ stats.total_upcoming }} Upcoming
     </span>
@@ -22,6 +27,75 @@
     </span>
     {% endif %}
 </div>
+{% endif %}
+
+{# ── Recently Posted section ── #}
+{% if recent_uploads and recent_uploads|length > 0 %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>Recently Posted</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            {{ recent_uploads|length }} video{{ 's' if recent_uploads|length != 1 else '' }} in the last 48 hours
+        </span>
+    </header>
+
+    <div class="recent-uploads-grid">
+        {% for upl in recent_uploads[:10] %}
+        <div class="recent-upload-card">
+            {# Video thumbnail #}
+            <a href="{{ upl.video_url }}" target="_blank" rel="noopener"
+               class="recent-upload-thumb-link">
+                <img src="{{ upl.thumbnail_url }}" alt=""
+                     class="recent-upload-thumb"
+                     loading="lazy">
+                {# Sentiment dot overlay #}
+                <span class="recent-upload-sentiment-dot"
+                      style="background: {% if upl.sentiment == 'bullish' %}#16a34a{% elif upl.sentiment == 'bearish' %}#e11d48{% else %}#a1a1aa{% endif %};"></span>
+            </a>
+
+            {# Card body #}
+            <div class="recent-upload-body">
+                {# Channel info row #}
+                <div style="display: flex; align-items: center; gap: 0.4em; margin-bottom: 0.25em;">
+                    {% if upl.channel_thumbnail %}
+                    <img src="{{ upl.channel_thumbnail }}" alt=""
+                         style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex-shrink: 0;"
+                         loading="lazy">
+                    {% endif %}
+                    <span style="font-weight: 600; font-size: 0.75em; color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {{ upl.channel_name }}
+                    </span>
+                </div>
+
+                {# Title #}
+                <a href="{{ upl.video_url }}" target="_blank" rel="noopener"
+                   class="recent-upload-title">
+                    {{ upl.title }}
+                </a>
+
+                {# Bottom row: time + tickers #}
+                <div style="display: flex; align-items: center; gap: 0.4em; flex-wrap: wrap; margin-top: auto; padding-top: 0.3em;">
+                    {% if upl.scheduled_at %}
+                    <span class="text-muted" style="font-size: 0.7em;" data-published="{{ upl.scheduled_at }}">
+                        {{ upl.scheduled_at[:16]|replace('T', ' ') }}
+                    </span>
+                    {% endif %}
+                    {% if upl.tickers and upl.tickers|length > 0 %}
+                    {% for ticker in upl.tickers[:3] %}
+                    <a href="/stock/{{ ticker }}"
+                       style="font-size: 0.7em; text-decoration: none; font-weight: 600;
+                              background: #f4f4f5; color: #3f3f46; padding: 0.1em 0.4em;
+                              border-radius: 3px; font-family: monospace;">
+                        ${{ ticker }}
+                    </a>
+                    {% endfor %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</article>
 {% endif %}
 
 {# ── Event timeline ── #}
@@ -216,7 +290,7 @@
 {% endif %}
 
 {% else %}
-{# ── Fallback: no events yet ── #}
+{# ── Fallback: no upcoming events yet ── #}
 <article>
     <header>
         <strong>Finance YouTuber Calendar</strong>
@@ -278,8 +352,68 @@
 </article>
 {% endif %}
 
-{# ── Filter styles + script ── #}
+{# ── Recently Posted + Filter styles + script ── #}
 <style>
+    .recent-uploads-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1em;
+        margin-top: 0.5em;
+    }
+    .recent-upload-card {
+        border: 1px solid #f4f4f5;
+        border-radius: 10px;
+        overflow: hidden;
+        transition: box-shadow 0.15s;
+        display: flex;
+        flex-direction: column;
+    }
+    .recent-upload-card:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .recent-upload-thumb-link {
+        display: block;
+        position: relative;
+        flex-shrink: 0;
+    }
+    .recent-upload-thumb {
+        width: 100%;
+        aspect-ratio: 16/9;
+        object-fit: cover;
+        display: block;
+    }
+    .recent-upload-sentiment-dot {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        border: 2px solid #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .recent-upload-body {
+        padding: 0.6em 0.75em 0.5em;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+    }
+    .recent-upload-title {
+        text-decoration: none;
+        font-weight: 500;
+        color: #18181b;
+        font-size: 0.85em;
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .recent-upload-title:hover {
+        color: #3b82f6;
+    }
+
     .calendar-filter-pill {
         background: none;
         border: 1px solid #e4e4e7;
@@ -302,6 +436,9 @@
     }
 
     @media (max-width: 768px) {
+        .recent-uploads-grid {
+            grid-template-columns: 1fr;
+        }
         .calendar-event-card {
             flex-direction: column !important;
         }
@@ -325,4 +462,21 @@ window.filterCalendar = function(sentiment) {
         }
     });
 };
+
+{# Convert published timestamps to relative time #}
+(function() {
+    document.querySelectorAll('[data-published]').forEach(function(el) {
+        try {
+            var pub = new Date(el.dataset.published);
+            var now = new Date();
+            var diff = Math.floor((now - pub) / 1000);
+            var text;
+            if (diff < 60) text = 'Just now';
+            else if (diff < 3600) text = Math.floor(diff / 60) + 'm ago';
+            else if (diff < 86400) text = Math.floor(diff / 3600) + 'h ago';
+            else text = Math.floor(diff / 86400) + 'd ago';
+            el.textContent = text;
+        } catch(e) {}
+    });
+})();
 </script>
