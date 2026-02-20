@@ -556,6 +556,19 @@ def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
         rows = supabase_cache.get_insider_trades_for_chart(days=30, limit_per_type=250)
         if rows:
             trades = [InsiderTrade.from_db_row(r) for r in rows]
+            logger.info("Chart L2 hit: %d trades (%d buys, %d sells)",
+                        len(trades),
+                        sum(1 for t in trades if "Purchase" in t.trade_type),
+                        sum(1 for t in trades if "Sale" in t.trade_type))
+            _set_cached(cache_key, trades)
+            return aggregate_top_tickers(trades, limit=limit, mixed=True)
+
+        # ── L3: Supabase chart query failed -- fetch buys + sells separately ──
+        logger.warning("Chart L2 returned None; falling back to separate queries")
+        buy_trades = get_latest_insider_trades(trade_type="p", count=200)
+        sell_trades = get_latest_insider_trades(trade_type="s", count=200)
+        trades = (buy_trades or []) + (sell_trades or [])
+        if trades:
             _set_cached(cache_key, trades)
             return aggregate_top_tickers(trades, limit=limit, mixed=True)
     else:
@@ -565,10 +578,10 @@ def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
             _set_cached(cache_key, trades)
             return aggregate_top_tickers(trades, limit=limit, mixed=False)
 
-    # ── L3: Fall back to standard 100-row fetch (degraded) ──
-    trades = get_latest_insider_trades(trade_type=trade_type, count=100)
-    if trades:
-        return aggregate_top_tickers(trades, limit=limit, mixed=is_mixed)
+        # ── L3: Fall back to smaller fetch ──
+        trades = get_latest_insider_trades(trade_type=trade_type, count=100)
+        if trades:
+            return aggregate_top_tickers(trades, limit=limit, mixed=False)
 
     # ── L4: Stale data — never show empty chart ──
     if stale_data:
