@@ -1,7 +1,8 @@
 """13F Filing Viewer — FastAPI web application.
 
 Production-ready with: security headers, request logging, exception
-handlers, rate limiting, health check, structured logging, and Sentry.
+handlers, rate limiting, health check, structured logging, Sentry,
+and Supabase-backed persistent cache.
 """
 
 import os as _os
