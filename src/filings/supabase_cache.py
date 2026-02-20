@@ -628,17 +628,19 @@ def get_insider_trades(
 
 def get_insider_trades_for_chart(
     days: int = 30,
-    limit: int = 500,
+    limit_per_type: int = 250,
 ) -> list[dict] | None:
     """Query ``insider_trades`` over a time window for chart aggregation.
 
-    Unlike :func:`get_insider_trades` (which fetches the *N* most recent
-    rows for the table), this returns trades across a date range so that
-    both buys **and** sells are represented in the momentum chart.
+    Fetches purchases and sales **separately** to guarantee both types
+    appear in the result set, then merges them.  A single mixed query
+    is always dominated by sales due to volume disparity (~90 %+ of
+    insider activity), so a LIMIT on a combined query excludes purchases.
 
     Args:
         days: How many days back to look (default 30).
-        limit: Max rows to return (default 500).
+        limit_per_type: Max rows per trade type (default 250 →
+            up to 500 total).
 
     Returns list of row dicts, or ``None`` if Supabase is unavailable.
     """
@@ -651,15 +653,28 @@ def get_insider_trades_for_chart(
             datetime.now(timezone.utc) - timedelta(days=days)
         ).strftime("%Y-%m-%d")
 
-        resp = (
+        buys = (
             client.table("insider_trades")
             .select("*")
+            .ilike("trade_type", "%Purchase%")
             .gte("trade_date", cutoff)
             .order("trade_date", desc=True)
-            .limit(limit)
+            .limit(limit_per_type)
             .execute()
-        )
-        return resp.data
+        ).data or []
+
+        sells = (
+            client.table("insider_trades")
+            .select("*")
+            .ilike("trade_type", "%Sale%")
+            .gte("trade_date", cutoff)
+            .order("trade_date", desc=True)
+            .limit(limit_per_type)
+            .execute()
+        ).data or []
+
+        combined = buys + sells
+        return combined if combined else None
     except Exception as exc:
         logger.warning("get_insider_trades_for_chart failed: %s", exc)
         return None
