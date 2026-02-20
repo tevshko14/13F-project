@@ -450,13 +450,26 @@
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-activity" class="gp-panel{% if view == 'activity' %} active{% endif %}">
     <div id="activity-dashboard"
-         hx-get="/api/activity-feed?timeframe=ALL"
+         hx-get="/api/activity-feed?timeframe=ALL&ptype=guru"
          hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
          hx-swap="innerHTML">
         <article>
             <p aria-busy="true"><span class="spinner"></span> Loading activity intelligence...</p>
         </article>
     </div>
+    <script>
+    /* Read URL params on load and override the default hx-get if ptype/timeframe specified */
+    (function() {
+        var params = new URLSearchParams(window.location.search);
+        var ptype = params.get('ptype') || 'guru';
+        var tf = params.get('timeframe') || 'ALL';
+        var el = document.getElementById('activity-dashboard');
+        if (el) {
+            el.setAttribute('hx-get', '/api/activity-feed?timeframe=' + tf + '&ptype=' + ptype);
+            if (window.htmx) htmx.process(el);
+        }
+    })();
+    </script>
 </div>{# end panel-activity #}
 
 {# ── Tab Switching + URL Sync Script ── #}

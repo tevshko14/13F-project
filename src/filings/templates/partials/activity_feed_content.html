@@ -1,7 +1,7 @@
 {% from "partials/ticker_link.html" import ticker_link %}
 {% from "partials/signal_badge.html" import signal_badge %}
 
-{# ── Sticky Sentiment Header ── #}
+{# -- Sticky Sentiment Header -- #}
 <div class="activity-stats-bar">
     <div class="stat">
         <span class="stat-label">Sentiment</span>
@@ -24,22 +24,36 @@
     </div>
 </div>
 
-{# ── Controls Bar: Timeframe + AUM Filter ── #}
+{# -- Controls Bar: Portfolio Type + Timeframe + AUM Filter -- #}
 <div class="activity-controls">
+    {# Portfolio Type Toggle (server-side, zinc/gray) #}
+    <div class="ptype-toggle" id="ptype-toggle">
+        <button class="ptype-pill{% if ptype == 'guru' %} active{% endif %}"
+                hx-get="/api/activity-feed?timeframe={{ timeframe }}&ptype=guru"
+                hx-target="#activity-dashboard"
+                hx-swap="innerHTML">Gurus (&lt; 100 names)</button>
+        <button class="ptype-pill{% if ptype == 'institutional' %} active{% endif %}"
+                hx-get="/api/activity-feed?timeframe={{ timeframe }}&ptype=institutional"
+                hx-target="#activity-dashboard"
+                hx-swap="innerHTML">Institutional (&gt; 100 names)</button>
+    </div>
+
+    {# Timeframe Toggle (carries ptype) #}
     <div class="activity-toggle" id="activity-toggle">
         <button class="activity-pill{% if timeframe == '1W' %} active{% endif %}"
-                hx-get="/api/activity-feed?timeframe=1W"
+                hx-get="/api/activity-feed?timeframe=1W&ptype={{ ptype }}"
                 hx-target="#activity-dashboard"
                 hx-swap="innerHTML">1W</button>
         <button class="activity-pill{% if timeframe == '1M' %} active{% endif %}"
-                hx-get="/api/activity-feed?timeframe=1M"
+                hx-get="/api/activity-feed?timeframe=1M&ptype={{ ptype }}"
                 hx-target="#activity-dashboard"
                 hx-swap="innerHTML">1M</button>
         <button class="activity-pill{% if timeframe == 'ALL' %} active{% endif %}"
-                hx-get="/api/activity-feed?timeframe=ALL"
+                hx-get="/api/activity-feed?timeframe=ALL&ptype={{ ptype }}"
                 hx-target="#activity-dashboard"
                 hx-swap="innerHTML">ALL</button>
     </div>
+
     <div class="aum-filter">
         <label>Min AUM: <strong id="aum-label">All</strong></label>
         <input type="range" id="aum-slider" min="0" max="5" value="0"
@@ -55,7 +69,7 @@
     </div>
 </div>
 
-{# ── Consensus Clusters (multi-investor moves) ── #}
+{# -- Consensus Clusters (multi-investor moves) -- #}
 {% if clusters %}
 <h4 class="section-label">Consensus Moves ({{ clusters|length }})</h4>
 {% for c in clusters %}
@@ -74,11 +88,16 @@
             <tr data-fund-aum="{{ item.fund_aum }}">
                 <td>
                     <a href="/holdings/{{ item.fund_cik }}">{{ item.fund_display_name }}</a>
-                    <small class="fund-aum">${{ "{:,.0f}".format(item.fund_aum / 1e9) }}B</small>
+                    <small class="fund-aum">${{ "{:,.0f}".format(item.fund_aum / 1e9) }}B - {{ item.fund_total_holdings }} names</small>
                 </td>
                 <td>{{ signal_badge(item.signal) }}</td>
-                <td class="text-right conviction" title="Conviction = |Share Change| &times; Portfolio Weight / 100">
+                <td class="text-right conviction{% if item.conviction > 50 %} high-conviction{% endif %}"
+                    title="Conviction = |Share Change| x Portfolio Weight / 100">
                     {{ "{:.1f}".format(item.conviction) }}
+                </td>
+                <td class="text-right portfolio-impact"
+                    title="This trade = {{ "%.2f"|format(item.portfolio_impact) }}% of fund AUM">
+                    {{ "%.1f"|format(item.portfolio_impact) }}%
                 </td>
                 <td class="text-right">
                     <span class="{% if item.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
@@ -89,7 +108,7 @@
                 {% if has_prices and item.current_price %}
                 <td class="text-right">${{ "{:,.2f}".format(item.current_price) }}</td>
                 {% elif has_prices %}
-                <td class="text-right">&mdash;</td>
+                <td class="text-right">-</td>
                 {% endif %}
             </tr>
             {% endfor %}
@@ -99,9 +118,9 @@
 {% endfor %}
 {% endif %}
 
-{# ── Individual Moves (single-investor, non-clustered) ── #}
+{# -- Individual Moves (single-investor, non-clustered) -- #}
 {% if solo_items %}
-<h4 class="section-label">Individual Moves ({{ solo_items|length }})</h4>
+<h4 class="section-label">Individual Moves ({{ total_solo }})</h4>
 <figure>
 <table class="gp-table activity-table">
     <thead>
@@ -111,7 +130,8 @@
             <th data-sort="text">Ticker</th>
             <th data-sort="text">Stock</th>
             <th class="text-right" data-sort="number">Conviction</th>
-            <th class="text-right" data-sort="number">Share &Delta;</th>
+            <th class="text-right" data-sort="number">Impact</th>
+            <th class="text-right" data-sort="number">Share &#916;</th>
             <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
             {% if has_prices %}
             <th class="text-right" data-sort="number">Price</th>
@@ -126,13 +146,18 @@
                 <a href="/holdings/{{ item.fund_cik }}">
                     <strong>{{ item.fund_display_name }}</strong>
                 </a>
-                <small class="fund-aum">${{ "{:,.0f}".format(item.fund_aum / 1e9) }}B AUM</small>
+                <small class="fund-aum">${{ "{:,.0f}".format(item.fund_aum / 1e9) }}B AUM - {{ item.fund_total_holdings }} names</small>
             </td>
             <td>{{ signal_badge(item.signal) }}</td>
             <td>{{ ticker_link(item.ticker, item.cusip) }}</td>
             <td>{{ item.issuer_name }}</td>
-            <td class="text-right conviction" title="Conviction = |Share Change| &times; Portfolio Weight / 100">
+            <td class="text-right conviction{% if item.conviction > 50 %} high-conviction{% endif %}"
+                title="Conviction = |Share Change| x Portfolio Weight / 100">
                 {{ "{:.1f}".format(item.conviction) }}
+            </td>
+            <td class="text-right portfolio-impact"
+                title="This trade = {{ "%.2f"|format(item.portfolio_impact) }}% of fund AUM">
+                {{ "%.1f"|format(item.portfolio_impact) }}%
             </td>
             <td class="text-right">
                 {% if item.share_change != 0 %}
@@ -145,11 +170,24 @@
             {% if has_prices and item.current_price %}
             <td class="text-right">${{ "{:,.2f}".format(item.current_price) }}</td>
             {% elif has_prices %}
-            <td class="text-right">&mdash;</td>
+            <td class="text-right">-</td>
             {% endif %}
             <td class="text-small">{{ item.filing_date }}</td>
         </tr>
         {% endfor %}
+        {% if has_more %}
+        <tr id="load-more-row">
+            <td colspan="{% if has_prices %}10{% else %}9{% endif %}" style="text-align:center;padding:1em;">
+                <button class="gp-expand-btn"
+                        hx-get="/api/activity-feed?timeframe={{ timeframe }}&ptype={{ ptype }}&page={{ next_page }}"
+                        hx-target="closest tr"
+                        hx-swap="outerHTML">
+                    Load More ({{ total_solo - (page * 50) }} remaining)
+                    <span class="gp-expand-arrow">&#9660;</span>
+                </button>
+            </td>
+        </tr>
+        {% endif %}
     </tbody>
 </table>
 </figure>
@@ -157,8 +195,8 @@
 
 {% if not clusters and not solo_items %}
 <article>
-    <p>No activity data available{% if timeframe != 'ALL' %} for this timeframe{% endif %}. Data will load as superinvestor portfolios are cached.</p>
-    <p><a href="/grand-portfolio?view=funds" role="button">View Superinvestors</a> to trigger data loading.</p>
+    <p>No activity found for {{ "high-conviction funds" if ptype == "guru" else "institutional funds" }}{% if timeframe != 'ALL' %} in this timeframe{% endif %}.</p>
+    <p>Try switching to {{ "Institutional" if ptype == "guru" else "Gurus" }} or expanding the timeframe.</p>
 </article>
 {% endif %}
 
@@ -170,34 +208,33 @@ function toggleCluster(header) {
     detail.style.display = detail.style.display === 'none' ? '' : 'none';
 }
 
-/* AUM slider filtering (client-side, instant) */
 (function() {
+    /* AUM slider filtering (client-side, instant) */
     var slider = document.getElementById('aum-slider');
     var label = document.getElementById('aum-label');
     var thresholds = [0, 1e9, 5e9, 10e9, 50e9, 100e9];
     var labels = ['All', '$1B+', '$5B+', '$10B+', '$50B+', '$100B+'];
-    if (!slider) return;
-    slider.addEventListener('input', function() {
-        var idx = parseInt(this.value);
-        label.textContent = labels[idx];
-        var minAum = thresholds[idx];
-        /* Hide/show rows by data-fund-aum */
-        document.querySelectorAll('[data-fund-aum]').forEach(function(el) {
-            var aum = parseInt(el.dataset.fundAum || '0');
-            el.style.display = aum >= minAum ? '' : 'none';
-        });
-        /* Hide clusters where all children hidden */
-        document.querySelectorAll('.activity-cluster').forEach(function(cl) {
-            var rows = cl.querySelectorAll('.cluster-table tr');
-            var anyVisible = false;
-            rows.forEach(function(r) {
-                if (r.style.display !== 'none') anyVisible = true;
+    if (slider) {
+        slider.addEventListener('input', function() {
+            var idx = parseInt(this.value);
+            label.textContent = labels[idx];
+            var minAum = thresholds[idx];
+            document.querySelectorAll('[data-fund-aum]').forEach(function(el) {
+                var aum = parseInt(el.dataset.fundAum || '0');
+                el.style.display = aum >= minAum ? '' : 'none';
             });
-            cl.style.display = anyVisible ? '' : 'none';
+            document.querySelectorAll('.activity-cluster').forEach(function(cl) {
+                var rows = cl.querySelectorAll('.cluster-table tr');
+                var anyVisible = false;
+                rows.forEach(function(r) {
+                    if (r.style.display !== 'none') anyVisible = true;
+                });
+                cl.style.display = anyVisible ? '' : 'none';
+            });
         });
-    });
+    }
 
-    /* Pill toggle active state */
+    /* Timeframe pill toggle active state */
     var toggle = document.getElementById('activity-toggle');
     if (toggle) {
         toggle.addEventListener('click', function(e) {
@@ -209,5 +246,34 @@ function toggleCluster(header) {
             btn.classList.add('active');
         });
     }
+
+    /* Portfolio type pill toggle active state */
+    var ptypeToggle = document.getElementById('ptype-toggle');
+    if (ptypeToggle) {
+        ptypeToggle.addEventListener('click', function(e) {
+            var btn = e.target.closest('.ptype-pill');
+            if (!btn) return;
+            ptypeToggle.querySelectorAll('.ptype-pill').forEach(function(b) {
+                b.classList.remove('active');
+            });
+            btn.classList.add('active');
+        });
+    }
+
+    /* URL sync - update browser URL when activity dashboard swaps */
+    document.body.addEventListener('htmx:afterSwap', function(evt) {
+        if (evt.detail.target.id === 'activity-dashboard') {
+            try {
+                var reqUrl = new URL(evt.detail.pathInfo.requestPath, window.location.origin);
+                var ptype = reqUrl.searchParams.get('ptype') || 'guru';
+                var timeframe = reqUrl.searchParams.get('timeframe') || 'ALL';
+                var pageUrl = new URL(window.location);
+                pageUrl.searchParams.set('view', 'activity');
+                pageUrl.searchParams.set('ptype', ptype);
+                pageUrl.searchParams.set('timeframe', timeframe);
+                history.replaceState(null, '', pageUrl.toString());
+            } catch(e) {}
+        }
+    });
 })();
 </script>
