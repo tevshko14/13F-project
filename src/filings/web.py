@@ -120,7 +120,7 @@ async def lifespan(app: FastAPI):
 
     app.state.refreshing = False
 
-    if cache.is_cache_stale(app.state.fund_cache) and app.state.fund_cache:
+    if cache.is_cache_stale_for_startup(app.state.fund_cache) and app.state.fund_cache:
         asyncio.create_task(_background_refresh(app))
 
     # Start periodic polling for new filings
