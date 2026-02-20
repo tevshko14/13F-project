@@ -299,10 +299,11 @@ def aggregate_top_tickers(
     """Aggregate trades by ticker, return top N for the chart.
 
     Args:
-        mixed: When ``True`` (Latest tab), selects top N/2 by buy volume
-            and top N/2 by sell volume so both sides are always visible.
-            When ``False`` (Purchases / Sales tab), simply picks the top
-            N by total dollar volume.
+        mixed: When ``True`` (Latest tab), selects top N/2 by most
+            positive net flow and top N/2 by most negative net flow,
+            sorted ascending from most bearish (left) to most bullish
+            (right).  When ``False`` (Purchases / Sales tab), simply
+            picks the top N by total dollar volume.
 
     Returns list of dicts for JSON serialization, each containing:
     ticker, company_name, buy_value, sell_value, net_flow, trade_count,
@@ -349,37 +350,39 @@ def aggregate_top_tickers(
     all_tickers = list(ticker_data.values())
 
     if mixed:
-        # ── Latest tab: top N/2 by buy volume + top N/2 by sell volume ──
-        # Guarantees the chart shows green and red bars even though sell
-        # volume vastly outnumbers buy volume.
+        # ── Latest tab: top N/2 by most positive + N/2 by most negative ──
+        # Uses *net dollar flow* (buys - sells) so the chart naturally
+        # shows a diverging layout from bearish (left) to bullish (right).
         half = max(limit // 2, 1)
 
-        top_buyers = sorted(
-            [d for d in all_tickers if d["buy_value"] > 0],
-            key=lambda d: d["buy_value"],
-            reverse=True,
-        )[:half]
+        for d in all_tickers:
+            d["_net"] = d["buy_value"] - d["sell_value"]
 
-        top_sellers = sorted(
-            [d for d in all_tickers if d["sell_value"] > 0],
-            key=lambda d: d["sell_value"],
-            reverse=True,
-        )[:half]
+        net_negative = sorted(
+            [d for d in all_tickers if d["_net"] < 0],
+            key=lambda d: d["_net"],           # most negative first
+        )
+        net_positive = sorted(
+            [d for d in all_tickers if d["_net"] > 0],
+            key=lambda d: d["_net"],
+            reverse=True,                      # most positive first
+        )
 
-        seen = set()
-        sorted_tickers = []
-        for d in top_buyers + top_sellers:
-            if d["ticker"] not in seen:
-                seen.add(d["ticker"])
-                sorted_tickers.append(d)
+        top_sells = net_negative[:half]
+        top_buys = net_positive[:half]
 
-        if len(sorted_tickers) < limit:
-            remaining = sorted(
-                [d for d in all_tickers if d["ticker"] not in seen],
-                key=lambda d: d["buy_value"] + d["sell_value"],
-                reverse=True,
-            )
-            sorted_tickers.extend(remaining[: limit - len(sorted_tickers)])
+        # Backfill if one side has fewer than half
+        if len(top_buys) < half:
+            top_sells = net_negative[: limit - len(top_buys)]
+        elif len(top_sells) < half:
+            top_buys = net_positive[: limit - len(top_sells)]
+
+        # Sort ascending by net flow: most bearish (left) → most bullish (right)
+        sorted_tickers = sorted(top_sells + top_buys, key=lambda d: d["_net"])
+
+        # Clean up temp key
+        for d in all_tickers:
+            d.pop("_net", None)
     else:
         # ── Purchases / Sales tab: simple top N by total dollar volume ──
         sorted_tickers = sorted(
