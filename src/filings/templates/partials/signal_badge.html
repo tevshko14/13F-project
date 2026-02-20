@@ -1,0 +1,15 @@
+{% macro signal_badge(signal) -%}
+{% if signal == "NEW ENTRY" %}
+<span class="badge badge-new-entry">NEW ENTRY</span>
+{% elif signal == "HEAVY ADD" %}
+<span class="badge badge-heavy-add">HEAVY ADD</span>
+{% elif signal == "ADD" %}
+<span class="badge badge-add">ADD</span>
+{% elif signal == "REDUCE" %}
+<span class="badge badge-reduce">REDUCE</span>
+{% elif signal == "TRIM" %}
+<span class="badge badge-trim">TRIM</span>
+{% elif signal == "LIQUIDATED" %}
+<span class="badge badge-liquidated">LIQUIDATED</span>
+{% endif %}
+{%- endmacro %}

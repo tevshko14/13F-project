@@ -334,6 +334,69 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
         return {}
 
 
+# ── Current Prices Batch ─────────────────────────────────────────────
+
+_prices_batch_cache: tuple[float, dict[str, float]] | None = None
+_PRICES_BATCH_TTL = 1_800  # 30 minutes
+
+
+def get_current_prices_batch(tickers: list[str]) -> dict[str, float]:
+    """Get current prices for a list of tickers via yfinance.
+
+    Returns ``{ticker: price}``.  Uses a 30-min in-memory TTL cache.
+    Tries existing S&P 500 market data first (already cached), then does
+    a small yfinance batch download for any remaining tickers.
+    """
+    global _prices_batch_cache
+
+    # Check full-set cache first
+    with _lock:
+        if _prices_batch_cache is not None:
+            ts, data = _prices_batch_cache
+            if time.time() - ts < _PRICES_BATCH_TTL:
+                return {t: data[t] for t in tickers if t in data}
+
+    result: dict[str, float] = {}
+
+    # 1. Pull from S&P 500 market data (already cached, cheap)
+    try:
+        sp500 = get_sp500_market_data("1D")
+        for t in tickers:
+            entry = sp500.get(t)
+            if entry and isinstance(entry, dict) and "price" in entry:
+                result[t] = entry["price"]
+    except Exception:
+        pass
+
+    # 2. Batch-download missing tickers via yfinance
+    missing = [t for t in tickers if t not in result and t]
+    if missing:
+        try:
+            import yfinance as yf
+
+            # Limit batch to avoid huge downloads
+            batch = missing[:80]
+            df = yf.download(batch, period="1d", threads=True, progress=False)
+            if not df.empty:
+                close = df.get("Close")
+                if close is not None:
+                    for t in batch:
+                        try:
+                            if t in close.columns:
+                                val = close[t].dropna()
+                                if len(val) > 0:
+                                    result[t] = round(float(val.iloc[-1]), 2)
+                        except Exception:
+                            continue
+        except Exception as e:
+            logger.debug("yfinance batch price fetch failed: %s", e)
+
+    with _lock:
+        _prices_batch_cache = (time.time(), result)
+
+    return {t: result[t] for t in tickers if t in result}
+
+
 # ── Heatmap Builder ───────────────────────────────────────────────────
 
 def _pct_to_color(pct: float) -> str:
