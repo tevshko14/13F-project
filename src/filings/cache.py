@@ -111,11 +111,20 @@ def save_cache(data: dict) -> None:
 
 # ── Staleness Checks ────────────────────────────────────────────────
 
-def is_cache_stale() -> bool:
-    """Check if the overall cache file is older than the effective TTL.
+def is_cache_stale(cache_data: dict | None = None) -> bool:
+    """Check if the cache needs a background refresh.
 
-    Used on startup to decide whether to trigger a background refresh.
+    If *cache_data* is provided (e.g. loaded from Supabase), checks whether
+    ANY fund in it is stale via per-fund ``_last_refreshed`` timestamps.
+    Otherwise falls back to disk-file mtime (local dev).
     """
+    if cache_data:
+        # In-memory data from Supabase — check per-fund timestamps
+        all_ciks = list(cache_data.keys())
+        stale = get_stale_ciks(cache_data, all_ciks)
+        return len(stale) > 0
+
+    # Fallback: disk file mtime (local dev)
     if not CACHE_FILE.exists():
         return True
     try:
@@ -167,21 +176,46 @@ def stamp_fund_data(data: dict) -> dict:
     return data
 
 
-def get_cache_age_str() -> str:
-    """Return human-readable cache age string."""
+def _format_age(age: timedelta) -> str:
+    """Format a timedelta into a human-readable age string."""
+    secs = age.total_seconds()
+    if secs < 60:
+        return "Just now"
+    elif secs < 3600:
+        return f"{int(secs / 60)} min ago"
+    elif secs < 86400:
+        return f"{int(secs / 3600)} hours ago"
+    else:
+        return f"{int(secs / 86400)} days ago"
+
+
+def get_cache_age_str(cache_data: dict | None = None) -> str:
+    """Return human-readable cache age string.
+
+    If *cache_data* is provided, uses the oldest ``_last_refreshed``
+    timestamp across all funds.  Otherwise falls back to disk-file mtime.
+    """
+    # ── Try in-memory data first (works on Railway where no disk file exists)
+    if cache_data:
+        oldest: datetime | None = None
+        for fund in cache_data.values():
+            lr = fund.get("_last_refreshed") if isinstance(fund, dict) else None
+            if lr:
+                try:
+                    dt = datetime.fromisoformat(lr)
+                    if oldest is None or dt < oldest:
+                        oldest = dt
+                except (ValueError, TypeError):
+                    pass
+        if oldest:
+            return _format_age(datetime.now() - oldest)
+
+    # ── Fallback: disk file mtime (local dev) ──
     if not CACHE_FILE.exists():
         return "No cache"
     try:
         mtime = datetime.fromtimestamp(CACHE_FILE.stat().st_mtime)
-        age = datetime.now() - mtime
-        if age.total_seconds() < 60:
-            return "Just now"
-        elif age.total_seconds() < 3600:
-            return f"{int(age.total_seconds() / 60)} min ago"
-        elif age.total_seconds() < 86400:
-            return f"{int(age.total_seconds() / 3600)} hours ago"
-        else:
-            return f"{int(age.total_seconds() / 86400)} days ago"
+        return _format_age(datetime.now() - mtime)
     except OSError:
         return "Unknown"
 
@@ -206,6 +240,31 @@ def get_fund_age_str(fund_data: dict) -> str:
         return "Unknown"
 
 
+# ── SEC Rate Limiting ────────────────────────────────────────────────
+# Guard against excessive SEC API calls during deploys / background refreshes.
+_sec_calls_this_session = 0
+_SEC_MAX_CALLS_PER_SESSION = int(os.environ.get("SEC_MAX_CALLS", "200"))
+_SEC_BATCH_SIZE = 10               # Pause after every N funds
+_SEC_BATCH_PAUSE = 5               # Seconds to pause between batches
+
+
+def _check_sec_rate_limit() -> bool:
+    """Return True if we're OK to make another SEC API call."""
+    if _sec_calls_this_session >= _SEC_MAX_CALLS_PER_SESSION:
+        logger.warning(
+            "SEC session call limit reached (%d) — stopping further requests",
+            _SEC_MAX_CALLS_PER_SESSION,
+        )
+        return False
+    return True
+
+
+def _record_sec_call() -> None:
+    """Record that we made a SEC API call."""
+    global _sec_calls_this_session
+    _sec_calls_this_session += 1
+
+
 # ── Refresh Operations ───────────────────────────────────────────────
 
 def refresh_single_fund(cik: str) -> dict | None:
@@ -216,9 +275,15 @@ def refresh_single_fund(cik: str) -> dict | None:
 
     Write-through: on success the data is also persisted to Supabase L2
     so that subsequent deploys can hydrate from there instantly.
+
+    Respects the per-session SEC call cap (see ``_check_sec_rate_limit``).
     """
+    if not _check_sec_rate_limit():
+        return None
+
     from filings.client import get_fund_summary
     try:
+        _record_sec_call()
         data = get_fund_summary(cik)
         stamped = stamp_fund_data(data)
 
