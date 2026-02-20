@@ -632,15 +632,20 @@
     /* ── Calendar lazy-load ── */
     function loadCalendar() {
         fetch('/api/retail/calendar')
-            .then(function(r) { return r.text(); })
+            .then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.text();
+            })
             .then(function(html) {
                 document.getElementById('retail-calendar-content').innerHTML = html;
                 if (window.initSortableTables) window.initSortableTables();
             })
             .catch(function() {
                 document.getElementById('retail-calendar-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Failed to load calendar. Please try again later.</p>';
+                    '<div style="text-align: center; padding: 2em 0;">' +
+                    '<p class="text-muted">Calendar is temporarily unavailable.</p>' +
+                    '<button onclick="loadCalendar()" style="margin-top: 0.5em; font-size: 0.85em;">Retry</button>' +
+                    '</div>';
             });
     }
 
