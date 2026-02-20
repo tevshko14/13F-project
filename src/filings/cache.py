@@ -36,6 +36,11 @@ REFRESH_INTERVAL = timedelta(days=7)
 # so new filings appear faster.
 FILING_SEASON_REFRESH_INTERVAL = timedelta(hours=12)
 
+# On startup (deploy), use a much longer TTL so routine deploys
+# never trigger a mass SEC refresh.  The periodic _poll_loop still
+# uses the normal shorter TTL to catch new filings.
+STARTUP_REFRESH_INTERVAL = timedelta(hours=48)
+
 
 def _get_effective_ttl() -> timedelta:
     """Return the appropriate TTL based on filing season."""
@@ -132,6 +137,31 @@ def is_cache_stale(cache_data: dict | None = None) -> bool:
         return datetime.now() - mtime > _get_effective_ttl()
     except OSError:
         return True
+
+
+def is_cache_stale_for_startup(cache_data: dict) -> bool:
+    """Startup-specific staleness check with a longer TTL (48 h).
+
+    Used in the ``lifespan()`` handler so that routine Railway deploys
+    never trigger a mass SEC refresh.  The periodic ``_poll_loop`` still
+    uses ``is_cache_stale()`` / ``get_stale_ciks()`` with the normal
+    12-hour filing-season TTL.
+    """
+    if not cache_data:
+        return True
+    for fund in cache_data.values():
+        if not isinstance(fund, dict):
+            continue
+        lr = fund.get("_last_refreshed")
+        if not lr:
+            return True  # No timestamp → treat as stale
+        try:
+            age = datetime.now() - datetime.fromisoformat(lr)
+            if age > STARTUP_REFRESH_INTERVAL:
+                return True
+        except (ValueError, TypeError):
+            return True
+    return False
 
 
 def is_fund_stale(fund_data: dict) -> bool:
