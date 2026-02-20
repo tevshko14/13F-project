@@ -77,6 +77,41 @@ class ActivityItem:
 
 
 @dataclass
+class EnrichedActivityItem:
+    """Activity entry enriched with conviction score and price data."""
+    fund_display_name: str
+    fund_cik: str
+    fund_aum: int                    # total_value from fund cache
+    issuer_name: str
+    ticker: str | None
+    cusip: str
+    action: str                      # "NEW BUY", "ADD", "REDUCE", "SOLD"
+    signal: str                      # "NEW ENTRY", "HEAVY ADD", "ADD", "TRIM", "LIQUIDATED", "REDUCE"
+    share_change: int
+    current_value: int
+    portfolio_weight: float          # % of this holding in the fund
+    conviction: float                # abs(share_change) × portfolio_weight / 100
+    filing_date: str
+    price_at_filing: float | None    # stock price near filing_date (future)
+    current_price: float | None      # latest stock price
+    price_change_pct: float | None   # % change from filing to current
+
+
+@dataclass
+class ActivityCluster:
+    """Multiple investors acting on the same ticker — consensus signal."""
+    ticker: str | None
+    cusip: str
+    issuer_name: str
+    action_summary: str              # "5 Buying / 2 Selling"
+    net_sentiment: str               # "BULLISH", "BEARISH", "MIXED"
+    investor_count: int
+    combined_value: int
+    avg_conviction: float
+    items: list[EnrichedActivityItem]  # Individual entries (for expand)
+
+
+@dataclass
 class GrandPortfolioEntry:
     """A single stock in the grand portfolio aggregation."""
     issuer_name: str

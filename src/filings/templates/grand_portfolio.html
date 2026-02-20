@@ -446,70 +446,17 @@
 </div>{# end panel-funds #}
 
 {# ══════════════════════════════════════════════════════════════════ #}
-{# ── Panel 3: Activity (Recent buys, sells, position changes)       #}
+{# ── Panel 3: Activity Intelligence Dashboard                       #}
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-activity" class="gp-panel{% if view == 'activity' %} active{% endif %}">
-
-{% if activities %}
-<p class="text-muted">Showing {{ activities|length }} recent changes (sorted by value)</p>
-
-<figure>
-<table class="gp-table">
-    <thead>
-        <tr>
-            <th>#</th>
-            <th data-sort="text">Investor</th>
-            <th data-sort="activity">Action</th>
-            <th data-sort="text">Ticker</th>
-            <th data-sort="text">Stock</th>
-            <th class="text-right" data-sort="number">Share Change</th>
-            <th class="text-right" data-sort="number" data-sort-default="desc">Current Value ($)</th>
-            <th data-sort="date">Filed</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for a in activities %}
-        <tr>
-            <td>{{ loop.index }}</td>
-            <td>
-                <a href="/holdings/{{ a.fund_cik }}">
-                    <strong>{{ a.fund_display_name }}</strong>
-                </a>
-            </td>
-            <td>
-                {% if a.action == "NEW BUY" %}
-                    <span class="badge badge-new">NEW BUY</span>
-                {% elif a.action == "ADD" %}
-                    <span class="badge badge-add">ADD</span>
-                {% elif a.action == "REDUCE" %}
-                    <span class="badge badge-reduce">REDUCE</span>
-                {% elif a.action == "SOLD" %}
-                    <span class="badge badge-sold">SOLD</span>
-                {% endif %}
-            </td>
-            <td>{{ ticker_link(a.ticker, a.cusip) }}</td>
-            <td>{{ a.issuer_name }}</td>
-            <td class="text-right">
-                {% if a.share_change != 0 %}
-                    <span class="{% if a.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
-                        {{ "{:+,}".format(a.share_change) }}
-                    </span>
-                {% else %}-{% endif %}
-            </td>
-            <td class="text-right">${{ "{:,.0f}".format(a.current_value) }}</td>
-            <td class="text-small">{{ a.filing_date }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-</figure>
-{% else %}
-<article>
-    <p>No activity data available yet. Data will load as superinvestor portfolios are cached.</p>
-    <p><a href="/grand-portfolio?view=funds" role="button">View Superinvestors</a> to trigger data loading.</p>
-</article>
-{% endif %}
-
+    <div id="activity-dashboard"
+         hx-get="/api/activity-feed?timeframe=ALL"
+         hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
+         hx-swap="innerHTML">
+        <article>
+            <p aria-busy="true"><span class="spinner"></span> Loading activity intelligence...</p>
+        </article>
+    </div>
 </div>{# end panel-activity #}
 
 {# ── Tab Switching + URL Sync Script ── #}

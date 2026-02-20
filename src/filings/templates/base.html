@@ -71,6 +71,94 @@
         .badge-reduce { background: #fce4ec; color: #c62828; }
         .badge-sold { background: #fce4ec; color: #b71c1c; }
 
+        /* Enhanced signal badges */
+        .badge-new-entry { background: #f3e5f5; color: #7b1fa2; }
+        .badge-heavy-add { background: #1b5e20; color: #fff; }
+        .badge-trim { background: #fff3e0; color: #e65100; }
+        .badge-liquidated { background: #212121; color: #ef5350; }
+
+        /* Consensus cluster sentiment badges */
+        .badge-bullish { background: #e8f5e9; color: #2e7d32; }
+        .badge-bearish { background: #fce4ec; color: #c62828; }
+        .badge-mixed { background: #fff8e1; color: #f57f17; }
+
+        /* Activity stats bar (sticky header) */
+        .activity-stats-bar {
+            display: flex; gap: 2em; padding: 0.75em 1em;
+            background: var(--card-background-color, #fff);
+            border: 1px solid var(--muted-border-color, #ddd);
+            border-radius: 8px; margin-bottom: 1em;
+            position: sticky; top: 0; z-index: 10;
+            flex-wrap: wrap;
+        }
+        .activity-stats-bar .stat-label {
+            font-size: 0.75em; color: var(--muted-color, #666); display: block;
+        }
+        .activity-stats-bar .stat-value { font-size: 1.1em; font-weight: 600; }
+        .activity-stats-bar .bullish { color: #2e7d32; }
+        .activity-stats-bar .bearish { color: #c62828; }
+
+        /* Activity controls bar */
+        .activity-controls {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 1em; flex-wrap: wrap; gap: 1em;
+        }
+
+        /* Activity pill toggle (same pattern as heatmap-pill) */
+        .activity-toggle {
+            display: inline-flex; border-radius: 6px; overflow: hidden;
+            border: 1px solid var(--muted-border-color, #ccc);
+        }
+        .activity-pill {
+            padding: 0.35em 1em; border: none; cursor: pointer;
+            background: transparent; font-size: 0.85em; font-weight: 500;
+            color: var(--color, inherit); transition: all 0.15s;
+        }
+        .activity-pill:hover { background: rgba(0,0,0,0.05); }
+        .activity-pill.active {
+            background: var(--primary, #1976d2); color: #fff;
+        }
+
+        /* AUM filter slider */
+        .aum-filter {
+            display: flex; align-items: center; gap: 0.5em; font-size: 0.85em;
+        }
+        .aum-filter input[type="range"] { width: 150px; }
+
+        /* Activity cluster rows */
+        .activity-cluster {
+            border: 1px solid var(--muted-border-color, #ddd);
+            border-radius: 8px; margin-bottom: 0.5em; overflow: hidden;
+        }
+        .cluster-header {
+            display: flex; align-items: center; gap: 1em;
+            padding: 0.75em 1em; cursor: pointer;
+            background: var(--card-background-color, #f8f9fa);
+            font-size: 0.92em;
+        }
+        .cluster-header:hover { background: rgba(0,0,0,0.04); }
+        .cluster-ticker { font-weight: bold; font-family: monospace; min-width: 5em; }
+        .cluster-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cluster-summary { font-size: 0.85em; color: var(--muted-color, #666); }
+        .cluster-value { font-family: monospace; font-weight: 500; }
+        .cluster-expand { margin-left: auto; transition: transform 0.2s; }
+        .cluster-header.open .cluster-expand { transform: rotate(90deg); }
+        .cluster-detail { padding: 0 1em 0.75em; }
+        .cluster-table { width: 100%; font-size: 0.9em; border-collapse: collapse; }
+        .cluster-table td { padding: 0.3em 0.5em; }
+
+        /* Fund AUM sub-label */
+        .fund-aum { display: block; color: var(--muted-color, #888); font-size: 0.75em; }
+
+        /* Section labels */
+        .section-label {
+            font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.05em;
+            color: var(--muted-color, #888); margin: 1.5em 0 0.5em;
+        }
+
+        /* Conviction column */
+        .conviction { font-family: monospace; }
+
         /* Ticker styling */
         .ticker { font-weight: bold; font-family: monospace; }
         a.ticker { text-decoration: none; }
