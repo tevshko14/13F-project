@@ -295,11 +295,12 @@ def aggregate_top_tickers(
     trades: list[InsiderTrade],
     limit: int = 10,
 ) -> list[dict]:
-    """Aggregate trades by ticker, return top N by total dollar volume.
+    """Aggregate trades by ticker, return top N with buys and sells.
 
-    Ranks tickers by ``buy_value + sell_value`` so the chart shows
-    the most actively traded tickers with both purchases and sales
-    visible on aggregate.
+    Selects the top N/2 tickers by buy volume and top N/2 by sell
+    volume, then merges.  This guarantees the chart always shows both
+    green (purchases) and red (sales) bars, even though insider selling
+    vastly outnumbers buying.
 
     Returns list of dicts for JSON serialization, each containing:
     ticker, company_name, buy_value, sell_value, net_flow, trade_count,
@@ -343,12 +344,41 @@ def aggregate_top_tickers(
             insider["sell_value"] += abs_val
         insider["count"] += 1
 
-    # Sort by total dollar volume (most actively traded tickers first)
-    sorted_tickers = sorted(
-        ticker_data.values(),
-        key=lambda d: d["buy_value"] + d["sell_value"],
+    # Select top tickers ensuring BOTH buys and sells are represented.
+    # Take the top half by buy volume + top half by sell volume, then
+    # deduplicate.  This guarantees the chart shows green and red bars
+    # even though sell volume vastly outnumbers buy volume.
+    half = max(limit // 2, 1)
+    all_tickers = list(ticker_data.values())
+
+    top_buyers = sorted(
+        [d for d in all_tickers if d["buy_value"] > 0],
+        key=lambda d: d["buy_value"],
         reverse=True,
-    )[:limit]
+    )[:half]
+
+    top_sellers = sorted(
+        [d for d in all_tickers if d["sell_value"] > 0],
+        key=lambda d: d["sell_value"],
+        reverse=True,
+    )[:half]
+
+    # Merge: buyers first, then sellers (skip duplicates)
+    seen = set()
+    sorted_tickers = []
+    for d in top_buyers + top_sellers:
+        if d["ticker"] not in seen:
+            seen.add(d["ticker"])
+            sorted_tickers.append(d)
+
+    # If we still have room, fill with remaining tickers by total volume
+    if len(sorted_tickers) < limit:
+        remaining = sorted(
+            [d for d in all_tickers if d["ticker"] not in seen],
+            key=lambda d: d["buy_value"] + d["sell_value"],
+            reverse=True,
+        )
+        sorted_tickers.extend(remaining[: limit - len(sorted_tickers)])
 
     result = []
     for d in sorted_tickers:
