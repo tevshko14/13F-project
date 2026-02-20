@@ -280,7 +280,11 @@ def aggregate_top_tickers(
     trades: list[InsiderTrade],
     limit: int = 10,
 ) -> list[dict]:
-    """Aggregate trades by ticker, return top N by total absolute dollar volume.
+    """Aggregate trades by ticker, return top N by absolute net flow.
+
+    Ranks tickers by ``abs(buy_value - sell_value)`` so the chart
+    highlights the strongest directional moves (biggest net buyers
+    and biggest net sellers) rather than just the noisiest tickers.
 
     Returns list of dicts for JSON serialization, each containing:
     ticker, company_name, buy_value, sell_value, net_flow, trade_count,
@@ -324,10 +328,10 @@ def aggregate_top_tickers(
             insider["sell_value"] += abs_val
         insider["count"] += 1
 
-    # Sort by total absolute volume, take top N
+    # Sort by absolute net flow (strongest directional moves first)
     sorted_tickers = sorted(
         ticker_data.values(),
-        key=lambda d: d["buy_value"] + d["sell_value"],
+        key=lambda d: abs(d["buy_value"] - d["sell_value"]),
         reverse=True,
     )[:limit]
 
