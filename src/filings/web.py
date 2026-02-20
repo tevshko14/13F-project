@@ -816,7 +816,7 @@ async def insider_trades_api(request: Request, filter: str = "all"):
         insider_trading.get_latest_insider_trades, trade_type
     )
     chart_data = await asyncio.to_thread(
-        insider_trading.get_insider_chart_data, 10
+        insider_trading.get_insider_chart_data, 10, trade_type
     )
     return templates.TemplateResponse("partials/insider_trades.html", {
         "request": request,
