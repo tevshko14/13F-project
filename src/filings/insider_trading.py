@@ -1,25 +1,26 @@
-"""Insider trading screener -- scrapes OpenInsider for SEC Form 4 data.
+"""Insider trading screener -- Supabase-first with OpenInsider fallback.
 
 Two modes:
   1. Global screener: latest insider buys/sells across all stocks
   2. Per-ticker: insider trades for a specific company
 
-Caching strategy:
+Data flow:
   - L1: in-memory dict with 5-10 min TTL (fast path, sub-ms)
-  - L2: Supabase via ``fetch_with_cache`` (survives Railway deploys,
-        returns stale data on API failure)
+  - L2: Supabase ``insider_trades`` table (dedicated, typed columns)
+  - L3 (fallback): scrape OpenInsider directly (empty DB or outage)
 
-OpenInsider aggregates SEC Form 4 filings into clean HTML tables,
-so we avoid parsing raw XML.
+The ``insider_sync`` cron worker populates the Supabase table every
+30 minutes.  OpenInsider aggregates SEC Form 4 filings into clean
+HTML tables, so we avoid parsing raw XML.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
 
 import httpx
 from bs4 import BeautifulSoup
@@ -27,6 +28,55 @@ from bs4 import BeautifulSoup
 from filings import supabase_cache
 
 logger = logging.getLogger(__name__)
+
+# ── Numeric parsing helpers ──────────────────────────────────────────
+
+
+def _parse_price(val: str) -> float | None:
+    """``'$150.50'`` -> ``150.50``, ``''`` -> ``None``."""
+    if not val:
+        return None
+    cleaned = val.replace("$", "").replace(",", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_qty(val: str) -> int | None:
+    """``'+75,000'`` -> ``75000``, ``'-3,752'`` -> ``-3752``."""
+    if not val:
+        return None
+    cleaned = val.replace(",", "").replace("+", "").strip()
+    try:
+        return int(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_owned(val: str) -> int | None:
+    """``'1,500,000'`` -> ``1500000``, ``''`` -> ``None``."""
+    if not val:
+        return None
+    cleaned = val.replace(",", "").replace("+", "").strip()
+    try:
+        return int(cleaned)
+    except ValueError:
+        return None
+
+
+def _parse_delta_own(val: str) -> float | None:
+    """``'+13%'`` -> ``13.0``, ``'New'`` -> ``None``."""
+    if not val:
+        return None
+    cleaned = val.replace("%", "").replace("+", "").strip()
+    if cleaned.lower() in ("new", ""):
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
 
 # ── Data model ───────────────────────────────────────────────────────
 
@@ -51,6 +101,49 @@ class InsiderTrade:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    def to_db_row(self) -> dict:
+        """Convert to a dict suitable for Supabase upsert into ``insider_trades``."""
+        return {
+            "sec_url": self.sec_url,
+            "filing_date": self.filing_date,
+            "trade_date": self.trade_date,
+            "ticker": self.ticker.upper(),
+            "company_name": self.company_name,
+            "insider_name": self.insider_name,
+            "title": self.title,
+            "trade_type": self.trade_type,
+            "price": _parse_price(self.price),
+            "qty": _parse_qty(self.qty),
+            "owned": _parse_owned(self.owned),
+            "delta_own_pct": _parse_delta_own(self.delta_own),
+            "value": parse_dollar_value(self.value),
+            "price_fmt": self.price,
+            "qty_fmt": self.qty,
+            "owned_fmt": self.owned,
+            "delta_own_fmt": self.delta_own,
+            "value_fmt": self.value,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @classmethod
+    def from_db_row(cls, row: dict) -> InsiderTrade:
+        """Reconstruct an ``InsiderTrade`` from a Supabase row dict."""
+        return cls(
+            filing_date=str(row.get("filing_date", "")),
+            trade_date=str(row.get("trade_date", "")),
+            ticker=row.get("ticker", ""),
+            company_name=row.get("company_name", ""),
+            insider_name=row.get("insider_name", ""),
+            title=row.get("title", ""),
+            trade_type=row.get("trade_type", ""),
+            price=row.get("price_fmt", ""),
+            qty=row.get("qty_fmt", ""),
+            owned=row.get("owned_fmt", ""),
+            delta_own=row.get("delta_own_fmt", ""),
+            value=row.get("value_fmt", ""),
+            sec_url=row.get("sec_url", ""),
+        )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -270,6 +363,58 @@ def aggregate_top_tickers(
     return result
 
 
+# ── OpenInsider scrape helpers (fallback only) ───────────────────────
+
+
+def _scrape_openinsider_global(
+    trade_type: str = "",
+    count: int = 100,
+) -> list[InsiderTrade]:
+    """Direct scrape of OpenInsider global screener (fallback path)."""
+    url = f"{_OI_BASE}/screener"
+    params: dict[str, str] = {
+        "s": "", "o": "", "pl": "", "ph": "",
+        "st": "0", "tc": "1",
+        "t": trade_type,
+        "vf": "", "o2d": "2", "sortcol": "0",
+        "cnt": str(min(count, 100)), "page": "1",
+    }
+    try:
+        resp = httpx.get(url, params=params, headers=_HEADERS,
+                         timeout=15, follow_redirects=True)
+        resp.raise_for_status()
+        return _parse_table(resp.text, has_company_col=True)
+    except Exception:
+        logger.exception("Fallback scrape of OpenInsider global failed")
+        return []
+
+
+def _scrape_openinsider_ticker(ticker: str) -> list[InsiderTrade]:
+    """Direct scrape of OpenInsider per-ticker page (fallback path)."""
+    try:
+        resp = httpx.get(f"{_OI_BASE}/{ticker}", headers=_HEADERS,
+                         timeout=15, follow_redirects=True)
+        resp.raise_for_status()
+        return _parse_table(resp.text, has_company_col=False)
+    except Exception:
+        logger.exception("Fallback scrape of OpenInsider for %s failed", ticker)
+        return []
+
+
+def _scrape_and_backfill_ticker(ticker: str) -> list[InsiderTrade]:
+    """Scrape per-ticker page and backfill results into Supabase."""
+    trades = _scrape_openinsider_ticker(ticker)
+    if trades:
+        try:
+            rows = [t.to_db_row() for t in trades if t.sec_url]
+            if rows:
+                upserted = supabase_cache.upsert_insider_trades(rows)
+                logger.info("Backfilled %d trades for %s", upserted, ticker)
+        except Exception:
+            logger.debug("Backfill upsert failed for %s", ticker)
+    return trades
+
+
 # ── Public API ───────────────────────────────────────────────────────
 
 
@@ -277,14 +422,15 @@ def get_latest_insider_trades(
     trade_type: str = "",  # "p"=purchases, "s"=sales, ""=all
     count: int = 100,
 ) -> list[InsiderTrade]:
-    """Fetch latest insider trades from OpenInsider (global screener).
+    """Fetch latest insider trades -- Supabase-first with scrape fallback.
 
-    Uses a two-tier cache:
-      - L1: in-memory dict (5 min TTL, sub-ms reads)
-      - L2: Supabase via ``fetch_with_cache`` (survives Railway deploys)
+    Data flow:
+      1. L1 in-memory cache (5 min TTL) -- sub-ms
+      2. Query ``insider_trades`` table in Supabase
+      3. Fallback: scrape OpenInsider directly (empty DB or outage)
 
     Args:
-        trade_type: "p" for purchases only, "s" for sales only, "" for all.
+        trade_type: ``"p"`` for purchases, ``"s"`` for sales, ``""`` for all.
         count: Number of trades to fetch (max 100).
     """
     cache_key = f"global:{trade_type or 'all'}:{count}"
@@ -294,56 +440,30 @@ def get_latest_insider_trades(
     if cached is not None:
         return cached
 
-    # ── L2: Supabase-backed fetch with stale fallback ──
-    supabase_key = f"insider_{cache_key}"
+    # ── L2: Supabase dedicated table ──
+    db_filter = {"p": "Purchase", "s": "Sale"}.get(trade_type, "")
+    rows = supabase_cache.get_insider_trades(trade_type=db_filter, limit=count)
 
-    def _fetch_from_openinsider() -> list[dict] | None:
-        url = f"{_OI_BASE}/screener"
-        params: dict[str, str] = {
-            "s": "", "o": "", "pl": "", "ph": "",
-            "st": "0", "tc": "1",
-            "t": trade_type,
-            "vf": "", "o2d": "2", "sortcol": "0",
-            "cnt": str(min(count, 100)), "page": "1",
-        }
-        try:
-            resp = httpx.get(url, params=params, headers=_HEADERS,
-                             timeout=15, follow_redirects=True)
-            resp.raise_for_status()
-            trades = _parse_table(resp.text, has_company_col=True)
-            if trades:
-                return [t.to_dict() for t in trades]
-        except Exception:
-            logger.exception("Failed to fetch OpenInsider global screener")
-        return None
+    if rows:
+        trades = [InsiderTrade.from_db_row(r) for r in rows]
+        _set_cached(cache_key, trades)
+        return trades
 
-    result_data = supabase_cache.fetch_with_cache(
-        cache_key=supabase_key,
-        category="insider",
-        ttl_days=1.0 / 288,  # 5 minutes
-        api_fetch_fn=_fetch_from_openinsider,
-        symbol="global",
-    )
-
-    # Reconstruct InsiderTrade objects from dicts
-    trades: list[InsiderTrade] = []
-    if result_data and isinstance(result_data, list):
-        for d in result_data:
-            try:
-                trades.append(InsiderTrade(**d))
-            except Exception:
-                continue
-
-    _set_cached(cache_key, trades)
+    # ── L3: Fallback -- scrape OpenInsider directly ──
+    logger.warning("Supabase insider_trades empty/unavailable -- scraping OpenInsider")
+    trades = _scrape_openinsider_global(trade_type, count)
+    if trades:
+        _set_cached(cache_key, trades)
     return trades
 
 
 def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
-    """Fetch insider trades for a specific ticker from OpenInsider.
+    """Fetch insider trades for a specific ticker -- Supabase-first.
 
-    Uses a two-tier cache:
-      - L1: in-memory dict (10 min TTL, sub-ms reads)
-      - L2: Supabase via ``fetch_with_cache`` (survives Railway deploys)
+    Data flow:
+      1. L1 in-memory cache (10 min TTL)
+      2. Query ``insider_trades`` table by ticker
+      3. Fallback: scrape OpenInsider + backfill to Supabase
     """
     key = ticker.upper()
     cache_key = f"ticker:{key}"
@@ -353,37 +473,17 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
     if cached is not None:
         return cached
 
-    # ── L2: Supabase-backed fetch with stale fallback ──
-    supabase_key = f"insider_ticker:{key}"
+    # ── L2: Supabase dedicated table ──
+    rows = supabase_cache.get_insider_trades_by_ticker(key)
 
-    def _fetch_ticker() -> list[dict] | None:
-        try:
-            resp = httpx.get(f"{_OI_BASE}/{key}", headers=_HEADERS,
-                             timeout=15, follow_redirects=True)
-            resp.raise_for_status()
-            trades = _parse_table(resp.text, has_company_col=False)
-            if trades:
-                return [t.to_dict() for t in trades]
-        except Exception:
-            logger.exception("Failed to fetch OpenInsider data for %s", key)
-        return None
+    if rows:
+        trades = [InsiderTrade.from_db_row(r) for r in rows]
+        _set_cached(cache_key, trades)
+        return trades
 
-    result_data = supabase_cache.fetch_with_cache(
-        cache_key=supabase_key,
-        category="insider",
-        ttl_days=1.0 / 144,  # 10 minutes
-        api_fetch_fn=_fetch_ticker,
-        symbol=key,
-    )
-
-    # Reconstruct InsiderTrade objects from dicts
-    trades: list[InsiderTrade] = []
-    if result_data and isinstance(result_data, list):
-        for d in result_data:
-            try:
-                trades.append(InsiderTrade(**d))
-            except Exception:
-                continue
-
-    _set_cached(cache_key, trades)
+    # ── L3: Fallback -- scrape + backfill ──
+    logger.warning("No Supabase data for %s -- scraping OpenInsider", key)
+    trades = _scrape_and_backfill_ticker(key)
+    if trades:
+        _set_cached(cache_key, trades)
     return trades

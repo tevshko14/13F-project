@@ -30,6 +30,7 @@ test = [
 filings = "filings.cli:main"
 filings-web = "filings.web:main"
 filings-sync = "filings.sync_worker:main"
+filings-insider-sync = "filings.insider_sync:main"
 
 [build-system]
 requires = ["hatchling"]
