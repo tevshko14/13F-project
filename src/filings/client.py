@@ -792,6 +792,9 @@ def build_enriched_activity_feed(
                 combined_value=sum(i.current_value for i in items),
                 avg_conviction=avg_conv,
                 items=items,
+                buy_value=round(buy_value, 2),
+                sell_value=round(sell_value, 2),
+                net_flow=round(net_flow, 2),
             ))
         else:
             solo_items.extend(items)
