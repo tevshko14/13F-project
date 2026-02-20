@@ -14,55 +14,140 @@
     <a href="/search" role="button" class="secondary outline">Search</a>
 </div>
 
-{# ── Tab Navigation ── #}
-<div class="investor-tabs" style="margin-bottom: 1.5em;">
-    <nav>
-        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
-            <li>
-                <button id="tab-holdings-btn"
-                        class="investor-tab active"
-                        onclick="switchInvestorTab('holdings')">
-                    Holdings
-                </button>
-            </li>
-            <li>
-                <button id="tab-compare-btn"
-                        class="investor-tab"
-                        onclick="switchInvestorTab('compare')">
-                    Compare Quarters
-                </button>
-            </li>
-        </ul>
-    </nav>
-</div>
-
 <style>
-    .investor-tab {
+    /* ── Table styling (matches stock page) ── */
+    .inv-table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+    }
+    .inv-table th,
+    .inv-table td {
+        padding: 10px 14px;
+        line-height: 1.5;
+        vertical-align: middle;
+        font-size: max(14px, 0.875rem);
+        height: auto;
+        white-space: normal;
+        overflow: visible;
+    }
+    .inv-table tr {
+        height: auto;
+        min-height: 44px;
+    }
+
+    /* ── Holdings overflow rows + fade ── */
+    .holding-overflow { display: none; }
+    .holdings-fade {
+        position: relative;
+    }
+    .holdings-fade::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 60px;
+        background: linear-gradient(transparent, #fff);
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+    }
+    .holdings-fade.expanded::after {
+        opacity: 0;
+        height: 0;
+    }
+
+    /* ── Holdings expand button (matches stock page) ── */
+    .holdings-expand-btn {
+        background: none;
+        border: 1px solid rgba(0,0,0,0.15);
+        border-radius: 6px;
+        padding: 0.4em 1.2em;
+        cursor: pointer;
+        font-size: 0.85em;
+        color: rgba(0,0,0,0.6);
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+        margin: 0.5em auto 0;
+        transition: background 0.15s, color 0.15s;
+    }
+    .holdings-expand-btn:hover {
+        background: rgba(0,0,0,0.04);
+        color: rgba(0,0,0,0.8);
+    }
+    .holdings-expand-arrow {
+        display: inline-block;
+        transition: transform 0.2s;
+        font-size: 0.75em;
+    }
+    .holdings-expand-arrow.expanded {
+        transform: rotate(180deg);
+    }
+
+    /* ── Quarter tabs (matches stock page) ── */
+    .quarter-tab {
         background: none;
         border: none;
         border-bottom: 3px solid transparent;
-        padding: 0.5em 1.2em;
+        padding: 0.4em 1em;
         margin: 0;
         margin-bottom: -2px;
         cursor: pointer;
-        font-size: 0.95em;
+        font-size: 0.85em;
         font-weight: 600;
-        color: rgba(0,0,0,0.5);
+        color: rgba(0,0,0,0.45);
         transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+        text-align: center;
     }
-    .investor-tab:hover {
-        color: rgba(0,0,0,0.8);
-    }
-    .investor-tab.active {
+    .quarter-tab:hover { color: rgba(0,0,0,0.75); }
+    .quarter-tab.active {
         color: #1976d2;
         border-bottom-color: #1976d2;
     }
-    .investor-tab-content { display: none; }
-    .investor-tab-content.active { display: block; }
-</style>
+    .quarter-panel { display: none; }
+    .quarter-panel.active { display: block; }
 
-{# ── Holdings Tab (server-rendered) ── #}
-<div id="tab-holdings" class="investor-tab-content active">
+    /* ── Skeleton loader for quarter content ── */
+    .skeleton-row {
+        height: 20px;
+        background: linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.10) 50%, rgba(0,0,0,0.06) 75%);
+        background-size: 200% 100%;
+        animation: skeletonShimmer 1.5s infinite ease-in-out;
+        border-radius: 4px;
+        margin-bottom: 0.75em;
+    }
+    .skeleton-row:nth-child(odd) { width: 90%; }
+    .skeleton-row:nth-child(even) { width: 70%; }
+    @keyframes skeletonShimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    /* ── Position Changes section ── */
+    .position-changes-section {
+        margin-top: 2.5em;
+    }
+    .position-changes-header {
+        font-size: 1.1em;
+        font-weight: 700;
+        margin-bottom: 0.2em;
+    }
+    .position-changes-sub {
+        font-size: 0.82em;
+        color: rgba(0, 0, 0, 0.45);
+        margin-bottom: 1em;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+        .inv-table th,
+        .inv-table td {
+            font-size: 14px;
+        }
+    }
+</style>
 
 {# ── Portfolio Donut Chart (lazy-loaded) ── #}
 <style>
@@ -73,6 +158,7 @@
         margin-bottom: 1.5em;
         background: #fff;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        overflow: visible;
     }
     .chart-card-header {
         font-size: 1.05em;
@@ -91,11 +177,13 @@
         justify-content: center;
         gap: 2em;
         flex-wrap: wrap;
+        overflow: visible;
     }
     .chart-container {
         width: 340px;
         height: 340px;
         flex-shrink: 0;
+        overflow: visible;
     }
     .chart-legend {
         display: flex;
@@ -200,11 +288,13 @@
             chart.setOption({
                 tooltip: {
                     trigger: 'item',
+                    appendToBody: true,
+                    confine: true,
                     backgroundColor: 'rgba(30, 30, 30, 0.95)',
                     borderColor: 'transparent',
                     textStyle: { color: '#fff', fontSize: 13 },
                     padding: [12, 16],
-                    extraCssText: 'border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);',
+                    extraCssText: 'border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); z-index: 9999;',
                     formatter: function(params) {
                         var d = params.data._raw;
                         if (!d) return '<strong>' + params.name + '</strong><br/>Weight: ' + params.value.toFixed(1) + '%';
@@ -318,6 +408,9 @@
 })();
 </script>
 
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Holdings Table: Top 10 Preview with Expand                     #}
+{# ══════════════════════════════════════════════════════════════════ #}
 <article>
     <header>
         <strong>Total Value:</strong> ${{ "{:,.0f}".format(fund.total_value) }}
@@ -325,8 +418,9 @@
         <strong>Total Holdings:</strong> {{ fund.total_holdings }}
     </header>
 
+    <div class="holdings-fade{% if holdings | length <= 10 %} expanded{% endif %}" id="holdings-table-wrap">
     <figure>
-    <table>
+    <table class="inv-table">
         <thead>
             <tr>
                 <th>#</th>
@@ -342,7 +436,7 @@
         </thead>
         <tbody>
             {% for h in holdings %}
-            <tr>
+            <tr{% if loop.index > 10 %} class="holding-overflow"{% endif %}>
                 <td>{{ loop.index }}</td>
                 <td>{{ ticker_link(h.ticker, h.cusip) }}</td>
                 <td><strong>{{ h.issuer_name }}</strong></td>
@@ -377,59 +471,177 @@
         </tbody>
     </table>
     </figure>
+    </div>
 
-    {% if top_n < fund.total_holdings %}
-    <footer class="text-muted">
-        Showing top {{ top_n }} of {{ fund.total_holdings }} holdings (sorted by value)
-    </footer>
+    {% if holdings | length > 10 %}
+    <button class="holdings-expand-btn" id="holdings-expand" onclick="toggleHoldings(this)">
+        <span>View All {{ holdings | length }} Holdings</span>
+        <span class="holdings-expand-arrow">&#9660;</span>
+    </button>
     {% endif %}
 </article>
 
-</div>{# end tab-holdings #}
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Position Changes: Quarterly Subtabs                            #}
+{# ══════════════════════════════════════════════════════════════════ #}
+{% if quarterly_changes %}
+<div class="position-changes-section">
+    <article>
+        <header>
+            <div>
+                <div class="position-changes-header">Position Changes</div>
+                <div class="position-changes-sub">
+                    Buys and sells by quarter &middot; {{ quarterly_changes | length }} quarter{{ "s" if quarterly_changes | length != 1 else "" }} available
+                </div>
+            </div>
+        </header>
 
-{# ── Compare Quarters Tab (lazy-loaded) ── #}
-<div id="tab-compare" class="investor-tab-content">
-    <div id="compare-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading comparison data...
-        </p>
-    </div>
+        {# ── Quarter Tabs (left=newest, right=oldest) ── #}
+        <nav>
+            <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid rgba(0,0,0,0.1); overflow-x: auto;">
+                {% for q in quarterly_changes %}
+                <li>
+                    <button class="quarter-tab{% if loop.first %} active{% endif %}"
+                            onclick="switchChangeQuarter({{ loop.index0 }})"
+                            data-quarter-idx="{{ loop.index0 }}">
+                        {{ q.period }}
+                        <span class="text-muted text-small" style="font-weight: normal; display: block; font-size: 0.75em;">
+                            {{ q.changes | length }} trade{{ "s" if q.changes | length != 1 else "" }}
+                        </span>
+                    </button>
+                </li>
+                {% endfor %}
+            </ul>
+        </nav>
+
+        {# ── Quarter Panels ── #}
+        {% for q in quarterly_changes %}
+        <div class="quarter-panel{% if loop.first %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
+            {% if q.changes | length == 0 %}
+                <p class="text-muted" style="text-align: center; padding: 2em 0; font-size: 0.95em;">
+                    No trades reported for this period.
+                </p>
+            {% else %}
+            <figure>
+            <table class="inv-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th data-sort="text">Ticker</th>
+                        <th data-sort="text">Issuer</th>
+                        <th data-sort="activity">Action</th>
+                        <th class="text-right" data-sort="number">Share Change</th>
+                        <th class="text-right" data-sort="number">% Change</th>
+                        <th class="text-right" data-sort="number">Shares Held</th>
+                        <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in q.changes %}
+                    <tr>
+                        <td>{{ loop.index }}</td>
+                        <td>
+                            {% if c.ticker %}
+                                <a href="/stock/{{ c.ticker }}"><strong>{{ c.ticker }}</strong></a>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td><strong>{{ c.issuer }}</strong></td>
+                        <td>
+                            {% if c.status == "NEW" %}
+                                <span class="badge badge-new">NEW BUY</span>
+                            {% elif c.status == "INCREASED" %}
+                                <span class="badge badge-add">ADD</span>
+                            {% elif c.status == "DECREASED" %}
+                                <span class="badge badge-reduce">REDUCE</span>
+                            {% elif c.status == "CLOSED" %}
+                                <span class="badge badge-sold">SOLD</span>
+                            {% else %}
+                                <span class="text-muted">{{ c.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if c.share_change != 0 %}
+                                <span class="{% if c.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                    {{ "{:+,}".format(c.share_change) }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if c.status == "NEW" %}
+                                <span class="activity-add">New</span>
+                            {% elif c.status == "CLOSED" %}
+                                <span class="activity-reduce">Exit</span>
+                            {% elif c.previous_shares and c.previous_shares > 0 %}
+                                {% set pct_chg = ((c.current_shares - c.previous_shares) / c.previous_shares * 100) %}
+                                <span class="{% if pct_chg > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                    {{ "%+.1f"|format(pct_chg) }}%
+                                </span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if c.current_shares %}
+                                {{ "{:,}".format(c.current_shares) }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">
+                            {% if c.current_value %}
+                                ${{ "{:,.0f}".format(c.current_value) }}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </figure>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </article>
 </div>
+{% endif %}
 
-{# ── Tab Switching Logic ── #}
+{# ── Interaction Scripts ── #}
 <script>
 (function() {
-    var compareLoaded = false;
+    // ── Holdings expand/collapse ──
+    window.toggleHoldings = function(btn) {
+        var rows = document.querySelectorAll('.holding-overflow');
+        var wrap = document.getElementById('holdings-table-wrap');
+        var arrow = btn.querySelector('.holdings-expand-arrow');
+        var label = btn.querySelector('span:first-child');
+        var expanded = rows.length > 0 && rows[0].style.display !== 'none';
 
-    window.switchInvestorTab = function(tab) {
-        // Toggle tab buttons
-        document.querySelectorAll('.investor-tab').forEach(function(btn) {
-            btn.classList.remove('active');
+        rows.forEach(function(row) {
+            row.style.display = expanded ? 'none' : '';
         });
-        document.getElementById('tab-' + tab + '-btn').classList.add('active');
+        wrap.classList.toggle('expanded', !expanded);
+        arrow.classList.toggle('expanded', !expanded);
+        label.textContent = expanded
+            ? 'View All ' + (rows.length + 10) + ' Holdings'
+            : 'Show Top 10';
 
-        // Toggle tab content
-        document.querySelectorAll('.investor-tab-content').forEach(function(el) {
-            el.classList.remove('active');
+        if (window.initSortableTables) window.initSortableTables();
+    };
+
+    // ── Quarter tab switching ──
+    window.switchChangeQuarter = function(idx) {
+        document.querySelectorAll('.quarter-tab').forEach(function(btn) {
+            btn.classList.toggle('active', parseInt(btn.dataset.quarterIdx) === idx);
         });
-        document.getElementById('tab-' + tab).classList.add('active');
-
-        // Lazy-load compare data on first click
-        if (tab === 'compare' && !compareLoaded) {
-            compareLoaded = true;
-            fetch('/api/compare/{{ fund.cik }}')
-                .then(function(resp) { return resp.text(); })
-                .then(function(html) {
-                    document.getElementById('compare-content').innerHTML = html;
-                    // Re-init sortable tables for the new content
-                    if (window.initSortableTables) window.initSortableTables();
-                })
-                .catch(function() {
-                    document.getElementById('compare-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Failed to load comparison data. Please try again later.</p>';
-                });
-        }
+        document.querySelectorAll('.quarter-panel').forEach(function(panel) {
+            panel.classList.toggle('active', parseInt(panel.dataset.quarterIdx) === idx);
+        });
+        if (window.initSortableTables) window.initSortableTables();
     };
 })();
 </script>

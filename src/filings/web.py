@@ -435,12 +435,41 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
                 "message": str(e),
             }, status_code=404)
 
+    # Build quarterly changes with ticker enrichment
+    quarterly_changes = []
+    if cached:
+        raw_quarters = cached.get("quarterly_changes", [])
+        # Build cusip->ticker lookup from all_holdings
+        cusip_to_ticker: dict[str, str | None] = {}
+        for h in cached.get("all_holdings", []):
+            if h.get("cusip"):
+                cusip_to_ticker[h["cusip"]] = h.get("ticker")
+        # Also check changes for additional cusips
+        for q in raw_quarters:
+            for c in q.get("changes", []):
+                if c.get("cusip") and c["cusip"] not in cusip_to_ticker:
+                    cusip_to_ticker[c["cusip"]] = None
+
+        for q in raw_quarters:
+            enriched_changes = []
+            for c in q.get("changes", []):
+                enriched = dict(c)
+                enriched["ticker"] = cusip_to_ticker.get(c.get("cusip"))
+                enriched_changes.append(enriched)
+            quarterly_changes.append({
+                "period": q.get("period", ""),
+                "report_period": q.get("report_period", ""),
+                "filing_date": q.get("filing_date", ""),
+                "changes": enriched_changes,
+            })
+
     return templates.TemplateResponse("investor.html", {
         "request": request,
         "fund": fund,
         "holdings": holdings_list,
         "top_n": top_n,
         "investor_name": si.display_name if si else None,
+        "quarterly_changes": quarterly_changes,
     })
 
 
