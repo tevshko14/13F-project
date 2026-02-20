@@ -153,7 +153,7 @@
 {% if solo_items %}
 <h4 class="section-label">Individual Moves ({{ total_solo }})</h4>
 <div class="activity-fade{% if solo_items|length <= 12 %} expanded{% endif %}" id="activity-table-wrap">
-<figure>
+<div class="pp-table-wrap">
 <table class="gp-table activity-table" id="activity-solo-table">
     <thead>
         <tr>
@@ -223,7 +223,7 @@
         {% endif %}
     </tbody>
 </table>
-</figure>
+</div>{# end pp-table-wrap #}
 </div>
 {% if solo_items|length > 12 or has_more %}
 <button class="gp-expand-btn" id="activity-expand-btn" onclick="toggleActivityAccordion(this)">
