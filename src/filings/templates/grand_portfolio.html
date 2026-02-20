@@ -10,19 +10,12 @@
 
 {# ── Subtab Navigation ── #}
 <style>
-    /* ── Subtab bar ── */
-    .gp-subtabs {
-        display: flex;
-        gap: 0;
-        margin-bottom: 1.5em;
-        border-bottom: 2px solid rgba(0,0,0,0.1);
-        overflow-x: auto;
-    }
+    /* ── Subtab bar (matches stock page tab pattern) ── */
     .gp-subtab {
         background: none;
         border: none;
         border-bottom: 3px solid transparent;
-        padding: 0.5em 1.5em;
+        padding: 0.5em 1.2em;
         margin: 0;
         margin-bottom: -2px;
         cursor: pointer;
@@ -30,7 +23,6 @@
         font-weight: 600;
         color: rgba(0,0,0,0.5);
         transition: color 0.15s, border-color 0.15s;
-        white-space: nowrap;
     }
     .gp-subtab:hover {
         color: rgba(0,0,0,0.8);
@@ -167,23 +159,27 @@
         .gp-table td {
             font-size: 14px;
         }
-        .gp-subtabs {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
     }
 </style>
 
-<nav class="gp-subtabs">
-    <button class="gp-subtab{% if view == 'holdings' %} active{% endif %}"
-            data-view="holdings" onclick="switchGPView('holdings')">
-        Holdings
-    </button>
-    <button class="gp-subtab{% if view == 'investors' %} active{% endif %}"
-            data-view="investors" onclick="switchGPView('investors')">
-        Superinvestors
-    </button>
-</nav>
+<div style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+            <li>
+                <button class="gp-subtab{% if view == 'holdings' %} active{% endif %}"
+                        data-view="holdings" onclick="switchGPView('holdings')">
+                    Holdings
+                </button>
+            </li>
+            <li>
+                <button class="gp-subtab{% if view == 'investors' %} active{% endif %}"
+                        data-view="investors" onclick="switchGPView('investors')">
+                    Superinvestors
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
 
 {# ══════════════════════════════════════════════════════════════════ #}
 {# ── Panel 1: Holdings (Charts + Table)                             #}
