@@ -98,6 +98,7 @@ class EnrichedActivityItem:
     fund_total_holdings: int = 0     # number of positions in this fund
     portfolio_impact: float = 0.0    # current_value / fund_aum * 100 (trade as % of AUM)
     pct_share_change: float | None = None  # share_change / previous_shares * 100
+    trade_value: float = 0.0              # abs(share_change) * price - estimated dollar value of trade
 
 
 @dataclass
