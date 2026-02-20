@@ -4,6 +4,12 @@ Production-ready with: security headers, request logging, exception
 handlers, rate limiting, health check, structured logging, and Sentry.
 """
 
+import os as _os
+
+# ── EDGAR rate limit (must be set before edgartools is imported) ──────
+# Default is 9 req/sec; 5 is conservative and avoids 429 errors.
+_os.environ.setdefault("EDGAR_RATE_LIMIT_PER_SEC", "5")
+
 import asyncio
 import json as json_module
 import logging
@@ -114,7 +120,7 @@ async def lifespan(app: FastAPI):
 
     app.state.refreshing = False
 
-    if cache.is_cache_stale() and app.state.fund_cache:
+    if cache.is_cache_stale(app.state.fund_cache) and app.state.fund_cache:
         asyncio.create_task(_background_refresh(app))
 
     # Start periodic polling for new filings
@@ -223,9 +229,14 @@ async def generic_exception_handler(request: Request, exc: Exception):
 async def _background_refresh(app: FastAPI):
     """Refresh stale superinvestor funds in background.
 
-    Uses per-fund TTL: only re-fetches funds whose `_last_refreshed`
-    timestamp is older than the effective TTL. Skips recently-refreshed
+    Uses per-fund TTL: only re-fetches funds whose ``_last_refreshed``
+    timestamp is older than the effective TTL.  Skips recently-refreshed
     funds to avoid unnecessary SEC EDGAR API calls.
+
+    Rate-limiting safeguards:
+      - 2 s sleep between individual funds
+      - 10 s batch pause every 10 funds
+      - Hard cap via ``cache._check_sec_rate_limit()``
 
     On failure, keeps existing stale data (stale-while-revalidate).
     """
@@ -240,7 +251,15 @@ async def _background_refresh(app: FastAPI):
 
     logger.info("Refreshing %d/%d stale funds", len(stale_ciks), len(all_ciks))
     dirty_count = 0
-    for cik in stale_ciks:
+    for idx, cik in enumerate(stale_ciks):
+        # Respect per-session SEC call cap
+        if not cache._check_sec_rate_limit():
+            logger.warning(
+                "SEC rate limit reached — stopping refresh at %d/%d",
+                idx, len(stale_ciks),
+            )
+            break
+
         try:
             data = await asyncio.to_thread(cache.refresh_single_fund, cik)
             if data:
@@ -250,7 +269,16 @@ async def _background_refresh(app: FastAPI):
                     await asyncio.to_thread(cache.save_cache, app.state.fund_cache)
         except Exception:
             pass
-        await asyncio.sleep(1)
+
+        await asyncio.sleep(2)  # 2s between individual funds
+
+        # Batch pause every 10 funds to avoid SEC throttling
+        if (idx + 1) % cache._SEC_BATCH_SIZE == 0:
+            logger.info(
+                "Refreshed %d/%d stale funds — pausing %ds",
+                idx + 1, len(stale_ciks), cache._SEC_BATCH_PAUSE,
+            )
+            await asyncio.sleep(cache._SEC_BATCH_PAUSE)
 
     if dirty_count > 0 and dirty_count % 10 != 0:
         await asyncio.to_thread(cache.save_cache, app.state.fund_cache)
@@ -611,7 +639,7 @@ async def grand_portfolio(request: Request, view: str = "funds"):
             "view": view,
             "superinvestors": SUPERINVESTORS,
             "summaries": si_summaries,
-            "cache_age": cache.get_cache_age_str(),
+            "cache_age": cache.get_cache_age_str(cache_data),
             "refreshing": getattr(app.state, "refreshing", False),
         })
 
@@ -678,7 +706,7 @@ async def grand_portfolio(request: Request, view: str = "funds"):
         "view": view,
         "superinvestors": SUPERINVESTORS,
         "summaries": si_summaries,
-        "cache_age": cache.get_cache_age_str(),
+        "cache_age": cache.get_cache_age_str(cache_data),
         "refreshing": getattr(app.state, "refreshing", False),
     })
 
@@ -1025,7 +1053,7 @@ async def health_check(request: Request):
         "status": "ok",
         "uptime_seconds": uptime,
         "cache_entries": len(cache_data),
-        "cache_age": cache.get_cache_age_str(),
+        "cache_age": cache.get_cache_age_str(cache_data),
         "cache_ttl": str(cache._get_effective_ttl()),
         "stale_funds": len(stale_ciks),
         "total_funds": len(all_ciks),
