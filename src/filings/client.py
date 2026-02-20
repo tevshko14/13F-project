@@ -589,18 +589,23 @@ def build_enriched_activity_feed(
     superinvestors_by_cik: dict,
     price_data: dict[str, float] | None = None,
     timeframe: str = "ALL",
+    ptype: str = "guru",
 ) -> tuple[list[ActivityCluster], list[EnrichedActivityItem], dict]:
     """Build enriched activity feed with conviction scores and clustering.
 
     Returns ``(clusters, solo_items, stats)``.
 
-    *clusters* – list of ``ActivityCluster`` where ≥2 investors acted on the
+    *ptype* -- ``"guru"`` filters to funds with < 100 holdings
+    (high-conviction).  ``"institutional"`` filters to funds with >= 100
+    holdings (quant/diversified).
+
+    *clusters* -- list of ``ActivityCluster`` where 2+ investors acted on the
     same ticker.  Sorted by investor_count desc, combined_value desc.
 
-    *solo_items* – remaining ``EnrichedActivityItem`` entries where only one
+    *solo_items* -- remaining ``EnrichedActivityItem`` entries where only one
     investor acted.  Sorted by current_value desc.
 
-    *stats* – dict with sentiment summary & sector breakdown for the header.
+    *stats* -- dict with sentiment summary and sector breakdown for the header.
     """
     from collections import defaultdict
     from datetime import datetime, timedelta
@@ -623,17 +628,29 @@ def build_enriched_activity_feed(
         if not si:
             continue
 
+        # Portfolio type filter (anti-noise engine)
+        total_holdings = fund_data.get("total_holdings", 0)
+        if ptype == "guru" and total_holdings >= 100:
+            continue
+        elif ptype == "institutional" and total_holdings < 100:
+            continue
+
         fund_aum = fund_data.get("total_value", 0)
         filing_date = fund_data.get("filing_date", "")
 
-        # Build cusip → portfolio weight + ticker maps
+        # Build cusip -> portfolio weight + ticker maps
         weight_by_cusip: dict[str, float] = {}
         ticker_by_cusip: dict[str, str | None] = {}
         for h in fund_data.get("all_holdings", []):
             weight_by_cusip[h["cusip"]] = h.get("pct", 0.0)
             ticker_by_cusip[h["cusip"]] = h.get("ticker")
 
-        for change in fund_data.get("changes", []):
+        # Use quarterly_changes (has current_shares/previous_shares) with
+        # fallback to flat changes for backward compatibility
+        quarterly = fund_data.get("quarterly_changes", [])
+        changes_source = quarterly[0]["changes"] if quarterly else fund_data.get("changes", [])
+
+        for change in changes_source:
             label = status_labels.get(change["status"])
             if not label:
                 continue
@@ -645,6 +662,20 @@ def build_enriched_activity_feed(
 
             current_price = price_data.get(ticker) if ticker else None
 
+            # Compute pct share change for HEAVY ADD detection
+            prev_shares = change.get("previous_shares", 0)
+            if change["status"] == "NEW":
+                pct_share_change = 100.0
+            elif change["status"] == "CLOSED":
+                pct_share_change = -100.0
+            elif prev_shares and prev_shares > 0:
+                pct_share_change = round(change["share_change"] / prev_shares * 100, 1)
+            else:
+                pct_share_change = None
+
+            # Portfolio impact = trade value as % of fund AUM
+            portfolio_impact = round(change["current_value"] / fund_aum * 100, 2) if fund_aum > 0 else 0.0
+
             all_items.append(EnrichedActivityItem(
                 fund_display_name=si.display_name,
                 fund_cik=cik,
@@ -653,7 +684,7 @@ def build_enriched_activity_feed(
                 ticker=ticker,
                 cusip=cusip,
                 action=label,
-                signal="",  # assigned below after threshold calc
+                signal="",  # assigned below
                 share_change=change["share_change"],
                 current_value=change["current_value"],
                 portfolio_weight=round(pct_weight, 2),
@@ -662,6 +693,9 @@ def build_enriched_activity_feed(
                 price_at_filing=None,
                 current_price=current_price,
                 price_change_pct=None,
+                fund_total_holdings=total_holdings,
+                portfolio_impact=portfolio_impact,
+                pct_share_change=pct_share_change,
             ))
 
     # ── 2. Filter by timeframe ───────────────────────────────────────
@@ -685,33 +719,22 @@ def build_enriched_activity_feed(
                     filtered.append(item)  # keep items with unparseable dates
             all_items = filtered
 
-    # ── 3. Assign signal labels ──────────────────────────────────────
-    # Compute conviction threshold (75th percentile) for "HEAVY" signals
-    add_convictions = sorted(
-        [it.conviction for it in all_items if it.action in ("ADD", "NEW BUY")],
-    )
-    reduce_convictions = sorted(
-        [it.conviction for it in all_items if it.action in ("REDUCE", "SOLD")],
-    )
-
-    def _p75(vals: list[float]) -> float:
-        if not vals:
-            return float("inf")
-        idx = int(len(vals) * 0.75)
-        return vals[min(idx, len(vals) - 1)]
-
-    add_threshold = _p75(add_convictions)
-    reduce_threshold = _p75(reduce_convictions)
-
+    # ── 3. Assign signal labels (fixed >10% share change threshold) ──
     for item in all_items:
         if item.action == "NEW BUY":
             item.signal = "NEW ENTRY"
         elif item.action == "SOLD":
             item.signal = "LIQUIDATED"
         elif item.action == "ADD":
-            item.signal = "HEAVY ADD" if item.conviction >= add_threshold else "ADD"
+            if item.pct_share_change is not None and item.pct_share_change > 10.0:
+                item.signal = "HEAVY ADD"
+            else:
+                item.signal = "ADD"
         elif item.action == "REDUCE":
-            item.signal = "TRIM" if item.conviction >= reduce_threshold else "REDUCE"
+            if item.pct_share_change is not None and abs(item.pct_share_change) > 10.0:
+                item.signal = "TRIM"
+            else:
+                item.signal = "REDUCE"
 
     # ── 4. Build clusters (group by ticker or cusip) ─────────────────
     groups: dict[str, list[EnrichedActivityItem]] = defaultdict(list)
