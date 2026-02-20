@@ -254,6 +254,12 @@
         }
         .insider-fade.expanded::after { opacity: 0; height: 0; }
 
+        /* Sticky insider momentum chart */
+        #insider-chart-section {
+            position: sticky; top: 0; z-index: 10;
+            background: #fff; margin-bottom: 1em;
+        }
+
         /* Global expand button (used by grand portfolio, activity feed, insider) */
         .gp-expand-btn {
             background: none; border: 1px solid #e4e4e7; border-radius: 8px;
