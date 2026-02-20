@@ -24,6 +24,10 @@ _CONSTITUENTS_TTL = 86_400  # 24 hours
 _market_data_cache: tuple[float, dict] | None = None
 _MARKET_DATA_TTL = 1_800  # 30 minutes
 
+# Stores the raw close DataFrame for multi-timeframe % change
+_close_df_cache: tuple[float, object] | None = None  # (ts, DataFrame)
+_CLOSE_DF_TTL = 1_800  # same as market data
+
 _52w_cache: tuple[float, dict] | None = None
 _52W_TTL = 1_800  # 30 minutes
 
@@ -144,22 +148,19 @@ def get_sp500_constituents() -> list[dict]:
 
 # ── Market Data (daily % change) ──────────────────────────────────────
 
-def get_sp500_market_data() -> dict:
-    """Fetch daily % change for S&P 500 tickers via yfinance bulk download.
+def _ensure_close_df():
+    """Download 1-month of S&P 500 close data and cache it.
 
-    Returns dict keyed by ticker:
-    {"AAPL": {"pct_change": 1.23, "price": 185.50}, ...
-     "_metadata": {"fetched_at": "...", "count": 503}}
-
-    Uses 30-min TTL cache. Returns empty dict on failure.
+    Returns the close DataFrame (columns = tickers, rows = dates).
+    Covers all heatmap timeframes: 1D (last 2 rows), 1W (~5 rows), 1M (all rows).
     """
-    global _market_data_cache
+    global _close_df_cache
 
     with _lock:
-        if _market_data_cache is not None:
-            ts, data = _market_data_cache
-            if time.time() - ts < _MARKET_DATA_TTL:
-                return data
+        if _close_df_cache is not None:
+            ts, df = _close_df_cache
+            if time.time() - ts < _CLOSE_DF_TTL:
+                return df
 
     constituents = get_sp500_constituents()
     tickers = [c["ticker"] for c in constituents]
@@ -167,53 +168,99 @@ def get_sp500_market_data() -> dict:
     try:
         import yfinance as yf
 
-        # Bulk download 2 days of data for % change calculation
-        df = yf.download(tickers, period="5d", threads=True, progress=False)
+        df = yf.download(tickers, period="1mo", threads=True, progress=False)
 
         if df.empty:
             logger.warning("yfinance returned empty DataFrame for S&P 500")
-            return {}
+            return None
 
-        result: dict = {}
-
-        # yf.download with multiple tickers returns MultiIndex columns
-        # Access pattern: df["Close"]["AAPL"]
         close_data = df["Close"] if "Close" in df.columns.get_level_values(0) else df.get("Close")
 
         if close_data is None or close_data.empty:
-            return {}
+            return None
 
-        for ticker in tickers:
-            try:
-                if ticker not in close_data.columns:
-                    continue
-                series = close_data[ticker].dropna()
-                if len(series) < 2:
-                    continue
-                prev_close = series.iloc[-2]
-                last_close = series.iloc[-1]
-                if prev_close > 0:
-                    pct = round((last_close - prev_close) / prev_close * 100, 2)
-                    result[ticker] = {
-                        "pct_change": pct,
-                        "price": round(float(last_close), 2),
-                    }
-            except Exception:
-                continue
-
-        result["_metadata"] = {
-            "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "count": len(result) - 1,  # exclude _metadata key
-        }
-
-        logger.info("Fetched market data for %d tickers", len(result) - 1)
+        logger.info("Downloaded 1-month close data: %d rows x %d tickers", len(close_data), len(close_data.columns))
         with _lock:
-            _market_data_cache = (time.time(), result)
-        return result
+            _close_df_cache = (time.time(), close_data)
+        return close_data
 
     except Exception as e:
         logger.warning("yfinance S&P 500 download failed: %s", e)
+        return None
+
+
+def get_sp500_market_data(period: str = "1D") -> dict:
+    """Compute % change for S&P 500 tickers over a given period.
+
+    period: "1D" (daily), "1W" (last ~5 trading days), "1M" (full month)
+
+    Returns dict keyed by ticker:
+    {"AAPL": {"pct_change": 1.23, "price": 185.50}, ...
+     "_metadata": {"fetched_at": "...", "count": 503, "period": "1D"}}
+
+    Uses 30-min TTL cache per period. Returns empty dict on failure.
+    """
+    global _market_data_cache
+
+    # Cache key includes period — reuse cache only for same period
+    with _lock:
+        if _market_data_cache is not None:
+            ts, data = _market_data_cache
+            if time.time() - ts < _MARKET_DATA_TTL and data.get("_metadata", {}).get("period") == period:
+                return data
+
+    close_data = _ensure_close_df()
+    if close_data is None:
         return {}
+
+    constituents = get_sp500_constituents()
+    tickers = [c["ticker"] for c in constituents]
+
+    # Determine how far back to look for the "start" price
+    if period == "1W":
+        lookback = 5   # ~5 trading days
+    elif period == "1M":
+        lookback = None  # use first available row
+    else:
+        lookback = 1   # 1D default
+
+    result: dict = {}
+    for ticker in tickers:
+        try:
+            if ticker not in close_data.columns:
+                continue
+            series = close_data[ticker].dropna()
+            if len(series) < 2:
+                continue
+
+            last_close = series.iloc[-1]
+            if lookback is None:
+                start_close = series.iloc[0]
+            else:
+                idx = min(lookback, len(series) - 1)
+                start_close = series.iloc[-1 - idx]
+
+            if start_close > 0:
+                pct = round((last_close - start_close) / start_close * 100, 2)
+                result[ticker] = {
+                    "pct_change": pct,
+                    "price": round(float(last_close), 2),
+                }
+        except Exception:
+            continue
+
+    period_labels = {"1D": "today", "1W": "past week", "1M": "past month"}
+    result["_metadata"] = {
+        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "count": len(result) - 1,
+        "period": period,
+        "period_label": period_labels.get(period, "today"),
+    }
+
+    logger.info("Computed %s market data for %d tickers", period, len(result) - 1)
+    with _lock:
+        _market_data_cache = (time.time(), result)
+    return result
 
 
 # ── 52-Week Range (bulk) ──────────────────────────────────────────────

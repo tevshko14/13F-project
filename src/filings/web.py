@@ -794,7 +794,11 @@ async def ticker_search_index(request: Request):
 
 
 @app.get("/api/heatmap", response_class=HTMLResponse)
-async def heatmap(request: Request):
+async def heatmap(request: Request, period: str = "1D"):
+    # Validate period
+    if period not in ("1D", "1W", "1M"):
+        period = "1D"
+
     if not getattr(app.state, "market_data_ready", False):
         return HTMLResponse(
             '<article>'
@@ -803,7 +807,7 @@ async def heatmap(request: Request):
             '<div hx-get="/api/heatmap" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
         )
 
-    mkt = await asyncio.to_thread(market_data.get_sp500_market_data)
+    mkt = await asyncio.to_thread(market_data.get_sp500_market_data, period)
     if not mkt or "_metadata" not in mkt:
         return HTMLResponse(
             '<article><p class="text-muted">Market data unavailable.</p></article>'
@@ -831,6 +835,7 @@ async def heatmap(request: Request):
         "request": request,
         "heatmap_json": json_module.dumps(heatmap_data),
         "metadata": metadata,
+        "period": period,
     })
 
 
