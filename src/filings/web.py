@@ -860,6 +860,11 @@ async def retail_calendar_api(request: Request):
         logger.exception("Calendar API: unexpected error in data fetch")
         events, channels = [], youtube._STATIC_CHANNELS
 
+    # Inject channel thumbnail into each event for avatar display
+    ch_thumbs = {ch["channel_id"]: ch.get("thumbnail_url", "") for ch in channels}
+    for ev in events:
+        ev["channel_thumbnail"] = ch_thumbs.get(ev.get("channel_id", ""), "")
+
     calendar_data = youtube.build_calendar_data(events, channels)
     return templates.TemplateResponse("partials/retail_calendar.html", {
         "request": request,
@@ -879,6 +884,11 @@ async def retail_calendar_data(request: Request):
     except Exception:
         logger.exception("Calendar data API: unexpected error in data fetch")
         events, channels = [], youtube._STATIC_CHANNELS
+
+    # Inject channel thumbnail into each event for avatar display
+    ch_thumbs = {ch["channel_id"]: ch.get("thumbnail_url", "") for ch in channels}
+    for ev in events:
+        ev["channel_thumbnail"] = ch_thumbs.get(ev.get("channel_id", ""), "")
 
     calendar_data = youtube.build_calendar_data(events, channels)
     return JSONResponse(content=calendar_data)
