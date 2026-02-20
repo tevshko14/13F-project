@@ -9,11 +9,11 @@ Usage:
     uv run filings-youtube-sync
 
 Quota budget (10,000 units/day):
-    search.list:     6 channels x 100 units x 4 polls = 2,400
-    channels.list:   1 batch call x 1 unit x 4 polls  =     4
-    activities.list: 6 channels x 1 unit x 4 polls    =    24
-    videos.list:     ~3 batch calls x 1 unit x 4 polls =    12
-    Total: ~2,440 units/day (well under 10,000)
+    search.list:     15 channels x 100 units x 4 polls = 6,000
+    channels.list:   1 batch call x 1 unit x 4 polls   =     4
+    activities.list: 15 channels x 1 unit x 4 polls    =    60
+    videos.list:     ~5 batch calls x 1 unit x 4 polls =    20
+    Total: ~6,084 units/day (61% of 10,000 quota)
 """
 
 from __future__ import annotations
@@ -84,6 +84,51 @@ _CHANNELS: dict[str, dict] = {
         "name": "Joseph Carlson",
         "handle": "@JosephCarlsonShow",
         "baseline_posts_per_week": 2.0,
+    },
+    "UChvd7RCRJS50RWlwbfcwr3A": {
+        "name": "Fun of Investing",
+        "handle": "@FunofInvesting",
+        "baseline_posts_per_week": 7.0,
+    },
+    "UCyZNir5FhvazX5L3_Q77UbA": {
+        "name": "Real Matt Money",
+        "handle": "@RealMattMoney",
+        "baseline_posts_per_week": 7.0,
+    },
+    "UCqlIWs2hwTzS8wIE-_pkC1A": {
+        "name": "Kross Roads",
+        "handle": "@Kross_Roads",
+        "baseline_posts_per_week": 7.0,
+    },
+    "UCDO_NH0PaRjo5Cn9gS-MH0w": {
+        "name": "Dividend Streams",
+        "handle": "@DividendStreams",
+        "baseline_posts_per_week": 7.0,
+    },
+    "UCvWx0-NX-9qVLCSW9yjdX-g": {
+        "name": "Futurenvesting",
+        "handle": "@Futurenvesting",
+        "baseline_posts_per_week": 7.0,
+    },
+    "UCjZnbgPb08NFg7MHyPQRZ3Q": {
+        "name": "Amit Investing",
+        "handle": "@amitinvesting",
+        "baseline_posts_per_week": 7.0,
+    },
+    "UCGJIGkEd46TER3y2Zvcwe0w": {
+        "name": "Couch Investor",
+        "handle": "@couch_Investor",
+        "baseline_posts_per_week": 7.0,
+    },
+    "UCgYKMfmLTViSE7Qj0Mj_Mhw": {
+        "name": "Endicott Invests",
+        "handle": "@EndicottInvests",
+        "baseline_posts_per_week": 7.0,
+    },
+    "UCEXnaoFOX1P-4pyq2LbruYA": {
+        "name": "Kris Patel",
+        "handle": "@KrisPatel99",
+        "baseline_posts_per_week": 7.0,
     },
 }
 
