@@ -183,15 +183,49 @@
 
 </div>
 
-{# ── S&P 500 Heatmap (lazy-loaded) ── #}
-<div style="margin-top: 2em;">
-    <h3 style="margin-bottom: 0.5em;">S&P 500 Heatmap</h3>
-    <div hx-get="/api/heatmap" hx-trigger="load" hx-swap="innerHTML">
+{# ── S&P 500 Heatmap (lazy-loaded with timeframe toggle) ── #}
+<div class="heatmap-section">
+    <div class="heatmap-header">
+        <h3 class="heatmap-title">S&amp;P 500 Heatmap</h3>
+        <div class="heatmap-toggle" id="heatmap-toggle">
+            <button class="heatmap-pill active" data-period="1D"
+                    hx-get="/api/heatmap?period=1D"
+                    hx-target="#heatmap-body"
+                    hx-swap="innerHTML"
+                    hx-indicator="#heatmap-body">1D</button>
+            <button class="heatmap-pill" data-period="1W"
+                    hx-get="/api/heatmap?period=1W"
+                    hx-target="#heatmap-body"
+                    hx-swap="innerHTML"
+                    hx-indicator="#heatmap-body">1W</button>
+            <button class="heatmap-pill" data-period="1M"
+                    hx-get="/api/heatmap?period=1M"
+                    hx-target="#heatmap-body"
+                    hx-swap="innerHTML"
+                    hx-indicator="#heatmap-body">1M</button>
+        </div>
+    </div>
+    <div id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load" hx-swap="innerHTML">
         <article>
-            <p aria-busy="true"><span class="spinner"></span> Loading S&P 500 heatmap...</p>
+            <p aria-busy="true"><span class="spinner"></span> Loading S&amp;P 500 heatmap...</p>
         </article>
     </div>
 </div>
+
+<script>
+(function() {
+    var toggle = document.getElementById('heatmap-toggle');
+    if (!toggle) return;
+    toggle.addEventListener('click', function(e) {
+        var btn = e.target.closest('.heatmap-pill');
+        if (!btn) return;
+        toggle.querySelectorAll('.heatmap-pill').forEach(function(b) {
+            b.classList.remove('active');
+        });
+        btn.classList.add('active');
+    });
+})();
+</script>
 
 {# ── Most Added by Superinvestors (lazy-loaded) ── #}
 <div style="margin-top: 1.5em;">
@@ -365,6 +399,70 @@
     @media (max-width: 768px) {
         .home-grid {
             grid-template-columns: 1fr;
+        }
+    }
+
+    /* ── Heatmap Section ── */
+    .heatmap-section {
+        margin-top: 3rem;
+    }
+    .heatmap-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.75em;
+        padding-bottom: 0.6em;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    }
+    .heatmap-title {
+        margin: 0;
+        font-size: 1.25em;
+    }
+
+    /* Segmented pill toggle */
+    .heatmap-toggle {
+        display: flex;
+        gap: 0;
+        background: rgba(0, 0, 0, 0.05);
+        border-radius: 8px;
+        padding: 3px;
+    }
+    .heatmap-pill {
+        background: transparent;
+        border: none;
+        padding: 0.35em 0.9em;
+        font-size: 0.82em;
+        font-weight: 600;
+        color: rgba(0, 0, 0, 0.5);
+        cursor: pointer;
+        border-radius: 6px;
+        transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+        margin: 0;
+        line-height: 1.4;
+    }
+    .heatmap-pill:hover {
+        color: rgba(0, 0, 0, 0.7);
+    }
+    .heatmap-pill.active {
+        background: #fff;
+        color: #1976d2;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Fade-in transition when heatmap data updates */
+    #heatmap-body {
+        transition: opacity 0.3s ease;
+    }
+    #heatmap-body.htmx-request {
+        opacity: 0.4;
+    }
+
+    /* Responsive: stack toggle below title on mobile */
+    @media (max-width: 520px) {
+        .heatmap-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.5em;
         }
     }
 </style>
