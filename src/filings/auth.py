@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,12 @@ SUPABASE_ANON_KEY: str = os.environ.get("SUPABASE_ANON_KEY", "")
 
 # Paths where we skip JWT decoding entirely (performance)
 _SKIP_PREFIXES = ("/health", "/static", "/favicon.ico")
+
+# ── Profile cache (avoid Supabase HTTP round-trip on every request) ──
+_profile_lock = threading.Lock()
+_profile_cache: dict[str, tuple[float, dict | None]] = {}
+_PROFILE_TTL = 60           # seconds
+_MAX_PROFILE_CACHE = 500    # LRU eviction threshold
 
 
 # ── JWT helpers ─────────────────────────────────────────────────────
@@ -56,9 +64,22 @@ def get_user_from_request(request) -> dict | None:
 def get_profile(user_id: str) -> dict | None:
     """Fetch the ``profiles`` row for *user_id* from Supabase.
 
+    Results are cached in-memory for 60 seconds to avoid a Supabase
+    HTTP round-trip on every authenticated request.
+
     Returns ``None`` when Supabase is unavailable or the profile
     doesn't exist.
     """
+    now = time.time()
+
+    # ── L1: check in-memory cache ──
+    with _profile_lock:
+        if user_id in _profile_cache:
+            ts, data = _profile_cache[user_id]
+            if now - ts < _PROFILE_TTL:
+                return data
+
+    # ── Cache miss: query Supabase ──
     try:
         from filings.supabase_cache import _get_client
 
@@ -72,10 +93,22 @@ def get_profile(user_id: str) -> dict | None:
             .single()
             .execute()
         )
-        return resp.data
+        profile = resp.data
     except Exception as exc:
         logger.debug("Profile fetch failed for %s: %s", user_id, exc)
-        return None
+        profile = None
+
+    # ── Store in cache (with LRU eviction) ──
+    with _profile_lock:
+        _profile_cache[user_id] = (now, profile)
+        if len(_profile_cache) > _MAX_PROFILE_CACHE:
+            sorted_keys = sorted(
+                _profile_cache, key=lambda k: _profile_cache[k][0],
+            )
+            for k in sorted_keys[: len(_profile_cache) - _MAX_PROFILE_CACHE]:
+                del _profile_cache[k]
+
+    return profile
 
 
 # ── Middleware ───────────────────────────────────────────────────────
