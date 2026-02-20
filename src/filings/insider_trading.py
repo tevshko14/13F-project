@@ -174,6 +174,21 @@ def _get_cached(key: str, ttl: int) -> list[InsiderTrade] | None:
     return None
 
 
+def _get_cached_with_stale(key: str, ttl: int) -> tuple[list[InsiderTrade] | None, bool]:
+    """Return ``(data, is_fresh)`` — stale data is returned instead of ``None``.
+
+    Unlike ``_get_cached`` which returns ``None`` when TTL expires, this
+    always returns the last cached value (even if stale) so users never
+    see an empty / error state while upstream sources are refreshing.
+    """
+    with _lock:
+        if key in _cache:
+            ts, data = _cache[key]
+            is_fresh = (time.time() - ts) < ttl
+            return data, is_fresh
+    return None, False
+
+
 def _set_cached(key: str, data: list[InsiderTrade]) -> None:
     with _lock:
         _cache[key] = (time.time(), data)
@@ -437,6 +452,7 @@ def get_latest_insider_trades(
       1. L1 in-memory cache (5 min TTL) -- sub-ms
       2. Query ``insider_trades`` table in Supabase
       3. Fallback: scrape OpenInsider directly (empty DB or outage)
+      4. Last resort: return stale L1 data (never show empty/error)
 
     Args:
         trade_type: ``"p"`` for purchases, ``"s"`` for sales, ``""`` for all.
@@ -444,10 +460,10 @@ def get_latest_insider_trades(
     """
     cache_key = f"global:{trade_type or 'all'}:{count}"
 
-    # ── L1: in-memory fast path ──
-    cached = _get_cached(cache_key, _GLOBAL_TTL)
-    if cached is not None:
-        return cached
+    # ── L1: in-memory fast path (fresh hit) ──
+    stale_data, is_fresh = _get_cached_with_stale(cache_key, _GLOBAL_TTL)
+    if stale_data is not None and is_fresh:
+        return stale_data
 
     # ── L2: Supabase dedicated table ──
     db_filter = {"p": "Purchase", "s": "Sale"}.get(trade_type, "")
@@ -463,7 +479,14 @@ def get_latest_insider_trades(
     trades = _scrape_openinsider_global(trade_type, count)
     if trades:
         _set_cached(cache_key, trades)
-    return trades
+        return trades
+
+    # ── L4: Stale L1 data -- never show empty/error to users ──
+    if stale_data:
+        logger.info("Returning stale L1 insider data for key=%s (%d trades)", cache_key, len(stale_data))
+        return stale_data
+
+    return []
 
 
 def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
@@ -473,14 +496,15 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
       1. L1 in-memory cache (10 min TTL)
       2. Query ``insider_trades`` table by ticker
       3. Fallback: scrape OpenInsider + backfill to Supabase
+      4. Last resort: return stale L1 data (never show empty/error)
     """
     key = ticker.upper()
     cache_key = f"ticker:{key}"
 
-    # ── L1: in-memory fast path ──
-    cached = _get_cached(cache_key, _TICKER_TTL)
-    if cached is not None:
-        return cached
+    # ── L1: in-memory fast path (fresh hit) ──
+    stale_data, is_fresh = _get_cached_with_stale(cache_key, _TICKER_TTL)
+    if stale_data is not None and is_fresh:
+        return stale_data
 
     # ── L2: Supabase dedicated table ──
     rows = supabase_cache.get_insider_trades_by_ticker(key)
@@ -495,4 +519,11 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
     trades = _scrape_and_backfill_ticker(key)
     if trades:
         _set_cached(cache_key, trades)
-    return trades
+        return trades
+
+    # ── L4: Stale L1 data -- never show empty/error to users ──
+    if stale_data:
+        logger.info("Returning stale L1 insider data for ticker=%s (%d trades)", key, len(stale_data))
+        return stale_data
+
+    return []
