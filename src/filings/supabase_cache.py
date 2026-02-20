@@ -945,7 +945,11 @@ def get_youtube_events(
     sentiment: str | None = None,
     min_impact: int | None = None,
 ) -> list[dict] | None:
-    """Query ``youtube_events``, newest scheduled first."""
+    """Query ``youtube_events`` for upcoming streams, newest scheduled first.
+
+    Filters to ``event_type = 'upcoming'`` so recent uploads are excluded
+    (use :func:`get_recent_youtube_uploads` for those).
+    """
     client = _get_client()
     if client is None:
         return None
@@ -953,6 +957,7 @@ def get_youtube_events(
         query = (
             client.table("youtube_events")
             .select("*")
+            .eq("event_type", "upcoming")
             .order("scheduled_at", desc=True)
             .limit(limit)
         )
@@ -998,4 +1003,30 @@ def get_high_impact_youtube_events(min_score: int = 9) -> list[dict] | None:
         return resp.data
     except Exception as exc:
         logger.warning("get_high_impact_youtube_events failed: %s", exc)
+        return None
+
+
+def get_recent_youtube_uploads(limit: int = 20) -> list[dict] | None:
+    """Query ``youtube_events`` for recently posted videos.
+
+    Fetches rows with ``event_type = 'recent_upload'``, ordered by
+    ``scheduled_at DESC`` (which stores ``published_at`` for uploads).
+
+    Returns list of row dicts, or ``None`` if Supabase is unavailable.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("youtube_events")
+            .select("*")
+            .eq("event_type", "recent_upload")
+            .order("scheduled_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_recent_youtube_uploads failed: %s", exc)
         return None

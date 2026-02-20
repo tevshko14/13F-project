@@ -322,21 +322,47 @@ def _fetch_channel_stats(channel_ids: list[str]) -> dict[str, dict]:
     return result
 
 
-def _fetch_recent_activity_count(channel_id: str, days: int = 2) -> int:
-    """Count recent uploads via activities.list (1 unit per call)."""
+def _fetch_recent_activities(channel_id: str, channel_name: str, days: int = 2) -> list[dict]:
+    """Fetch recent uploads via activities.list (1 unit per call).
+
+    Returns a list of dicts with video metadata for each upload:
+    ``{video_id, title, thumbnail_url, published_at, channel_id, channel_name}``
+
+    The ``contentDetails.upload.videoId`` path is the standard activities
+    API structure for upload-type activities.
+    """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     data = _yt_get("activities", {
-        "part": "snippet",
+        "part": "snippet,contentDetails",
         "channelId": channel_id,
         "publishedAfter": cutoff,
         "maxResults": 50,
     })
+    results: list[dict] = []
     if data and "items" in data:
-        return len([
-            it for it in data["items"]
-            if it.get("snippet", {}).get("type") == "upload"
-        ])
-    return 0
+        for it in data["items"]:
+            snippet = it.get("snippet", {})
+            if snippet.get("type") != "upload":
+                continue
+            content = it.get("contentDetails", {})
+            video_id = content.get("upload", {}).get("videoId")
+            if not video_id:
+                continue
+            thumbnails = snippet.get("thumbnails", {})
+            thumb_url = (
+                thumbnails.get("high", {}).get("url")
+                or thumbnails.get("medium", {}).get("url")
+                or thumbnails.get("default", {}).get("url", "")
+            )
+            results.append({
+                "video_id": video_id,
+                "title": snippet.get("title", ""),
+                "thumbnail_url": thumb_url,
+                "published_at": snippet.get("publishedAt", ""),
+                "channel_id": channel_id,
+                "channel_name": channel_name,
+            })
+    return results
 
 
 def _fetch_upcoming_videos(channel_id: str) -> list[dict]:
@@ -414,8 +440,9 @@ def sync_youtube_events() -> dict:
         })
     supabase_cache.upsert_youtube_channels(channel_rows)
 
-    # 2. Per-channel: search upcoming + check frequency
+    # 2. Per-channel: search upcoming + fetch recent activities
     all_event_rows: list[dict] = []
+    all_upload_rows: list[dict] = []
     total_videos_found = 0
 
     for cid, info in _CHANNELS.items():
@@ -426,8 +453,9 @@ def sync_youtube_events() -> dict:
             info["name"], cid[:8], len(upcoming),
         )
 
-        # 2b. Activity count for frequency alert (1 unit)
-        recent_count = _fetch_recent_activity_count(cid, days=2)
+        # 2b. Fetch recent activities for frequency alert + recent uploads (1 unit)
+        recent_activities = _fetch_recent_activities(cid, info["name"], days=2)
+        recent_count = len(recent_activities)
         freq_alert, freq_detail = check_frequency_alert(
             recent_count, 2, info["baseline_posts_per_week"],
         )
@@ -442,7 +470,7 @@ def sync_youtube_events() -> dict:
         ]
         video_details = _fetch_video_details(video_ids) if video_ids else {}
 
-        # 2d. Build event rows
+        # 2d. Build event rows (upcoming streams)
         sub_count = channel_stats.get(cid, {}).get("subscriber_count", 0)
         total_views = channel_stats.get(cid, {}).get("view_count", 0)
         video_count = max(channel_stats.get(cid, {}).get("video_count", 1), 1)
@@ -487,10 +515,39 @@ def sync_youtube_events() -> dict:
             })
             total_videos_found += 1
 
+        # 2e. Build recent upload rows (from activities data -- zero extra API cost)
+        for act in recent_activities:
+            vid = act["video_id"]
+            title = act["title"]
+            tickers = parse_tickers(title)
+            sent = classify_sentiment(title)
+            impact = compute_impact_score(sub_count, avg_views)
+
+            all_upload_rows.append({
+                "video_id": vid,
+                "channel_id": cid,
+                "channel_name": info["name"],
+                "title": title,
+                "scheduled_at": act["published_at"],  # reuse column for chronological ordering
+                "event_type": "recent_upload",
+                "sentiment": sent,
+                "tickers": tickers,
+                "impact_score": impact,
+                "subscriber_count": sub_count,
+                "avg_views": avg_views,
+                "frequency_alert": freq_alert,
+                "frequency_detail": freq_detail if freq_alert else "",
+                "thumbnail_url": act["thumbnail_url"],
+                "video_url": f"https://www.youtube.com/watch?v={vid}",
+                "updated_at": now_iso,
+            })
+
         time.sleep(_DELAY_BETWEEN_CHANNELS)
 
-    # 3. Upsert all events
-    upserted = supabase_cache.upsert_youtube_events(all_event_rows) if all_event_rows else 0
+    # 3. Upsert all events (upcoming + recent uploads)
+    combined_rows = all_event_rows + all_upload_rows
+    upserted = supabase_cache.upsert_youtube_events(combined_rows) if combined_rows else 0
+    total_videos_found += len(all_upload_rows)
 
     errors: list[str] = []
     if total_videos_found > 0 and upserted == 0:
@@ -505,10 +562,16 @@ def sync_youtube_events() -> dict:
     )
 
     logger.info(
-        "YouTube sync complete: %d videos found, %d upserted across %d channels",
-        total_videos_found, upserted, len(_CHANNELS),
+        "YouTube sync complete: %d upcoming + %d recent uploads found, "
+        "%d upserted across %d channels",
+        len(all_event_rows), len(all_upload_rows), upserted, len(_CHANNELS),
     )
-    return {"found": total_videos_found, "upserted": upserted, "errors": len(errors)}
+    return {
+        "upcoming_found": len(all_event_rows),
+        "uploads_found": len(all_upload_rows),
+        "upserted": upserted,
+        "errors": len(errors),
+    }
 
 
 # ── Entry point ──────────────────────────────────────────────────────
