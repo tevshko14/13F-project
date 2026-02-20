@@ -254,8 +254,19 @@ async def fund_row(request: Request, cik: str):
     cik_normalized = cik.lstrip("0") or cik
     si = SUPERINVESTORS_BY_CIK.get(cik_normalized) or SUPERINVESTORS_BY_CIK.get(cik)
 
-    # ── Serve from cache only (no live SEC fallback) ──
+    # ── Serve from L1 in-memory cache (fast path) ──
     cached = app.state.fund_cache.get(cik_normalized) or app.state.fund_cache.get(cik)
+
+    # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
+    if not cached:
+        data, _is_fresh = await asyncio.to_thread(
+            supabase_cache.get_cached_with_stale, f"13f:{cik_normalized}"
+        )
+        if isinstance(data, dict):
+            cached = data
+            # Promote to L1 so subsequent requests are fast
+            app.state.fund_cache[cik_normalized] = cached
+
     if cached:
         top_tickers = [
             h.get("ticker") or h.get("issuer", "?")[:8]
@@ -284,6 +295,16 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
     si = SUPERINVESTORS_BY_CIK.get(cik)
     cache_data = getattr(app.state, "fund_cache", {})
     cached = cache_data.get(cik)
+
+    # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
+    if not cached:
+        data, _is_fresh = await asyncio.to_thread(
+            supabase_cache.get_cached_with_stale, f"13f:{cik}"
+        )
+        if isinstance(data, dict):
+            cached = data
+            # Promote to L1 so subsequent requests are fast
+            cache_data[cik] = cached
 
     if cached:
         # ── Cache hit: build from stored data (zero SEC calls) ──
@@ -348,6 +369,15 @@ async def compare_api(request: Request, cik: str, top_n: int = Query(25)):
     cache_data = getattr(app.state, "fund_cache", {})
     cached = cache_data.get(cik)
 
+    # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
+    if not cached:
+        data, _is_fresh = await asyncio.to_thread(
+            supabase_cache.get_cached_with_stale, f"13f:{cik}"
+        )
+        if isinstance(data, dict):
+            cached = data
+            cache_data[cik] = cached
+
     if cached:
         # ── Cache hit: reconstruct comparison from stored data ──
         current, previous, changes = client.get_compare_from_cache(cached, cik, top_n)
@@ -381,6 +411,16 @@ async def portfolio_chart_data(request: Request, cik: str):
     """
     cache_data = getattr(app.state, "fund_cache", {})
     cached = cache_data.get(cik)
+
+    # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
+    if not cached:
+        data, _is_fresh = await asyncio.to_thread(
+            supabase_cache.get_cached_with_stale, f"13f:{cik}"
+        )
+        if isinstance(data, dict):
+            cached = data
+            cache_data[cik] = cached
+
     if not cached:
         return JSONResponse(content=[])
 
