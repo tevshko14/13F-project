@@ -78,19 +78,28 @@ def load_cache_from_supabase() -> dict:
     Returns a dict keyed by CIK (same structure as ``load_cache()``),
     or ``{}`` if Supabase is unavailable / has no 13F data.
 
-    Called on startup as the primary cache source — the disk cache
-    (``load_cache()``) is the fallback.
+    Fetches funds one at a time to avoid 28MB single-request timeouts
+    on Railway's free tier.
     """
-    rows = supabase_cache.get_all_by_category("13f")
-    if not rows:
+    # First, get the list of available CIKs (lightweight query)
+    keys = supabase_cache.get_category_keys("13f")
+    if not keys:
         return {}
 
+    ciks = []
+    for key in keys:
+        cik = key.replace("13f:", "", 1) if key.startswith("13f:") else None
+        if cik:
+            ciks.append(cik)
+
+    if not ciks:
+        return {}
+
+    logger.info("Found %d 13f keys in Supabase — loading individually...", len(ciks))
     result: dict = {}
-    for row in rows:
-        cache_key = row.get("cache_key", "")      # e.g. "13f:1067983"
-        data = row.get("response_data", {})
-        cik = cache_key.replace("13f:", "", 1) if cache_key.startswith("13f:") else None
-        if cik and isinstance(data, dict):
+    for cik in ciks:
+        data = supabase_cache.get_cached(f"13f:{cik}")
+        if isinstance(data, dict):
             result[cik] = data
 
     if result:
