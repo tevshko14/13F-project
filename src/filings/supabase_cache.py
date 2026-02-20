@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 _client = None           # supabase.Client | None
 _initialised = False     # True once we've attempted init (even if it failed)
 _table_verified = False  # True once we've confirmed the table exists
+_init_lock = threading.Lock()  # Protects one-time client creation
 
 _TABLE = "api_cache"
 
@@ -129,6 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_youtube_events_impact
     WHERE impact_score >= 9;
 CREATE INDEX IF NOT EXISTS idx_youtube_events_sentiment
     ON youtube_events (sentiment, scheduled_at DESC);
+CREATE INDEX IF NOT EXISTS idx_youtube_events_type_scheduled
+    ON youtube_events (event_type, scheduled_at DESC);
 
 -- ── YouTube channel metadata cache ──
 CREATE TABLE IF NOT EXISTS youtube_channels (
@@ -212,32 +216,41 @@ def _auto_migrate() -> None:
 def _get_client():
     """Return the Supabase client, lazily creating it on first call.
 
+    Uses double-checked locking so concurrent threads on first request
+    don't each create a separate client or run migrations in parallel.
+
     Returns ``None`` when either env var is missing or the client
     could not be created.
     """
     global _client, _initialised
 
+    # Fast path: already initialised (no lock needed)
     if _initialised:
         return _client
 
-    _initialised = True
+    with _init_lock:
+        # Re-check after acquiring lock (another thread may have finished)
+        if _initialised:
+            return _client
 
-    url = os.environ.get("SUPABASE_URL", "").strip()
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+        _initialised = True
 
-    if not url or not key:
-        logger.info("Supabase not configured (SUPABASE_URL / SUPABASE_SERVICE_KEY missing)")
-        return None
+        url = os.environ.get("SUPABASE_URL", "").strip()
+        key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 
-    try:
-        from supabase import create_client
-        _client = create_client(url, key)
-        logger.info("Supabase client initialised (%s)", url)
-        # Try auto-migration (non-fatal)
-        _auto_migrate()
-    except Exception as exc:
-        logger.warning("Supabase client init failed: %s", exc)
-        _client = None
+        if not url or not key:
+            logger.info("Supabase not configured (SUPABASE_URL / SUPABASE_SERVICE_KEY missing)")
+            return None
+
+        try:
+            from supabase import create_client
+            _client = create_client(url, key)
+            logger.info("Supabase client initialised (%s)", url)
+            # Try auto-migration (non-fatal)
+            _auto_migrate()
+        except Exception as exc:
+            logger.warning("Supabase client init failed: %s", exc)
+            _client = None
 
     return _client
 
