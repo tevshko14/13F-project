@@ -1000,5 +1000,87 @@
         });
     })();
     </script>
+
+    {# ── Global Toast Notification System ── #}
+    <div id="pp-toast-container" style="
+        position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+        display: flex; flex-direction: column; gap: 0.5em;
+        max-width: 380px; pointer-events: none;
+    "></div>
+    <style>
+        .pp-toast {
+            background: #18181b;
+            color: #fafafa;
+            padding: 0.85em 1.2em;
+            border-radius: 10px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+            font-size: 0.88em;
+            line-height: 1.4;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.7em;
+            animation: ppToastIn 0.3s ease-out;
+            cursor: pointer;
+            pointer-events: auto;
+            transition: opacity 0.3s;
+        }
+        .pp-toast:hover { opacity: 0.85; }
+        .pp-toast-icon { font-size: 1.3em; flex-shrink: 0; }
+        .pp-toast-body { flex: 1; }
+        .pp-toast-title { font-weight: 600; margin-bottom: 0.15em; }
+        .pp-toast-msg { opacity: 0.8; font-size: 0.9em; }
+        .pp-toast-close {
+            opacity: 0.5; cursor: pointer; font-size: 1.1em;
+            padding: 0; background: none; border: none; color: inherit;
+            flex-shrink: 0;
+        }
+        .pp-toast-close:hover { opacity: 1; }
+        @keyframes ppToastIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        @keyframes ppToastOut {
+            from { transform: translateY(0); opacity: 1; }
+            to { transform: translateY(20px); opacity: 0; }
+        }
+    </style>
+    <script>
+    window.ppToast = function(opts) {
+        var container = document.getElementById('pp-toast-container');
+        if (!container) return;
+
+        var borderColor = '#a1a1aa';
+        if (opts.type === 'bullish') borderColor = '#166534';
+        else if (opts.type === 'bearish') borderColor = '#9f1239';
+        else if (opts.type === 'alert') borderColor = '#FFD700';
+
+        var toast = document.createElement('div');
+        toast.className = 'pp-toast';
+        toast.style.borderLeft = '4px solid ' + borderColor;
+        toast.innerHTML =
+            '<span class="pp-toast-icon">' + (opts.icon || '&#x1F514;') + '</span>' +
+            '<div class="pp-toast-body">' +
+                '<div class="pp-toast-title">' + (opts.title || '') + '</div>' +
+                '<div class="pp-toast-msg">' + (opts.message || '') + '</div>' +
+            '</div>' +
+            '<button class="pp-toast-close" onclick="event.stopPropagation();this.parentElement.remove()">&times;</button>';
+
+        if (opts.link) {
+            toast.addEventListener('click', function(e) {
+                if (!e.target.classList.contains('pp-toast-close')) {
+                    window.location.href = opts.link;
+                }
+            });
+        }
+
+        container.appendChild(toast);
+
+        var duration = opts.duration || 8000;
+        setTimeout(function() {
+            toast.style.animation = 'ppToastOut 0.3s ease-in forwards';
+            setTimeout(function() { toast.remove(); }, 300);
+        }, duration);
+    };
+    </script>
 </body>
 </html>
