@@ -507,7 +507,7 @@ def get_insider_chart_data(limit: int = 10) -> list[dict]:
         return aggregate_top_tickers(stale_data, limit=limit)
 
     # ── L2: Supabase time-bounded query (30 days, 500 rows) ──
-    rows = supabase_cache.get_insider_trades_for_chart(days=30, limit=500)
+    rows = supabase_cache.get_insider_trades_for_chart(days=30, limit_per_type=250)
     if rows:
         trades = [InsiderTrade.from_db_row(r) for r in rows]
         _set_cached(cache_key, trades)
