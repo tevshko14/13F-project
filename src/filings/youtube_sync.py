@@ -294,23 +294,30 @@ def _yt_get(endpoint: str, params: dict) -> dict | None:
 
 
 def _fetch_channel_stats(channel_ids: list[str]) -> dict[str, dict]:
-    """Batch fetch channel statistics (1 unit, up to 50 IDs per call).
+    """Batch fetch channel statistics and thumbnails (1 unit, up to 50 IDs).
 
-    Returns {channel_id: {subscriber_count, view_count, video_count}}.
+    Returns {channel_id: {subscriber_count, view_count, video_count, thumbnail_url}}.
     """
     result: dict[str, dict] = {}
     data = _yt_get("channels", {
-        "part": "statistics",
+        "part": "snippet,statistics",
         "id": ",".join(channel_ids),
     })
     if data and "items" in data:
         for item in data["items"]:
             cid = item["id"]
             stats = item.get("statistics", {})
+            snippet = item.get("snippet", {})
+            thumbnails = snippet.get("thumbnails", {})
+            thumb_url = (
+                thumbnails.get("default", {}).get("url", "")
+                or thumbnails.get("medium", {}).get("url", "")
+            )
             result[cid] = {
                 "subscriber_count": int(stats.get("subscriberCount", 0)),
                 "view_count": int(stats.get("viewCount", 0)),
                 "video_count": int(stats.get("videoCount", 1)),
+                "thumbnail_url": thumb_url,
             }
     return result
 
@@ -401,6 +408,7 @@ def sync_youtube_events() -> dict:
             "subscriber_count": stats.get("subscriber_count", 0),
             "avg_views_30d": total_views // video_count,
             "avg_posts_per_week": info["baseline_posts_per_week"],
+            "thumbnail_url": stats.get("thumbnail_url", ""),
             "last_polled_at": now_iso,
             "updated_at": now_iso,
         })
