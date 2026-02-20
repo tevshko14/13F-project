@@ -1318,6 +1318,16 @@ if _has_limiter:
 
 def main():
     """Entry point for `uv run filings-web`."""
+    # Auto-load .env for local development (skipped on Railway)
+    if not os.environ.get("RAILWAY_ENVIRONMENT"):
+        from pathlib import Path
+
+        env_file = Path(__file__).resolve().parents[2] / ".env"
+        if env_file.exists():
+            from dotenv import load_dotenv
+
+            load_dotenv(env_file)
+
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "127.0.0.1")
     reload = os.environ.get("RAILWAY_ENVIRONMENT") is None
