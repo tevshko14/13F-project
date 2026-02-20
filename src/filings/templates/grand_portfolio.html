@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}SuperInvestors - PaperPanda{% endblock %}
+{% block title %}Top Funds - PaperPanda{% endblock %}
 {% block meta_description %}Track 13F holdings of top superinvestors like Warren Buffett, Bill Ackman, and more. See portfolio values, top holdings, and recent changes.{% endblock %}
 {% block content %}
 {% from "partials/ticker_link.html" import ticker_link %}
 <hgroup>
-    <h1>SuperInvestors</h1>
+    <h1>Top Funds</h1>
     <p>Aggregated holdings across all tracked superinvestors, powered by SEC EDGAR data.</p>
 </hgroup>
 
@@ -193,7 +193,7 @@
 {% if empty is defined and empty %}
 <article>
     <p>No portfolio data available yet. Data will load as superinvestor portfolios are cached.</p>
-    <p><a href="/grand-portfolio?view=funds" role="button">View Superinvestors</a> to trigger data loading.</p>
+    <p><a href="/funds?view=funds" role="button">View Top Funds</a> to trigger data loading.</p>
 </article>
 {% else %}
 
