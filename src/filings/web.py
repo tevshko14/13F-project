@@ -276,22 +276,6 @@ async def fund_row(request: Request, cik: str):
     })
 
 
-# --- Search page ---
-
-@app.get("/search", response_class=HTMLResponse)
-async def search_page(request: Request, q: str = Query("")):
-    query = q.strip()
-    if not query:
-        return templates.TemplateResponse("search.html", {"request": request})
-
-    results = await asyncio.to_thread(client.search_managers, query)
-
-    return templates.TemplateResponse("search.html", {
-        "request": request,
-        "query": query,
-        "results": results,
-    })
-
 
 # --- Enhanced Holdings page ---
 
