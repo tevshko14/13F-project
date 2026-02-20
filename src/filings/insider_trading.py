@@ -489,6 +489,42 @@ def get_latest_insider_trades(
     return []
 
 
+def get_insider_chart_data(limit: int = 10) -> list[dict]:
+    """Fetch aggregated chart data for the insider momentum chart.
+
+    Uses a 30-day time window (not a row-count limit) to ensure both
+    buys **and** sells are represented.  Falls back gracefully through
+    the same L1→L2→L3→L4 tiers as the table data.
+
+    Returns pre-aggregated chart data (list of dicts from
+    :func:`aggregate_top_tickers`).
+    """
+    cache_key = "chart:insider_momentum"
+
+    # ── L1: in-memory fast path ──
+    stale_data, is_fresh = _get_cached_with_stale(cache_key, _GLOBAL_TTL)
+    if stale_data is not None and is_fresh:
+        return aggregate_top_tickers(stale_data, limit=limit)
+
+    # ── L2: Supabase time-bounded query (30 days, 500 rows) ──
+    rows = supabase_cache.get_insider_trades_for_chart(days=30, limit=500)
+    if rows:
+        trades = [InsiderTrade.from_db_row(r) for r in rows]
+        _set_cached(cache_key, trades)
+        return aggregate_top_tickers(trades, limit=limit)
+
+    # ── L3: Fall back to standard 100-row fetch (degraded) ──
+    trades = get_latest_insider_trades(trade_type="", count=100)
+    if trades:
+        return aggregate_top_tickers(trades, limit=limit)
+
+    # ── L4: Stale data — never show empty chart ──
+    if stale_data:
+        return aggregate_top_tickers(stale_data, limit=limit)
+
+    return []
+
+
 def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
     """Fetch insider trades for a specific ticker -- Supabase-first.
 
