@@ -231,17 +231,32 @@
                     x: {
                         stacked: true,
                         grid: { display: false },
+                        border: { display: false },
+                        ticks: {
+                            font: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 12 },
+                            color: '#27272a',
+                        },
                     },
                     y: {
                         stacked: true,
-                        title: { display: true, text: 'Total Dollar Value ($)', font: { size: 13 } },
-                        ticks: { callback: function(v) { return fmtDollar(v); } },
+                        border: { display: false },
+                        title: {
+                            display: true,
+                            text: 'Total Dollar Value ($)',
+                            font: { family: "'Inter', 'system-ui', sans-serif", size: 12, weight: '500' },
+                            color: '#a1a1aa',
+                        },
+                        ticks: {
+                            callback: function(v) { return fmtDollar(v); },
+                            font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
+                            color: '#71717a',
+                        },
                         grid: {
                             color: function(ctx) {
-                                return ctx.tick.value === 0 ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.06)';
+                                return ctx.tick.value === 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)';
                             },
                             lineWidth: function(ctx) {
-                                return ctx.tick.value === 0 ? 2 : 1;
+                                return ctx.tick.value === 0 ? 1.5 : 1;
                             },
                         },
                     },
@@ -250,9 +265,15 @@
                     legend: {
                         display: chartView === 'detailed',
                         position: 'bottom',
-                        labels: { font: { size: 11 }, boxWidth: 12, padding: 8 },
+                        labels: {
+                            font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
+                            boxWidth: 12, padding: 8,
+                        },
                     },
                     tooltip: {
+                        titleFont: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 13 },
+                        bodyFont: { family: "'Inter', 'system-ui', sans-serif", size: 12 },
+                        padding: 12,
                         callbacks: {
                             title: function(items) {
                                 var idx = items[0].dataIndex;
@@ -267,24 +288,44 @@
                             afterBody: function(items) {
                                 var idx = items[0].dataIndex;
                                 var d = chartDataCache[currentFilter][idx];
-                                var lines = [];
-                                lines.push('');
-                                lines.push('Net Flow: ' + fmtDollar(d.net_flow));
-                                lines.push(d.trade_count + ' trade' + (d.trade_count !== 1 ? 's' : ''));
-                                if (d.date_range) lines.push(d.date_range);
-                                /* List insiders */
                                 var insiders = d.insider_details || [];
-                                if (insiders.length > 0) {
+                                var lines = [];
+
+                                /* Net Flow */
+                                lines.push('');
+                                var sign = d.net_flow >= 0 ? '+' : '';
+                                lines.push('Net Flow: ' + sign + fmtDollar(d.net_flow));
+
+                                /* Buy Breakdown */
+                                var buyers = insiders.filter(function(i) { return i.buy_value > 0; });
+                                if (buyers.length > 0) {
+                                    var totalBuyTrades = buyers.reduce(function(s, i) { return s + i.count; }, 0);
                                     lines.push('');
-                                    for (var i = 0; i < Math.min(insiders.length, 5); i++) {
-                                        var ins = insiders[i];
-                                        var desc = ins.name + ' (' + ins.count + ' trade' + (ins.count !== 1 ? 's' : '') + ')';
-                                        lines.push(desc);
+                                    lines.push('Buy Breakdown (' + fmtDollar(d.buy_value) + ', ' + totalBuyTrades + ' trade' + (totalBuyTrades !== 1 ? 's' : '') + '):');
+                                    for (var b = 0; b < Math.min(buyers.length, 4); b++) {
+                                        lines.push('  ' + buyers[b].name + ': ' + fmtDollar(buyers[b].buy_value) + ' (' + buyers[b].count + ')');
                                     }
-                                    if (insiders.length > 5) {
-                                        lines.push('... +' + (insiders.length - 5) + ' more');
-                                    }
+                                    if (buyers.length > 4) lines.push('  +' + (buyers.length - 4) + ' more');
                                 }
+
+                                /* Sell Breakdown */
+                                var sellers = insiders.filter(function(i) { return i.sell_value > 0; });
+                                if (sellers.length > 0) {
+                                    var totalSellTrades = sellers.reduce(function(s, i) { return s + i.count; }, 0);
+                                    lines.push('');
+                                    lines.push('Sell Breakdown (' + fmtDollar(d.sell_value) + ', ' + totalSellTrades + ' trade' + (totalSellTrades !== 1 ? 's' : '') + '):');
+                                    for (var s = 0; s < Math.min(sellers.length, 4); s++) {
+                                        lines.push('  ' + sellers[s].name + ': ' + fmtDollar(sellers[s].sell_value) + ' (' + sellers[s].count + ')');
+                                    }
+                                    if (sellers.length > 4) lines.push('  +' + (sellers.length - 4) + ' more');
+                                }
+
+                                /* Date Range */
+                                if (d.date_range) {
+                                    lines.push('');
+                                    lines.push('Date Range: ' + d.date_range);
+                                }
+
                                 return lines;
                             },
                         },
