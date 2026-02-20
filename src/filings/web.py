@@ -309,8 +309,8 @@ async def homepage(request: Request):
 
 @app.get("/superinvestors", response_class=HTMLResponse)
 async def superinvestors_page(request: Request):
-    """Redirect to grand portfolio with investors tab active."""
-    return RedirectResponse(url="/grand-portfolio?view=investors", status_code=302)
+    """Redirect to grand portfolio with funds tab active."""
+    return RedirectResponse(url="/grand-portfolio?view=funds", status_code=302)
 
 
 # --- Lazy-load a single fund row (HTMX) ---
@@ -572,9 +572,9 @@ async def activity_feed(request: Request):
 # --- Grand Portfolio ---
 
 @app.get("/grand-portfolio", response_class=HTMLResponse)
-async def grand_portfolio(request: Request, view: str = "holdings"):
-    if view not in ("holdings", "investors", "activity"):
-        view = "holdings"
+async def grand_portfolio(request: Request, view: str = "funds"):
+    if view not in ("funds", "holdings", "activity"):
+        view = "funds"
 
     cache_data = getattr(app.state, "fund_cache", {})
 

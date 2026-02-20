@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Grand Portfolio - PaperPanda{% endblock %}
+{% block title %}SuperInvestors - PaperPanda{% endblock %}
 {% block meta_description %}Track 13F holdings of top superinvestors like Warren Buffett, Bill Ackman, and more. See portfolio values, top holdings, and recent changes.{% endblock %}
 {% block content %}
 {% from "partials/ticker_link.html" import ticker_link %}
 <hgroup>
-    <h1>Grand Portfolio</h1>
+    <h1>SuperInvestors</h1>
     <p>Aggregated holdings across all tracked superinvestors, powered by SEC EDGAR data.</p>
 </hgroup>
 
@@ -166,15 +166,15 @@
     <nav>
         <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
             <li>
-                <button class="gp-subtab{% if view == 'holdings' %} active{% endif %}"
-                        data-view="holdings" onclick="switchGPView('holdings')">
-                    Holdings
+                <button class="gp-subtab{% if view == 'funds' %} active{% endif %}"
+                        data-view="funds" onclick="switchGPView('funds')">
+                    Funds
                 </button>
             </li>
             <li>
-                <button class="gp-subtab{% if view == 'investors' %} active{% endif %}"
-                        data-view="investors" onclick="switchGPView('investors')">
-                    Superinvestors
+                <button class="gp-subtab{% if view == 'holdings' %} active{% endif %}"
+                        data-view="holdings" onclick="switchGPView('holdings')">
+                    Holdings
                 </button>
             </li>
             <li>
@@ -195,7 +195,7 @@
 {% if empty is defined and empty %}
 <article>
     <p>No portfolio data available yet. Data will load as superinvestor portfolios are cached.</p>
-    <p><a href="/grand-portfolio?view=investors" role="button">View Superinvestors</a> to trigger data loading.</p>
+    <p><a href="/grand-portfolio?view=funds" role="button">View Superinvestors</a> to trigger data loading.</p>
 </article>
 {% else %}
 
@@ -370,9 +370,9 @@
 </div>{# end panel-holdings #}
 
 {# ══════════════════════════════════════════════════════════════════ #}
-{# ── Panel 2: Superinvestors (Investor listing table)               #}
+{# ── Panel: Funds (Investor listing table)                           #}
 {# ══════════════════════════════════════════════════════════════════ #}
-<div id="panel-investors" class="gp-panel{% if view == 'investors' %} active{% endif %}">
+<div id="panel-funds" class="gp-panel{% if view == 'funds' %} active{% endif %}">
 
 <div class="cache-info">
     <small>Cache: {{ cache_age }}</small>
@@ -443,7 +443,7 @@
 </table>
 </figure>
 
-</div>{# end panel-investors #}
+</div>{# end panel-funds #}
 
 {# ══════════════════════════════════════════════════════════════════ #}
 {# ── Panel 3: Activity (Recent buys, sells, position changes)       #}
@@ -506,7 +506,7 @@
 {% else %}
 <article>
     <p>No activity data available yet. Data will load as superinvestor portfolios are cached.</p>
-    <p><a href="/grand-portfolio?view=investors" role="button">View Superinvestors</a> to trigger data loading.</p>
+    <p><a href="/grand-portfolio?view=funds" role="button">View Superinvestors</a> to trigger data loading.</p>
 </article>
 {% endif %}
 
@@ -550,7 +550,7 @@
     // Handle browser back/forward
     window.addEventListener('popstate', function() {
         var params = new URLSearchParams(window.location.search);
-        var view = params.get('view') || 'holdings';
+        var view = params.get('view') || 'funds';
         switchGPView(view);
     });
 })();
