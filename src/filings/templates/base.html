@@ -29,11 +29,11 @@
         .htmx-request .htmx-indicator,
         .htmx-request.htmx-indicator { display: block; }
 
-        .status-new, .activity-new-buy { color: #2e7d32; font-weight: bold; }
-        .status-closed, .activity-sold { color: #c62828; font-weight: bold; }
-        .status-increased, .activity-add { color: #2e7d32; }
-        .status-decreased, .activity-reduce { color: #c62828; }
-        .status-unchanged { opacity: 0.6; }
+        .status-new, .activity-new-buy { color: #166534; font-weight: 600; }
+        .status-closed, .activity-sold { color: #9f1239; font-weight: 600; }
+        .status-increased, .activity-add { color: #166534; }
+        .status-decreased, .activity-reduce { color: #9f1239; }
+        .status-unchanged { color: #a1a1aa; }
 
         .text-right { text-align: right; }
         .text-muted { opacity: 0.6; font-size: 0.9em; }
@@ -58,45 +58,108 @@
 
         table td, table th { padding: 0.5em 0.75em; }
 
-        /* Badge-style labels for activity */
+        /* ══════════════════════════════════════════════════════ */
+        /* ── Paper Panda Design System                        ── */
+        /* ══════════════════════════════════════════════════════ */
+
+        /* ── PP Table: clean, minimal, high-contrast ── */
+        .pp-table-wrap {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+            overflow-x: auto;
+            border: 1px solid #f4f4f5;
+        }
+        .pp-table {
+            width: 100%;
+            table-layout: auto;
+            border-collapse: collapse;
+            font-size: max(14px, 0.875rem);
+        }
+        .pp-table thead th {
+            padding: 12px 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #71717a;
+            background: #fafafa;
+            border-bottom: 1px solid #e4e4e7;
+            white-space: nowrap;
+            vertical-align: middle;
+        }
+        .pp-table tbody td {
+            padding: 14px 20px;
+            vertical-align: middle;
+            color: #27272a;
+            border-bottom: 1px solid #f4f4f5;
+            line-height: 1.5;
+            white-space: normal;
+        }
+        .pp-table tbody tr {
+            transition: background-color 0.15s ease;
+        }
+        .pp-table tbody tr:hover {
+            background-color: #fafafa;
+        }
+        .pp-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+        /* Primary data emphasis */
+        .pp-table .pp-primary {
+            font-weight: 500;
+            color: #18181b;
+        }
+        /* Secondary/muted data */
+        .pp-table .pp-secondary {
+            color: #71717a;
+            font-size: 0.85em;
+        }
+
+        /* ── PP Pill Badges (low-saturation, rounded-full) ── */
         .badge {
             display: inline-block;
-            padding: 0.15em 0.5em;
-            border-radius: 4px;
-            font-size: 0.8em;
-            font-weight: bold;
+            padding: 0.2em 0.65em;
+            border-radius: 9999px;
+            font-size: 0.72em;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            line-height: 1.4;
+            white-space: nowrap;
         }
-        .badge-new { background: #e8f5e9; color: #2e7d32; }
-        .badge-add { background: #e8f5e9; color: #388e3c; }
-        .badge-reduce { background: #fce4ec; color: #c62828; }
-        .badge-sold { background: #fce4ec; color: #b71c1c; }
+        .badge-new { background: #dcfce7; color: #166534; }
+        .badge-add { background: #dcfce7; color: #15803d; }
+        .badge-reduce { background: #ffe4e6; color: #9f1239; }
+        .badge-sold { background: #ffe4e6; color: #881337; }
 
         /* Enhanced signal badges */
-        .badge-new-entry { background: #f3e5f5; color: #7b1fa2; }
-        .badge-heavy-add { background: #1b5e20; color: #fff; }
-        .badge-trim { background: #fff3e0; color: #e65100; }
-        .badge-liquidated { background: #212121; color: #ef5350; }
+        .badge-new-entry { background: #f3e8ff; color: #7c3aed; }
+        .badge-heavy-add { background: #166534; color: #fff; }
+        .badge-trim { background: #fff7ed; color: #c2410c; }
+        .badge-liquidated { background: #18181b; color: #fb7185; }
 
         /* Consensus cluster sentiment badges */
-        .badge-bullish { background: #e8f5e9; color: #2e7d32; }
-        .badge-bearish { background: #fce4ec; color: #c62828; }
-        .badge-mixed { background: #fff8e1; color: #f57f17; }
+        .badge-bullish { background: #dcfce7; color: #166534; }
+        .badge-bearish { background: #ffe4e6; color: #9f1239; }
+        .badge-mixed { background: #fef9c3; color: #a16207; }
 
         /* Activity stats bar (sticky header) */
         .activity-stats-bar {
-            display: flex; gap: 2em; padding: 0.75em 1em;
-            background: var(--card-background-color, #fff);
-            border: 1px solid var(--muted-border-color, #ddd);
-            border-radius: 8px; margin-bottom: 1em;
+            display: flex; gap: 2em; padding: 0.85em 1.25em;
+            background: #fff;
+            border: 1px solid #f4f4f5;
+            border-radius: 12px; margin-bottom: 1em;
             position: sticky; top: 0; z-index: 10;
             flex-wrap: wrap;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
         }
         .activity-stats-bar .stat-label {
-            font-size: 0.75em; color: var(--muted-color, #666); display: block;
+            font-size: 0.68em; color: #a1a1aa; display: block;
+            text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500;
         }
-        .activity-stats-bar .stat-value { font-size: 1.1em; font-weight: 600; }
-        .activity-stats-bar .bullish { color: #2e7d32; }
-        .activity-stats-bar .bearish { color: #c62828; }
+        .activity-stats-bar .stat-value { font-size: 1.05em; font-weight: 600; color: #18181b; }
+        .activity-stats-bar .bullish { color: #166534; }
+        .activity-stats-bar .bearish { color: #9f1239; }
 
         /* Activity controls bar */
         .activity-controls {
@@ -149,7 +212,7 @@
         .activity-fade.expanded::after { opacity: 0; height: 0; }
 
         /* Sticky thead when accordion is expanded */
-        .sticky-head { position: sticky; top: 0; z-index: 5; background: #fff; box-shadow: 0 1px 0 0 #e4e4e7; }
+        .sticky-head { position: sticky; top: 0; z-index: 5; background: #fafafa; box-shadow: 0 1px 0 0 #e4e4e7; }
 
         /* Neutral sentiment badge */
         .badge-neutral { background: #f4f4f5; color: #52525b; }
@@ -162,33 +225,38 @@
 
         /* Activity cluster rows */
         .activity-cluster {
-            border: 1px solid var(--muted-border-color, #ddd);
-            border-radius: 8px; margin-bottom: 0.5em; overflow: hidden;
+            border: 1px solid #f4f4f5;
+            border-radius: 12px; margin-bottom: 0.5em; overflow: hidden;
+            background: #fff;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
         }
         .cluster-header {
             display: flex; align-items: center; gap: 1em;
-            padding: 0.75em 1em; cursor: pointer;
-            background: var(--card-background-color, #f8f9fa);
+            padding: 0.85em 1.25em; cursor: pointer;
+            background: #fafafa;
             font-size: 0.92em;
+            transition: background-color 0.15s ease;
         }
-        .cluster-header:hover { background: rgba(0,0,0,0.04); }
-        .cluster-ticker { font-weight: bold; font-family: monospace; min-width: 5em; }
-        .cluster-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .cluster-summary { font-size: 0.85em; color: var(--muted-color, #666); }
-        .cluster-value { font-family: monospace; font-weight: 500; }
-        .cluster-expand { margin-left: auto; transition: transform 0.2s; }
+        .cluster-header:hover { background: #f4f4f5; }
+        .cluster-ticker { font-weight: 600; font-family: monospace; min-width: 5em; color: #18181b; }
+        .cluster-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #71717a; }
+        .cluster-summary { font-size: 0.85em; color: #a1a1aa; }
+        .cluster-value { font-family: monospace; font-weight: 500; color: #27272a; }
+        .cluster-expand { margin-left: auto; transition: transform 0.2s; color: #a1a1aa; }
         .cluster-header.open .cluster-expand { transform: rotate(90deg); }
-        .cluster-detail { padding: 0 1em 0.75em; }
-        .cluster-table { width: 100%; font-size: 0.9em; border-collapse: collapse; }
-        .cluster-table td { padding: 0.3em 0.5em; }
+        .cluster-detail { padding: 0 1.25em 0.85em; }
+        .cluster-table { width: 100%; font-size: 0.88em; border-collapse: collapse; }
+        .cluster-table td { padding: 0.5em 0.6em; border-bottom: 1px solid #f4f4f5; color: #27272a; }
+        .cluster-table tr:last-child td { border-bottom: none; }
+        .cluster-table tr:hover { background: #fafafa; }
 
         /* Fund AUM sub-label */
-        .fund-aum { display: block; color: var(--muted-color, #888); font-size: 0.75em; }
+        .fund-aum { display: block; color: #a1a1aa; font-size: 0.72em; margin-top: 2px; }
 
         /* Section labels */
         .section-label {
-            font-size: 0.9em; text-transform: uppercase; letter-spacing: 0.05em;
-            color: var(--muted-color, #888); margin: 1.5em 0 0.5em;
+            font-size: 0.72em; text-transform: uppercase; letter-spacing: 0.08em;
+            font-weight: 600; color: #a1a1aa; margin: 1.5em 0 0.75em;
         }
 
         /* Conviction column */
@@ -203,14 +271,15 @@
         .tag-list { display: flex; gap: 0.3em; flex-wrap: wrap; }
         .tag {
             display: inline-block;
-            padding: 0.1em 0.4em;
-            background: #e3f2fd;
-            border-radius: 3px;
-            font-size: 0.78em;
+            padding: 0.15em 0.5em;
+            background: #f4f4f5;
+            border-radius: 4px;
+            font-size: 0.75em;
             font-family: monospace;
+            color: #3f3f46;
         }
-        a.tag { text-decoration: none; color: inherit; }
-        a.tag:hover { text-decoration: underline; }
+        a.tag { text-decoration: none; color: #3f3f46; }
+        a.tag:hover { background: #e4e4e7; }
 
         /* Refresh area */
         .cache-info {
@@ -285,8 +354,8 @@
 
         /* Sortable table headers */
         th[data-sort] { cursor: pointer; user-select: none; }
-        th[data-sort]:hover { background: rgba(0,0,0,0.04); }
-        .sort-indicator { font-size: 0.7em; vertical-align: middle; margin-left: 0.2em; }
+        th[data-sort]:hover { background: #f4f4f5; }
+        .sort-indicator { font-size: 0.7em; vertical-align: middle; margin-left: 0.2em; color: #a1a1aa; }
 
         /* ── Nav dropdown ── */
         .nav-dropdown {

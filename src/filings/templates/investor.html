@@ -15,25 +15,41 @@
 </div>
 
 <style>
-    /* ── Table styling (matches stock page) ── */
+    /* ── Table styling: Paper Panda design ── */
     .inv-table {
         width: 100%;
         table-layout: auto;
         border-collapse: collapse;
-    }
-    .inv-table th,
-    .inv-table td {
-        padding: 10px 14px;
-        line-height: 1.5;
-        vertical-align: middle;
         font-size: max(14px, 0.875rem);
-        height: auto;
-        white-space: normal;
-        overflow: visible;
     }
-    .inv-table tr {
-        height: auto;
-        min-height: 44px;
+    .inv-table thead th {
+        padding: 12px 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #71717a;
+        background: #fafafa;
+        border-bottom: 1px solid #e4e4e7;
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    .inv-table tbody td {
+        padding: 14px 20px;
+        vertical-align: middle;
+        color: #27272a;
+        border-bottom: 1px solid #f4f4f5;
+        line-height: 1.5;
+        white-space: normal;
+    }
+    .inv-table tbody tr {
+        transition: background-color 0.15s ease;
+    }
+    .inv-table tbody tr:hover {
+        background-color: #fafafa;
+    }
+    .inv-table tbody tr:last-child td {
+        border-bottom: none;
     }
 
     /* ── Holdings overflow rows + fade ── */
@@ -142,9 +158,9 @@
 
     /* ── Responsive ── */
     @media (max-width: 768px) {
-        .inv-table th,
-        .inv-table td {
-            font-size: 14px;
+        .inv-table thead th,
+        .inv-table tbody td {
+            padding: 10px 12px; font-size: 13px;
         }
     }
 </style>
@@ -419,7 +435,7 @@
     </header>
 
     <div class="holdings-fade{% if holdings | length <= 10 %} expanded{% endif %}" id="holdings-table-wrap">
-    <figure>
+    <div class="pp-table-wrap">
     <table class="inv-table">
         <thead>
             <tr>
@@ -470,7 +486,7 @@
             {% endfor %}
         </tbody>
     </table>
-    </figure>
+    </div>{# end pp-table-wrap #}
     </div>
 
     {% if holdings | length > 10 %}
@@ -522,7 +538,7 @@
                     No trades reported for this period.
                 </p>
             {% else %}
-            <figure>
+            <div class="pp-table-wrap">
             <table class="inv-table">
                 <thead>
                     <tr>
@@ -602,7 +618,7 @@
                     {% endfor %}
                 </tbody>
             </table>
-            </figure>
+            </div>{# end pp-table-wrap #}
             {% endif %}
         </div>
         {% endfor %}

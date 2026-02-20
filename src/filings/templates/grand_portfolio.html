@@ -57,25 +57,41 @@
     .dash-spacing { margin-bottom: 2rem; }
     .dash-top-spacing { margin-bottom: 3rem; }
 
-    /* ── Table styling (matches stock/investor page) ── */
+    /* ── Table styling: alias .gp-table to Paper Panda design ── */
     .gp-table {
         width: 100%;
         table-layout: auto;
         border-collapse: collapse;
-    }
-    .gp-table th,
-    .gp-table td {
-        padding: 10px 14px;
-        line-height: 1.5;
-        vertical-align: middle;
         font-size: max(14px, 0.875rem);
-        height: auto;
-        white-space: normal;
-        overflow: visible;
     }
-    .gp-table tr {
-        height: auto;
-        min-height: 44px;
+    .gp-table thead th {
+        padding: 12px 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #71717a;
+        background: #fafafa;
+        border-bottom: 1px solid #e4e4e7;
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    .gp-table tbody td {
+        padding: 14px 20px;
+        vertical-align: middle;
+        color: #27272a;
+        border-bottom: 1px solid #f4f4f5;
+        line-height: 1.5;
+        white-space: normal;
+    }
+    .gp-table tbody tr {
+        transition: background-color 0.15s ease;
+    }
+    .gp-table tbody tr:hover {
+        background-color: #fafafa;
+    }
+    .gp-table tbody tr:last-child td {
+        border-bottom: none;
     }
 
     /* ── Tag list for holders ── */
@@ -118,21 +134,23 @@
     }
     .gp-expand-btn {
         background: none;
-        border: 1px solid rgba(0,0,0,0.15);
-        border-radius: 6px;
-        padding: 0.4em 1.2em;
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        padding: 0.5em 1.4em;
         cursor: pointer;
-        font-size: 0.85em;
-        color: rgba(0,0,0,0.6);
+        font-size: 0.82em;
+        font-weight: 500;
+        color: #71717a;
         display: flex;
         align-items: center;
         gap: 0.4em;
-        margin: 0.5em auto 0;
-        transition: background 0.15s, color 0.15s;
+        margin: 0.75em auto 0;
+        transition: all 0.15s ease;
     }
     .gp-expand-btn:hover {
-        background: rgba(0,0,0,0.04);
-        color: rgba(0,0,0,0.8);
+        background: #fafafa;
+        color: #3f3f46;
+        border-color: #a1a1aa;
     }
     .gp-expand-arrow {
         display: inline-block;
@@ -164,9 +182,9 @@
 
     /* ── Responsive ── */
     @media (max-width: 768px) {
-        .gp-table th,
-        .gp-table td {
-            font-size: 14px;
+        .gp-table thead th,
+        .gp-table tbody td {
+            padding: 10px 12px; font-size: 13px;
         }
     }
 </style>
@@ -332,7 +350,7 @@
         </span>
     </header>
     <div class="gp-fade{% if entries|length <= 25 %} expanded{% endif %}" id="gp-table-wrap">
-    <figure>
+    <div class="pp-table-wrap">
     <table class="gp-table">
         <thead>
             <tr>
@@ -365,7 +383,7 @@
             {% endfor %}
         </tbody>
     </table>
-    </figure>
+    </div>{# end pp-table-wrap #}
     </div>
     {% if entries|length > 25 %}
     <button class="gp-expand-btn" onclick="toggleGrandPortfolio(this)">
@@ -388,7 +406,7 @@
     <small class="sync-badge">Auto-synced</small>
 </div>
 
-<figure>
+<div class="pp-table-wrap">
 <table class="gp-table">
     <thead>
         <tr>
@@ -441,7 +459,7 @@
         {% endfor %}
     </tbody>
 </table>
-</figure>
+</div>{# end pp-table-wrap #}
 
 </div>{# end panel-funds #}
 
