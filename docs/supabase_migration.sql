@@ -1,15 +1,16 @@
--- PaperPanda Supabase Schema: api_cache
+-- PaperPanda Supabase Schema
 -- Run this in your Supabase SQL Editor (Dashboard > SQL Editor > New Query)
 -- NOTE: Auto-applied on first deploy via _auto_migrate() in supabase_cache.py
 --
--- This table acts as a universal persistent cache (L2) for all API data.
--- It survives Railway deploys (unlike the disk JSON cache).
+-- Tables:
+--   api_cache       — Universal persistent cache (L2) for API data
+--   insider_trades  — Dedicated table for SEC Form 4 insider trading data
+--   profiles        — User authentication / tier tracking
 --
--- Categories stored:
+-- api_cache categories:
 --   "13f"              — ~100 superinvestor fund data (holdings, changes, quarterly history)
 --   "glassdoor"        — Company culture ratings per ticker
 --   "glassdoor_quota"  — Monthly Glassdoor API call counter
---   "insider"          — Form 4 insider trades (global + per-ticker)
 
 -- 1. Create the api_cache table
 CREATE TABLE IF NOT EXISTS api_cache (
@@ -100,3 +101,69 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- PaperPanda Supabase Schema: insider_trades (SEC Form 4 Data)
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- Dedicated table for insider trading data scraped from OpenInsider.
+-- Populated by the insider_sync cron worker (filings-insider-sync).
+-- The web server reads from this table instead of scraping on-demand.
+--
+-- Each row is a single SEC Form 4 filing transaction, deduplicated
+-- by sec_url (the unique SEC filing URL).
+--
+-- Numeric columns (price, qty, value, etc.) enable SQL-level
+-- aggregation.  The *_fmt columns preserve the original formatted
+-- strings for display.
+
+-- 9. Create the insider_trades table
+CREATE TABLE IF NOT EXISTS insider_trades (
+    id              BIGSERIAL PRIMARY KEY,
+    sec_url         TEXT NOT NULL UNIQUE,           -- dedup key (SEC Form 4 filing URL)
+    filing_date     DATE NOT NULL,                  -- when the Form 4 was filed with SEC
+    trade_date      DATE NOT NULL,                  -- when the trade actually occurred
+    ticker          TEXT NOT NULL,                   -- e.g. "AAPL"
+    company_name    TEXT NOT NULL DEFAULT '',        -- e.g. "Apple Inc"
+    insider_name    TEXT NOT NULL,                   -- e.g. "Tim Cook"
+    title           TEXT NOT NULL DEFAULT '',        -- e.g. "CEO", "CFO", "Director", "10%"
+    trade_type      TEXT NOT NULL,                   -- "Purchase", "Sale", "Sale+OE"
+    price           NUMERIC(12,4),                   -- parsed numeric price (150.5000)
+    qty             INTEGER,                         -- parsed signed quantity (+75000 or -3752)
+    owned           BIGINT,                          -- shares owned after trade
+    delta_own_pct   NUMERIC(8,4),                    -- ownership change as percentage (13.0, -4.0)
+    value           NUMERIC(16,2),                   -- parsed signed dollar value (+150000.00)
+    price_fmt       TEXT NOT NULL DEFAULT '',        -- "$150.50" (display string)
+    qty_fmt         TEXT NOT NULL DEFAULT '',        -- "+75,000" (display string)
+    owned_fmt       TEXT NOT NULL DEFAULT '',        -- "1,500,000" (display string)
+    delta_own_fmt   TEXT NOT NULL DEFAULT '',        -- "+13%" (display string)
+    value_fmt       TEXT NOT NULL DEFAULT '',        -- "+$150,000" (display string)
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 10. Indexes for insider_trades
+CREATE INDEX IF NOT EXISTS idx_insider_trades_ticker
+    ON insider_trades (ticker, trade_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_insider_trades_trade_date
+    ON insider_trades (trade_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_insider_trades_type_date
+    ON insider_trades (trade_type, trade_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_insider_trades_filing_date
+    ON insider_trades (filing_date DESC);
+
+-- 11. Enable Row Level Security on insider_trades
+ALTER TABLE insider_trades ENABLE ROW LEVEL SECURITY;
+
+-- 12. RLS Policies for insider_trades
+CREATE POLICY "Allow authenticated read access on insider_trades"
+    ON insider_trades
+    FOR SELECT
+    TO authenticated
+    USING (true);
+
+-- Service role (Python backend / sync worker) has full access via bypass.

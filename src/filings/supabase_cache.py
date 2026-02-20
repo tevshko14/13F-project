@@ -65,6 +65,39 @@ CREATE TABLE IF NOT EXISTS sync_logs (
     funds_skipped   INTEGER DEFAULT 0,
     error_messages  JSONB DEFAULT '[]'::jsonb
 );
+
+-- ── Dedicated insider_trades table ──
+CREATE TABLE IF NOT EXISTS insider_trades (
+    id              BIGSERIAL PRIMARY KEY,
+    sec_url         TEXT NOT NULL UNIQUE,
+    filing_date     DATE NOT NULL,
+    trade_date      DATE NOT NULL,
+    ticker          TEXT NOT NULL,
+    company_name    TEXT NOT NULL DEFAULT '',
+    insider_name    TEXT NOT NULL,
+    title           TEXT NOT NULL DEFAULT '',
+    trade_type      TEXT NOT NULL,
+    price           NUMERIC(12,4),
+    qty             INTEGER,
+    owned           BIGINT,
+    delta_own_pct   NUMERIC(8,4),
+    value           NUMERIC(16,2),
+    price_fmt       TEXT NOT NULL DEFAULT '',
+    qty_fmt         TEXT NOT NULL DEFAULT '',
+    owned_fmt       TEXT NOT NULL DEFAULT '',
+    delta_own_fmt   TEXT NOT NULL DEFAULT '',
+    value_fmt       TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_insider_trades_ticker
+    ON insider_trades (ticker, trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_insider_trades_trade_date
+    ON insider_trades (trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_insider_trades_type_date
+    ON insider_trades (trade_type, trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_insider_trades_filing_date
+    ON insider_trades (filing_date DESC);
 """
 
 
@@ -120,7 +153,7 @@ def _auto_migrate() -> None:
             cur.close()
             conn.close()
             _table_verified = True
-            logger.info("Supabase api_cache + sync_logs tables verified via auto-migration")
+            logger.info("Supabase api_cache + sync_logs + insider_trades tables verified via auto-migration")
             return  # Success — stop trying other URLs
         except Exception as exc:
             logger.debug("Auto-migration attempt failed (%s...): %s", url[:40], exc)
@@ -553,6 +586,96 @@ def fetch_with_cache_and_quota(
     except Exception as exc:
         logger.error("fetch_with_cache_and_quota failed for %s: %s", log_label, exc)
         return None
+
+
+# ── Insider trades queries ───────────────────────────────────────
+
+
+def get_insider_trades(
+    trade_type: str = "",
+    limit: int = 100,
+) -> list[dict] | None:
+    """Query ``insider_trades`` table for latest trades.
+
+    Args:
+        trade_type: ``"Purchase"`` for buys, ``"Sale"`` for sells,
+                    ``""`` for all.
+        limit: Max rows to return.
+
+    Returns list of row dicts, or ``None`` if Supabase is unavailable.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+
+    try:
+        query = (
+            client.table("insider_trades")
+            .select("*")
+            .order("filing_date", desc=True)
+            .order("trade_date", desc=True)
+            .limit(limit)
+        )
+        if trade_type:
+            query = query.ilike("trade_type", f"%{trade_type}%")
+
+        resp = query.execute()
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_insider_trades failed: %s", exc)
+        return None
+
+
+def get_insider_trades_by_ticker(
+    ticker: str,
+    limit: int = 100,
+) -> list[dict] | None:
+    """Query ``insider_trades`` for a specific ticker.
+
+    Returns list of row dicts, or ``None`` if Supabase is unavailable.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+
+    try:
+        resp = (
+            client.table("insider_trades")
+            .select("*")
+            .eq("ticker", ticker.upper())
+            .order("trade_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_insider_trades_by_ticker(%s) failed: %s", ticker, exc)
+        return None
+
+
+def upsert_insider_trades(rows: list[dict]) -> int:
+    """Batch upsert rows into ``insider_trades``.
+
+    Uses ``ON CONFLICT (sec_url) DO UPDATE`` for deduplication.
+    Returns the number of rows upserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    upserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("insider_trades").upsert(
+                chunk, on_conflict="sec_url"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_insider_trades chunk %d failed: %s", i, exc)
+
+    return upserted
 
 
 # ── Sync worker helpers ──────────────────────────────────────────

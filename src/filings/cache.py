@@ -97,13 +97,23 @@ def load_cache_from_supabase() -> dict:
 
     logger.info("Found %d 13f keys in Supabase — loading individually...", len(ciks))
     result: dict = {}
+    stale_count = 0
     for cik in ciks:
-        data = supabase_cache.get_cached(f"13f:{cik}")
+        # Use stale-aware fetch so we NEVER drop data just because
+        # the TTL expired.  Users should always see the latest cached
+        # figures, even if the sync worker hasn't refreshed yet.
+        data, is_fresh = supabase_cache.get_cached_with_stale(f"13f:{cik}")
         if isinstance(data, dict):
             result[cik] = data
+            if not is_fresh:
+                stale_count += 1
 
     if result:
-        logger.info("Loaded %d funds from Supabase L2 cache", len(result))
+        fresh_count = len(result) - stale_count
+        logger.info(
+            "Loaded %d funds from Supabase L2 cache (%d fresh, %d stale)",
+            len(result), fresh_count, stale_count,
+        )
     return result
 
 
