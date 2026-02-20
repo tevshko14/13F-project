@@ -715,9 +715,11 @@ async def insider_trades_api(request: Request, filter: str = "all"):
     trades = await asyncio.to_thread(
         insider_trading.get_latest_insider_trades, trade_type
     )
+    chart_data = insider_trading.aggregate_top_tickers(trades, limit=10)
     return templates.TemplateResponse("partials/insider_trades.html", {
         "request": request,
         "trades": trades,
+        "chart_data_json": json_module.dumps(chart_data),
     })
 
 

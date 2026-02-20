@@ -244,6 +244,32 @@
         /* Sentiment tooltip (native title, styled wrapper for spacing) */
         .cluster-sentiment-wrap { position: relative; }
 
+        /* Insider trades 10-row accordion */
+        .insider-overflow { display: none; }
+        .insider-fade { position: relative; }
+        .insider-fade::after {
+            content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+            height: 60px; background: linear-gradient(transparent, #fff);
+            pointer-events: none; transition: opacity 0.3s ease;
+        }
+        .insider-fade.expanded::after { opacity: 0; height: 0; }
+
+        /* Global expand button (used by grand portfolio, activity feed, insider) */
+        .gp-expand-btn {
+            background: none; border: 1px solid #e4e4e7; border-radius: 8px;
+            padding: 0.5em 1.4em; cursor: pointer; font-size: 0.82em;
+            font-weight: 500; color: #71717a; display: flex;
+            align-items: center; gap: 0.4em; margin: 0.75em auto 0;
+            transition: all 0.15s ease;
+        }
+        .gp-expand-btn:hover {
+            background: #fafafa; color: #3f3f46; border-color: #a1a1aa;
+        }
+        .gp-expand-arrow {
+            display: inline-block; transition: transform 0.2s; font-size: 0.75em;
+        }
+        .gp-expand-arrow.expanded { transform: rotate(180deg); }
+
         /* Activity cluster rows */
         .activity-cluster {
             border: 1px solid #f4f4f5;

@@ -3,11 +3,10 @@
 {% block content %}
 <hgroup>
     <h1>Insider Trading</h1>
-    <p>Real-time SEC Form 4 filings — insider buys and sells across all public companies.</p>
+    <p>Real-time SEC Form 4 filings -- insider buys and sells across all public companies.</p>
 </hgroup>
 
-
-{# ── Sub-tabs: Latest / Top Buys / Top Sells ── #}
+{# -- Sub-tabs: Latest / Purchases / Sales -- #}
 <div style="margin-bottom: 1.5em;">
     <nav>
         <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
@@ -57,7 +56,31 @@
     }
 </style>
 
-{# ── Trade table (lazy-loaded) ── #}
+{# -- Insider Momentum Chart -- #}
+<article id="insider-chart-section" style="display: none;">
+    <header style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <strong>Insider Momentum</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Top 10 Tickers by Transaction Volume
+            </span>
+        </div>
+        <button id="insider-chart-toggle-btn"
+                class="secondary outline"
+                style="font-size: 0.8em; padding: 0.25em 0.75em; margin: 0;"
+                onclick="toggleInsiderChartView()">
+            Show Detailed View
+        </button>
+    </header>
+    <div style="position: relative; width: 100%; height: 350px;">
+        <canvas id="insiderMomentumChart"></canvas>
+    </div>
+    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.5em;">
+        Green = Purchases &middot; Red = Sales
+    </footer>
+</article>
+
+{# -- Trade table (lazy-loaded) -- #}
 <div id="insider-trades-content">
     <p aria-busy="true" style="text-align: center; padding: 2em 0;">
         Loading insider trades...
@@ -68,24 +91,242 @@
 (function() {
     var currentFilter = 'all';
     var cache = {};
+    var chartDataCache = {};
+    var insiderChart = null;
+    var chartView = 'simple';
 
+    /* ── Number formatting ── */
+    function fmtDollar(num) {
+        if (num === 0) return '$0';
+        var a = Math.abs(num);
+        var sign = num < 0 ? '-' : '';
+        if (a >= 1e9) return sign + '$' + (a / 1e9).toFixed(1) + 'B';
+        if (a >= 1e6) return sign + '$' + (a / 1e6).toFixed(1) + 'M';
+        if (a >= 1e3) return sign + '$' + (a / 1e3).toFixed(0) + 'K';
+        return sign + '$' + a.toLocaleString();
+    }
+
+    /* ── Color palette (from stock.html) ── */
+    function palette(darkHex, lightHex, count) {
+        if (count === 0) return [];
+        if (count === 1) return [darkHex];
+        var d = hexRgb(darkHex), l = hexRgb(lightHex), out = [];
+        for (var i = 0; i < count; i++) {
+            var t = i / (count - 1);
+            out.push('rgb(' + mix(d.r,l.r,t) + ',' + mix(d.g,l.g,t) + ',' + mix(d.b,l.b,t) + ')');
+        }
+        return out;
+    }
+    function hexRgb(h) {
+        var m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h);
+        return { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) };
+    }
+    function mix(a, b, t) { return Math.round(a + (b - a) * t); }
+
+    /* ── Simple view: one green bar + one red bar per ticker ── */
+    function buildSimpleData(chartData) {
+        return {
+            labels: chartData.map(function(d) { return d.ticker; }),
+            datasets: [
+                {
+                    label: 'Purchases',
+                    data: chartData.map(function(d) { return d.buy_value; }),
+                    backgroundColor: 'rgba(46, 125, 50, 0.8)',
+                    borderColor: '#1b5e20',
+                    borderWidth: 1,
+                },
+                {
+                    label: 'Sales',
+                    data: chartData.map(function(d) { return -d.sell_value; }),
+                    backgroundColor: 'rgba(198, 40, 40, 0.8)',
+                    borderColor: '#b71c1c',
+                    borderWidth: 1,
+                },
+            ],
+        };
+    }
+
+    /* ── Detailed view: per-insider segments ── */
+    function buildDetailedData(chartData) {
+        var labels = chartData.map(function(d) { return d.ticker; });
+        var datasets = [];
+        var buyInsiders = {}, sellInsiders = {};
+
+        for (var i = 0; i < chartData.length; i++) {
+            var details = chartData[i].insider_details || [];
+            for (var j = 0; j < details.length; j++) {
+                if (details[j].buy_value > 0) buyInsiders[details[j].name] = true;
+                if (details[j].sell_value > 0) sellInsiders[details[j].name] = true;
+            }
+        }
+
+        var buyNames = Object.keys(buyInsiders);
+        var sellNames = Object.keys(sellInsiders);
+        var greens = palette('#2e7d32', '#a5d6a7', buyNames.length);
+        var reds = palette('#c62828', '#ef9a9a', sellNames.length);
+
+        buyNames.forEach(function(name, idx) {
+            datasets.push({
+                label: name,
+                data: chartData.map(function(d) {
+                    var details = d.insider_details || [];
+                    for (var k = 0; k < details.length; k++) {
+                        if (details[k].name === name) return details[k].buy_value;
+                    }
+                    return 0;
+                }),
+                backgroundColor: greens[idx],
+                borderColor: greens[idx],
+                borderWidth: 0.5,
+                stack: 'buys',
+            });
+        });
+
+        sellNames.forEach(function(name, idx) {
+            datasets.push({
+                label: name,
+                data: chartData.map(function(d) {
+                    var details = d.insider_details || [];
+                    for (var k = 0; k < details.length; k++) {
+                        if (details[k].name === name) return -details[k].sell_value;
+                    }
+                    return 0;
+                }),
+                backgroundColor: reds[idx],
+                borderColor: reds[idx],
+                borderWidth: 0.5,
+                stack: 'sells',
+            });
+        });
+
+        return { labels: labels, datasets: datasets };
+    }
+
+    /* ── Render chart ── */
+    function renderChart(chartData) {
+        var section = document.getElementById('insider-chart-section');
+        if (!chartData || chartData.length === 0) {
+            section.style.display = 'none';
+            return;
+        }
+        section.style.display = '';
+
+        if (insiderChart) { insiderChart.destroy(); insiderChart = null; }
+
+        var viewData = chartView === 'simple'
+            ? buildSimpleData(chartData)
+            : buildDetailedData(chartData);
+
+        var ctx = document.getElementById('insiderMomentumChart');
+        if (!ctx) return;
+
+        insiderChart = new Chart(ctx, {
+            type: 'bar',
+            data: viewData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                scales: {
+                    x: {
+                        stacked: true,
+                        grid: { display: false },
+                    },
+                    y: {
+                        stacked: true,
+                        title: { display: true, text: 'Total Dollar Value ($)', font: { size: 13 } },
+                        ticks: { callback: function(v) { return fmtDollar(v); } },
+                        grid: {
+                            color: function(ctx) {
+                                return ctx.tick.value === 0 ? 'rgba(0,0,0,0.3)' : 'rgba(0,0,0,0.06)';
+                            },
+                            lineWidth: function(ctx) {
+                                return ctx.tick.value === 0 ? 2 : 1;
+                            },
+                        },
+                    },
+                },
+                plugins: {
+                    legend: {
+                        display: chartView === 'detailed',
+                        position: 'bottom',
+                        labels: { font: { size: 11 }, boxWidth: 12, padding: 8 },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: function(items) {
+                                var idx = items[0].dataIndex;
+                                var d = chartDataCache[currentFilter][idx];
+                                return d.ticker + ' -- ' + d.company_name;
+                            },
+                            label: function(ctx) {
+                                var val = ctx.raw;
+                                if (val === 0) return null;
+                                return ctx.dataset.label + ': ' + fmtDollar(Math.abs(val));
+                            },
+                            afterBody: function(items) {
+                                var idx = items[0].dataIndex;
+                                var d = chartDataCache[currentFilter][idx];
+                                var lines = [];
+                                lines.push('');
+                                lines.push('Net Flow: ' + fmtDollar(d.net_flow));
+                                lines.push(d.trade_count + ' trade' + (d.trade_count !== 1 ? 's' : ''));
+                                if (d.date_range) lines.push(d.date_range);
+                                /* List insiders */
+                                var insiders = d.insider_details || [];
+                                if (insiders.length > 0) {
+                                    lines.push('');
+                                    for (var i = 0; i < Math.min(insiders.length, 5); i++) {
+                                        var ins = insiders[i];
+                                        var desc = ins.name + ' (' + ins.count + ' trade' + (ins.count !== 1 ? 's' : '') + ')';
+                                        lines.push(desc);
+                                    }
+                                    if (insiders.length > 5) {
+                                        lines.push('... +' + (insiders.length - 5) + ' more');
+                                    }
+                                }
+                                return lines;
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    /* ── Toggle simple / detailed ── */
+    window.toggleInsiderChartView = function() {
+        var btn = document.getElementById('insider-chart-toggle-btn');
+        if (chartView === 'simple') {
+            chartView = 'detailed';
+            btn.textContent = 'Show Simple View';
+        } else {
+            chartView = 'simple';
+            btn.textContent = 'Show Detailed View';
+        }
+        if (chartDataCache[currentFilter]) {
+            renderChart(chartDataCache[currentFilter]);
+        }
+    };
+
+    /* ── Tab switching ── */
     function loadTrades(filter) {
         currentFilter = filter;
 
-        // Update tab buttons
         document.querySelectorAll('.insider-tab').forEach(function(btn) {
             btn.classList.remove('active');
         });
         document.getElementById('insider-tab-' + filter + '-btn').classList.add('active');
 
-        // Check cache
+        /* Check cache */
         if (cache[filter]) {
             document.getElementById('insider-trades-content').innerHTML = cache[filter];
+            renderChart(chartDataCache[filter] || []);
             if (window.initSortableTables) window.initSortableTables();
             return;
         }
 
-        // Show loading
+        /* Show loading */
         document.getElementById('insider-trades-content').innerHTML =
             '<p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading insider trades...</p>';
 
@@ -95,6 +336,13 @@
             .then(function(html) {
                 cache[filter] = html;
                 document.getElementById('insider-trades-content').innerHTML = html;
+
+                /* Extract chart data from embedded script tag */
+                var match = html.match(/var\s+__chartData\s*=\s*(\[[\s\S]*?\]);/);
+                if (match) {
+                    try { chartDataCache[filter] = JSON.parse(match[1]); } catch(e) {}
+                }
+                renderChart(chartDataCache[filter] || []);
                 if (window.initSortableTables) window.initSortableTables();
             })
             .catch(function() {
@@ -106,7 +354,7 @@
 
     window.switchInsiderTab = loadTrades;
 
-    // Auto-load default tab
+    /* Auto-load default tab */
     loadTrades('all');
 })();
 </script>

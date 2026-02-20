@@ -1,35 +1,39 @@
+{# Embed chart data for JS extraction #}
+<script>var __chartData = {{ chart_data_json | safe }};</script>
+
 {% if trades %}
 <p class="text-muted text-small">
     Showing {{ trades | length }} recent insider trades &middot; Source: SEC Form 4 filings via
     <a href="http://openinsider.com" target="_blank" rel="noopener">OpenInsider</a>
 </p>
-<figure>
-<table>
+
+<div class="insider-fade{% if trades | length <= 10 %} expanded{% endif %}" id="insider-table-wrap">
+<div class="pp-table-wrap">
+<table class="pp-table" id="insider-trades-table">
     <thead>
         <tr>
-            <th data-sort="text">Ticker</th>
-            <th data-sort="text">Company</th>
-            <th data-sort="text">Insider</th>
+            <th data-sort="text">Insider Name</th>
             <th>Title</th>
-            <th data-sort="date">Trade Date</th>
+            <th data-sort="text">Ticker</th>
             <th>Type</th>
+            <th class="text-right" data-sort="number">Shares</th>
             <th class="text-right">Price</th>
-            <th class="text-right" data-sort="number">Qty</th>
-            <th class="text-right" data-sort="number">Value</th>
-            <th class="text-right">Owned</th>
+            <th class="text-right" data-sort="number" data-sort-default="desc">Total $ Value</th>
+            <th data-sort="date">Trade Date</th>
             <th style="text-align: center;">Filing</th>
         </tr>
     </thead>
     <tbody>
         {% for t in trades %}
-        <tr>
+        <tr{% if loop.index > 10 %} class="insider-overflow"{% endif %}>
+            <td class="pp-primary">{{ t.insider_name }}</td>
+            <td class="pp-secondary">{{ t.title }}</td>
             <td>
-                <a href="/stock/{{ t.ticker }}"><strong>{{ t.ticker }}</strong></a>
+                <a href="/stock/{{ t.ticker }}" class="ticker">{{ t.ticker }}</a>
+                {% if t.company_name %}
+                <small class="pp-secondary" style="display: block;">{{ t.company_name }}</small>
+                {% endif %}
             </td>
-            <td class="text-small">{{ t.company_name }}</td>
-            <td>{{ t.insider_name }}</td>
-            <td class="text-small text-muted">{{ t.title }}</td>
-            <td style="white-space: nowrap;">{{ t.trade_date }}</td>
             <td>
                 {% if "Purchase" in t.trade_type %}
                     <span class="badge badge-add">{{ t.trade_type }}</span>
@@ -39,10 +43,10 @@
                     <span class="badge" style="background: #f5f5f5; color: #616161;">{{ t.trade_type }}</span>
                 {% endif %}
             </td>
-            <td class="text-right">{{ t.price }}</td>
             <td class="text-right">{{ t.qty }}</td>
-            <td class="text-right">{{ t.value }}</td>
-            <td class="text-right text-small">{{ t.owned }}{% if t.delta_own %} <span class="text-muted">({{ t.delta_own }})</span>{% endif %}</td>
+            <td class="text-right">{{ t.price }}</td>
+            <td class="text-right pp-primary">{{ t.value }}</td>
+            <td style="white-space: nowrap;">{{ t.trade_date }}</td>
             <td style="text-align: center;">
                 {% if t.sec_url %}
                 <a href="{{ t.sec_url }}" target="_blank" rel="noopener" title="View SEC Form 4">&#128279;</a>
@@ -54,8 +58,44 @@
         {% endfor %}
     </tbody>
 </table>
-</figure>
+</div>
+</div>
+{% if trades | length > 10 %}
+<button class="gp-expand-btn" id="insider-expand-btn" onclick="toggleInsiderAccordion(this)">
+    <span>View All ({{ trades | length }} trades)</span>
+    <span class="gp-expand-arrow">&#9660;</span>
+</button>
+{% endif %}
+
+<script>
+window.toggleInsiderAccordion = function(btn) {
+    var rows = document.querySelectorAll('.insider-overflow');
+    var wrap = document.getElementById('insider-table-wrap');
+    var arrow = btn.querySelector('.gp-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+    var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+    rows.forEach(function(row) {
+        row.style.display = expanded ? 'none' : '';
+    });
+    wrap.classList.toggle('expanded', !expanded);
+    arrow.classList.toggle('expanded', !expanded);
+
+    var thead = document.querySelector('#insider-trades-table thead');
+    if (thead) {
+        thead.classList.toggle('sticky-head', !expanded);
+    }
+
+    label.textContent = expanded
+        ? 'View All ({{ trades | length }} trades)'
+        : 'Collapse';
+
+    if (window.initSortableTables) window.initSortableTables();
+};
+</script>
+
 {% else %}
+<script>var __chartData = [];</script>
 <p class="text-muted" style="text-align: center; padding: 2em 0;">
     No insider trades found. Try a different filter.
 </p>
