@@ -765,6 +765,15 @@ _FINANCE_YOUTUBERS = [
     {"name": "Tom Nash", "channel": "https://youtube.com/@TomNashYT", "schedule": "3-4x/week", "topics": "Tech Stocks, Growth Investing"},
     {"name": "Financial Education", "channel": "https://youtube.com/@FinancialEducation", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
     {"name": "Joseph Carlson", "channel": "https://youtube.com/@JosephCarlsonShow", "schedule": "2x/week", "topics": "Dividend Investing, Portfolio Updates"},
+    {"name": "Fun of Investing", "channel": "https://youtube.com/@FunofInvesting", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
+    {"name": "Real Matt Money", "channel": "https://youtube.com/@RealMattMoney", "schedule": "Daily", "topics": "Investing, Market News"},
+    {"name": "Kross Roads", "channel": "https://youtube.com/@Kross_Roads", "schedule": "Daily", "topics": "Stock Analysis, Growth Investing"},
+    {"name": "Dividend Streams", "channel": "https://youtube.com/@DividendStreams", "schedule": "Daily", "topics": "Dividends, Income Investing"},
+    {"name": "Futurenvesting", "channel": "https://youtube.com/@Futurenvesting", "schedule": "Daily", "topics": "Investing, Future Trends"},
+    {"name": "Amit Investing", "channel": "https://youtube.com/@amitinvesting", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
+    {"name": "Couch Investor", "channel": "https://youtube.com/@couch_Investor", "schedule": "Daily", "topics": "Investing, Portfolio Strategy"},
+    {"name": "Endicott Invests", "channel": "https://youtube.com/@EndicottInvests", "schedule": "Daily", "topics": "Stock Analysis, Investing"},
+    {"name": "Kris Patel", "channel": "https://youtube.com/@KrisPatel99", "schedule": "Daily", "topics": "Stock Picks, Market News"},
 ]
 
 
