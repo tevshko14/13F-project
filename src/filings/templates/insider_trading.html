@@ -62,7 +62,7 @@
         <div>
             <strong>Insider Momentum</strong>
             <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-                Top 10 Tickers by Net Dollar Flow
+                Top-5-Buys and Top-5-Sells by Net Dollar Flow
             </span>
         </div>
         <button id="insider-chart-toggle-btn"
@@ -94,6 +94,7 @@
     var chartDataCache = {};
     var insiderChart = null;
     var chartView = 'simple';
+    var lastViewType = null;   /* track simple/detailed for smooth updates */
 
     /* ── Number formatting ── */
     function fmtDollar(num) {
@@ -202,6 +203,127 @@
         return { labels: labels, datasets: datasets };
     }
 
+    /* ── Chart.js shared options ── */
+    function getChartOptions() {
+        return {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 600, easing: 'easeInOutQuart' },
+            transitions: { active: { animation: { duration: 200 } } },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: {
+                    stacked: true,
+                    grid: { display: false },
+                    border: { display: false },
+                    ticks: {
+                        font: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 12 },
+                        color: '#27272a',
+                    },
+                },
+                y: {
+                    stacked: true,
+                    border: { display: false },
+                    title: {
+                        display: true,
+                        text: 'Total Dollar Value ($)',
+                        font: { family: "'Inter', 'system-ui', sans-serif", size: 12, weight: '500' },
+                        color: '#a1a1aa',
+                    },
+                    ticks: {
+                        callback: function(v) { return fmtDollar(v); },
+                        font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
+                        color: '#71717a',
+                    },
+                    grid: {
+                        color: function(ctx) {
+                            return ctx.tick.value === 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)';
+                        },
+                        lineWidth: function(ctx) {
+                            return ctx.tick.value === 0 ? 1.5 : 1;
+                        },
+                    },
+                },
+            },
+            plugins: {
+                legend: {
+                    display: chartView === 'detailed',
+                    position: 'bottom',
+                    labels: {
+                        font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
+                        boxWidth: 12, padding: 8,
+                    },
+                },
+                tooltip: {
+                    titleFont: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 13 },
+                    bodyFont: { family: "'Inter', 'system-ui', sans-serif", size: 12 },
+                    padding: 12,
+                    callbacks: {
+                        title: function(items) {
+                            var idx = items[0].dataIndex;
+                            var cd = chartDataCache[currentFilter];
+                            if (!cd || !cd[idx]) return '';
+                            return cd[idx].ticker + ' - ' + cd[idx].company_name;
+                        },
+                        label: function() { return null; },
+                        afterBody: function(items) {
+                            var idx = items[0].dataIndex;
+                            var cd = chartDataCache[currentFilter];
+                            if (!cd || !cd[idx]) return [];
+                            var d = cd[idx];
+                            var insiders = d.insider_details || [];
+                            var lines = [];
+
+                            /* Net Amount with consensus label */
+                            var consensus = d.net_flow >= 0 ? 'Bullish Consensus' : 'Bearish Consensus';
+                            var sign = d.net_flow >= 0 ? '+' : '';
+                            lines.push('Net Amount: ' + sign + fmtDollar(d.net_flow) + ' (' + consensus + ')');
+
+                            /* Insider counts summary */
+                            var sellers = insiders.filter(function(i) { return i.sell_value > 0; });
+                            var buyers = insiders.filter(function(i) { return i.buy_value > 0; });
+                            var sellCount = sellers.reduce(function(s, i) { return s + i.count; }, 0);
+                            var buyCount = buyers.reduce(function(s, i) { return s + i.count; }, 0);
+                            var parts = [];
+                            if (sellers.length > 0) {
+                                parts.push(sellers.length + ' Insider' + (sellers.length !== 1 ? 's' : '') + ' Sold ' + fmtDollar(d.sell_value));
+                            }
+                            if (buyers.length > 0) {
+                                parts.push(buyers.length + ' Insider' + (buyers.length !== 1 ? 's' : '') + ' Bought ' + fmtDollar(d.buy_value));
+                            }
+                            if (parts.length > 0) lines.push(parts.join(' | '));
+
+                            /* Top 3 contributors by total value */
+                            lines.push('');
+                            var sorted = insiders.slice().sort(function(a, b) {
+                                return (b.buy_value + b.sell_value) - (a.buy_value + a.sell_value);
+                            });
+                            var topN = Math.min(sorted.length, 3);
+                            for (var i = 0; i < topN; i++) {
+                                var ins = sorted[i];
+                                var action = ins.buy_value > ins.sell_value
+                                    ? 'bought ' + fmtDollar(ins.buy_value)
+                                    : 'sold ' + fmtDollar(ins.sell_value);
+                                lines.push('  ' + ins.name + ' ' + action + ' (' + ins.count + ' trade' + (ins.count !== 1 ? 's' : '') + ')');
+                            }
+                            if (insiders.length > 3) {
+                                lines.push('  +' + (insiders.length - 3) + ' more');
+                            }
+
+                            /* Date range */
+                            if (d.date_range) {
+                                lines.push('');
+                                lines.push('Date Range: ' + d.date_range);
+                            }
+
+                            return lines;
+                        },
+                    },
+                },
+            },
+        };
+    }
+
     /* ── Render chart ── */
     function renderChart(chartData) {
         var section = document.getElementById('insider-chart-section');
@@ -211,8 +333,6 @@
         }
         section.style.display = '';
 
-        if (insiderChart) { insiderChart.destroy(); insiderChart = null; }
-
         var viewData = chartView === 'simple'
             ? buildSimpleData(chartData)
             : buildDetailedData(chartData);
@@ -220,118 +340,22 @@
         var ctx = document.getElementById('insiderMomentumChart');
         if (!ctx) return;
 
+        /* Smooth update when view type hasn't changed and chart exists */
+        if (insiderChart && lastViewType === chartView) {
+            insiderChart.data.labels = viewData.labels;
+            insiderChart.data.datasets = viewData.datasets;
+            insiderChart.update();
+            return;
+        }
+
+        /* Full recreate on first render or view type change */
+        if (insiderChart) { insiderChart.destroy(); insiderChart = null; }
+
+        lastViewType = chartView;
         insiderChart = new Chart(ctx, {
             type: 'bar',
             data: viewData,
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
-                scales: {
-                    x: {
-                        stacked: true,
-                        grid: { display: false },
-                        border: { display: false },
-                        ticks: {
-                            font: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 12 },
-                            color: '#27272a',
-                        },
-                    },
-                    y: {
-                        stacked: true,
-                        border: { display: false },
-                        title: {
-                            display: true,
-                            text: 'Total Dollar Value ($)',
-                            font: { family: "'Inter', 'system-ui', sans-serif", size: 12, weight: '500' },
-                            color: '#a1a1aa',
-                        },
-                        ticks: {
-                            callback: function(v) { return fmtDollar(v); },
-                            font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
-                            color: '#71717a',
-                        },
-                        grid: {
-                            color: function(ctx) {
-                                return ctx.tick.value === 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)';
-                            },
-                            lineWidth: function(ctx) {
-                                return ctx.tick.value === 0 ? 1.5 : 1;
-                            },
-                        },
-                    },
-                },
-                plugins: {
-                    legend: {
-                        display: chartView === 'detailed',
-                        position: 'bottom',
-                        labels: {
-                            font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
-                            boxWidth: 12, padding: 8,
-                        },
-                    },
-                    tooltip: {
-                        titleFont: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 13 },
-                        bodyFont: { family: "'Inter', 'system-ui', sans-serif", size: 12 },
-                        padding: 12,
-                        callbacks: {
-                            title: function(items) {
-                                var idx = items[0].dataIndex;
-                                var d = chartDataCache[currentFilter][idx];
-                                return d.ticker + ' -- ' + d.company_name;
-                            },
-                            label: function(ctx) {
-                                var val = ctx.raw;
-                                if (val === 0) return null;
-                                return ctx.dataset.label + ': ' + fmtDollar(Math.abs(val));
-                            },
-                            afterBody: function(items) {
-                                var idx = items[0].dataIndex;
-                                var d = chartDataCache[currentFilter][idx];
-                                var insiders = d.insider_details || [];
-                                var lines = [];
-
-                                /* Net Flow */
-                                lines.push('');
-                                var sign = d.net_flow >= 0 ? '+' : '';
-                                lines.push('Net Flow: ' + sign + fmtDollar(d.net_flow));
-
-                                /* Buy Breakdown */
-                                var buyers = insiders.filter(function(i) { return i.buy_value > 0; });
-                                if (buyers.length > 0) {
-                                    var totalBuyTrades = buyers.reduce(function(s, i) { return s + i.count; }, 0);
-                                    lines.push('');
-                                    lines.push('Buy Breakdown (' + fmtDollar(d.buy_value) + ', ' + totalBuyTrades + ' trade' + (totalBuyTrades !== 1 ? 's' : '') + '):');
-                                    for (var b = 0; b < Math.min(buyers.length, 4); b++) {
-                                        lines.push('  ' + buyers[b].name + ': ' + fmtDollar(buyers[b].buy_value) + ' (' + buyers[b].count + ')');
-                                    }
-                                    if (buyers.length > 4) lines.push('  +' + (buyers.length - 4) + ' more');
-                                }
-
-                                /* Sell Breakdown */
-                                var sellers = insiders.filter(function(i) { return i.sell_value > 0; });
-                                if (sellers.length > 0) {
-                                    var totalSellTrades = sellers.reduce(function(s, i) { return s + i.count; }, 0);
-                                    lines.push('');
-                                    lines.push('Sell Breakdown (' + fmtDollar(d.sell_value) + ', ' + totalSellTrades + ' trade' + (totalSellTrades !== 1 ? 's' : '') + '):');
-                                    for (var s = 0; s < Math.min(sellers.length, 4); s++) {
-                                        lines.push('  ' + sellers[s].name + ': ' + fmtDollar(sellers[s].sell_value) + ' (' + sellers[s].count + ')');
-                                    }
-                                    if (sellers.length > 4) lines.push('  +' + (sellers.length - 4) + ' more');
-                                }
-
-                                /* Date Range */
-                                if (d.date_range) {
-                                    lines.push('');
-                                    lines.push('Date Range: ' + d.date_range);
-                                }
-
-                                return lines;
-                            },
-                        },
-                    },
-                },
-            },
+            options: getChartOptions(),
         });
     }
 
@@ -345,6 +369,8 @@
             chartView = 'simple';
             btn.textContent = 'Show Detailed View';
         }
+        /* Force full recreate by clearing lastViewType */
+        lastViewType = null;
         if (chartDataCache[currentFilter]) {
             renderChart(chartDataCache[currentFilter]);
         }
