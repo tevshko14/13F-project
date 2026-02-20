@@ -925,23 +925,39 @@ async def admin_migrate(request: Request):
 
 
 def _run_migration_with_details() -> dict:
-    """Run migration with detailed error reporting."""
+    """Run migration with detailed error reporting. Tries multiple connection formats."""
     import psycopg2
     db_url = os.environ.get("SUPABASE_DB_URL", "").strip()
-    derived = False
 
-    if not db_url:
-        supa_url = os.environ.get("SUPABASE_URL", "").strip()
-        db_pass = os.environ.get("SUPABASE_DB_PASSWORD", "").strip()
-        if supa_url and db_pass:
-            ref = supa_url.replace("https://", "").split(".")[0]
-            db_url = f"postgresql://postgres:{db_pass}@db.{ref}.supabase.co:5432/postgres"
-            derived = True
+    if db_url:
+        return _try_migrate(psycopg2, db_url, derived=False)
 
-    if not db_url:
-        return {"error": "No SUPABASE_DB_URL and cannot derive one", "env_keys": list(os.environ.keys())}
+    supa_url = os.environ.get("SUPABASE_URL", "").strip()
+    db_pass = os.environ.get("SUPABASE_DB_PASSWORD", "").strip()
+    if not (supa_url and db_pass):
+        return {"error": "No SUPABASE_DB_URL / SUPABASE_URL+SUPABASE_DB_PASSWORD"}
 
-    masked_url = db_url[:30] + "***" + db_url[-20:] if len(db_url) > 50 else "***"
+    ref = supa_url.replace("https://", "").split(".")[0]
+
+    # Try multiple connection formats (Supabase changed hosting over time)
+    urls_to_try = [
+        f"postgresql://postgres.{ref}:{db_pass}@aws-0-us-east-1.pooler.supabase.com:5432/postgres",
+        f"postgresql://postgres.{ref}:{db_pass}@aws-0-us-east-1.pooler.supabase.com:6543/postgres",
+        f"postgresql://postgres:{db_pass}@db.{ref}.supabase.co:5432/postgres",
+    ]
+
+    errors = []
+    for url in urls_to_try:
+        result = _try_migrate(psycopg2, url, derived=True)
+        if result.get("status") == "ok":
+            return result
+        errors.append(result.get("error", "unknown"))
+
+    return {"error": "All connection formats failed", "attempts": errors}
+
+
+def _try_migrate(psycopg2, db_url: str, derived: bool) -> dict:
+    masked = db_url[:30] + "***" + db_url[-20:] if len(db_url) > 50 else "***"
     try:
         conn = psycopg2.connect(db_url, connect_timeout=10)
         conn.autocommit = True
@@ -952,9 +968,9 @@ def _run_migration_with_details() -> dict:
         tables = [row[0] for row in cur.fetchall()]
         cur.close()
         conn.close()
-        return {"status": "ok", "tables": tables, "derived": derived, "url_prefix": masked_url}
+        return {"status": "ok", "tables": tables, "derived": derived, "url_prefix": masked}
     except Exception as e:
-        return {"error": str(e)[:500], "derived": derived, "url_prefix": masked_url}
+        return {"error": f"{masked}: {str(e)[:300]}", "derived": derived}
 
 
 @app.get("/robots.txt")

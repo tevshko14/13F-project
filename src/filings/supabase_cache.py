@@ -83,34 +83,49 @@ def _auto_migrate() -> None:
 
     db_url = os.environ.get("SUPABASE_DB_URL", "").strip()
 
-    # Try to derive a connection string if not explicitly set
-    if not db_url:
+    # Build a list of connection strings to try
+    urls_to_try: list[str] = []
+    if db_url:
+        urls_to_try.append(db_url)
+    else:
         supa_url = os.environ.get("SUPABASE_URL", "").strip()
         db_pass = os.environ.get("SUPABASE_DB_PASSWORD", "").strip()
         if supa_url and db_pass:
-            # Extract project ref from URL: https://<ref>.supabase.co
             ref = supa_url.replace("https://", "").split(".")[0]
-            db_url = f"postgresql://postgres:{db_pass}@db.{ref}.supabase.co:5432/postgres"
+            # Try pooler first (works across cloud boundaries), then direct
+            urls_to_try.append(
+                f"postgresql://postgres.{ref}:{db_pass}@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
+            )
+            urls_to_try.append(
+                f"postgresql://postgres:{db_pass}@db.{ref}.supabase.co:5432/postgres"
+            )
 
-    if not db_url:
+    if not urls_to_try:
         logger.debug("No SUPABASE_DB_URL -- skipping auto-migration")
         return
 
     try:
         import psycopg2  # noqa: F811
-        conn = psycopg2.connect(db_url, connect_timeout=5)
-        conn.autocommit = True
-        cur = conn.cursor()
-        cur.execute(_CREATE_TABLE_SQL)
-        cur.execute(_MIGRATE_SQL)
-        cur.close()
-        conn.close()
-        _table_verified = True
-        logger.info("Supabase api_cache + sync_logs tables verified via auto-migration")
     except ImportError:
         logger.debug("psycopg2 not installed -- skipping auto-migration")
-    except Exception as exc:
-        logger.debug("Supabase auto-migration skipped: %s", exc)
+        return
+
+    for url in urls_to_try:
+        try:
+            conn = psycopg2.connect(url, connect_timeout=5)
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute(_CREATE_TABLE_SQL)
+            cur.execute(_MIGRATE_SQL)
+            cur.close()
+            conn.close()
+            _table_verified = True
+            logger.info("Supabase api_cache + sync_logs tables verified via auto-migration")
+            return  # Success — stop trying other URLs
+        except Exception as exc:
+            logger.debug("Auto-migration attempt failed (%s...): %s", url[:40], exc)
+
+    logger.warning("Auto-migration failed on all connection strings")
 
 
 def _get_client():
