@@ -817,6 +817,10 @@ async def api_activity_feed(
             clusters_raw = cached.get("clusters", [])
             solo_raw = cached.get("solo_items", [])
             stats = cached.get("stats", {})
+            stats.setdefault("total_buy_value", 0)
+            stats.setdefault("total_sell_value", 0)
+            stats.setdefault("net_dollar_flow", 0)
+            stats.setdefault("value_sentiment", "NEUTRAL")
             has_prices = cached.get("has_prices", False)
 
             # Reconstruct dataclass instances from dicts
@@ -826,6 +830,7 @@ async def api_activity_feed(
                 s.setdefault("fund_total_holdings", 0)
                 s.setdefault("portfolio_impact", 0.0)
                 s.setdefault("pct_share_change", None)
+                s.setdefault("trade_value", 0.0)
                 solo_items.append(EnrichedActivityItem(**s))
             clusters = []
             for c in clusters_raw:
@@ -835,6 +840,7 @@ async def api_activity_feed(
                     i.setdefault("fund_total_holdings", 0)
                     i.setdefault("portfolio_impact", 0.0)
                     i.setdefault("pct_share_change", None)
+                    i.setdefault("trade_value", 0.0)
                     items.append(EnrichedActivityItem(**i))
                 clusters.append(ActivityCluster(**c, items=items))
     except Exception as e:
