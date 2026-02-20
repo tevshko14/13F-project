@@ -243,8 +243,15 @@ async def homepage(request: Request):
 
 @app.get("/superinvestors", response_class=HTMLResponse)
 async def superinvestors_page(request: Request):
-    """Redirect to grand portfolio with funds tab active."""
-    return RedirectResponse(url="/grand-portfolio?view=funds", status_code=302)
+    """Backward-compat redirect to /funds."""
+    return RedirectResponse(url="/funds?view=funds", status_code=301)
+
+
+@app.get("/grand-portfolio", response_class=HTMLResponse)
+async def grand_portfolio_redirect(request: Request):
+    """Backward-compat redirect: /grand-portfolio → /funds."""
+    view = request.query_params.get("view", "funds")
+    return RedirectResponse(url=f"/funds?view={view}", status_code=301)
 
 
 # --- Lazy-load a single fund row (HTMX) ---
@@ -490,13 +497,13 @@ async def portfolio_chart_data(request: Request, cik: str):
 @app.get("/activity", response_class=HTMLResponse)
 async def activity_feed(request: Request):
     """Redirect to grand portfolio with activity tab active."""
-    return RedirectResponse(url="/grand-portfolio?view=activity", status_code=302)
+    return RedirectResponse(url="/funds?view=activity", status_code=302)
 
 
-# --- Grand Portfolio ---
+# --- Top Funds (formerly Grand Portfolio) ---
 
-@app.get("/grand-portfolio", response_class=HTMLResponse)
-async def grand_portfolio(request: Request, view: str = "funds"):
+@app.get("/funds", response_class=HTMLResponse)
+async def funds_page(request: Request, view: str = "funds"):
     if view not in ("funds", "holdings", "activity"):
         view = "funds"
 
@@ -1158,7 +1165,7 @@ async def sitemap_xml():
         f"  <url><loc>{base_url}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>",
         f"  <url><loc>{base_url}/superinvestors</loc><changefreq>daily</changefreq><priority>0.9</priority></url>",
         f"  <url><loc>{base_url}/activity</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
-        f"  <url><loc>{base_url}/grand-portfolio</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/funds</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
         f"  <url><loc>{base_url}/insider-trading</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
     ]
     for si in SUPERINVESTORS:
