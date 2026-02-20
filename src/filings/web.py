@@ -915,6 +915,48 @@ async def health_check(request: Request):
     })
 
 
+@app.post("/admin/migrate")
+async def admin_migrate(request: Request):
+    """Trigger database migration from within Railway (temporary endpoint)."""
+    import importlib
+    importlib.reload(supabase_cache)  # Reset _table_verified flag
+    result = await asyncio.to_thread(_run_migration_with_details)
+    return JSONResponse(result)
+
+
+def _run_migration_with_details() -> dict:
+    """Run migration with detailed error reporting."""
+    import psycopg2
+    db_url = os.environ.get("SUPABASE_DB_URL", "").strip()
+    derived = False
+
+    if not db_url:
+        supa_url = os.environ.get("SUPABASE_URL", "").strip()
+        db_pass = os.environ.get("SUPABASE_DB_PASSWORD", "").strip()
+        if supa_url and db_pass:
+            ref = supa_url.replace("https://", "").split(".")[0]
+            db_url = f"postgresql://postgres:{db_pass}@db.{ref}.supabase.co:5432/postgres"
+            derived = True
+
+    if not db_url:
+        return {"error": "No SUPABASE_DB_URL and cannot derive one", "env_keys": list(os.environ.keys())}
+
+    masked_url = db_url[:30] + "***" + db_url[-20:] if len(db_url) > 50 else "***"
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute(supabase_cache._CREATE_TABLE_SQL)
+        cur.execute(supabase_cache._MIGRATE_SQL)
+        cur.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
+        tables = [row[0] for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+        return {"status": "ok", "tables": tables, "derived": derived, "url_prefix": masked_url}
+    except Exception as e:
+        return {"error": str(e)[:500], "derived": derived, "url_prefix": masked_url}
+
+
 @app.get("/robots.txt")
 async def robots_txt():
     content = (
