@@ -5,10 +5,12 @@
 #   START_COMMAND=filings-insider-sync
 #   START_COMMAND=filings-sync
 #   START_COMMAND=filings-youtube-sync
+echo "start.sh: START_COMMAND='${START_COMMAND:-<not set>}'"
 if [ -n "$START_COMMAND" ]; then
-  echo "Running custom command: $START_COMMAND"
+  echo "start.sh: Running custom command: $START_COMMAND"
   exec $START_COMMAND
 fi
+echo "start.sh: No START_COMMAND set, starting gunicorn"
 
 exec gunicorn filings.web:app \
   --bind "0.0.0.0:${PORT:-8000}" \
