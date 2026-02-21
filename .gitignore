@@ -25,5 +25,8 @@ notifications.json
 *.swp
 *.swo
 
+# Environment variables (secrets)
+.env
+
 # Claude Code
 .claude/
