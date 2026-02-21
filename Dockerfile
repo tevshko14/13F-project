@@ -18,9 +18,9 @@ RUN pip install --no-cache-dir hatchling && \
 # Railway injects PORT env var
 ENV PORT=8000
 
-COPY start.sh ./
-RUN chmod +x start.sh
-
 EXPOSE 8000
 
-CMD ["./start.sh"]
+# Default: run the web server.
+# Cron services override by setting START_COMMAND env var
+# (e.g. START_COMMAND=filings-insider-sync).
+CMD ["sh", "-c", "if [ -n \"$START_COMMAND\" ]; then echo \"Running: $START_COMMAND\" && exec $START_COMMAND; else exec gunicorn filings.web:app --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_WORKERS:-2} --worker-class uvicorn.workers.UvicornWorker --timeout 120 --graceful-timeout 30 --access-logfile -; fi"]
