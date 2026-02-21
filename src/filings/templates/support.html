@@ -12,7 +12,7 @@
         font-size: 2em;
         margin-bottom: 0.3em;
     }
-    .support-hero p {
+    .support-hero .hero-sub {
         color: #71717a;
         max-width: 600px;
         margin: 0 auto;
@@ -60,8 +60,19 @@
         font-size: 0.85em;
         color: #71717a;
     }
+    .goal-reached-badge {
+        display: inline-block;
+        background: #dcfce7;
+        color: #166534;
+        font-size: 0.8em;
+        font-weight: 600;
+        padding: 0.25em 0.8em;
+        border-radius: 999px;
+        margin-left: 0.5em;
+        vertical-align: middle;
+    }
 
-    /* ── CTA button ── */
+    /* ── CTA buttons ── */
     .support-cta {
         text-align: center;
         margin: 2em 0;
@@ -88,33 +99,42 @@
         color: #a1a1aa;
     }
 
-    /* ── Cost breakdown grid ── */
-    .cost-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1em;
-        margin: 1.5em 0;
+    /* ── Where-it-goes section ── */
+    .where-it-goes {
+        margin: 2.5em 0 1.5em;
     }
-    .cost-card {
-        background: #fafafa;
-        border: 1px solid #e4e4e7;
-        border-radius: 10px;
-        padding: 1.2em;
-        text-align: center;
-    }
-    .cost-card .cost-icon {
-        font-size: 1.6em;
-        margin-bottom: 0.3em;
-    }
-    .cost-card .cost-label {
-        font-size: 0.85em;
-        color: #71717a;
-        margin-bottom: 0.3em;
-    }
-    .cost-card .cost-amount {
+    .where-it-goes h2 {
         font-size: 1.3em;
-        font-weight: 700;
-        color: #18181b;
+        margin-bottom: 0.5em;
+    }
+    .where-it-goes .explainer {
+        color: #52525b;
+        font-size: 0.95em;
+        line-height: 1.6;
+        max-width: 650px;
+        margin-bottom: 1em;
+    }
+    .line-items-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .line-items-list li {
+        padding: 0.55em 0;
+        border-bottom: 1px solid #f4f4f5;
+        font-size: 0.92em;
+        color: #3f3f46;
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
+    }
+    .line-items-list li:last-child { border-bottom: none; }
+    .li-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #22c55e;
+        flex-shrink: 0;
     }
 
     /* ── Funding history chart ── */
@@ -133,8 +153,6 @@
         width: 100%;
         height: 280px;
     }
-
-    /* ── Legend ── */
     .chart-legend {
         display: flex;
         gap: 1.5em;
@@ -155,57 +173,113 @@
         border-radius: 3px;
     }
 
-    /* ── Transparency section ── */
-    .transparency-section {
-        margin: 2.5em 0;
+    /* ── Other ways to support ── */
+    .other-support {
+        background: #fafafa;
+        border: 1px solid #e4e4e7;
+        border-radius: 12px;
+        padding: 1.8em 2em;
+        margin: 2em 0;
+        text-align: center;
     }
-    .transparency-section h2 {
-        font-size: 1.3em;
-        margin-bottom: 0.8em;
+    .other-support h3 {
+        font-size: 1.15em;
+        margin-bottom: 0.4em;
     }
-    .transparency-list {
-        list-style: none;
-        padding: 0;
-        margin: 0;
+    .other-support .other-sub {
+        color: #71717a;
+        font-size: 0.92em;
+        line-height: 1.5;
+        max-width: 520px;
+        margin: 0 auto 1em;
     }
-    .transparency-list li {
-        padding: 0.7em 0;
-        border-bottom: 1px solid #f4f4f5;
-        display: flex;
-        justify-content: space-between;
+    .other-support .yt-link {
+        display: inline-flex;
         align-items: center;
-        font-size: 0.95em;
-    }
-    .transparency-list li:last-child {
-        border-bottom: none;
-        font-weight: 700;
-    }
-    .transparency-list .line-label {
-        color: #3f3f46;
-    }
-    .transparency-list .line-value {
+        gap: 0.5em;
+        background: #fff;
+        border: 1px solid #e4e4e7;
+        padding: 0.6em 1.4em;
+        border-radius: 10px;
         font-weight: 600;
+        font-size: 0.95em;
         color: #18181b;
+        text-decoration: none;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .other-support .yt-link:hover {
+        border-color: #ff0000;
+        box-shadow: 0 2px 8px rgba(255,0,0,0.1);
+    }
+    .yt-icon {
+        width: 20px;
+        height: 14px;
+    }
+
+    /* ── Feedback CTA ── */
+    .feedback-section {
+        background: #fff;
+        border: 1px solid #e4e4e7;
+        border-radius: 12px;
+        padding: 1.8em 2em;
+        margin: 1.5em 0 2.5em;
+        text-align: center;
+    }
+    .feedback-section h3 {
+        font-size: 1.15em;
+        margin-bottom: 0.3em;
+    }
+    .feedback-section .feedback-sub {
+        color: #71717a;
+        font-size: 0.92em;
+        margin-bottom: 1em;
+    }
+    .feedback-section a.btn-feedback {
+        display: inline-block;
+        background: #fff;
+        color: #18181b;
+        border: 2px solid #18181b;
+        padding: 0.6em 2em;
+        border-radius: 10px;
+        font-size: 1em;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background 0.15s, color 0.15s;
+    }
+    .feedback-section a.btn-feedback:hover {
+        background: #18181b;
+        color: #fff;
+    }
+
+    /* ── Built-with-love ── */
+    .built-with-love {
+        text-align: center;
+        padding: 1em 0 2em;
+        font-size: 0.85em;
+        color: #a1a1aa;
     }
 
     @media (max-width: 640px) {
         .panda-progress { padding: 1em 1.2em; }
         .panda-progress .progress-header .amount { font-size: 1.4em; }
-        .cost-grid { grid-template-columns: 1fr 1fr; }
         .chart-container { height: 220px; }
+        .other-support, .feedback-section { padding: 1.2em 1em; }
     }
 </style>
 
 {# ── Hero ── #}
 <div class="support-hero">
     <h1>The Panda Fund</h1>
-    <p>PaperPanda is free and open. Here's exactly where your support goes -- no mystery, no paywall.</p>
+    <p class="hero-sub">PaperPanda is free and open. Here's exactly where your support goes -- no mystery, no paywall.</p>
 </div>
 
 {# ── Progress Bar ── #}
 <div class="panda-progress">
     <div class="progress-header">
-        <span class="amount">${{ raised_this_month }}</span>
+        <span class="amount">
+            ${{ raised_this_month }}
+            {% if goal_reached %}<span class="goal-reached-badge">Goal reached!</span>{% endif %}
+        </span>
         <span class="goal">of ${{ monthly_goal }} monthly goal</span>
     </div>
     <div class="progress-track">
@@ -223,15 +297,18 @@
 </div>
 
 {# ── Where the money goes ── #}
-<h2 style="font-size: 1.3em; margin-top: 2em;">Where the money goes</h2>
-<div class="cost-grid">
-    {% for item in cost_breakdown %}
-    <div class="cost-card">
-        <div class="cost-icon">{{ item.icon }}</div>
-        <div class="cost-label">{{ item.label }}</div>
-        <div class="cost-amount">${{ item.amount }}/mo</div>
-    </div>
-    {% endfor %}
+<div class="where-it-goes">
+    <h2>Where the money goes</h2>
+    <p class="explainer">
+        Every dollar goes directly to keeping PaperPanda running -- real-time data feeds,
+        cloud infrastructure, and the tools that make development possible.
+        There are no salaries, no investors, no hidden fees.
+    </p>
+    <ul class="line-items-list">
+        {% for item in line_items %}
+        <li><span class="li-dot"></span> {{ item }}</li>
+        {% endfor %}
+    </ul>
 </div>
 
 {# ── Funding History Chart ── #}
@@ -244,24 +321,38 @@
     </div>
 </div>
 
-{# ── Monthly transparency ledger ── #}
-<div class="transparency-section">
-    <h2>{{ current_month_name }} Breakdown</h2>
-    <ul class="transparency-list">
-        {% for item in cost_breakdown %}
-        <li>
-            <span class="line-label">{{ item.icon }} {{ item.label }}</span>
-            <span class="line-value">${{ item.amount }}</span>
-        </li>
-        {% endfor %}
-        <li>
-            <span class="line-label">Total monthly cost</span>
-            <span class="line-value">${{ monthly_goal }}</span>
-        </li>
-    </ul>
+{# ── Other ways to support ── #}
+<div class="other-support">
+    <h3>Another way to support</h3>
+    <p class="other-sub">
+        PaperPanda was built with love by <strong>Tevis</strong>.
+        If you can't contribute financially, consider subscribing for financial content -- it means just as much.
+    </p>
+    <a href="https://youtube.com/@funofinvesting" target="_blank" rel="noopener" class="yt-link">
+        <svg class="yt-icon" viewBox="0 0 24 17" fill="#ff0000">
+            <path d="M23.5 2.5A3 3 0 0 0 21.4.4C19.5 0 12 0 12 0S4.5 0 2.6.4A3 3 0 0 0 .5 2.5 31.5 31.5 0 0 0 0 8.5a31.5 31.5 0 0 0 .5 6A3 3 0 0 0 2.6 16.6C4.5 17 12 17 12 17s7.5 0 9.4-.4a3 3 0 0 0 2.1-2.1 31.5 31.5 0 0 0 .5-6 31.5 31.5 0 0 0-.5-6zM9.6 12.1V4.9l6.3 3.6-6.3 3.6z"/>
+        </svg>
+        @funofinvesting
+    </a>
 </div>
 
-{# ── Chart JS ── #}
+{# ── Feedback CTA ── #}
+<div class="feedback-section">
+    <h3>Help shape PaperPanda</h3>
+    <p class="feedback-sub">
+        What features do you want to see next? Found a bug? Your feedback drives what gets built.
+    </p>
+    <a href="{{ feedback_link }}" target="_blank" rel="noopener" class="btn-feedback">
+        Share Feedback
+    </a>
+</div>
+
+{# ── Footer note ── #}
+<div class="built-with-love">
+    Built with bamboo and late nights by Tevis &middot; <a href="https://youtube.com/@funofinvesting" target="_blank" rel="noopener" style="color: inherit;">@funofinvesting</a>
+</div>
+
+{# ── Chart ── #}
 <script>
 (function() {
     var chartDom = document.getElementById('funding-chart');
@@ -273,7 +364,6 @@
     var raised = {{ funding_history_raised | tojson }};
     var goal = {{ monthly_goal }};
 
-    // Color each bar: green if >= goal, gray if subsidized
     var barColors = raised.map(function(v) {
         return v >= goal ? '#22c55e' : '#d4d4d8';
     });
@@ -303,6 +393,7 @@
         },
         yAxis: {
             type: 'value',
+            max: goal,
             axisLabel: {
                 fontSize: 11,
                 color: '#a1a1aa',

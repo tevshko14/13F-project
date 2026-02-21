@@ -921,12 +921,21 @@ _STRIPE_SUPPORT_LINK = os.environ.get(
     "https://buy.stripe.com/test_placeholder",  # replaced with real link via env var
 )
 
-# Monthly operating costs (displayed in the transparency dashboard)
-_PANDA_FUND_COSTS = [
-    {"icon": "API", "label": "Data APIs", "amount": 50},
-    {"icon": "SRV", "label": "Railway Hosting", "amount": 20},
-    {"icon": "DB",  "label": "Supabase (DB)", "amount": 25},
-    {"icon": "DOM", "label": "Domain & DNS", "amount": 5},
+# Feedback form link (Notion form, Google Form, Canny, etc.)
+_FEEDBACK_LINK = os.environ.get(
+    "FEEDBACK_LINK",
+    "https://paperpanda.notion.site/placeholder",  # replaced with real link via env var
+)
+
+_PANDA_FUND_MONTHLY_GOAL = 400  # Cap displayed on frontend
+
+# What the fund covers (labels only, no dollar amounts exposed)
+_PANDA_FUND_LINE_ITEMS = [
+    "Data APIs (SEC EDGAR, Glassdoor, People Data Labs)",
+    "Cloud hosting (Railway)",
+    "Database (Supabase Postgres)",
+    "Domain & DNS",
+    "AI coding assistants",
 ]
 
 # Funding history — will eventually be driven by Supabase/Stripe webhook
@@ -942,9 +951,11 @@ _PANDA_FUND_HISTORY = [
 
 @app.get("/support", response_class=HTMLResponse)
 async def support_page(request: Request):
-    monthly_goal = sum(c["amount"] for c in _PANDA_FUND_COSTS)
+    monthly_goal = _PANDA_FUND_MONTHLY_GOAL
     # Current month raised — eventually from Stripe webhook / Supabase
-    raised_this_month = int(os.environ.get("PANDA_FUND_RAISED", "0"))
+    raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
+    # Cap at goal for display — even if we collect more, show $400 max
+    raised_this_month = min(raw_raised, monthly_goal)
     progress_pct = min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
 
     from calendar import month_name as _month_names
@@ -953,13 +964,15 @@ async def support_page(request: Request):
     return templates.TemplateResponse("support.html", {
         "request": request,
         "stripe_link": _STRIPE_SUPPORT_LINK,
+        "feedback_link": _FEEDBACK_LINK,
         "monthly_goal": monthly_goal,
         "raised_this_month": raised_this_month,
         "progress_pct": progress_pct,
+        "goal_reached": raw_raised >= monthly_goal,
         "current_month_name": current_month_name,
-        "cost_breakdown": _PANDA_FUND_COSTS,
+        "line_items": _PANDA_FUND_LINE_ITEMS,
         "funding_history_months": [h["month"] for h in _PANDA_FUND_HISTORY],
-        "funding_history_raised": [h["raised"] for h in _PANDA_FUND_HISTORY],
+        "funding_history_raised": [min(h["raised"], monthly_goal) for h in _PANDA_FUND_HISTORY],
     })
 
 
