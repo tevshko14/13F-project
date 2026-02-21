@@ -711,17 +711,17 @@ async def sentiment_data(request: Request, ticker: str):
 
 @app.get("/api/vitals/{ticker}", response_class=HTMLResponse)
 async def vitals_data(request: Request, ticker: str):
-    # ── Paywall: Vitals is premium-only when auth is enabled ──
-    if auth.JWT_SECRET:
-        user = getattr(request.state, "user", None)
-        profile = getattr(request.state, "profile", None)
-        is_premium = bool(profile and profile.get("tier") == "premium")
-        if not user or not is_premium:
-            return templates.TemplateResponse("partials/vitals_paywall.html", {
-                "request": request,
-                "ticker": ticker.upper(),
-                "user": user,
-            })
+    # ── Paywall: disabled while auth is not active ──
+    # if auth.JWT_SECRET:
+    #     user = getattr(request.state, "user", None)
+    #     profile = getattr(request.state, "profile", None)
+    #     is_premium = bool(profile and profile.get("tier") == "premium")
+    #     if not user or not is_premium:
+    #         return templates.TemplateResponse("partials/vitals_paywall.html", {
+    #             "request": request,
+    #             "ticker": ticker.upper(),
+    #             "user": user,
+    #         })
 
     data = await asyncio.to_thread(vitals.get_vitals_data, ticker)
     return templates.TemplateResponse("partials/vitals.html", {
@@ -1206,16 +1206,22 @@ async def most_added(request: Request):
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
+    if not auth.SUPABASE_ANON_KEY:
+        return RedirectResponse(url="/", status_code=302)
     return templates.TemplateResponse("login.html", {"request": request})
 
 
 @app.get("/signup", response_class=HTMLResponse)
 async def signup_page(request: Request):
+    if not auth.SUPABASE_ANON_KEY:
+        return RedirectResponse(url="/", status_code=302)
     return templates.TemplateResponse("signup.html", {"request": request})
 
 
 @app.get("/reset-password", response_class=HTMLResponse)
 async def reset_password_page(request: Request):
+    if not auth.SUPABASE_ANON_KEY:
+        return RedirectResponse(url="/", status_code=302)
     return templates.TemplateResponse("reset_password.html", {"request": request})
 
 
