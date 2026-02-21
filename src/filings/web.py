@@ -209,12 +209,21 @@ if auth.JWT_SECRET:
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    if exc.status_code == 404:
-        message = "The page you're looking for doesn't exist."
-    elif exc.status_code == 429:
+    # HTMX partial requests (api/ endpoints) get inline error fragments
+    is_htmx = request.headers.get("HX-Request") == "true"
+
+    if exc.status_code == 429:
+        if is_htmx or request.url.path.startswith("/api/"):
+            return templates.TemplateResponse("partials/data_error.html", {
+                "request": request,
+                "error_type": "rate_limit",
+            }, status_code=429)
         message = "Too many requests. Please slow down and try again in a minute."
+    elif exc.status_code == 404:
+        message = "The page you're looking for doesn't exist."
     else:
         message = exc.detail or "An unexpected error occurred."
+
     return templates.TemplateResponse("error.html", {
         "request": request,
         "message": message,
@@ -224,6 +233,16 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+
+    # HTMX partial requests get inline error fragments
+    is_htmx = request.headers.get("HX-Request") == "true"
+    if is_htmx or request.url.path.startswith("/api/"):
+        return templates.TemplateResponse("partials/data_error.html", {
+            "request": request,
+            "error_type": "generic",
+            "message": "Unable to load data right now. Please try again later.",
+        }, status_code=500)
+
     return templates.TemplateResponse("error.html", {
         "request": request,
         "message": "Something went wrong on our end. Please try again later.",
@@ -894,6 +913,56 @@ async def insider_trading_page(request: Request):
     })
 
 
+# --- Support / Panda Fund ---
+
+# Stripe Payment Link — standard anchor tag (opens in new tab)
+_STRIPE_SUPPORT_LINK = os.environ.get(
+    "STRIPE_SUPPORT_LINK",
+    "https://buy.stripe.com/test_placeholder",  # replaced with real link via env var
+)
+
+# Monthly operating costs (displayed in the transparency dashboard)
+_PANDA_FUND_COSTS = [
+    {"icon": "API", "label": "Data APIs", "amount": 50},
+    {"icon": "SRV", "label": "Railway Hosting", "amount": 20},
+    {"icon": "DB",  "label": "Supabase (DB)", "amount": 25},
+    {"icon": "DOM", "label": "Domain & DNS", "amount": 5},
+]
+
+# Funding history — will eventually be driven by Supabase/Stripe webhook
+_PANDA_FUND_HISTORY = [
+    {"month": "Sep", "raised": 0},
+    {"month": "Oct", "raised": 0},
+    {"month": "Nov", "raised": 0},
+    {"month": "Dec", "raised": 0},
+    {"month": "Jan", "raised": 0},
+    {"month": "Feb", "raised": 0},
+]
+
+
+@app.get("/support", response_class=HTMLResponse)
+async def support_page(request: Request):
+    monthly_goal = sum(c["amount"] for c in _PANDA_FUND_COSTS)
+    # Current month raised — eventually from Stripe webhook / Supabase
+    raised_this_month = int(os.environ.get("PANDA_FUND_RAISED", "0"))
+    progress_pct = min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
+
+    from calendar import month_name as _month_names
+    current_month_name = _month_names[datetime.now().month]
+
+    return templates.TemplateResponse("support.html", {
+        "request": request,
+        "stripe_link": _STRIPE_SUPPORT_LINK,
+        "monthly_goal": monthly_goal,
+        "raised_this_month": raised_this_month,
+        "progress_pct": progress_pct,
+        "current_month_name": current_month_name,
+        "cost_breakdown": _PANDA_FUND_COSTS,
+        "funding_history_months": [h["month"] for h in _PANDA_FUND_HISTORY],
+        "funding_history_raised": [h["raised"] for h in _PANDA_FUND_HISTORY],
+    })
+
+
 # --- Retail Traders (hidden — no nav link) ---
 
 _FINANCE_YOUTUBERS = [
@@ -1427,6 +1496,7 @@ async def sitemap_xml():
         f"  <url><loc>{base_url}/activity</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
         f"  <url><loc>{base_url}/funds</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
         f"  <url><loc>{base_url}/insider-trading</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/support</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>",
     ]
     for si in SUPERINVESTORS:
         urls.append(
