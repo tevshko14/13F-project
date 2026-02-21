@@ -55,9 +55,14 @@ _glassdoor_cache: dict[str, tuple[float, dict | None]] = {}
 _pdl_cache: dict[str, tuple[float, dict | None]] = {}
 _appstore_cache: dict[str, tuple[float, dict | None]] = {}
 
-# ── Glassdoor persistent cache state ─────────────────────────────────
+# ── Persistent cache state (lazy-hydrated from Supabase on first use) ─
 _glassdoor_hydrated = False
+_pdl_hydrated = False
+_appstore_hydrated = False
 _pending_refreshes: set[str] = set()  # Prevent duplicate concurrent refreshes
+
+# ── PDL quota configuration ──────────────────────────────────────────
+MAX_MONTHLY_PDL_QUOTA = 100  # Free tier: 100 calls/month
 
 
 def _evict_oldest(cache: dict, max_size: int = _MAX_CACHE_ENTRIES) -> None:
@@ -249,6 +254,122 @@ def _increment_glassdoor_quota() -> int:
     return final_count
 
 
+# ═══════════════════════════════════════════════════════════════════
+# PDL Persistent Cache (Supabase-backed)
+# ═══════════════════════════════════════════════════════════════════
+
+def _hydrate_pdl_cache() -> None:
+    """One-time load of PDL data from Supabase into in-memory cache.
+
+    Called lazily on first PDL data request.  No API calls triggered.
+    """
+    global _pdl_hydrated
+    if _pdl_hydrated:
+        return
+    _pdl_hydrated = True
+
+    rows = supabase_cache.get_all_by_category("pdl")
+    if rows is not None and len(rows) > 0:
+        loaded = 0
+        for row in rows:
+            cache_key = row.get("cache_key", "")  # e.g. "pdl:AAPL"
+            payload = row.get("response_data", {})
+            ticker_key = cache_key.replace("pdl:", "", 1) if cache_key.startswith("pdl:") else cache_key
+            ts = payload.get("ts", 0.0)
+            data = payload.get("data")
+            if ticker_key:
+                _pdl_cache[ticker_key] = (ts, data)
+                loaded += 1
+        if loaded:
+            logger.info("Hydrated PDL in-memory cache with %d entries from Supabase", loaded)
+
+
+def _persist_pdl_entry(ticker_key: str, ts: float, data: dict | None) -> None:
+    """Write a single PDL cache entry to Supabase. Must hold _lock."""
+    payload = {"ts": ts, "data": data}
+    supabase_cache.set_cached(
+        cache_key=f"pdl:{ticker_key}",
+        category="pdl",
+        data=payload,
+        ttl_seconds=None,  # managed by our own TTL logic
+    )
+
+
+# ── PDL Monthly Quota Tracker ────────────────────────────────────────
+
+def _check_pdl_quota(threshold: int = MAX_MONTHLY_PDL_QUOTA) -> bool:
+    """Return True if we can still make PDL API calls this month."""
+    current_month = _get_current_month_str()
+    sb_quota = supabase_cache.get_quota("pdl", current_month)
+    if sb_quota is not None:
+        return sb_quota.get("count", 0) < threshold
+    return True  # No quota data → assume fresh month
+
+
+def _increment_pdl_quota() -> int:
+    """Increment the PDL monthly API call counter. Returns new count."""
+    current_month = _get_current_month_str()
+    sb_count = supabase_cache.increment_quota("pdl", current_month)
+    if sb_count > 0:
+        logger.info("PDL monthly quota (Supabase): %d/%d", sb_count, MAX_MONTHLY_PDL_QUOTA)
+    return sb_count
+
+
+def get_pdl_quota_info() -> dict:
+    """Return current PDL quota status for diagnostics."""
+    current_month = _get_current_month_str()
+    sb_quota = supabase_cache.get_quota("pdl", current_month)
+    count = (sb_quota or {}).get("count", 0)
+    return {
+        "month": current_month,
+        "count": count,
+        "max": MAX_MONTHLY_PDL_QUOTA,
+        "remaining": max(0, MAX_MONTHLY_PDL_QUOTA - count),
+        "exhausted": count >= MAX_MONTHLY_PDL_QUOTA,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# App Store Persistent Cache (Supabase-backed)
+# ═══════════════════════════════════════════════════════════════════
+
+def _hydrate_appstore_cache() -> None:
+    """One-time load of App Store data from Supabase into in-memory cache.
+
+    Called lazily on first App Store data request.  No API calls triggered.
+    """
+    global _appstore_hydrated
+    if _appstore_hydrated:
+        return
+    _appstore_hydrated = True
+
+    rows = supabase_cache.get_all_by_category("appstore")
+    if rows is not None and len(rows) > 0:
+        loaded = 0
+        for row in rows:
+            cache_key = row.get("cache_key", "")  # e.g. "appstore:AAPL"
+            payload = row.get("response_data", {})
+            ticker_key = cache_key.replace("appstore:", "", 1) if cache_key.startswith("appstore:") else cache_key
+            ts = payload.get("ts", 0.0)
+            data = payload.get("data")
+            if ticker_key:
+                _appstore_cache[ticker_key] = (ts, data)
+                loaded += 1
+        if loaded:
+            logger.info("Hydrated App Store in-memory cache with %d entries from Supabase", loaded)
+
+
+def _persist_appstore_entry(ticker_key: str, ts: float, data: dict | None) -> None:
+    """Write a single App Store cache entry to Supabase. Must hold _lock."""
+    payload = {"ts": ts, "data": data}
+    supabase_cache.set_cached(
+        cache_key=f"appstore:{ticker_key}",
+        category="appstore",
+        data=payload,
+        ttl_seconds=None,
+    )
+
+
 # ── Shared HTTP helper ────────────────────────────────────────────────
 
 _BROWSER_UA = (
@@ -311,45 +432,90 @@ def _get_pdl_data(ticker: str) -> dict | None:
     location, linkedin_url.
 
     Free tier: 100 calls/month, no credit card required.
+
+    Caching strategy (mirrors Glassdoor):
+      1. Cached AND fresh (< 7 days) → return immediately
+      2. Cached AND stale → return stale data (conserve quota — no background refresh)
+      3. Not cached → API call if monthly quota allows, else None
     """
     key = ticker.upper()
 
-    # Check cache
-    with _lock:
-        if key in _pdl_cache:
-            ts, data = _pdl_cache[key]
-            if time.time() - ts < _PDL_TTL:
-                return data
+    # ── Lazy hydration from Supabase on first call ──
+    _hydrate_pdl_cache()
 
+    # ── Check in-memory cache ──
+    with _lock:
+        cached_entry = _pdl_cache.get(key)
+
+    if cached_entry is not None:
+        ts, data = cached_entry
+        age = time.time() - ts
+
+        if age < _PDL_TTL:
+            # Case 1: Fresh cache — return immediately
+            return data
+
+        # Case 2: Stale cache — return stale data, conserve quota
+        if data is not None:
+            logger.debug("PDL stale data for %s (age %.0fs) — returning cached", key, age)
+        return data
+
+    # ── Case 3: Not cached at all — must call API ──
     api_key = os.environ.get("PDL_API_KEY", "")
     if not api_key:
         return None
+
+    if not _check_pdl_quota(MAX_MONTHLY_PDL_QUOTA):
+        logger.warning("PDL quota exhausted — cannot fetch %s (no cached data)", key)
+        return None
+
+    return _fetch_pdl_from_api(key)
+
+
+def _fetch_pdl_from_api(key: str) -> dict | None:
+    """Make an actual PDL API call and persist the result.
+
+    Increments the monthly quota counter. Persists to both in-memory
+    cache and Supabase. Returns the parsed data dict or None.
+    """
+    api_key = os.environ.get("PDL_API_KEY", "")
+    if not api_key:
+        return None
+
+    # Increment quota BEFORE the call (pessimistic — prevents overshoot)
+    with _lock:
+        _increment_pdl_quota()
 
     url = f"https://api.peopledatalabs.com/v5/company/enrich?ticker={key}"
 
     raw = _http_get_json(url, headers={"X-Api-Key": api_key}, timeout=15)
 
+    now = time.time()
+
     if not raw or not isinstance(raw, dict):
         logger.info("PDL returned no data for %s", key)
         with _lock:
-            _pdl_cache[key] = (time.time(), None)
+            _pdl_cache[key] = (now, None)
             _evict_oldest(_pdl_cache)
+            _persist_pdl_entry(key, now, None)
         return None
 
     # Check for error status
     if raw.get("status") and raw["status"] != 200:
         logger.info("PDL error for %s: %s", key, raw.get("error", {}).get("message", "unknown"))
         with _lock:
-            _pdl_cache[key] = (time.time(), None)
+            _pdl_cache[key] = (now, None)
             _evict_oldest(_pdl_cache)
+            _persist_pdl_entry(key, now, None)
         return None
 
     employee_count = raw.get("employee_count")
     if not employee_count:
         # No employee data — cache the miss
         with _lock:
-            _pdl_cache[key] = (time.time(), None)
+            _pdl_cache[key] = (now, None)
             _evict_oldest(_pdl_cache)
+            _persist_pdl_entry(key, now, None)
         return None
 
     # Extract location
@@ -370,14 +536,16 @@ def _get_pdl_data(ticker: str) -> dict | None:
         "location": loc_str,
         "linkedin_url": raw.get("linkedin_url") or "",
         "website": raw.get("website") or "",
+        "_fetched_at": datetime.now().isoformat(timespec="seconds"),
     }
 
     logger.info("PDL data for %s: %d employees, industry=%s",
                 key, result["employee_count"], result["industry"])
 
     with _lock:
-        _pdl_cache[key] = (time.time(), result)
+        _pdl_cache[key] = (now, result)
         _evict_oldest(_pdl_cache)
+        _persist_pdl_entry(key, now, result)
     return result
 
 
@@ -762,17 +930,43 @@ def _get_appstore_data(ticker: str) -> dict | None:
     Returns dict with: app_name, rating, rating_count,
     current_version_rating, app_icon_url, app_url, developer_name.
 
-    7-day cache TTL.
+    Caching strategy:
+      1. Cached AND fresh (< 7 days) → return immediately
+      2. Cached AND stale → return stale data (free API, but avoid redundant calls)
+      3. Not cached → fetch from iTunes API
     """
     key = ticker.upper()
 
-    # Check cache
-    with _lock:
-        if key in _appstore_cache:
-            ts, data = _appstore_cache[key]
-            if time.time() - ts < _APPSTORE_TTL:
-                return data
+    # ── Lazy hydration from Supabase on first call ──
+    _hydrate_appstore_cache()
 
+    # ── Check in-memory cache ──
+    with _lock:
+        cached_entry = _appstore_cache.get(key)
+
+    if cached_entry is not None:
+        ts, data = cached_entry
+        age = time.time() - ts
+
+        if age < _APPSTORE_TTL:
+            # Case 1: Fresh cache — return immediately
+            return data
+
+        # Case 2: Stale cache — return stale data
+        if data is not None:
+            logger.debug("App Store stale data for %s (age %.0fs) — returning cached", key, age)
+        return data
+
+    # ── Case 3: Not cached at all — fetch from iTunes ──
+    return _fetch_appstore_from_api(key)
+
+
+def _fetch_appstore_from_api(key: str) -> dict | None:
+    """Make an actual iTunes Search API call and persist the result.
+
+    Persists to both in-memory cache and Supabase.
+    Returns the parsed data dict or None.
+    """
     # Check for hardcoded override first
     search_name = _TICKER_APP_OVERRIDES.get(key)
 
@@ -781,9 +975,11 @@ def _get_appstore_data(ticker: str) -> dict | None:
         company_name = _resolve_company_name(key)
         if not company_name:
             logger.info("Cannot resolve company name for %s — skipping App Store", key)
+            now = time.time()
             with _lock:
-                _appstore_cache[key] = (time.time(), None)
+                _appstore_cache[key] = (now, None)
                 _evict_oldest(_appstore_cache)
+                _persist_appstore_entry(key, now, None)
             return None
 
         # Clean company name for search (remove common suffixes)
@@ -800,19 +996,22 @@ def _get_appstore_data(ticker: str) -> dict | None:
     url = f"https://itunes.apple.com/search?term={encoded_term}&entity=software&country=us&limit=5"
 
     raw = _http_get_json(url, timeout=10)
+    now = time.time()
 
     if not raw or not isinstance(raw, dict) or raw.get("resultCount", 0) == 0:
         logger.info("iTunes returned no apps for %s (searched: %s)", key, search_name)
         with _lock:
-            _appstore_cache[key] = (time.time(), None)
+            _appstore_cache[key] = (now, None)
             _evict_oldest(_appstore_cache)
+            _persist_appstore_entry(key, now, None)
         return None
 
     results = raw.get("results", [])
     if not results:
         with _lock:
-            _appstore_cache[key] = (time.time(), None)
+            _appstore_cache[key] = (now, None)
             _evict_oldest(_appstore_cache)
+            _persist_appstore_entry(key, now, None)
         return None
 
     # Pick the best match — prefer results whose artist name matches the company
@@ -838,8 +1037,9 @@ def _get_appstore_data(ticker: str) -> dict | None:
     rating = best.get("averageUserRating")
     if rating is None:
         with _lock:
-            _appstore_cache[key] = (time.time(), None)
+            _appstore_cache[key] = (now, None)
             _evict_oldest(_appstore_cache)
+            _persist_appstore_entry(key, now, None)
         return None
 
     result = {
@@ -858,6 +1058,7 @@ def _get_appstore_data(ticker: str) -> dict | None:
         "bundle_id": best.get("bundleId", ""),
         "version": best.get("version", ""),
         "price": best.get("formattedPrice", "Free"),
+        "_fetched_at": datetime.now().isoformat(timespec="seconds"),
     }
 
     logger.info(
@@ -869,8 +1070,9 @@ def _get_appstore_data(ticker: str) -> dict | None:
     )
 
     with _lock:
-        _appstore_cache[key] = (time.time(), result)
+        _appstore_cache[key] = (now, result)
         _evict_oldest(_appstore_cache)
+        _persist_appstore_entry(key, now, result)
     return result
 
 
@@ -907,3 +1109,28 @@ def get_vitals_data(ticker: str) -> dict:
         result["appstore"] = None
 
     return result
+
+
+def get_vitals_cache_info() -> dict:
+    """Return cache status for all vitals data sources.
+
+    Useful for diagnostics and the /health endpoint.
+    """
+    # Count non-None cached entries for each source
+    gd_count = sum(1 for _, (_, d) in _glassdoor_cache.items() if d is not None)
+    pdl_count = sum(1 for _, (_, d) in _pdl_cache.items() if d is not None)
+    app_count = sum(1 for _, (_, d) in _appstore_cache.items() if d is not None)
+
+    return {
+        "glassdoor": {
+            "cached_tickers": gd_count,
+            "quota": get_glassdoor_quota_info(),
+        },
+        "pdl": {
+            "cached_tickers": pdl_count,
+            "quota": get_pdl_quota_info(),
+        },
+        "appstore": {
+            "cached_tickers": app_count,
+        },
+    }

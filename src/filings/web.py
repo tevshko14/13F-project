@@ -1402,6 +1402,7 @@ async def health_check(request: Request):
             "progress": getattr(app.state, "refresh_progress", {}),
             "in_progress_ciks": len(_refresh_in_progress),
         },
+        "vitals_cache": vitals.get_vitals_cache_info(),
     })
 
 
