@@ -99,6 +99,13 @@ except ImportError:
 
 _app_start_time = time_module.time()
 
+# ── Background refresh configuration ─────────────────────────────────
+# Self-healing: the web app can refresh stale 13F data in the background,
+# reducing dependency on the Railway cron job.  Disable via env var if needed.
+_ENABLE_BACKGROUND_REFRESH = os.environ.get("ENABLE_BACKGROUND_REFRESH", "true").lower() == "true"
+_refresh_lock = asyncio.Lock()
+_refresh_in_progress: set[str] = set()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Lifespan
@@ -106,10 +113,12 @@ _app_start_time = time_module.time()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Load cache from Supabase on startup.  No background SEC refresh.
+    """Load cache from Supabase on startup, then self-heal stale data.
 
-    Data is kept fresh by the standalone sync worker (Railway Cron Job).
-    The web process only reads from the cache — it never calls SEC EDGAR.
+    Data is primarily kept fresh by the standalone sync worker (Railway
+    Cron Job).  As a safety net, the web process can also refresh stale
+    funds in the background so users never see outdated data even if the
+    cron job fails.
     """
     # ── Try Supabase first (persists across Railway deploys) ──
     app.state.fund_cache = await asyncio.to_thread(cache.load_cache_from_supabase)
@@ -118,8 +127,17 @@ async def lifespan(app: FastAPI):
         # Fallback: load from disk (local dev, or Supabase unavailable)
         app.state.fund_cache = cache.load_cache()
 
+    # Initialize background refresh state
+    app.state.refresh_status = "disabled"
+    app.state.refresh_progress = {"total": 0, "done": 0, "failed": 0}
+
     # Prefetch S&P 500 market data in background (~30-60s on cold start)
     asyncio.create_task(_prefetch_market_data(app))
+
+    # Self-heal: refresh any stale funds in background
+    if _ENABLE_BACKGROUND_REFRESH:
+        app.state.refresh_status = "pending"
+        asyncio.create_task(_delayed_refresh_sweep(app))
 
     yield
 
@@ -226,6 +244,118 @@ async def _prefetch_market_data(app: FastAPI):
         app.state.market_data_ready = False
 
 
+# ── Background 13F Refresh ────────────────────────────────────────────
+
+
+async def _refresh_single_fund_async(app: FastAPI, cik: str) -> bool:
+    """Refresh a single fund from SEC EDGAR in a background thread.
+
+    Updates app.state.fund_cache on success.
+    Returns True on success, False on failure.
+    """
+    if cik in _refresh_in_progress:
+        return False  # Already being refreshed
+
+    _refresh_in_progress.add(cik)
+    try:
+        data = await asyncio.to_thread(cache.refresh_single_fund, cik)
+        if data is not None:
+            app.state.fund_cache[cik] = data
+            logger.info("Background refresh OK: CIK %s (%s)", cik, data.get("name", ""))
+            return True
+        else:
+            logger.warning("Background refresh returned None: CIK %s", cik)
+            return False
+    except Exception:
+        logger.exception("Background refresh failed: CIK %s", cik)
+        return False
+    finally:
+        _refresh_in_progress.discard(cik)
+
+
+async def _background_refresh_sweep(app: FastAPI) -> None:
+    """Sweep all stale funds and refresh them in the background.
+
+    Runs serially with rate-limit pauses matching the sync worker.
+    """
+    async with _refresh_lock:
+        try:
+            cache_data = app.state.fund_cache
+            all_ciks = [si.cik for si in SUPERINVESTORS]
+            stale_ciks = await asyncio.to_thread(
+                cache.get_stale_ciks, cache_data, all_ciks
+            )
+
+            if not stale_ciks:
+                logger.info("Background sweep: all %d funds fresh", len(all_ciks))
+                app.state.refresh_status = "idle"
+                return
+
+            logger.info(
+                "Background sweep: refreshing %d/%d stale funds",
+                len(stale_ciks), len(all_ciks),
+            )
+            app.state.refresh_status = "running"
+            app.state.refresh_progress = {"total": len(stale_ciks), "done": 0, "failed": 0}
+
+            for idx, cik in enumerate(stale_ciks):
+                if not cache._check_sec_rate_limit():
+                    logger.warning(
+                        "Background sweep: SEC session limit reached at %d/%d",
+                        idx, len(stale_ciks),
+                    )
+                    break
+
+                success = await _refresh_single_fund_async(app, cik)
+
+                if success:
+                    app.state.refresh_progress["done"] += 1
+                else:
+                    app.state.refresh_progress["failed"] += 1
+
+                # Rate limiting: 2s between funds
+                if idx < len(stale_ciks) - 1:
+                    await asyncio.sleep(2)
+
+                # Batch pause every 10 funds
+                if (idx + 1) % cache._SEC_BATCH_SIZE == 0 and idx < len(stale_ciks) - 1:
+                    logger.info("Background sweep: batch pause at %d/%d", idx + 1, len(stale_ciks))
+                    await asyncio.sleep(cache._SEC_BATCH_PAUSE)
+
+            done = app.state.refresh_progress["done"]
+            failed = app.state.refresh_progress["failed"]
+            logger.info("Background sweep complete: %d refreshed, %d failed", done, failed)
+            app.state.refresh_status = "idle"
+
+        except Exception:
+            logger.exception("Background sweep crashed")
+            app.state.refresh_status = "error"
+
+
+async def _delayed_refresh_sweep(app: FastAPI) -> None:
+    """Wait for initial startup to settle, then begin background sweep."""
+    await asyncio.sleep(30)
+    await _background_refresh_sweep(app)
+
+
+async def _trigger_single_refresh(app: FastAPI, cik: str) -> None:
+    """Request-triggered refresh for a single stale fund.
+
+    Acquires the refresh lock with a short timeout to avoid blocking
+    if a full sweep is already running.
+    """
+    try:
+        async with asyncio.timeout(1):
+            async with _refresh_lock:
+                if not cache._check_sec_rate_limit():
+                    return
+                await _refresh_single_fund_async(app, cik)
+    except TimeoutError:
+        logger.debug("Skipping on-demand refresh for CIK %s (sweep in progress)", cik)
+    except Exception:
+        logger.debug("On-demand refresh failed for CIK %s", cik)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Pages
 # ═══════════════════════════════════════════════════════════════════════
@@ -275,6 +405,10 @@ async def fund_row(request: Request, cik: str):
             app.state.fund_cache[cik_normalized] = cached
 
     if cached:
+        # Trigger background refresh if this fund is stale
+        if _ENABLE_BACKGROUND_REFRESH and cache.is_fund_stale(cached) and cik_normalized not in _refresh_in_progress:
+            asyncio.create_task(_trigger_single_refresh(app, cik_normalized))
+
         top_tickers = [
             h.get("ticker") or h.get("issuer", "?")[:8]
             for h in cached.get("top_holdings", [])[:5]
@@ -314,6 +448,10 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
             cache_data[cik] = cached
 
     if cached:
+        # Trigger background refresh if this fund is stale
+        if _ENABLE_BACKGROUND_REFRESH and cache.is_fund_stale(cached) and cik not in _refresh_in_progress:
+            asyncio.create_task(_trigger_single_refresh(app, cik))
+
         # ── Cache hit: build from stored data (zero SEC calls) ──
         fund, holdings_list = client.get_enriched_holdings_from_cache(cached, cik, top_n)
     else:
@@ -1241,14 +1379,29 @@ async def logout(request: Request):
 async def health_check(request: Request):
     uptime = round(time_module.time() - _app_start_time)
     cache_data = getattr(app.state, "fund_cache", {})
+
+    # Count stale funds for observability
+    all_ciks = [si.cik for si in SUPERINVESTORS]
+    stale_count = sum(
+        1 for cik in all_ciks
+        if cik not in cache_data or cache.is_fund_stale(cache_data.get(cik, {}))
+    )
+
     return JSONResponse({
         "status": "ok",
         "uptime_seconds": uptime,
         "cache_entries": len(cache_data),
         "cache_age": cache.get_cache_age_str(cache_data),
         "total_funds": len(SUPERINVESTORS),
+        "stale_funds": stale_count,
         "market_data_ready": getattr(app.state, "market_data_ready", False),
         "supabase_connected": supabase_cache.is_available(),
+        "background_refresh": {
+            "enabled": _ENABLE_BACKGROUND_REFRESH,
+            "status": getattr(app.state, "refresh_status", "unknown"),
+            "progress": getattr(app.state, "refresh_progress", {}),
+            "in_progress_ciks": len(_refresh_in_progress),
+        },
     })
 
 
