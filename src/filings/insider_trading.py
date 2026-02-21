@@ -515,11 +515,19 @@ def get_latest_insider_trades(
         _set_cached(cache_key, trades)
         return trades
 
-    # ── L3: Fallback -- scrape OpenInsider directly ──
+    # ── L3: Fallback -- scrape OpenInsider directly + backfill to Supabase ──
     logger.warning("Supabase insider_trades empty/unavailable -- scraping OpenInsider")
     trades = _scrape_openinsider_global(trade_type, count)
     if trades:
         _set_cached(cache_key, trades)
+        # Backfill scraped trades into Supabase so they persist across restarts
+        try:
+            rows = [t.to_db_row() for t in trades if t.sec_url]
+            if rows:
+                upserted = supabase_cache.upsert_insider_trades(rows)
+                logger.info("Backfilled %d global insider trades to Supabase", upserted)
+        except Exception:
+            logger.debug("Global insider backfill upsert failed")
         return trades
 
     # ── L4: Stale L1 data -- never show empty/error to users ──
