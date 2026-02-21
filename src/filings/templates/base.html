@@ -502,28 +502,25 @@
         }
         .site-footer a { color: inherit; }
 
-        /* Auth nav - <button> avoids Pico a:hover color conflicts */
-        button.nav-account-btn {
-            padding: 0.4em 1em;
+        /* Support the Panda CTA button in nav */
+        a.nav-support-btn {
+            display: inline-block;
+            padding: 0.4em 1.1em;
             font-size: 0.85em;
-            font-weight: 500;
+            font-weight: 600;
             border-radius: 8px;
             white-space: nowrap;
             cursor: pointer;
             margin: 0;
-        }
-        button.nav-account-btn:hover,
-        button.nav-account-btn:active,
-        button.nav-account-btn:focus {
-            --pico-background-color: var(--pico-primary-background) !important;
-            --pico-border-color: var(--pico-primary-border) !important;
-            --pico-color: var(--pico-primary-inverse) !important;
-        }
-        .nav-account-name {
-            font-size: 0.85em;
-            font-weight: 600;
-            color: inherit;
+            background: #18181b;
+            color: #fff !important;
+            border: 1px solid #18181b;
             text-decoration: none;
+            transition: background 0.15s, box-shadow 0.15s;
+        }
+        a.nav-support-btn:hover {
+            background: #27272a;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         }
     </style>
     {% if supabase_anon_key %}
@@ -561,27 +558,9 @@
                 <li><a href="/retail">Retail</a></li>
                 <li><a href="/funds">Funds</a></li>
                 <li><a href="/insider-trading">Insiders</a></li>
-                {% if auth_enabled %}
                 <li>
-                    {% if request.state.user is defined and request.state.user %}
-                    <span class="nav-dropdown">
-                        <a href="#" class="nav-dropdown-toggle nav-account-name">
-                            {% if request.state.profile is defined and request.state.profile %}
-                                {{ request.state.profile.display_name or 'Account' }}
-                            {% else %}
-                                Account
-                            {% endif %}
-                            <svg class="nav-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="2 4 6 8 10 4"/></svg>
-                        </a>
-                        <ul class="nav-dropdown-menu">
-                            <li><a href="/logout">Sign Out</a></li>
-                        </ul>
-                    </span>
-                    {% else %}
-                    <button class="outline nav-account-btn" onclick="window.location.href='/login'">Sign In</button>
-                    {% endif %}
+                    <a href="/support" class="nav-support-btn" role="button">Support the Panda</a>
                 </li>
-                {% endif %}
             </ul>
         </div>
     </nav>

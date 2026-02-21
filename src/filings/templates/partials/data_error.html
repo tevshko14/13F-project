@@ -1,0 +1,52 @@
+{# Reusable data-error message for HTMX partials.
+   Accepts:
+     - error_type  : "rate_limit" | "generic"  (default: "generic")
+     - message     : custom message  (optional, has sensible defaults)
+     - section     : label like "Analyst Ratings" for context (optional)
+#}
+<div class="data-error">
+    <style>
+        .data-error {
+            text-align: center;
+            padding: 2em 1em;
+            color: #71717a;
+        }
+        .data-error .de-icon {
+            font-size: 1.6em;
+            margin-bottom: 0.3em;
+        }
+        .data-error .de-message {
+            max-width: 400px;
+            margin: 0 auto 0.8em;
+            font-size: 0.92em;
+            line-height: 1.5;
+        }
+        .data-error .de-cta {
+            display: inline-block;
+            background: #18181b;
+            color: #fff;
+            padding: 0.4em 1.2em;
+            border-radius: 8px;
+            font-size: 0.85em;
+            font-weight: 600;
+            text-decoration: none;
+            transition: background 0.15s;
+        }
+        .data-error .de-cta:hover {
+            background: #27272a;
+        }
+    </style>
+
+    {% if error_type == "rate_limit" %}
+    <div class="de-icon">&#x26A0;</div>
+    <p class="de-message">
+        Token-Limit Reached. Support the Panda Fund to help increase our monthly data capacity.
+    </p>
+    <a href="/support" class="de-cta">Support the Panda</a>
+    {% else %}
+    <div class="de-icon">&#x1F50C;</div>
+    <p class="de-message">
+        {{ message or "Unable to load data right now. Please try again later." }}
+    </p>
+    {% endif %}
+</div>
