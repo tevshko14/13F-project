@@ -8,9 +8,10 @@ A web dashboard for tracking SEC 13F institutional holdings filings from 84 supe
 - **S&P 500 Heatmap** - Interactive treemap showing daily performance grouped by sector (ECharts), with gold borders on stocks held by superinvestors
 - **Most Added by Superinvestors** - Stack-ranked table of stocks most added this quarter, with analyst consensus and 52-week range
 - **Quick Access Cards** - Retail, Funds, and Insiders overview cards
+- **Support Widget** - Panda Fund progress bar with Stripe Pricing Table embed for direct monthly subscriptions
 
 ### Navigation
-Top nav: **Home** | **Retail** | **Funds** | **Insiders**
+Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda**
 
 ### Retail Page (`/retail`)
 - **Sentiment Tab** - CNN Fear & Greed gauge, summary cards (Most Mentioned, Biggest Rank Mover, Top 5 Trending)
@@ -25,6 +26,11 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders**
 ### Insider Trading Page (`/insider-trading`)
 - **Global Screener** - Latest insider buys/sells across all stocks with top-tickers chart
 - **Per-Ticker View** - Insider trades for individual companies
+
+### Support Page (`/support`)
+- **Panda Fund Dashboard** - Transparency page showing monthly funding progress, cost breakdown, and funding history chart (ECharts)
+- **Stripe Donations** - One-time (Buy Button) and recurring (Pricing Table) support via embedded Stripe OOTB components
+- **YouTube & Feedback CTAs** - Links to @funofinvesting and feedback form
 
 ### Search
 - **Fuzzy Ticker Search** - Fuse.js-powered autocomplete with ~8,000 NYSE/NASDAQ listings, weighted by superinvestor holdings and S&P 500 membership
@@ -47,6 +53,8 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders**
 - **Watchlist** - Star tickers from any stock page, persistent sidebar on all pages
 - **Notifications** - SSE-powered real-time alerts when new filings match your watchlist
 - **Sortable Tables** - Click any column header to sort across all pages
+- **Background Refresh** - Self-healing, request-triggered refresh for stale 13F data with per-fund TTL
+- **Graceful Error Handling** - HTMX-aware inline error partials with Panda Fund CTA on rate limits
 
 ### CLI
 - Search managers, view holdings, and compare quarters from the terminal
@@ -112,21 +120,28 @@ railway up
 | `SUPABASE_DB_PASSWORD` | No | Free tier | Supabase DB password (auto-migration) |
 | `CACHE_DIR` | No | - | Cache directory (default: `~/.13f-cache/`) |
 | `POSTHOG_API_KEY` | No | Free tier | Product analytics |
+| `STRIPE_PUBLISHABLE_KEY` | No | - | Stripe publishable key (for donation embeds) |
+| `STRIPE_BUY_BUTTON_ID` | No | - | Stripe Buy Button ID (one-time donations) |
+| `STRIPE_PRICING_TABLE_ID` | No | - | Stripe Pricing Table ID (recurring subscriptions) |
+| `PANDA_FUND_RAISED` | No | - | Current month's donation total in dollars |
+| `FEEDBACK_LINK` | No | - | URL to feedback form (Notion, Google Form, etc.) |
+| `ENABLE_BACKGROUND_REFRESH` | No | - | Enable/disable background 13F refresh (default: `true`) |
 
 > **Note:** The App Store ratings feature requires no API key (Apple's public iTunes API).
 > Without Supabase env vars, the app works identically using disk-only cache.
+> Without Stripe env vars, the support page shows "coming soon" placeholders gracefully.
 
 ## Project Structure
 
 ```
 src/filings/
-├── web.py              # FastAPI app (40+ routes)
+├── web.py              # FastAPI app (40+ routes, background refresh, Stripe/support)
 ├── cli.py              # CLI entry point
 ├── client.py           # SEC EDGAR data access layer
 ├── analysts.py         # Analyst ratings (Finnhub + yfinance)
 ├── market_data.py      # S&P 500 heatmap, most-added, ticker search (~8K listings)
 ├── sentiment.py        # Market sentiment (CNN, Finnhub, ApeWisdom, Alpha Vantage)
-├── vitals.py           # Alternative data (Glassdoor, People Data Labs, App Store)
+├── vitals.py           # Alternative data (Glassdoor, PDL, App Store) + Supabase persistence
 ├── cache.py            # Cache layer (3-tier: in-memory → Supabase → disk)
 ├── supabase_cache.py   # Supabase L2 persistent cache (survives deploys)
 ├── insider_trading.py  # Form 4 insider transaction data (Supabase-first + scrape fallback)
@@ -139,14 +154,15 @@ src/filings/
 ├── superinvestors.py   # 84 hardcoded superinvestors
 ├── display.py          # CLI Rich formatters
 └── templates/          # Jinja2 HTML templates
-    ├── base.html       # Master layout (nav: Home, Retail, Funds, Insiders)
-    ├── home.html       # Homepage: heatmap + most-added + cards
+    ├── base.html       # Master layout (nav: Home, Retail, Funds, Insiders, Support)
+    ├── home.html       # Homepage: heatmap + most-added + cards + support widget
     ├── retail.html     # Retail page (Sentiment, Leaderboard, Calendar tabs)
     ├── grand_portfolio.html  # Top Funds page (Funds, Holdings, Activity tabs)
     ├── investor.html   # Individual fund page (Holdings + Compare tabs)
     ├── stock.html      # Stock page (7 tabs, lazy-loaded)
     ├── insider_trading.html  # Insider trading screener page
     ├── activity.html   # Cross-fund activity feed
+    ├── support.html    # Panda Fund transparency dashboard + Stripe donations
     └── partials/       # HTMX / lazy-loaded partials
         ├── heatmap.html             # S&P 500 ECharts treemap
         ├── most_added.html          # Most-added-by-superinvestors table
@@ -158,7 +174,8 @@ src/filings/
         ├── insider_trades.html      # Insider trading table (global)
         ├── stock_insider_trades.html # Insider trades (per-ticker)
         ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded)
-        └── compare_content.html     # Compare quarters (lazy-loaded)
+        ├── compare_content.html     # Compare quarters (lazy-loaded)
+        └── data_error.html          # Reusable error partial (rate limits, HTMX-aware)
 ```
 
 ## Caching Strategy
@@ -193,6 +210,9 @@ The `insider_sync` cron worker scrapes OpenInsider every 30 minutes and upserts 
 | `13f` | All ~100 superinvestor fund holdings, changes, quarterly history | 7 days / 12 hours (filing season) |
 | `glassdoor` | Company culture ratings per ticker | 90 days |
 | `glassdoor_quota` | Monthly API call counter | Never expires |
+| `pdl` | People Data Labs employee data per ticker | 7 days |
+| `pdl_quota` | Monthly PDL API call counter (100/month limit) | Never expires |
+| `appstore` | Apple App Store ratings per ticker | 7 days |
 | `insider_trades` | Insider trades (dedicated table, upsert-only) | No TTL (data persists) |
 
 ### TTL by data type
