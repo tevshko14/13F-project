@@ -3,6 +3,9 @@
 {% block meta_description %}Help keep PaperPanda free. See exactly where your support goes — API costs, infrastructure, and monthly funding progress.{% endblock %}
 
 {% block content %}
+{# Stripe OOTB components — loaded async, no performance impact #}
+<script async src="https://js.stripe.com/v3/buy-button.js"></script>
+<script async src="https://js.stripe.com/v3/pricing-table.js"></script>
 <style>
     .support-hero {
         text-align: center;
@@ -72,31 +75,57 @@
         vertical-align: middle;
     }
 
-    /* ── CTA buttons ── */
-    .support-cta {
-        text-align: center;
-        margin: 2em 0;
+    /* ── Donation widget ── */
+    .donate-widget {
+        background: #fff;
+        border: 1px solid #e4e4e7;
+        border-radius: 12px;
+        padding: 1.5em 2em;
+        margin: 1.5em 0;
     }
-    .support-cta a.btn-support {
-        display: inline-block;
-        background: #18181b;
-        color: #fff;
-        padding: 0.8em 2.5em;
-        border-radius: 10px;
-        font-size: 1.1em;
+    .donate-tabs {
+        display: flex;
+        gap: 0;
+        margin-bottom: 1.5em;
+        border-bottom: 2px solid #e4e4e7;
+    }
+    .donate-tab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.6em 1.5em;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
         font-weight: 600;
-        text-decoration: none;
-        transition: background 0.15s, box-shadow 0.15s;
-    }
-    .support-cta a.btn-support:hover {
-        background: #27272a;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-    }
-    .support-cta .cta-note {
-        display: block;
-        margin-top: 0.5em;
-        font-size: 0.8em;
         color: #a1a1aa;
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .donate-tab.active {
+        color: #18181b;
+        border-bottom-color: #18181b;
+    }
+    .donate-tab:hover:not(.active) {
+        color: #52525b;
+    }
+    .donate-panel {
+        display: none;
+        min-height: 120px;
+    }
+    .donate-panel.active {
+        display: block;
+    }
+    .donate-panel-center {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 80px;
+    }
+    .stripe-not-configured {
+        text-align: center;
+        padding: 2em 1em;
+        color: #a1a1aa;
+        font-size: 0.9em;
     }
 
     /* ── Where-it-goes section ── */
@@ -288,13 +317,52 @@
     <div class="progress-label">{{ progress_pct }}% funded for {{ current_month_name }}</div>
 </div>
 
-{# ── CTA ── #}
-<div class="support-cta">
-    <a href="{{ stripe_link }}" target="_blank" rel="noopener" class="btn-support">
-        Support the Panda
-    </a>
-    <span class="cta-note">One-time or monthly &middot; Powered by Stripe</span>
+{# ── Donate Widget ── #}
+<div class="donate-widget">
+    <div class="donate-tabs">
+        <button class="donate-tab active" onclick="switchDonateTab('onetime')" id="tab-onetime">One-time</button>
+        <button class="donate-tab" onclick="switchDonateTab('monthly')" id="tab-monthly">Monthly</button>
+    </div>
+
+    {# ── One-time tab: Stripe Buy Button ── #}
+    <div class="donate-panel active" id="panel-onetime">
+        {% if stripe_publishable_key and stripe_buy_button_id %}
+        <div class="donate-panel-center">
+            <stripe-buy-button
+                buy-button-id="{{ stripe_buy_button_id }}"
+                publishable-key="{{ stripe_publishable_key }}"
+            ></stripe-buy-button>
+        </div>
+        {% else %}
+        <div class="stripe-not-configured">
+            One-time donations coming soon.
+        </div>
+        {% endif %}
+    </div>
+
+    {# ── Monthly tab: Stripe Pricing Table ── #}
+    <div class="donate-panel" id="panel-monthly">
+        {% if stripe_publishable_key and stripe_pricing_table_id %}
+        <stripe-pricing-table
+            pricing-table-id="{{ stripe_pricing_table_id }}"
+            publishable-key="{{ stripe_publishable_key }}"
+        ></stripe-pricing-table>
+        {% else %}
+        <div class="stripe-not-configured">
+            Monthly support tiers coming soon.
+        </div>
+        {% endif %}
+    </div>
 </div>
+
+<script>
+function switchDonateTab(tab) {
+    document.querySelectorAll('.donate-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.donate-panel').forEach(function(p) { p.classList.remove('active'); });
+    document.getElementById('tab-' + tab).classList.add('active');
+    document.getElementById('panel-' + tab).classList.add('active');
+}
+</script>
 
 {# ── Where the money goes ── #}
 <div class="where-it-goes">
