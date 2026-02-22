@@ -362,6 +362,13 @@ function switchDonateTab(tab) {
     document.getElementById('tab-' + tab).classList.add('active');
     document.getElementById('panel-' + tab).classList.add('active');
 }
+// Auto-switch to monthly tab if linked from homepage pills
+(function() {
+    if (window.location.hash === '#monthly' || sessionStorage.getItem('supportTab') === 'monthly') {
+        switchDonateTab('monthly');
+        sessionStorage.removeItem('supportTab');
+    }
+})();
 </script>
 
 {# ── Where the money goes ── #}
