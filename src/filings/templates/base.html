@@ -7,10 +7,8 @@
     <script>
     (function() {
         var stored = localStorage.getItem('pp-theme');
-        var theme = stored || 'system';
-        if (theme === 'system') {
-            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
+        var theme = (stored === 'light' || stored === 'dark') ? stored
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         document.documentElement.setAttribute('data-theme', theme);
     })();
     </script>
@@ -100,9 +98,9 @@
             --pp-overlay-40: rgba(255, 255, 255, 0.4);
             --pp-overlay-50: rgba(255, 255, 255, 0.5);
             --pp-overlay-65: rgba(255, 255, 255, 0.65);
-            --pp-support-btn-bg: #fff;
-            --pp-support-btn-text: #18181b;
-            --pp-support-btn-hover: #e4e4e7;
+            --pp-support-btn-bg: #1976d2;
+            --pp-support-btn-text: #fff;
+            --pp-support-btn-hover: #1565c0;
             --pp-tag-bg: #2a2a2e;
             --pp-tag-text: #d4d4d8;
             --pp-tag-hover: #333338;
@@ -610,27 +608,37 @@
         .theme-toggle {
             display: flex;
             align-items: center;
-            justify-content: center;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            border: none;
-            background: transparent;
+            width: 52px;
+            height: 28px;
+            border-radius: 14px;
+            border: 1px solid var(--pp-border);
+            background: var(--pp-surface-hover);
             cursor: pointer;
-            color: var(--pp-text-muted);
-            transition: background 0.15s, color 0.15s;
-            padding: 0;
+            padding: 3px;
             margin: 0;
+            position: relative;
+            transition: background 0.2s, border-color 0.2s;
         }
         .theme-toggle:hover {
-            background: var(--pp-surface-hover);
-            color: var(--pp-text);
+            border-color: var(--pp-text-faint);
         }
-        /* Show/hide icons based on current theme */
-        .theme-icon-sun, .theme-icon-moon, .theme-icon-system { display: none; }
+        .theme-toggle-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--pp-surface);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s ease;
+        }
+        :root[data-theme="dark"] .theme-toggle-thumb {
+            transform: translateX(24px);
+        }
+        .theme-icon-sun, .theme-icon-moon { display: none; }
         :root[data-theme="light"] .theme-icon-sun { display: block; }
         :root[data-theme="dark"] .theme-icon-moon { display: block; }
-        /* System icon shown via JS when preference is 'system' */
 
         /* ── Logo: swap light/dark based on theme ── */
         .logo-dark { display: none; }
@@ -682,10 +690,11 @@
                 <li><a href="/funds">Funds</a></li>
                 <li><a href="/insider-trading">Insiders</a></li>
                 <li>
-                    <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" title="Switch theme" aria-label="Toggle dark mode">
-                        <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                        <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                        <svg class="theme-icon-system" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">
+                        <span class="theme-toggle-thumb">
+                            <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                            <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                        </span>
                     </button>
                 </li>
                 <li>
@@ -1195,67 +1204,31 @@
     {# ── Theme Toggle Logic ── #}
     <script>
     (function() {
-        var CYCLE = ['light', 'dark', 'system'];
-        var TITLES = { light: 'Switch to dark mode', dark: 'Use system theme', system: 'Switch to light mode' };
-
-        function getStoredPref() {
-            return localStorage.getItem('pp-theme') || 'system';
-        }
-
-        function resolveTheme(pref) {
-            if (pref === 'system') {
-                return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-            }
-            return pref;
+        function getStoredTheme() {
+            var stored = localStorage.getItem('pp-theme');
+            if (stored === 'light' || stored === 'dark') return stored;
+            // First visit: use system preference, then persist
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         }
 
         var _lastResolved = null;
-        function applyTheme(pref) {
-            var resolved = resolveTheme(pref);
-            document.documentElement.setAttribute('data-theme', resolved);
-            // Update toggle button icons
-            var btn = document.getElementById('theme-toggle');
-            if (btn) {
-                btn.title = TITLES[pref] || 'Toggle theme';
-                // Show system icon when preference is system
-                var sunIcon = btn.querySelector('.theme-icon-sun');
-                var moonIcon = btn.querySelector('.theme-icon-moon');
-                var sysIcon = btn.querySelector('.theme-icon-system');
-                if (sunIcon) sunIcon.style.display = 'none';
-                if (moonIcon) moonIcon.style.display = 'none';
-                if (sysIcon) sysIcon.style.display = 'none';
-                if (pref === 'system') {
-                    if (sysIcon) sysIcon.style.display = 'block';
-                } else if (resolved === 'light') {
-                    if (sunIcon) sunIcon.style.display = 'block';
-                } else {
-                    if (moonIcon) moonIcon.style.display = 'block';
-                }
-            }
-            // Notify 3rd-party widgets (TradingView, etc.) when resolved theme changes
-            if (resolved !== _lastResolved) {
-                _lastResolved = resolved;
-                document.dispatchEvent(new CustomEvent('pp-theme-changed', { detail: { theme: resolved } }));
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('pp-theme', theme);
+            // Notify 3rd-party widgets (TradingView, etc.) when theme changes
+            if (theme !== _lastResolved) {
+                _lastResolved = theme;
+                document.dispatchEvent(new CustomEvent('pp-theme-changed', { detail: { theme: theme } }));
             }
         }
 
         window.toggleTheme = function() {
-            var current = getStoredPref();
-            var idx = CYCLE.indexOf(current);
-            var next = CYCLE[(idx + 1) % CYCLE.length];
-            localStorage.setItem('pp-theme', next);
-            applyTheme(next);
+            var current = document.documentElement.getAttribute('data-theme');
+            applyTheme(current === 'dark' ? 'light' : 'dark');
         };
 
         // Apply on DOM ready
-        applyTheme(getStoredPref());
-
-        // Listen for system theme changes
-        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function() {
-            if (getStoredPref() === 'system') {
-                applyTheme('system');
-            }
-        });
+        applyTheme(getStoredTheme());
     })();
     </script>
 </body>
