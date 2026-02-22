@@ -108,6 +108,7 @@
 
     function renderAll() {
         var theme = currentTheme();
+        var isDark = theme === 'dark';
 
         /* Ticker Tape */
         tvEmbed('tv-ticker-tape-wrap',
@@ -128,14 +129,13 @@
                     {description: "META", proName: "NASDAQ:META"}
                 ],
                 showSymbolLogo: true,
-                isTransparent: true,
+                isTransparent: !isDark,
                 displayMode: "adaptive",
                 colorTheme: theme,
                 locale: "en"
             });
 
         /* Market Overview */
-        var isDark = theme === 'dark';
         tvEmbed('tv-market-overview-wrap',
             'https://s3.tradingview.com/external-embedding/embed-widget-market-overview.js',
             {
@@ -146,7 +146,7 @@
                 width: "100%",
                 height: "100%",
                 largeChartUrl: "",
-                isTransparent: true,
+                isTransparent: !isDark,
                 showSymbolLogo: true,
                 showFloatingTooltip: true,
                 plotLineColorGrowing: "rgba(25, 118, 210, 1)",
@@ -201,7 +201,7 @@
             'https://s3.tradingview.com/external-embedding/embed-widget-timeline.js',
             {
                 feedMode: "all_symbols",
-                isTransparent: true,
+                isTransparent: !isDark,
                 displayMode: "regular",
                 width: "100%",
                 height: "100%",
