@@ -631,6 +631,12 @@
         :root[data-theme="light"] .theme-icon-sun { display: block; }
         :root[data-theme="dark"] .theme-icon-moon { display: block; }
         /* System icon shown via JS when preference is 'system' */
+
+        /* ── Stripe embeds: invert colors in dark mode ── */
+        :root[data-theme="dark"] stripe-pricing-table,
+        :root[data-theme="dark"] stripe-buy-button {
+            filter: invert(1) hue-rotate(180deg);
+        }
     </style>
     {% if supabase_anon_key %}
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -1195,6 +1201,7 @@
             return pref;
         }
 
+        var _lastResolved = null;
         function applyTheme(pref) {
             var resolved = resolveTheme(pref);
             document.documentElement.setAttribute('data-theme', resolved);
@@ -1216,6 +1223,11 @@
                 } else {
                     if (moonIcon) moonIcon.style.display = 'block';
                 }
+            }
+            // Notify 3rd-party widgets (TradingView, etc.) when resolved theme changes
+            if (resolved !== _lastResolved) {
+                _lastResolved = resolved;
+                document.dispatchEvent(new CustomEvent('pp-theme-changed', { detail: { theme: resolved } }));
             }
         }
 
