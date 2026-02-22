@@ -15,10 +15,10 @@
         }
     }
     .vitals-card {
-        border: 1px solid rgba(0,0,0,0.08);
+        border: 1px solid var(--pp-overlay-8);
         border-radius: 10px;
         padding: 1.5em;
-        background: #fff;
+        background: var(--pp-surface);
     }
     .vitals-card-header {
         display: flex;
@@ -400,7 +400,7 @@
             {% if appstore.app_icon_url %}
             <img src="{{ appstore.app_icon_url }}"
                  alt="{{ appstore.app_name }}"
-                 style="width: 56px; height: 56px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,0.1);"
+                 style="width: 56px; height: 56px; border-radius: 12px; box-shadow: 0 1px 4px var(--pp-overlay-10);"
                  onerror="this.style.display='none'">
             {% endif %}
             <div>

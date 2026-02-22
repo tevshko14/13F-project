@@ -18,10 +18,10 @@
         cursor: pointer;
         font-size: 0.95em;
         font-weight: 600;
-        color: rgba(0,0,0,0.5);
+        color: var(--pp-overlay-50);
         transition: color 0.15s, border-color 0.15s;
     }
-    .rt-subtab:hover { color: rgba(0,0,0,0.8); }
+    .rt-subtab:hover { color: var(--pp-text-secondary); }
     .rt-subtab.active {
         color: #1976d2;
         border-bottom-color: #1976d2;
@@ -37,29 +37,29 @@
         margin-bottom: 1.5em;
     }
     .rt-card {
-        border: 1px solid rgba(0, 0, 0, 0.08);
+        border: 1px solid var(--pp-overlay-8);
         border-radius: 12px;
         padding: 1.25em;
-        background: #fff;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        background: var(--pp-surface);
+        box-shadow: var(--pp-card-shadow-sm);
     }
     .rt-card-label {
         font-size: 0.75em;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: #71717a;
+        color: var(--pp-text-muted);
         margin-bottom: 0.3em;
     }
     .rt-card-value {
         font-size: 1.6em;
         font-weight: 700;
-        color: #222;
+        color: var(--pp-text);
         line-height: 1.2;
     }
     .rt-card-sub {
         font-size: 0.8em;
-        color: #999;
+        color: var(--pp-text-faint);
         margin-top: 0.2em;
     }
 
@@ -75,17 +75,17 @@
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: #71717a;
-        background: #fafafa;
-        border-bottom: 1px solid #e4e4e7;
+        color: var(--pp-text-muted);
+        background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border);
         text-align: left;
     }
     .yt-table tbody td {
         padding: 14px 20px;
-        border-bottom: 1px solid #f4f4f5;
+        border-bottom: 1px solid var(--pp-border-light);
         vertical-align: middle;
     }
-    .yt-table tbody tr:hover { background: #fafafa; }
+    .yt-table tbody tr:hover { background: var(--pp-surface-alt); }
 
     /* Responsive: stack charts on mobile */
     @media (max-width: 768px) {
@@ -96,7 +96,7 @@
 {# ── Sub-tab navigation ── #}
 <div style="margin-bottom: 1.5em;">
     <nav>
-        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
             <li>
                 <button class="rt-subtab{% if view == 'sentiment' %} active{% endif %}"
                         data-view="sentiment" onclick="switchRetailView('sentiment')">
