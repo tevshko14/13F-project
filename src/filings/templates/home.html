@@ -500,8 +500,7 @@
 
     /* ── Support the Panda widget ── */
     .panda-widget {
-        margin: 2.5em auto 1em;
-        max-width: 900px;
+        margin: 2.5em 0 1em;
     }
     .pw-body {
         background: #fafaf9;
@@ -560,13 +559,6 @@
     .pw-pricing-table {
         margin-bottom: 0.5em;
     }
-    /* Scale down Stripe pricing table for compact horizontal fit */
-    .pw-pricing-table stripe-pricing-table {
-        display: block;
-        transform: scale(0.85);
-        transform-origin: top center;
-        margin-bottom: -40px;
-    }
     .pw-fallback {
         text-align: center;
         margin-bottom: 0.8em;
@@ -596,13 +588,8 @@
     .pw-learn-more:hover {
         color: #18181b;
     }
-    @media (max-width: 768px) {
-        .panda-widget { max-width: 100%; }
+    @media (max-width: 640px) {
         .pw-body { padding: 1.2em 1em; }
-        .pw-pricing-table stripe-pricing-table {
-            transform: scale(1);
-            margin-bottom: 0;
-        }
     }
 </style>
 {% endblock %}
