@@ -233,23 +233,41 @@
         width: 100%;
         table-layout: auto;
         border-collapse: collapse;
+        font-size: max(14px, 0.875rem);
     }
-    #tab-overview table th,
-    #tab-overview table td,
-    #tab-ownership table th,
-    #tab-ownership table td {
-        padding: 10px 14px;     /* min 10px top/bottom */
-        line-height: 1.5;
+    #tab-overview table thead th,
+    #tab-ownership table thead th {
+        padding: 12px 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-text-muted);
+        background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border);
+        white-space: nowrap;
         vertical-align: middle;
-        font-size: max(14px, 0.875rem);  /* never shrink below 14px */
-        height: auto;
-        white-space: normal;
-        overflow: visible;
     }
-    #tab-overview table tr,
-    #tab-ownership table tr {
-        height: auto;
-        min-height: 44px;
+    #tab-overview table tbody td,
+    #tab-ownership table tbody td {
+        padding: 14px 20px;
+        vertical-align: middle;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+        line-height: 1.5;
+        white-space: normal;
+    }
+    #tab-overview table tbody tr,
+    #tab-ownership table tbody tr {
+        transition: background-color 0.15s ease;
+    }
+    #tab-overview table tbody tr:hover,
+    #tab-ownership table tbody tr:hover {
+        background-color: var(--pp-surface-alt);
+    }
+    #tab-overview table tbody tr:last-child td,
+    #tab-ownership table tbody tr:last-child td {
+        border-bottom: none;
     }
 
     /* ── Force full-width on overview panels (break out of PicoCSS container) ── */

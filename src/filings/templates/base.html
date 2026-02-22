@@ -632,6 +632,11 @@
         :root[data-theme="dark"] .theme-icon-moon { display: block; }
         /* System icon shown via JS when preference is 'system' */
 
+        /* ── Logo: swap light/dark based on theme ── */
+        .logo-dark { display: none; }
+        :root[data-theme="dark"] .logo-light { display: none; }
+        :root[data-theme="dark"] .logo-dark { display: inline; }
+
         /* ── Stripe embeds: invert colors in dark mode ── */
         :root[data-theme="dark"] stripe-pricing-table,
         :root[data-theme="dark"] stripe-buy-button {
@@ -666,7 +671,10 @@
     <nav class="site-nav">
         <div class="container">
             <div class="nav-left">
-                <a href="/"><img src="/static/logo-nav.png" alt="PaperPanda" style="height: 110px;"></a>
+                <a href="/">
+                    <img src="/static/logo-nav.png" alt="PaperPanda" class="logo-light" style="height: 110px;">
+                    <img src="/static/logo-nav-dark.png" alt="PaperPanda" class="logo-dark" style="height: 110px;">
+                </a>
             </div>
             <ul class="nav-right">
                 <li><a href="/">Home</a></li>
