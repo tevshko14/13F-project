@@ -121,7 +121,15 @@ async def lifespan(app: FastAPI):
     cron job fails.
     """
     # ── Try Supabase first (persists across Railway deploys) ──
-    app.state.fund_cache = await asyncio.to_thread(cache.load_cache_from_supabase)
+    # Timeout after 30s so workers don't get killed by gunicorn if Supabase is slow
+    try:
+        app.state.fund_cache = await asyncio.wait_for(
+            asyncio.to_thread(cache.load_cache_from_supabase),
+            timeout=30,
+        )
+    except (asyncio.TimeoutError, Exception) as exc:
+        logger.warning("Supabase startup cache load failed (%s), falling back to disk", exc)
+        app.state.fund_cache = {}
 
     if not app.state.fund_cache:
         # Fallback: load from disk (local dev, or Supabase unavailable)
