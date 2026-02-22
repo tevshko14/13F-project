@@ -16,7 +16,7 @@
         margin-bottom: 0.3em;
     }
     .support-hero .hero-sub {
-        color: #71717a;
+        color: var(--pp-text-muted);
         max-width: 600px;
         margin: 0 auto;
         font-size: 1.05em;
@@ -24,8 +24,8 @@
 
     /* ── Progress bar ── */
     .panda-progress {
-        background: #fff;
-        border: 1px solid #e4e4e7;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
         border-radius: 12px;
         padding: 1.5em 2em;
         margin: 1.5em 0;
@@ -39,14 +39,14 @@
     .panda-progress .progress-header .amount {
         font-size: 1.8em;
         font-weight: 700;
-        color: #18181b;
+        color: var(--pp-text);
     }
     .panda-progress .progress-header .goal {
         font-size: 0.95em;
-        color: #71717a;
+        color: var(--pp-text-muted);
     }
     .progress-track {
-        background: #e4e4e7;
+        background: var(--pp-surface-hover);
         border-radius: 999px;
         height: 14px;
         overflow: hidden;
@@ -61,7 +61,7 @@
         text-align: center;
         margin-top: 0.5em;
         font-size: 0.85em;
-        color: #71717a;
+        color: var(--pp-text-muted);
     }
     .goal-reached-badge {
         display: inline-block;
@@ -77,8 +77,8 @@
 
     /* ── Donation widget ── */
     .donate-widget {
-        background: #fff;
-        border: 1px solid #e4e4e7;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
         border-radius: 12px;
         padding: 1.5em 2em;
         margin: 1.5em 0;
@@ -87,7 +87,7 @@
         display: flex;
         gap: 0;
         margin-bottom: 1.5em;
-        border-bottom: 2px solid #e4e4e7;
+        border-bottom: 2px solid var(--pp-border);
     }
     .donate-tab {
         background: none;
@@ -98,15 +98,15 @@
         cursor: pointer;
         font-size: 0.95em;
         font-weight: 600;
-        color: #a1a1aa;
+        color: var(--pp-text-faint);
         transition: color 0.15s, border-color 0.15s;
     }
     .donate-tab.active {
-        color: #18181b;
-        border-bottom-color: #18181b;
+        color: var(--pp-text);
+        border-bottom-color: var(--pp-text);
     }
     .donate-tab:hover:not(.active) {
-        color: #52525b;
+        color: var(--pp-text-muted);
     }
     .donate-panel {
         display: none;
@@ -124,7 +124,7 @@
     .stripe-not-configured {
         text-align: center;
         padding: 2em 1em;
-        color: #a1a1aa;
+        color: var(--pp-text-faint);
         font-size: 0.9em;
     }
 
@@ -137,7 +137,7 @@
         margin-bottom: 0.5em;
     }
     .where-it-goes .explainer {
-        color: #52525b;
+        color: var(--pp-text-secondary);
         font-size: 0.95em;
         line-height: 1.6;
         max-width: 650px;
@@ -150,9 +150,9 @@
     }
     .line-items-list li {
         padding: 0.55em 0;
-        border-bottom: 1px solid #f4f4f5;
+        border-bottom: 1px solid var(--pp-border-light);
         font-size: 0.92em;
-        color: #3f3f46;
+        color: var(--pp-text-secondary);
         display: flex;
         align-items: center;
         gap: 0.5em;
@@ -168,8 +168,8 @@
 
     /* ── Funding history chart ── */
     .funding-history {
-        background: #fff;
-        border: 1px solid #e4e4e7;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
         border-radius: 12px;
         padding: 1.5em 2em;
         margin: 1.5em 0;
@@ -188,7 +188,7 @@
         justify-content: center;
         margin-top: 0.8em;
         font-size: 0.82em;
-        color: #71717a;
+        color: var(--pp-text-muted);
     }
     .chart-legend span {
         display: flex;
@@ -204,8 +204,8 @@
 
     /* ── Other ways to support ── */
     .other-support {
-        background: #fafafa;
-        border: 1px solid #e4e4e7;
+        background: var(--pp-surface-alt);
+        border: 1px solid var(--pp-border);
         border-radius: 12px;
         padding: 1.8em 2em;
         margin: 2em 0;
@@ -216,7 +216,7 @@
         margin-bottom: 0.4em;
     }
     .other-support .other-sub {
-        color: #71717a;
+        color: var(--pp-text-muted);
         font-size: 0.92em;
         line-height: 1.5;
         max-width: 520px;
@@ -226,13 +226,13 @@
         display: inline-flex;
         align-items: center;
         gap: 0.5em;
-        background: #fff;
-        border: 1px solid #e4e4e7;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
         padding: 0.6em 1.4em;
         border-radius: 10px;
         font-weight: 600;
         font-size: 0.95em;
-        color: #18181b;
+        color: var(--pp-text);
         text-decoration: none;
         transition: border-color 0.15s, box-shadow 0.15s;
     }
@@ -247,8 +247,8 @@
 
     /* ── Feedback CTA ── */
     .feedback-section {
-        background: #fff;
-        border: 1px solid #e4e4e7;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
         border-radius: 12px;
         padding: 1.8em 2em;
         margin: 1.5em 0 2.5em;
@@ -259,15 +259,15 @@
         margin-bottom: 0.3em;
     }
     .feedback-section .feedback-sub {
-        color: #71717a;
+        color: var(--pp-text-muted);
         font-size: 0.92em;
         margin-bottom: 1em;
     }
     .feedback-section a.btn-feedback {
         display: inline-block;
-        background: #fff;
-        color: #18181b;
-        border: 2px solid #18181b;
+        background: var(--pp-surface);
+        color: var(--pp-text);
+        border: 2px solid var(--pp-text);
         padding: 0.6em 2em;
         border-radius: 10px;
         font-size: 1em;
@@ -276,8 +276,8 @@
         transition: background 0.15s, color 0.15s;
     }
     .feedback-section a.btn-feedback:hover {
-        background: #18181b;
-        color: #fff;
+        background: var(--pp-support-btn-bg);
+        color: var(--pp-support-btn-text);
     }
 
     /* ── Built-with-love ── */
@@ -285,7 +285,7 @@
         text-align: center;
         padding: 1em 0 2em;
         font-size: 0.85em;
-        color: #a1a1aa;
+        color: var(--pp-text-faint);
     }
 
     @media (max-width: 640px) {

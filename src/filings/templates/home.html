@@ -33,9 +33,9 @@
         </button>
         <div id="ticker-search-results"
              style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
-                    background: var(--pico-background-color, white); border: 1px solid #e0e0e0;
+                    background: var(--pp-surface); border: 1px solid var(--pp-border);
                     border-radius: 16px; max-height: 400px; overflow-y: auto; z-index: 1001;
-                    box-shadow: 0 8px 24px rgba(0,0,0,0.12);">
+                    box-shadow: var(--pp-dropdown-shadow);">
         </div>
     </div>
 </div>
@@ -284,8 +284,8 @@
         width: 90%;
         max-width: 720px;
         height: 56px;
-        background: var(--pico-background-color, #fff);
-        border: 1px solid #e0e0e0;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
         border-radius: 28px;
         padding: 0 6px 0 20px;
         transition: border-color 0.2s, box-shadow 0.2s;
@@ -297,7 +297,7 @@
     .hero-search-icon {
         width: 20px;
         height: 20px;
-        color: rgba(0,0,0,0.35);
+        color: var(--pp-overlay-35);
         flex-shrink: 0;
         margin-right: 12px;
     }
@@ -315,7 +315,7 @@
         -webkit-appearance: none;
     }
     .hero-search-bar input[type="search"]::placeholder {
-        color: rgba(0,0,0,0.35);
+        color: var(--pp-overlay-35);
         font-size: 16px;
     }
     /* Remove PicoCSS input styling overrides */
@@ -391,7 +391,7 @@
         align-items: center;
         text-align: center;
         padding: 0.9em 0.7em;
-        border: 1px solid rgba(0,0,0,0.1);
+        border: 1px solid var(--pp-overlay-10);
         border-radius: 10px;
         text-decoration: none;
         color: inherit;
@@ -444,7 +444,7 @@
         align-items: center;
         margin-bottom: 0.75em;
         padding-bottom: 0.6em;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+        border-bottom: 1px solid var(--pp-nav-border);
     }
     .heatmap-title {
         margin: 0;
@@ -455,7 +455,7 @@
     .heatmap-toggle {
         display: flex;
         gap: 0;
-        background: rgba(0, 0, 0, 0.05);
+        background: var(--pp-overlay-5);
         border-radius: 8px;
         padding: 3px;
     }
@@ -465,7 +465,7 @@
         padding: 0.35em 0.9em;
         font-size: 0.82em;
         font-weight: 600;
-        color: rgba(0, 0, 0, 0.5);
+        color: var(--pp-overlay-50);
         cursor: pointer;
         border-radius: 6px;
         transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
@@ -473,10 +473,10 @@
         line-height: 1.4;
     }
     .heatmap-pill:hover {
-        color: rgba(0, 0, 0, 0.7);
+        color: var(--pp-text-secondary);
     }
     .heatmap-pill.active {
-        background: #fff;
+        background: var(--pp-surface);
         color: #1976d2;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
@@ -503,8 +503,8 @@
         margin: 2.5em 0 1em;
     }
     .pw-body {
-        background: #fafaf9;
-        border: 1px solid #e4e4e7;
+        background: var(--pp-surface-alt);
+        border: 1px solid var(--pp-border);
         border-radius: 14px;
         padding: 1.4em 1.8em;
     }
@@ -525,16 +525,16 @@
     }
     .pw-title {
         font-size: 1.05em;
-        color: #18181b;
+        color: var(--pp-text);
     }
     .pw-copy {
         font-size: 0.82em;
-        color: #52525b;
+        color: var(--pp-text-secondary);
         line-height: 1.5;
         margin: 0 0 0.7em;
     }
     .pw-progress-track {
-        background: #e4e4e7;
+        background: var(--pp-surface-hover);
         border-radius: 999px;
         height: 5px;
         overflow: hidden;
@@ -552,7 +552,7 @@
     }
     .pw-progress-label {
         font-size: 0.72em;
-        color: #a1a1aa;
+        color: var(--pp-text-faint);
         margin-top: 0.3em;
         margin-bottom: 0;
     }
@@ -565,8 +565,8 @@
     }
     .pw-fallback-btn {
         display: inline-block;
-        background: #18181b;
-        color: #fff;
+        background: var(--pp-support-btn-bg);
+        color: var(--pp-support-btn-text);
         padding: 0.5em 1.5em;
         border-radius: 8px;
         font-size: 0.9em;
@@ -575,18 +575,18 @@
         transition: background 0.15s;
     }
     .pw-fallback-btn:hover {
-        background: #27272a;
+        background: var(--pp-support-btn-hover);
     }
     .pw-learn-more {
         display: block;
         text-align: center;
         font-size: 0.75em;
-        color: #71717a;
+        color: var(--pp-text-muted);
         text-decoration: none;
         transition: color 0.15s;
     }
     .pw-learn-more:hover {
-        color: #18181b;
+        color: var(--pp-text);
     }
     @media (max-width: 640px) {
         .pw-body { padding: 1.2em 1em; }

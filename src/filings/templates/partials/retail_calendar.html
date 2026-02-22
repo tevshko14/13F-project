@@ -8,7 +8,7 @@
         {{ stats.recent_count }} Recently Posted
     </span>
     {% endif %}
-    <span style="background: #f4f4f5; color: #3f3f46; font-size: 0.85em; padding: 0.3em 0.8em; border-radius: 6px; font-weight: 500;">
+    <span style="background: var(--pp-tag-bg); color: var(--pp-tag-text); font-size: 0.85em; padding: 0.3em 0.8em; border-radius: 6px; font-weight: 500;">
         {{ stats.total_upcoming }} Upcoming
     </span>
     {% if stats.bullish_count %}
@@ -62,7 +62,7 @@
                          style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex-shrink: 0;"
                          loading="lazy">
                     {% endif %}
-                    <span style="font-weight: 600; font-size: 0.75em; color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    <span style="font-weight: 600; font-size: 0.75em; color: var(--pp-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                         {{ upl.channel_name }}
                     </span>
                 </div>
@@ -84,7 +84,7 @@
                     {% for ticker in upl.tickers[:3] %}
                     <a href="/stock/{{ ticker }}"
                        style="font-size: 0.7em; text-decoration: none; font-weight: 600;
-                              background: #f4f4f5; color: #3f3f46; padding: 0.1em 0.4em;
+                              background: var(--pp-tag-bg); color: var(--pp-tag-text); padding: 0.1em 0.4em;
                               border-radius: 3px; font-family: monospace;">
                         ${{ ticker }}
                     </a>
@@ -122,7 +122,7 @@
         {% for event in events %}
         <div class="calendar-event-card" data-sentiment="{{ event.sentiment }}"
              style="display: flex; gap: 1em; padding: 1em 0;
-                    border-bottom: 1px solid #f4f4f5; align-items: flex-start;">
+                    border-bottom: 1px solid var(--pp-border-light); align-items: flex-start;">
 
             {# Sentiment indicator bar #}
             <div style="width: 4px; min-height: 60px; border-radius: 2px; flex-shrink: 0;
@@ -147,7 +147,7 @@
                          style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; flex-shrink: 0;"
                          loading="lazy">
                     {% endif %}
-                    <span style="font-weight: 600; font-size: 0.8em; color: #71717a;">
+                    <span style="font-weight: 600; font-size: 0.8em; color: var(--pp-text-muted);">
                         {{ event.channel_name }}
                     </span>
                     {% if event.scheduled_at %}
@@ -165,7 +165,7 @@
                 </div>
 
                 <a href="{{ event.video_url }}" target="_blank" rel="noopener"
-                   style="text-decoration: none; font-weight: 500; color: #18181b;
+                   style="text-decoration: none; font-weight: 500; color: var(--pp-text);
                           font-size: 0.95em; line-height: 1.3;">
                     {{ event.title }}
                 </a>
@@ -176,7 +176,7 @@
                     {% for ticker in event.tickers %}
                     <a href="/stock/{{ ticker }}"
                        style="font-size: 0.75em; text-decoration: none; font-weight: 600;
-                              background: #f4f4f5; color: #3f3f46; padding: 0.15em 0.5em;
+                              background: var(--pp-tag-bg); color: var(--pp-tag-text); padding: 0.15em 0.5em;
                               border-radius: 4px; font-family: monospace;">
                         ${{ ticker }}
                     </a>
@@ -188,11 +188,11 @@
             {# Impact score + sentiment badge #}
             <div style="flex-shrink: 0; text-align: center; min-width: 50px;">
                 <div style="font-size: 1.4em; font-weight: 700;
-                            color: {% if event.impact_score >= 9 %}#FFD700{% elif event.impact_score >= 7 %}#18181b{% else %}#a1a1aa{% endif %};">
+                            color: {% if event.impact_score >= 9 %}#FFD700{% elif event.impact_score >= 7 %}var(--pp-text){% else %}var(--pp-text-faint){% endif %};">
                     {{ event.impact_score }}
                 </div>
                 <div style="font-size: 0.6em; text-transform: uppercase;
-                            letter-spacing: 0.05em; color: #a1a1aa;">
+                            letter-spacing: 0.05em; color: var(--pp-text-faint);">
                     Impact
                 </div>
                 <div style="margin-top: 0.3em;">
@@ -207,7 +207,7 @@
                         Bearish
                     </span>
                     {% else %}
-                    <span style="background: #f4f4f5; color: #71717a; font-size: 0.7em;
+                    <span style="background: var(--pp-tag-bg); color: var(--pp-text-muted); font-size: 0.7em;
                                  padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;">
                         Neutral
                     </span>
@@ -361,7 +361,7 @@
         margin-top: 0.5em;
     }
     .recent-upload-card {
-        border: 1px solid #f4f4f5;
+        border: 1px solid var(--pp-border-light);
         border-radius: 10px;
         overflow: hidden;
         transition: box-shadow 0.15s;
@@ -369,7 +369,7 @@
         flex-direction: column;
     }
     .recent-upload-card:hover {
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        box-shadow: 0 2px 8px var(--pp-overlay-8);
     }
     .recent-upload-thumb-link {
         display: block;
@@ -389,7 +389,7 @@
         width: 10px;
         height: 10px;
         border-radius: 50%;
-        border: 2px solid #fff;
+        border: 2px solid var(--pp-surface);
         box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
     .recent-upload-body {
@@ -402,7 +402,7 @@
     .recent-upload-title {
         text-decoration: none;
         font-weight: 500;
-        color: #18181b;
+        color: var(--pp-text);
         font-size: 0.85em;
         line-height: 1.35;
         display: -webkit-box;
@@ -416,23 +416,23 @@
 
     .calendar-filter-pill {
         background: none;
-        border: 1px solid #e4e4e7;
+        border: 1px solid var(--pp-border);
         border-radius: 6px;
         padding: 0.25em 0.8em;
         font-size: 0.8em;
         font-weight: 500;
         cursor: pointer;
-        color: #71717a;
+        color: var(--pp-text-muted);
         transition: all 0.15s;
     }
     .calendar-filter-pill:hover {
-        background: #fafafa;
-        color: #3f3f46;
+        background: var(--pp-surface-alt);
+        color: var(--pp-tag-text);
     }
     .calendar-filter-pill.active {
-        background: #18181b;
-        color: #fff;
-        border-color: #18181b;
+        background: var(--pp-text);
+        color: var(--pp-surface);
+        border-color: var(--pp-text);
     }
 
     @media (max-width: 768px) {
