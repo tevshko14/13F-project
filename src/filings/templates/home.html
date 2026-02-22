@@ -232,6 +232,44 @@
     </div>
 </div>
 
+{# ── Support the Panda widget ── #}
+<div class="panda-widget">
+    <div class="pw-body">
+        <div class="pw-header">
+            <span class="pw-icon">&#x1F43C;</span>
+            <strong class="pw-title">Support the Panda</strong>
+        </div>
+        <p class="pw-copy">
+            PaperPanda is open and ad-free. I pay for these expensive data APIs out of pocket.
+            Help keep the project alive.
+        </p>
+        <div class="pw-progress-track">
+            <div class="pw-progress-fill" style="width: {{ panda_pct }}%;"></div>
+        </div>
+        <div class="pw-progress-label">
+            ${{ panda_raised }} / ${{ panda_goal }} this month
+        </div>
+        <div class="pw-tiers">
+            <a href="/support#monthly" class="pw-pill pw-bamboo" onclick="sessionStorage.setItem('supportTab','monthly')">
+                <span class="pw-pill-icon">&#x1F38D;</span>
+                <span class="pw-pill-name">Bamboo</span>
+                <span class="pw-pill-price">$5/mo</span>
+            </a>
+            <a href="/support#monthly" class="pw-pill pw-panda" onclick="sessionStorage.setItem('supportTab','monthly')">
+                <span class="pw-pill-icon">&#x1F43C;</span>
+                <span class="pw-pill-name">Panda</span>
+                <span class="pw-pill-price">$15/mo</span>
+            </a>
+            <a href="/support#monthly" class="pw-pill pw-giant" onclick="sessionStorage.setItem('supportTab','monthly')">
+                <span class="pw-pill-icon">&#x1F38B;</span>
+                <span class="pw-pill-name">Giant Panda</span>
+                <span class="pw-pill-price">$30/mo</span>
+            </a>
+        </div>
+        <a href="/support" class="pw-learn-more">Learn more about the Panda Fund &rarr;</a>
+    </div>
+</div>
+
 <style>
     /* ── Hero Search Bar (Brave-style pill) ── */
     .hero-search-wrapper {
@@ -459,6 +497,113 @@
             align-items: flex-start;
             gap: 0.5em;
         }
+    }
+
+    /* ── Support the Panda widget ── */
+    .panda-widget {
+        margin: 2.5em auto 1em;
+        max-width: 560px;
+    }
+    .pw-body {
+        background: #fafaf9;
+        border: 1px solid #e4e4e7;
+        border-radius: 14px;
+        padding: 1.6em 1.8em;
+    }
+    .pw-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
+        margin-bottom: 0.5em;
+    }
+    .pw-icon {
+        font-size: 1.3em;
+    }
+    .pw-title {
+        font-size: 1.1em;
+        color: #18181b;
+    }
+    .pw-copy {
+        font-size: 0.88em;
+        color: #52525b;
+        line-height: 1.55;
+        margin: 0 0 1em;
+    }
+    .pw-progress-track {
+        background: #e4e4e7;
+        border-radius: 999px;
+        height: 6px;
+        overflow: hidden;
+    }
+    .pw-progress-fill {
+        background: #22c55e;
+        height: 100%;
+        border-radius: 999px;
+        transition: width 0.6s ease;
+        animation: pw-pulse 2s ease-in-out infinite;
+    }
+    @keyframes pw-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+    .pw-progress-label {
+        font-size: 0.78em;
+        color: #a1a1aa;
+        margin-top: 0.35em;
+        margin-bottom: 1em;
+    }
+    .pw-tiers {
+        display: flex;
+        gap: 0.5em;
+        margin-bottom: 0.8em;
+    }
+    .pw-pill {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.15em;
+        padding: 0.6em 0.4em;
+        border: 1px solid #e4e4e7;
+        border-radius: 10px;
+        background: #fff;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+        cursor: pointer;
+    }
+    .pw-pill:hover {
+        border-color: #22c55e;
+        box-shadow: 0 2px 8px rgba(34, 197, 94, 0.15);
+        transform: translateY(-1px);
+    }
+    .pw-pill-icon {
+        font-size: 1.2em;
+    }
+    .pw-pill-name {
+        font-size: 0.78em;
+        font-weight: 600;
+        color: #18181b;
+    }
+    .pw-pill-price {
+        font-size: 0.72em;
+        color: #71717a;
+    }
+    .pw-learn-more {
+        display: block;
+        text-align: center;
+        font-size: 0.8em;
+        color: #71717a;
+        text-decoration: none;
+        transition: color 0.15s;
+    }
+    .pw-learn-more:hover {
+        color: #18181b;
+    }
+    @media (max-width: 640px) {
+        .pw-body { padding: 1.2em 1em; }
+        .pw-tiers { gap: 0.4em; }
+        .pw-pill { padding: 0.5em 0.3em; }
     }
 </style>
 {% endblock %}
