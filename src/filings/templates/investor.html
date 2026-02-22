@@ -23,17 +23,17 @@
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.06em;
-        color: #71717a;
-        background: #fafafa;
-        border-bottom: 1px solid #e4e4e7;
+        color: var(--pp-text-muted);
+        background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border);
         white-space: nowrap;
         vertical-align: middle;
     }
     .inv-table tbody td {
         padding: 14px 20px;
         vertical-align: middle;
-        color: #27272a;
-        border-bottom: 1px solid #f4f4f5;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
         line-height: 1.5;
         white-space: normal;
     }
@@ -41,7 +41,7 @@
         transition: background-color 0.15s ease;
     }
     .inv-table tbody tr:hover {
-        background-color: #fafafa;
+        background-color: var(--pp-surface-alt);
     }
     .inv-table tbody tr:last-child td {
         border-bottom: none;
@@ -59,7 +59,7 @@
         left: 0;
         right: 0;
         height: 60px;
-        background: linear-gradient(transparent, #fff);
+        background: var(--pp-gradient-fade);
         pointer-events: none;
         transition: opacity 0.3s ease;
     }
@@ -71,12 +71,12 @@
     /* ── Holdings expand button (matches stock page) ── */
     .holdings-expand-btn {
         background: none;
-        border: 1px solid rgba(0,0,0,0.15);
+        border: 1px solid var(--pp-overlay-10);
         border-radius: 6px;
         padding: 0.4em 1.2em;
         cursor: pointer;
         font-size: 0.85em;
-        color: rgba(0,0,0,0.6);
+        color: var(--pp-text-muted);
         display: flex;
         align-items: center;
         gap: 0.4em;
@@ -84,8 +84,8 @@
         transition: background 0.15s, color 0.15s;
     }
     .holdings-expand-btn:hover {
-        background: rgba(0,0,0,0.04);
-        color: rgba(0,0,0,0.8);
+        background: var(--pp-overlay-5);
+        color: var(--pp-text-secondary);
     }
     .holdings-expand-arrow {
         display: inline-block;
@@ -107,12 +107,12 @@
         cursor: pointer;
         font-size: 0.85em;
         font-weight: 600;
-        color: rgba(0,0,0,0.45);
+        color: var(--pp-overlay-50);
         transition: color 0.15s, border-color 0.15s;
         white-space: nowrap;
         text-align: center;
     }
-    .quarter-tab:hover { color: rgba(0,0,0,0.75); }
+    .quarter-tab:hover { color: var(--pp-text-secondary); }
     .quarter-tab.active {
         color: #1976d2;
         border-bottom-color: #1976d2;
@@ -123,7 +123,7 @@
     /* ── Skeleton loader for quarter content ── */
     .skeleton-row {
         height: 20px;
-        background: linear-gradient(90deg, rgba(0,0,0,0.06) 25%, rgba(0,0,0,0.10) 50%, rgba(0,0,0,0.06) 75%);
+        background: linear-gradient(90deg, var(--pp-overlay-5) 25%, var(--pp-overlay-10) 50%, var(--pp-overlay-5) 75%);
         background-size: 200% 100%;
         animation: skeletonShimmer 1.5s infinite ease-in-out;
         border-radius: 4px;
@@ -147,7 +147,7 @@
     }
     .position-changes-sub {
         font-size: 0.82em;
-        color: rgba(0, 0, 0, 0.45);
+        color: var(--pp-overlay-50);
         margin-bottom: 1em;
     }
 
@@ -163,23 +163,23 @@
 {# ── Portfolio Donut Chart (lazy-loaded) ── #}
 <style>
     .chart-card {
-        border: 1px solid rgba(0, 0, 0, 0.08);
+        border: 1px solid var(--pp-overlay-8);
         border-radius: 12px;
         padding: 1.5em;
         margin-bottom: 1.5em;
-        background: #fff;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        background: var(--pp-surface);
+        box-shadow: var(--pp-card-shadow-sm);
         overflow: visible;
     }
     .chart-card-header {
         font-size: 1.05em;
         font-weight: 700;
         margin-bottom: 0.2em;
-        color: #222;
+        color: var(--pp-text);
     }
     .chart-card-sub {
         font-size: 0.82em;
-        color: rgba(0, 0, 0, 0.45);
+        color: var(--pp-overlay-50);
         margin-bottom: 1em;
     }
     .chart-wrapper {
@@ -213,7 +213,7 @@
         transition: background 0.15s ease;
     }
     .chart-legend-item:hover {
-        background: rgba(0, 0, 0, 0.04);
+        background: var(--pp-overlay-5);
     }
     .chart-legend-dot {
         width: 10px;
@@ -227,14 +227,14 @@
         min-width: 50px;
     }
     .chart-legend-pct {
-        color: rgba(0, 0, 0, 0.45);
+        color: var(--pp-overlay-50);
         margin-left: auto;
         font-size: 0.9em;
     }
     .chart-empty {
         text-align: center;
         padding: 3em 1em;
-        color: rgba(0, 0, 0, 0.4);
+        color: var(--pp-overlay-40);
         font-size: 0.95em;
     }
 </style>
@@ -509,7 +509,7 @@
 
         {# ── Quarter Tabs (left=newest, right=oldest) ── #}
         <nav>
-            <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid rgba(0,0,0,0.1); overflow-x: auto;">
+            <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid var(--pp-overlay-10); overflow-x: auto;">
                 {% for q in quarterly_changes %}
                 <li>
                     <button class="quarter-tab{% if loop.first %} active{% endif %}"

@@ -35,7 +35,7 @@
 {# ── Tab Navigation ── #}
 <div class="stock-tabs" style="margin-bottom: 1.5em;">
     <nav>
-        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
             <li>
                 <button id="tab-overview-btn"
                         class="stock-tab active"
@@ -100,11 +100,11 @@
         cursor: pointer;
         font-size: 0.95em;
         font-weight: 600;
-        color: rgba(0,0,0,0.5);
+        color: var(--pp-overlay-50);
         transition: color 0.15s, border-color 0.15s;
     }
     .stock-tab:hover {
-        color: rgba(0,0,0,0.8);
+        color: var(--pp-text-secondary);
     }
     .stock-tab.active {
         color: #1976d2;
@@ -124,12 +124,12 @@
         cursor: pointer;
         font-size: 0.85em;
         font-weight: 600;
-        color: rgba(0,0,0,0.45);
+        color: var(--pp-overlay-50);
         transition: color 0.15s, border-color 0.15s;
         white-space: nowrap;
         text-align: center;
     }
-    .quarter-tab:hover { color: rgba(0,0,0,0.75); }
+    .quarter-tab:hover { color: var(--pp-text-secondary); }
     .quarter-tab.active {
         color: #1976d2;
         border-bottom-color: #1976d2;
@@ -140,12 +140,12 @@
     /* Holders expand/collapse */
     .holders-expand-btn {
         background: none;
-        border: 1px solid rgba(0,0,0,0.15);
+        border: 1px solid var(--pp-overlay-10);
         border-radius: 6px;
         padding: 0.4em 1.2em;
         cursor: pointer;
         font-size: 0.85em;
-        color: rgba(0,0,0,0.6);
+        color: var(--pp-text-muted);
         display: flex;
         align-items: center;
         gap: 0.4em;
@@ -153,8 +153,8 @@
         transition: background 0.15s, color 0.15s;
     }
     .holders-expand-btn:hover {
-        background: rgba(0,0,0,0.04);
-        color: rgba(0,0,0,0.8);
+        background: var(--pp-overlay-5);
+        color: var(--pp-text-secondary);
     }
     .holders-expand-arrow {
         display: inline-block;
@@ -218,10 +218,10 @@
         cursor: pointer;
         font-size: 0.9em;
         font-weight: 600;
-        color: rgba(0,0,0,0.45);
+        color: var(--pp-overlay-50);
         transition: color 0.15s, border-color 0.15s;
     }
-    .overview-subtab:hover { color: rgba(0,0,0,0.75); }
+    .overview-subtab:hover { color: var(--pp-text-secondary); }
     .overview-subtab.active {
         color: #1976d2;
         border-bottom-color: #1976d2;
@@ -262,12 +262,12 @@
     /* TickerTick news styling */
     .news-item {
         padding: 1em 0;
-        border-bottom: 1px solid rgba(0,0,0,0.06);
+        border-bottom: 1px solid var(--pp-nav-border);
     }
     .news-item:last-child { border-bottom: none; }
     .news-item a {
         font-weight: 600;
-        color: var(--pico-color, #333);
+        color: var(--pp-text-secondary);
         text-decoration: none;
         line-height: 1.5;
         font-size: 1.02em;
@@ -275,7 +275,7 @@
     .news-item a:hover { text-decoration: underline; }
     .news-meta {
         font-size: 0.85em;
-        color: rgba(0,0,0,0.5);
+        color: var(--pp-overlay-50);
         margin-top: 0.4em;
         display: flex;
         align-items: center;
@@ -294,23 +294,23 @@
         gap: 0.5em;
         padding: 1.2em 0 0.5em;
         margin-top: 0.5em;
-        border-top: 1px solid rgba(0,0,0,0.08);
+        border-top: 1px solid var(--pp-overlay-8);
     }
     .news-pagination button {
         background: none;
-        border: 1px solid rgba(0,0,0,0.15);
+        border: 1px solid var(--pp-overlay-10);
         border-radius: 6px;
         padding: 0.35em 0.9em;
         cursor: pointer;
         font-size: 0.85em;
         font-weight: 600;
-        color: rgba(0,0,0,0.6);
+        color: var(--pp-text-muted);
         transition: background 0.15s, color 0.15s;
         margin: 0;
     }
     .news-pagination button:hover:not(:disabled) {
-        background: rgba(0,0,0,0.04);
-        color: rgba(0,0,0,0.8);
+        background: var(--pp-overlay-5);
+        color: var(--pp-text-secondary);
     }
     .news-pagination button:disabled {
         opacity: 0.35;
@@ -318,7 +318,7 @@
     }
     .news-pagination .page-info {
         font-size: 0.85em;
-        color: rgba(0,0,0,0.5);
+        color: var(--pp-overlay-50);
         min-width: 80px;
         text-align: center;
     }
@@ -393,7 +393,7 @@
 
     {# ── Subtabs: Financials / News (full-width) ── #}
     <nav>
-        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid var(--pp-overlay-10);">
             <li>
                 <button class="overview-subtab active" onclick="switchOverviewSubtab('financials')">
                     Financials
@@ -673,7 +673,7 @@
 
     {# ── Quarter Tabs (left=newest, right=oldest, default=newest) ── #}
     <nav>
-        <ul class="quarter-tabs" style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid rgba(0,0,0,0.1); overflow-x: auto;">
+        <ul class="quarter-tabs" style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid var(--pp-overlay-10); overflow-x: auto;">
             {% for quarter in history %}
             <li>
                 <button class="quarter-tab{% if loop.first %} active{% endif %}"

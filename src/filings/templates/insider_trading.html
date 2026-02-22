@@ -9,7 +9,7 @@
 {# -- Sub-tabs: Latest / Purchases / Sales -- #}
 <div style="margin-bottom: 1.5em;">
     <nav>
-        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid rgba(0,0,0,0.1);">
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
             <li>
                 <button id="insider-tab-all-btn"
                         class="insider-tab active"
@@ -46,10 +46,10 @@
         cursor: pointer;
         font-size: 0.95em;
         font-weight: 600;
-        color: rgba(0,0,0,0.5);
+        color: var(--pp-overlay-50);
         transition: color 0.15s, border-color 0.15s;
     }
-    .insider-tab:hover { color: rgba(0,0,0,0.8); }
+    .insider-tab:hover { color: var(--pp-text-secondary); }
     .insider-tab.active {
         color: #1976d2;
         border-bottom-color: #1976d2;
