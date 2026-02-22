@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-20 (Retail page, nav restructure, /funds URL, insider stale-while-revalidate)
+> Last updated: 2026-02-22 (Background refresh, vitals persistence, Panda Fund support page, Stripe embed, homepage widget)
 
 ---
 
@@ -146,7 +146,7 @@ uv run filings-web          # starts at http://localhost:8000
                                  ▼
                       ┌─────────────────────────┐
                       │  templates/ (Jinja2)     │
-                      │  9 pages + 11 partials   │
+                      │  10 pages + 12 partials  │
                       │  (see Section 7)         │
                       └─────────────────────────┘
 ```
@@ -228,10 +228,10 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
     ├── cli.py                        # CLI entry point (search/holdings/compare)
-    ├── web.py                        # FastAPI app (40+ routes + background refresh + SSE + polling + market data)
+    ├── web.py                        # FastAPI app (40+ routes + background refresh + Stripe/support + SSE + polling)
     └── templates/
-        ├── base.html                 # Master layout: nav (Home|Retail|Funds|Insiders), PicoCSS, HTMX, ECharts, Fuse.js, sidebar, sortable tables
-        ├── home.html                 # Homepage: heatmap + most-added + Retail/Funds/Insiders cards
+        ├── base.html                 # Master layout: nav (Home|Retail|Funds|Insiders|Support), PicoCSS, HTMX, ECharts, Fuse.js, sidebar, sortable tables
+        ├── home.html                 # Homepage: heatmap + most-added + cards + Panda Fund support widget (Stripe Pricing Table)
         ├── retail.html               # Retail page: Sentiment, Leaderboard, Calendar sub-tabs
         ├── grand_portfolio.html      # Top Funds page: Funds, Holdings, Activity sub-tabs (URL: /funds)
         ├── insider_trading.html      # Insider trading screener: global buys/sells with chart
@@ -239,6 +239,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── investor.html             # Individual fund page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
         ├── stock.html                # Stock detail (7 tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
+        ├── support.html              # Panda Fund: progress bar, Stripe Buy Button + Pricing Table, cost breakdown, funding history chart
         ├── notifications.html        # Notification history page
         ├── error.html                # Error page
         └── partials/
@@ -259,7 +260,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── insider_trades.html     # Insider trading table — global screener (lazy-loaded)
             ├── stock_insider_trades.html # Insider trading table — per-ticker (lazy-loaded)
             ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded into retail page)
-            └── compare_content.html    # Compare quarters partial (lazy-loaded into investor page)
+            ├── compare_content.html    # Compare quarters partial (lazy-loaded into investor page)
+            └── data_error.html         # Reusable error partial (rate limit CTA, generic fallback, HTMX-aware)
 ```
 
 ---
@@ -712,6 +714,15 @@ Background refresh (selective, write-through):
   3. Fresh funds are SKIPPED (not re-fetched)
   4. On API failure, old data is preserved (stale-while-revalidate)
 
+Request-triggered refresh (self-healing):
+  When fund_row() or holdings() detects stale data:
+    1. Check _ENABLE_BACKGROUND_REFRESH flag (env: ENABLE_BACKGROUND_REFRESH)
+    2. Check cache.is_fund_stale(cached) for per-fund staleness
+    3. Check cik not already in _refresh_in_progress set
+    4. If all pass → asyncio.create_task(_trigger_single_refresh(app, cik))
+  Uses asyncio.Lock + asyncio.timeout(300) for concurrency control
+  _refresh_in_progress set prevents duplicate refreshes for same CIK
+
 Manual refresh:
   POST /refresh → creates same background task
   Prevented from running concurrently via app.state.refreshing flag
@@ -795,13 +806,21 @@ Alpha Vantage has a daily budget tracker (`_AV_DAILY_MAX = 20`) to stay within t
 ### 5.10 Vitals Module (`vitals.py`)
 
 Alternative data signals for the Vitals tab. Each source is fetched independently
-with aggressive caching (7-30 day TTLs).
+with aggressive caching (7-30 day TTLs). All three providers now persist to Supabase
+(L2 cache) so data survives deploys.
 
-| Provider | Function | TTL | API Key | Returns |
-|---|---|---|---|---|
-| People Data Labs | `_get_pdl_data()` | 7d | `PDL_API_KEY` | employee_count, size, industry, founded, location |
-| Glassdoor (RapidAPI) | `_get_glassdoor_data()` | 30d | `GLASSDOOR_RAPIDAPI_KEY` | overall_rating, CEO approval, recommend %, outlook |
-| Apple iTunes Search | `_get_appstore_data()` | 7d | None (free) | app_name, rating, rating_count, version trend |
+| Provider | Function | TTL | API Key | Supabase Category | Returns |
+|---|---|---|---|---|---|
+| People Data Labs | `_fetch_pdl_from_api()` | 7d | `PDL_API_KEY` | `pdl` | employee_count, size, industry, founded, location |
+| Glassdoor (RapidAPI) | `_get_glassdoor_data()` | 30d | `GLASSDOOR_RAPIDAPI_KEY` | `glassdoor` | overall_rating, CEO approval, recommend %, outlook |
+| Apple iTunes Search | `_fetch_appstore_from_api()` | 7d | None (free) | `appstore` | app_name, rating, rating_count, version trend |
+
+**Supabase persistence (PDL + App Store):**
+- Lazy hydration: `_hydrate_pdl_cache()` and `_hydrate_appstore_cache()` load all rows for a category on first request
+- Every API fetch persists to Supabase via `_persist_pdl_entry()` / `_persist_appstore_entry()`
+- Stale-while-revalidate: PDL returns stale data and conserves API quota rather than re-fetching
+- Quota tracking: PDL has `MAX_MONTHLY_PDL_QUOTA = 100`, tracked via `supabase_cache.increment_quota("pdl", month)`
+- Diagnostic helper: `get_vitals_cache_info()` returns cache status for /health endpoint
 
 **Company name resolution:** Both Glassdoor and App Store use `_resolve_company_name(ticker)`
 which calls `yfinance.Ticker(ticker).info["longName"]` to map ticker to company name.
@@ -840,7 +859,53 @@ Dedicated insider trading system with its own Supabase table and sync worker.
 - Deduplicates by `sec_url`, upserts to Supabase in chunks of 50
 - Logs to `sync_logs` table for observability
 
-### 5.12 Retail Page (`retail.html`)
+### 5.12 Panda Fund & Stripe Integration (`web.py` + `support.html`)
+
+The Panda Fund is the project's donation/support system, displayed on both the
+`/support` page and the homepage widget.
+
+**Architecture (zero backend Stripe SDK):**
+- Uses Stripe's OOTB web components -- purely frontend, configured via Stripe Dashboard
+- `<stripe-buy-button>` for one-time donations (backed by Payment Link with "Customer chooses what to pay")
+- `<stripe-pricing-table>` for recurring monthly subscriptions (Bamboo $5, Panda $15, Giant Panda $30)
+- Scripts loaded async: `https://js.stripe.com/v3/buy-button.js` and `https://js.stripe.com/v3/pricing-table.js`
+
+**Env vars:**
+| Variable | Purpose |
+|---|---|
+| `STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (pk_live_...) |
+| `STRIPE_BUY_BUTTON_ID` | Buy Button ID (buy_btn_...) for one-time tab |
+| `STRIPE_PRICING_TABLE_ID` | Pricing Table ID (prctbl_...) for monthly tab + homepage widget |
+| `PANDA_FUND_RAISED` | Current month's total raised in dollars (manual or webhook-updated) |
+| `FEEDBACK_LINK` | URL for feedback form CTA |
+
+**Progress bar logic:**
+- `_PANDA_FUND_MONTHLY_GOAL = 400` (capped on frontend, even if more is collected)
+- `raised_this_month = min(raw_raised, monthly_goal)` -- never shows more than goal
+- `progress_pct = min(100, round(...))` -- capped at 100%
+- Goal-reached badge shown when `raw_raised >= monthly_goal`
+
+**Support page (`/support`) sections:**
+1. Hero + progress bar with goal-reached badge
+2. Donate widget: tab toggle (One-time / Monthly) with Stripe Buy Button + Pricing Table
+3. "Where the money goes" -- line items (no dollar amounts): Data APIs, Cloud hosting, Database, Domain, AI coding assistants
+4. Funding history -- ECharts bar chart (Y-axis capped at goal), green = funded, gray = subsidized
+5. "Another way to support" -- YouTube @funofinvesting link
+6. "Help shape PaperPanda" -- feedback CTA
+7. "Built with bamboo and late nights by Tevis" footer
+
+**Homepage widget (`home.html`):**
+- Compact card with panda emoji header, copy text, thin green progress bar (6px, pulse animation)
+- Embeds the same `<stripe-pricing-table>` component from /support
+- Falls back to "View Support Tiers" button when Stripe env vars not set
+- "Learn more about the Panda Fund" link to /support
+
+**HTMX-aware error handling:**
+- Exception handlers detect HTMX requests (`HX-Request` header) or API paths
+- 429 errors return `partials/data_error.html` inline instead of full error page
+- Error partial shows "Token-Limit Reached" with link to /support (Panda Fund CTA)
+
+### 5.13 Retail Page (`retail.html`)
 
 The `/retail` page aggregates retail trader sentiment data with 3 sub-tabs.
 
@@ -864,7 +929,7 @@ JS function (same pattern as grand_portfolio's `.gp-subtab`). URL synced via `hi
 - Green/red badges for rank changes and mention deltas
 - Fear & Greed badge at the top with color-coded mood
 
-### 5.13 Performance Optimizations
+### 5.14 Performance Optimizations
 
 **Problem:** With 84 superinvestors, synchronous file I/O was blocking the async event loop.
 Per-fund TTL now skips fresh funds during background refresh, reducing API calls significantly.
@@ -889,7 +954,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 
 | Method | Path | Handler | Data Source | Template |
 |---|---|---|---|---|
-| GET | `/` | `index` | Cache (read) | `home.html` |
+| GET | `/` | `homepage` | Cache + Panda Fund env vars + Stripe IDs | `home.html` |
 | GET | `/retail` | `retail_page` | CNN, ApeWisdom, YouTubers (static) | `retail.html` |
 | GET | `/funds` | `funds_page` | Cache only | `grand_portfolio.html` |
 | GET | `/insider-trading` | `insider_trading_page` | — (JS lazy-loads) | `insider_trading.html` |
@@ -921,14 +986,19 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/notifications` | `notifications_page` | Notifications JSON | `notifications.html` |
 | POST | `/api/notifications/read/{id}` | `mark_read` | Notifications JSON | Empty HTML |
 | POST | `/api/notifications/read-all` | `mark_all_read` | Notifications JSON | `partials/notification_bell.html` |
+| GET | `/support` | `support_page` | Env vars (PANDA_FUND_RAISED, Stripe IDs) | `support.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**
 - All endpoints are cache-first. SEC EDGAR is only called on cache miss or during background refresh.
 - Fund data endpoints (`/api/fund-row`, `/api/holdings`, `/api/compare`) have L2 Supabase fallback with L1 promotion when L1 misses.
+- Fund data endpoints trigger self-healing background refresh when stale data is detected (request-triggered via `_trigger_single_refresh`).
 - Insider trade endpoints use 4-tier fallback: L1 fresh → L2 Supabase → L3 scrape → L4 stale L1 (never empty).
 - Backward-compat redirects: `/grand-portfolio` → `/funds` (301), `/superinvestors` → `/funds?view=funds` (301).
 - Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
+- Exception handlers detect HTMX requests (`HX-Request` header) and API paths to return inline `data_error.html` partial instead of full error pages.
+- `/support` and homepage widget use Stripe OOTB web components (Buy Button + Pricing Table) -- zero backend Stripe SDK needed.
+- `/health` endpoint includes `stale_funds`, `refresh_status`, `refresh_progress`, and `vitals_cache` diagnostics.
 
 ---
 
@@ -969,14 +1039,15 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 ### Template Hierarchy
 
 ```
-base.html (nav: Home|Retail|Funds|Insiders + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SSE + sortable tables)
+base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SSE + sortable tables)
   ├── includes partials/watchlist_sidebar.html (in <aside> via hx-preserve)
   ├── includes partials/notification_bell.html (in <nav>, HTMX-polls every 60s)
   ├── includes partials/ticker_search.html (in <nav>, Fuse.js fuzzy autocomplete)
   ├── home.html (homepage)
   │     ├── lazy-loads partials/heatmap.html via HTMX (/api/heatmap)
   │     ├── lazy-loads partials/most_added.html via HTMX (/api/most-added)
-  │     └── 3 quick-access cards: Retail, Funds, Insiders
+  │     ├── 3 quick-access cards: Retail, Funds, Insiders
+  │     └── Panda Fund support widget: progress bar + Stripe Pricing Table embed
   ├── retail.html (sub-tabs: Sentiment | Leaderboard | Calendar)
   │     ├── Sentiment tab: CNN Fear & Greed gauge + summary cards (server-rendered)
   │     ├── Leaderboard tab: lazy-loads partials/retail_leaderboard.html via fetch(/api/retail/leaderboard)
@@ -1000,6 +1071,12 @@ base.html (nav: Home|Retail|Funds|Insiders + styles + HTMX + Chart.js + ECharts 
   │     ├── lazy-loads partials/vitals.html via fetch(/api/vitals/{ticker})
   │     ├── lazy-loads partials/company_filings.html via fetch(/api/company-filings/{ticker})
   │     └── lazy-loads partials/stock_insider_trades.html via fetch(/api/insider-trades/{ticker})
+  ├── support.html (Panda Fund transparency dashboard)
+  │     ├── Progress bar with goal-reached badge ($400 monthly goal, capped on frontend)
+  │     ├── Stripe Buy Button (one-time) + Pricing Table (recurring) with tab toggle
+  │     ├── Cost breakdown (line items, no dollar amounts), funding history ECharts bar chart
+  │     ├── YouTube @funofinvesting section + feedback CTA
+  │     └── Auto-switches to monthly tab when linked from homepage (#monthly hash)
   ├── notifications.html (notification history)
   └── error.html
 ```
@@ -1316,6 +1393,14 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Nav restructure: Home | Retail | Funds | Insiders (renamed `/grand-portfolio` → `/funds`)
 - [x] Stale-while-revalidate for 13F fund data (never drop data on TTL expiry)
 - [x] Stale-while-revalidate for insider trades (4-tier fallback, never show errors)
+- [x] Self-healing background refresh: request-triggered per-fund refresh with asyncio.Lock concurrency control
+- [x] Supabase persistence for PDL + App Store vitals data (lazy hydration, stale-while-revalidate, quota tracking)
+- [x] Panda Fund support page (`/support`): progress bar, cost breakdown, funding history chart, Stripe donations
+- [x] Stripe OOTB embed: Buy Button (one-time) + Pricing Table (recurring) on /support page
+- [x] Homepage support widget: Panda Fund progress bar + Stripe Pricing Table embed
+- [x] HTMX-aware error handling: inline data_error.html partial for 429/rate-limit errors with Panda Fund CTA
+- [x] Nav update: replaced auth buttons with "Support the Panda" CTA
+- [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
 - [ ] Comparison across multiple funds on the same page
@@ -1356,7 +1441,8 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-20 (retail page, nav restructure,
-> /funds URL, insider stale-while-revalidate). If told "Context is drifting,"
-> the first action should be to re-read `/Users/Tevis_1/13F-project/README_DEV.md`
-> and reconcile any discrepancies with the actual code.
+> This file documents the system as of 2026-02-22 (background refresh, vitals
+> persistence, Panda Fund support page, Stripe embed, homepage widget).
+> If told "Context is drifting," the first action should be to re-read
+> `/Users/Tevis_1/13F-project/README_DEV.md` and reconcile any discrepancies
+> with the actual code.
