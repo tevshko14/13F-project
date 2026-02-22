@@ -434,6 +434,7 @@
         }
         function renderTV() {
             var theme = currentTheme();
+            var isDark = theme === 'dark';
             tvEmbed('tv-advanced-chart-wrap',
                 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js',
                 {
@@ -453,7 +454,7 @@
                 {
                     symbol: "{{ stock_info.ticker }}",
                     colorTheme: theme,
-                    isTransparent: true,
+                    isTransparent: !isDark,
                     largeChartUrl: "",
                     displayMode: "regular",
                     width: "100%",
