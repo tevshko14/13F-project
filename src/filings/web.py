@@ -915,11 +915,10 @@ async def insider_trading_page(request: Request):
 
 # --- Support / Panda Fund ---
 
-# Stripe Payment Link — standard anchor tag (opens in new tab)
-_STRIPE_SUPPORT_LINK = os.environ.get(
-    "STRIPE_SUPPORT_LINK",
-    "https://buy.stripe.com/test_placeholder",  # replaced with real link via env var
-)
+# Stripe embeddable components (configured in Stripe Dashboard, no backend SDK needed)
+_STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
+_STRIPE_BUY_BUTTON_ID = os.environ.get("STRIPE_BUY_BUTTON_ID", "")        # buy_btn_...
+_STRIPE_PRICING_TABLE_ID = os.environ.get("STRIPE_PRICING_TABLE_ID", "")  # prctbl_...
 
 # Feedback form link (Notion form, Google Form, Canny, etc.)
 _FEEDBACK_LINK = os.environ.get(
@@ -963,7 +962,9 @@ async def support_page(request: Request):
 
     return templates.TemplateResponse("support.html", {
         "request": request,
-        "stripe_link": _STRIPE_SUPPORT_LINK,
+        "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
+        "stripe_buy_button_id": _STRIPE_BUY_BUTTON_ID,
+        "stripe_pricing_table_id": _STRIPE_PRICING_TABLE_ID,
         "feedback_link": _FEEDBACK_LINK,
         "monthly_goal": monthly_goal,
         "raised_this_month": raised_this_month,
