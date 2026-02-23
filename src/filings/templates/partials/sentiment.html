@@ -1,3 +1,7 @@
+<style>
+.mood-badge { background: var(--mood-bg); }
+:root[data-theme="dark"] .mood-badge { background: var(--mood-bg-dark); }
+</style>
 {# ── Market Mood: CNN Fear & Greed Index ── #}
 {% if cnn %}
 <article style="margin-bottom: 1.5em;">
@@ -12,18 +16,23 @@
     {% if score <= 25 %}
         {% set mood_color = "#c62828" %}
         {% set mood_bg = "#ffebee" %}
+        {% set mood_bg_dark = "rgba(198, 40, 40, 0.15)" %}
     {% elif score <= 45 %}
         {% set mood_color = "#e65100" %}
         {% set mood_bg = "#fff3e0" %}
+        {% set mood_bg_dark = "rgba(230, 81, 0, 0.15)" %}
     {% elif score <= 55 %}
         {% set mood_color = "#616161" %}
         {% set mood_bg = "#f5f5f5" %}
+        {% set mood_bg_dark = "rgba(255, 255, 255, 0.08)" %}
     {% elif score <= 75 %}
         {% set mood_color = "#2e7d32" %}
         {% set mood_bg = "#e8f5e9" %}
+        {% set mood_bg_dark = "rgba(46, 125, 50, 0.15)" %}
     {% else %}
         {% set mood_color = "#1b5e20" %}
         {% set mood_bg = "#c8e6c9" %}
+        {% set mood_bg_dark = "rgba(27, 94, 32, 0.2)" %}
     {% endif %}
 
     <div style="display: flex; gap: 2em; align-items: center; flex-wrap: wrap;">
@@ -32,9 +41,9 @@
             <span style="display: inline-block; font-size: 1.8em; font-weight: 700; color: {{ mood_color }};">
                 {{ score|round(0)|int }}
             </span>
-            <span style="font-size: 0.9em; color: #888;">/100</span>
+            <span style="font-size: 0.9em; color: var(--pp-sub-text);">/100</span>
             <div>
-                <span class="badge" style="background: {{ mood_bg }}; color: {{ mood_color }}; font-size: 0.85em; padding: 0.2em 0.7em;">
+                <span class="badge mood-badge" style="--mood-bg: {{ mood_bg }}; --mood-bg-dark: {{ mood_bg_dark }}; color: {{ mood_color }}; font-size: 0.85em; padding: 0.2em 0.7em;">
                     {{ cnn.rating }}
                 </span>
             </div>
@@ -45,10 +54,10 @@
             <div style="position: relative; height: 10px; border-radius: 5px; overflow: hidden;
                         background: linear-gradient(to right, #c62828, #e65100, #9e9e9e, #2e7d32, #1b5e20);">
                 <div style="position: absolute; left: {{ score }}%; top: -3px;
-                            width: 4px; height: 16px; background: #000; border-radius: 2px;
+                            width: 4px; height: 16px; background: var(--pp-gauge-indicator); border-radius: 2px;
                             transform: translateX(-50%);"></div>
             </div>
-            <div style="display: flex; justify-content: space-between; font-size: 0.7em; color: #999; margin-top: 0.2em;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.7em; color: var(--pp-sub-text-light); margin-top: 0.2em;">
                 <span>Extreme Fear</span>
                 <span>Neutral</span>
                 <span>Extreme Greed</span>
@@ -56,7 +65,7 @@
         </div>
 
         {# Comparison #}
-        <div style="font-size: 0.85em; color: #666;">
+        <div style="font-size: 0.85em; color: var(--pp-info-text);">
             {% if cnn.previous_close is not none %}
             <div>Previous close: <strong>{{ cnn.previous_close|round(0)|int }}</strong></div>
             {% endif %}
@@ -93,7 +102,7 @@
                     Bullish: {{ bull }}%
                 </span>
                 {% if neutral_pct > 0 %}
-                <span class="badge" style="font-size: 0.9em; padding: 0.25em 0.6em; background: #f5f5f5; color: #616161;">
+                <span class="badge" style="font-size: 0.9em; padding: 0.25em 0.6em; background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">
                     Neutral: {{ neutral_pct }}%
                 </span>
                 {% endif %}
@@ -102,7 +111,7 @@
                 </span>
             </div>
             {# Visual bar #}
-            <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #f5f5f5;">
+            <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--pp-neutral-badge-bg);">
                 {% if bull > 0 %}
                 <div style="width: {{ bull }}%; background: #2e7d32;"></div>
                 {% endif %}
@@ -116,7 +125,7 @@
         </div>
 
         {# Buzz metrics #}
-        <div style="font-size: 0.85em; color: #666;">
+        <div style="font-size: 0.85em; color: var(--pp-info-text);">
             <div>
                 Articles this week: <strong>{{ finnhub.buzz_articles_last_week }}</strong>
                 <span class="text-muted" style="margin-left: 0.3em;">
@@ -140,7 +149,7 @@
         </div>
 
         {# Sector comparison #}
-        <div style="font-size: 0.85em; color: #666;">
+        <div style="font-size: 0.85em; color: var(--pp-info-text);">
             {% set sector_bull = (finnhub.sector_avg_bullish_pct * 100)|round(0)|int %}
             <div>
                 vs Sector bullish avg:
@@ -180,15 +189,15 @@
     <div style="display: flex; gap: 2.5em; align-items: center; flex-wrap: wrap;">
         <div style="text-align: center;">
             <div style="font-size: 1.6em; font-weight: 700; color: #1976d2;">#{{ apewisdom.rank }}</div>
-            <div style="font-size: 0.75em; color: #888;">Rank</div>
+            <div style="font-size: 0.75em; color: var(--pp-sub-text);">Rank</div>
         </div>
         <div style="text-align: center;">
             <div style="font-size: 1.6em; font-weight: 700;">{{ apewisdom.mentions }}</div>
-            <div style="font-size: 0.75em; color: #888;">Mentions (24h)</div>
+            <div style="font-size: 0.75em; color: var(--pp-sub-text);">Mentions (24h)</div>
         </div>
         <div style="text-align: center;">
             <div style="font-size: 1.6em; font-weight: 700;">{{ "{:,}".format(apewisdom.upvotes) }}</div>
-            <div style="font-size: 0.75em; color: #888;">Upvotes</div>
+            <div style="font-size: 0.75em; color: var(--pp-sub-text);">Upvotes</div>
         </div>
         <div style="text-align: center;">
             {% set rank_diff = apewisdom.rank_24h_ago - apewisdom.rank %}
@@ -196,15 +205,15 @@
                 <div style="font-size: 1.6em; font-weight: 700; color: #2e7d32;">
                     &#x25B2; +{{ rank_diff }}
                 </div>
-                <div style="font-size: 0.75em; color: #888;">Rank change (24h)</div>
+                <div style="font-size: 0.75em; color: var(--pp-sub-text);">Rank change (24h)</div>
             {% elif rank_diff < 0 %}
                 <div style="font-size: 1.6em; font-weight: 700; color: #c62828;">
                     &#x25BC; {{ rank_diff }}
                 </div>
-                <div style="font-size: 0.75em; color: #888;">Rank change (24h)</div>
+                <div style="font-size: 0.75em; color: var(--pp-sub-text);">Rank change (24h)</div>
             {% else %}
-                <div style="font-size: 1.6em; font-weight: 700; color: #888;">&#x2014;</div>
-                <div style="font-size: 0.75em; color: #888;">Rank change (24h)</div>
+                <div style="font-size: 1.6em; font-weight: 700; color: var(--pp-sub-text);">&#x2014;</div>
+                <div style="font-size: 0.75em; color: var(--pp-sub-text);">Rank change (24h)</div>
             {% endif %}
         </div>
         <div style="text-align: center;">
@@ -214,9 +223,9 @@
             {% elif mention_diff < 0 %}
                 <div style="font-size: 1.2em; color: #c62828;">{{ mention_diff }} mentions</div>
             {% else %}
-                <div style="font-size: 1.2em; color: #888;">No change</div>
+                <div style="font-size: 1.2em; color: var(--pp-sub-text);">No change</div>
             {% endif %}
-            <div style="font-size: 0.75em; color: #888;">vs previous 24h</div>
+            <div style="font-size: 0.75em; color: var(--pp-sub-text);">vs previous 24h</div>
         </div>
     </div>
 </article>
@@ -254,7 +263,7 @@
                     {{ alphavantage.avg_sentiment_label }}
                 </span>
             {% else %}
-                <span class="badge" style="font-size: 0.8em; padding: 0.15em 0.5em; background: #fff3e0; color: #e65100;">
+                <span class="badge" style="font-size: 0.8em; padding: 0.15em 0.5em; background: var(--pp-neutral-orange-bg, #fff3e0); color: #e65100;">
                     {{ alphavantage.avg_sentiment_label }}
                 </span>
             {% endif %}
@@ -293,7 +302,7 @@
                             {{ a.ticker_sentiment_label }}
                         </span>
                     {% else %}
-                        <span class="badge" style="font-size: 0.8em; padding: 0.15em 0.5em; background: #fff3e0; color: #e65100;">
+                        <span class="badge" style="font-size: 0.8em; padding: 0.15em 0.5em; background: var(--pp-neutral-orange-bg, #fff3e0); color: #e65100;">
                             {{ a.ticker_sentiment_label }}
                         </span>
                     {% endif %}

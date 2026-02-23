@@ -205,6 +205,14 @@
 
     /* ── Chart.js shared options ── */
     function getChartOptions() {
+        var cs = getComputedStyle(document.documentElement);
+        var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+        var axisSecondary = cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a';
+        var axisMuted = cs.getPropertyValue('--pp-chart-axis-muted').trim() || '#a1a1aa';
+        var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.05)';
+        var gridZero = cs.getPropertyValue('--pp-chart-grid-zero').trim() || 'rgba(0,0,0,0.25)';
+        var legendColor = cs.getPropertyValue('--pp-chart-legend').trim() || '#52525b';
+
         return {
             responsive: true,
             maintainAspectRatio: false,
@@ -218,7 +226,7 @@
                     border: { display: false },
                     ticks: {
                         font: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 12 },
-                        color: '#27272a',
+                        color: axisColor,
                     },
                 },
                 y: {
@@ -228,16 +236,16 @@
                         display: true,
                         text: 'Total Dollar Value ($)',
                         font: { family: "'Inter', 'system-ui', sans-serif", size: 12, weight: '500' },
-                        color: '#a1a1aa',
+                        color: axisMuted,
                     },
                     ticks: {
                         callback: function(v) { return fmtDollar(v); },
                         font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
-                        color: '#71717a',
+                        color: axisSecondary,
                     },
                     grid: {
                         color: function(ctx) {
-                            return ctx.tick.value === 0 ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.05)';
+                            return ctx.tick.value === 0 ? gridZero : gridColor;
                         },
                         lineWidth: function(ctx) {
                             return ctx.tick.value === 0 ? 1.5 : 1;
@@ -251,6 +259,7 @@
                     position: 'bottom',
                     labels: {
                         font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
+                        color: legendColor,
                         boxWidth: 12, padding: 8,
                     },
                 },
@@ -420,6 +429,16 @@
     }
 
     window.switchInsiderTab = loadTrades;
+
+    /* Re-render chart when theme changes so axis/grid colors update */
+    document.addEventListener('pp-theme-changed', function() {
+        if (insiderChart) {
+            lastViewType = null;  /* force full recreate */
+            if (chartDataCache[currentFilter]) {
+                renderChart(chartDataCache[currentFilter]);
+            }
+        }
+    });
 
     /* Auto-load default tab */
     loadTrades('all');
