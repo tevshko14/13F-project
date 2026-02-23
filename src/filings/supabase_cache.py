@@ -19,6 +19,8 @@ Env vars (set in Railway):
 
 from __future__ import annotations
 
+import hashlib
+import json as _json
 import logging
 import os
 import threading
@@ -56,6 +58,8 @@ _MIGRATE_SQL = """
 -- Sync worker tracking columns on api_cache
 ALTER TABLE api_cache ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;
 ALTER TABLE api_cache ADD COLUMN IF NOT EXISTS sync_status TEXT DEFAULT 'pending';
+-- Content hash for change detection (avoids re-uploading identical data)
+ALTER TABLE api_cache ADD COLUMN IF NOT EXISTS content_hash TEXT DEFAULT '';
 
 -- Sync run log table
 CREATE TABLE IF NOT EXISTS sync_logs (
@@ -362,13 +366,79 @@ def get_cached_with_stale(cache_key: str) -> tuple[dict | list | None, bool]:
         return None, False
 
 
+def _compute_hash(data: dict | list) -> str:
+    """Compute a stable SHA-256 hash of a JSON-serialisable payload.
+
+    Used for change detection: skip Supabase upserts when the data
+    hasn't actually changed (saves egress on both write and subsequent reads).
+    """
+    raw = _json.dumps(data, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def get_content_hash(cache_key: str) -> str:
+    """Fetch only the content_hash for a cache row (very lightweight).
+
+    Returns the hash string, or ``""`` on miss / error / column missing.
+    """
+    client = _get_client()
+    if client is None:
+        return ""
+
+    try:
+        resp = (
+            client
+            .table(_TABLE)
+            .select("content_hash")
+            .eq("cache_key", cache_key)
+            .maybe_single()
+            .execute()
+        )
+        if resp.data is None:
+            return ""
+        return resp.data.get("content_hash") or ""
+    except Exception:
+        return ""
+
+
+def get_all_content_hashes(category: str) -> dict[str, str]:
+    """Fetch {cache_key: content_hash} for an entire category.
+
+    Very lightweight query — only two small text columns, no JSONB.
+    Used on startup to detect which funds changed since last deploy.
+    """
+    client = _get_client()
+    if client is None:
+        return {}
+
+    try:
+        resp = (
+            client
+            .table(_TABLE)
+            .select("cache_key, content_hash")
+            .eq("category", category)
+            .execute()
+        )
+        return {
+            row["cache_key"]: (row.get("content_hash") or "")
+            for row in (resp.data or [])
+        }
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return {}
+
+
 def set_cached(
     cache_key: str,
     category: str,
     data: dict,
     ttl_seconds: int | None = None,
 ) -> bool:
-    """Upsert a cache row.
+    """Upsert a cache row with content-hash change detection.
+
+    Computes a SHA-256 hash of *data* and compares it to the stored
+    ``content_hash``.  If identical, only the TTL / timestamps are
+    bumped (no JSONB rewrite) — saving significant Supabase egress.
 
     Args:
         cache_key:   e.g. ``"glassdoor:AAPL"``
@@ -382,6 +452,25 @@ def set_cached(
     if client is None:
         return False
 
+    new_hash = _compute_hash(data)
+
+    # Check if data actually changed (lightweight: fetches only the hash)
+    existing_hash = get_content_hash(cache_key)
+    if existing_hash and existing_hash == new_hash:
+        # Data unchanged — just bump the TTL and sync timestamp
+        expires_at = None
+        if ttl_seconds is not None:
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+            ).isoformat()
+        try:
+            update_row: dict = {"expires_at": expires_at}
+            client.table(_TABLE).update(update_row).eq("cache_key", cache_key).execute()
+            logger.debug("Cache unchanged for %s (hash=%s), bumped TTL only", cache_key, new_hash)
+            return True
+        except Exception:
+            pass  # Fall through to full upsert
+
     expires_at = None
     if ttl_seconds is not None:
         expires_at = (
@@ -393,10 +482,12 @@ def set_cached(
         "category": category,
         "response_data": data,
         "expires_at": expires_at,
+        "content_hash": new_hash,
     }
 
     try:
         client.table(_TABLE).upsert(row, on_conflict="cache_key").execute()
+        logger.debug("Cache updated for %s (new hash=%s)", cache_key, new_hash)
         return True
     except Exception as exc:
         _handle_table_missing(exc)
