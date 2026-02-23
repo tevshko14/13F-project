@@ -1097,6 +1097,38 @@ def _fetch_appstore_from_api(key: str) -> dict | None:
 # Public API
 # ═══════════════════════════════════════════════════════════════════
 
+def _glassdoor_to_company_info(gd: dict) -> dict | None:
+    """Extract company-info fields from Glassdoor data as PDL fallback.
+
+    When no PDL API key is configured, we can still populate the
+    Employee Pulse card using fields already present in the Glassdoor
+    search response (company_size, industry, year_founded, headquarters).
+    Returns a dict shaped like the PDL response, or None if insufficient data.
+    """
+    if not gd:
+        return None
+
+    company_size = gd.get("company_size", "")
+    industry = gd.get("industry", "")
+    headquarters = gd.get("headquarters", "")
+    year_founded = gd.get("year_founded")
+
+    # Only return if we have at least some useful data
+    if not any([company_size, industry, headquarters, year_founded]):
+        return None
+
+    return {
+        "employee_count": 0,  # Glassdoor gives size range, not exact count
+        "size": company_size,
+        "industry": industry,
+        "founded": year_founded,
+        "location": headquarters,
+        "linkedin_url": "",
+        "name": gd.get("company_name", ""),
+        "_source": "glassdoor",  # Flag so template knows origin
+    }
+
+
 def get_vitals_data(ticker: str) -> dict:
     """Aggregate vitals from all sources for a ticker.
 
@@ -1118,6 +1150,10 @@ def get_vitals_data(ticker: str) -> dict:
     except Exception as exc:
         logger.warning("PDL vitals failed for %s: %s", ticker, exc)
         result["pdl"] = None
+
+    # Fallback: derive company info from Glassdoor when PDL unavailable
+    if not result["pdl"] and not has_pdl_key() and result["glassdoor"]:
+        result["pdl"] = _glassdoor_to_company_info(result["glassdoor"])
 
     try:
         result["appstore"] = _get_appstore_data(ticker)
