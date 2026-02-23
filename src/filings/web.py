@@ -1012,17 +1012,43 @@ async def support_page(request: Request):
     })
 
 
+# --- YouTube page ---
+
+
+@app.get("/youtube", response_class=HTMLResponse)
+async def youtube_page(request: Request):
+    """Dedicated YouTube page showing recent uploads from tracked finance creators."""
+    try:
+        channels = await asyncio.to_thread(youtube.get_channels)
+        recent = await asyncio.to_thread(youtube.get_recent_uploads, 50)
+        events = await asyncio.to_thread(youtube.get_upcoming_events, 20)
+    except Exception:
+        logger.exception("YouTube page: unexpected error in data fetch")
+        channels = youtube._STATIC_CHANNELS
+        recent, events = [], []
+
+    # Inject channel thumbnails into uploads and events
+    ch_thumbs = {ch["channel_id"]: ch.get("thumbnail_url", "") for ch in channels}
+    for upl in recent:
+        upl["channel_thumbnail"] = ch_thumbs.get(upl.get("channel_id", ""), "")
+    for ev in events:
+        ev["channel_thumbnail"] = ch_thumbs.get(ev.get("channel_id", ""), "")
+
+    return templates.TemplateResponse("youtube.html", {
+        "request": request,
+        "channels": channels,
+        "recent_uploads": recent,
+        "events": events,
+    })
+
+
 # --- Retail Traders (hidden — no nav link) ---
 
 _FINANCE_YOUTUBERS = [
-    {"name": "Meet Kevin", "channel": "https://youtube.com/@MeetKevin", "schedule": "Daily ~9am ET", "topics": "Markets, Real Estate, Fed"},
-    {"name": "Graham Stephan", "channel": "https://youtube.com/@GrahamStephan", "schedule": "3-4x/week", "topics": "Personal Finance, Real Estate"},
-    {"name": "Andrei Jikh", "channel": "https://youtube.com/@AndreiJikh", "schedule": "2-3x/week", "topics": "Investing, Crypto"},
-    {"name": "Tom Nash", "channel": "https://youtube.com/@TomNashYT", "schedule": "3-4x/week", "topics": "Tech Stocks, Growth Investing"},
     {"name": "Financial Education", "channel": "https://youtube.com/@FinancialEducation", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
     {"name": "Joseph Carlson", "channel": "https://youtube.com/@JosephCarlsonShow", "schedule": "2x/week", "topics": "Dividend Investing, Portfolio Updates"},
-    {"name": "Fun of Investing", "channel": "https://youtube.com/@FunofInvesting", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
-    {"name": "Real Matt Money", "channel": "https://youtube.com/@RealMattMoney", "schedule": "Daily", "topics": "Investing, Market News"},
+    {"name": "Tevis (FunOfInvesting)", "channel": "https://youtube.com/@FunofInvesting", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
+    {"name": "MattMoney", "channel": "https://youtube.com/@RealMattMoney", "schedule": "Daily", "topics": "Investing, Market News"},
     {"name": "Kross Roads", "channel": "https://youtube.com/@Kross_Roads", "schedule": "Daily", "topics": "Stock Analysis, Growth Investing"},
     {"name": "Dividend Streams", "channel": "https://youtube.com/@DividendStreams", "schedule": "Daily", "topics": "Dividends, Income Investing"},
     {"name": "Futurenvesting", "channel": "https://youtube.com/@Futurenvesting", "schedule": "Daily", "topics": "Investing, Future Trends"},
