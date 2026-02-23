@@ -12,8 +12,8 @@ Quota budget (10,000 units/day):
     search.list:     11 channels x 100 units x 4 polls = 4,400
     channels.list:   1 batch call x 1 unit x 4 polls   =     4
     activities.list: 11 channels x 1 unit x 4 polls    =    44
-    videos.list:     ~5 batch calls x 1 unit x 4 polls =    20
-    Total: ~4,468 units/day (45% of 10,000 quota)
+    videos.list:     ~10 batch calls x 1 unit x 4 polls =    40
+    Total: ~4,488 units/day (45% of 10,000 quota)
 """
 
 from __future__ import annotations
@@ -360,10 +360,30 @@ def _fetch_upcoming_videos(channel_id: str) -> list[dict]:
     return []
 
 
+def _parse_iso8601_duration(iso_dur: str) -> str:
+    """Convert ISO 8601 duration (PT1H2M30S) to human-readable (1:02:30).
+
+    Returns empty string for unparseable or zero-length durations.
+    """
+    if not iso_dur:
+        return ""
+    m = re.match(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", iso_dur)
+    if not m:
+        return ""
+    hours = int(m.group(1) or 0)
+    minutes = int(m.group(2) or 0)
+    seconds = int(m.group(3) or 0)
+    if hours == 0 and minutes == 0 and seconds == 0:
+        return ""
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
 def _fetch_video_details(video_ids: list[str]) -> dict[str, dict]:
     """Batch fetch video details for scheduled start times (1 unit per batch of 50).
 
-    Returns {video_id: {scheduled_at, view_count}}.
+    Returns {video_id: {scheduled_at, view_count, duration, content_type}}.
     """
     if not video_ids:
         return {}
@@ -371,7 +391,7 @@ def _fetch_video_details(video_ids: list[str]) -> dict[str, dict]:
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i : i + 50]
         data = _yt_get("videos", {
-            "part": "liveStreamingDetails,statistics",
+            "part": "contentDetails,liveStreamingDetails,statistics,snippet",
             "id": ",".join(batch),
         })
         if data and "items" in data:
@@ -379,9 +399,24 @@ def _fetch_video_details(video_ids: list[str]) -> dict[str, dict]:
                 vid = item["id"]
                 live = item.get("liveStreamingDetails", {})
                 stats = item.get("statistics", {})
+                content = item.get("contentDetails", {})
+                snippet = item.get("snippet", {})
+
+                # liveBroadcastContent: "live", "upcoming", or "none"
+                broadcast = snippet.get("liveBroadcastContent", "none")
+                if broadcast == "none" and live:
+                    # Has liveStreamingDetails but not currently live/upcoming
+                    content_type = "was_live"
+                elif broadcast in ("live", "upcoming"):
+                    content_type = broadcast
+                else:
+                    content_type = "video"
+
                 result[vid] = {
                     "scheduled_at": live.get("scheduledStartTime"),
                     "view_count": int(stats.get("viewCount", 0)),
+                    "duration": _parse_iso8601_duration(content.get("duration", "")),
+                    "content_type": content_type,
                 }
     return result
 
@@ -442,13 +477,15 @@ def sync_youtube_events() -> dict:
         if freq_alert:
             logger.info("Frequency alert for %s: %s", info["name"], freq_detail)
 
-        # 2c. Get video details for scheduled start times (batch)
-        video_ids = [
+        # 2c. Collect all video IDs (upcoming + recent uploads) for batch detail fetch
+        upcoming_vids = [
             it["id"]["videoId"]
             for it in upcoming
             if "videoId" in it.get("id", {})
         ]
-        video_details = _fetch_video_details(video_ids) if video_ids else {}
+        upload_vids = [act["video_id"] for act in recent_activities]
+        all_vids = list(dict.fromkeys(upcoming_vids + upload_vids))  # dedupe, preserve order
+        video_details = _fetch_video_details(all_vids) if all_vids else {}
 
         # 2d. Build event rows (upcoming streams)
         sub_count = channel_stats.get(cid, {}).get("subscriber_count", 0)
@@ -491,14 +528,17 @@ def sync_youtube_events() -> dict:
                 "frequency_detail": freq_detail if freq_alert else "",
                 "thumbnail_url": thumbnail,
                 "video_url": f"https://www.youtube.com/watch?v={vid}",
+                "duration": details.get("duration", ""),
+                "content_type": details.get("content_type", "upcoming"),
                 "updated_at": now_iso,
             })
             total_videos_found += 1
 
-        # 2e. Build recent upload rows (from activities data -- zero extra API cost)
+        # 2e. Build recent upload rows (from activities data)
         for act in recent_activities:
             vid = act["video_id"]
             title = act["title"]
+            details = video_details.get(vid, {})
             tickers = parse_tickers(title)
             sent = classify_sentiment(title)
             impact = compute_impact_score(sub_count, avg_views)
@@ -519,6 +559,8 @@ def sync_youtube_events() -> dict:
                 "frequency_detail": freq_detail if freq_alert else "",
                 "thumbnail_url": act["thumbnail_url"],
                 "video_url": f"https://www.youtube.com/watch?v={vid}",
+                "duration": details.get("duration", ""),
+                "content_type": details.get("content_type", "video"),
                 "updated_at": now_iso,
             })
 

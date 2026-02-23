@@ -150,6 +150,10 @@ CREATE TABLE IF NOT EXISTS youtube_channels (
 
 -- Backfill: add thumbnail_url if table already exists
 ALTER TABLE youtube_channels ADD COLUMN IF NOT EXISTS thumbnail_url TEXT NOT NULL DEFAULT '';
+
+-- Backfill: add duration and content_type columns for video metadata
+ALTER TABLE youtube_events ADD COLUMN IF NOT EXISTS duration TEXT NOT NULL DEFAULT '';
+ALTER TABLE youtube_events ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'video';
 """
 
 
