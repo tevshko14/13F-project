@@ -142,7 +142,7 @@ async def lifespan(app: FastAPI):
     # Prefetch S&P 500 market data in background (~30-60s on cold start)
     asyncio.create_task(_prefetch_market_data(app))
 
-    # Retention cleanup: delete old insider trades, youtube events, sync logs
+    # Run retention cleanup in background (keep DB small)
     asyncio.create_task(asyncio.to_thread(supabase_cache.run_retention_cleanup))
 
     # Self-heal: refresh any stale funds in background
@@ -502,9 +502,24 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
         }, status_code=404)
 
     # Build quarterly changes with ticker enrichment
+    # Merge hot quarters (from Supabase Postgres) with cold quarters
+    # (from Supabase Storage archive) for full historical view.
     quarterly_changes = []
     if cached:
-        raw_quarters = cached.get("quarterly_changes", [])
+        raw_quarters = list(cached.get("quarterly_changes", []))
+
+        # Load cold (archived) quarters from Supabase Storage
+        try:
+            cold_quarters = await asyncio.to_thread(cache.load_historical_quarters, cik)
+            if cold_quarters:
+                seen_periods = {q.get("period") for q in raw_quarters}
+                for cq in cold_quarters:
+                    if cq.get("period") not in seen_periods:
+                        raw_quarters.append(cq)
+                        seen_periods.add(cq.get("period"))
+        except Exception:
+            pass  # Cold storage unavailable -- show hot quarters only
+
         # Build cusip->ticker lookup from all_holdings
         cusip_to_ticker: dict[str, str | None] = {}
         for h in cached.get("all_holdings", []):

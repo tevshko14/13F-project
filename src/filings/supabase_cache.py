@@ -206,6 +206,12 @@ def _auto_migrate() -> None:
             conn.close()
             _table_verified = True
             logger.info("Supabase api_cache + sync_logs + insider_trades tables verified via auto-migration")
+            # Create cold storage bucket (non-fatal)
+            try:
+                from filings import cold_storage
+                cold_storage.ensure_bucket()
+            except Exception:
+                logger.debug("Cold storage bucket creation skipped (non-fatal)")
             return  # Success — stop trying other URLs
         except Exception as exc:
             logger.debug("Auto-migration attempt failed (%s...): %s", url[:40], exc)
@@ -1045,83 +1051,84 @@ def get_recent_youtube_uploads(limit: int = 20) -> list[dict] | None:
         return None
 
 
-# ── Retention cleanup ─────────────────────────────────────────────
+# ── Retention cleanup ───────────────────────────────────────────
 
 
 def run_retention_cleanup() -> dict:
-    """Delete old rows to keep the database within the free-tier limit.
+    """Run all retention policies -- delete old data to keep DB small.
 
-    Retention periods:
-      - insider_trades:  6 months (by filing_date)
-      - youtube_events: 30 days  (by updated_at)
-      - sync_logs:      30 days  (by started_at)
-      - api_cache:      expired  (by expires_at)
+    Policies:
+      1. insider_trades: delete rows with trade_date older than 30 days
+      2. sync_logs: delete rows with started_at older than 30 days
+      3. youtube_events: delete rows with scheduled_at older than 30 days
+      4. api_cache: physically delete expired rows (excluding 13f which
+         uses stale-while-revalidate)
 
-    Returns a dict of ``{table: rows_deleted}`` for logging.
-    Safe to call when Supabase is unavailable (returns empty dict).
+    Each table cleanup is independent -- failure on one doesn't block others.
+    Returns summary dict with deletion counts (-1 means error).
     """
     client = _get_client()
     if client is None:
-        return {}
+        return {"status": "skipped", "reason": "supabase_unavailable"}
 
-    results: dict[str, int] = {}
     now = datetime.now(timezone.utc)
+    results: dict[str, int] = {}
 
-    # ── insider_trades: keep 6 months ──
-    cutoff_insider = (now - timedelta(days=180)).strftime("%Y-%m-%d")
+    # 1. Insider trades: delete > 30 days
+    cutoff_30d = (now - timedelta(days=30)).strftime("%Y-%m-%d")
     try:
         resp = (
             client.table("insider_trades")
             .delete()
-            .lt("filing_date", cutoff_insider)
+            .lt("trade_date", cutoff_30d)
             .execute()
         )
-        results["insider_trades"] = len(resp.data) if resp.data else 0
+        results["insider_trades_deleted"] = len(resp.data) if resp.data else 0
     except Exception as exc:
-        logger.warning("Retention cleanup insider_trades failed: %s", exc)
+        logger.warning("Retention: insider_trades cleanup failed: %s", exc)
+        results["insider_trades_deleted"] = -1
 
-    # ── youtube_events: keep 30 days ──
-    cutoff_yt = (now - timedelta(days=30)).isoformat()
-    try:
-        resp = (
-            client.table("youtube_events")
-            .delete()
-            .lt("updated_at", cutoff_yt)
-            .execute()
-        )
-        results["youtube_events"] = len(resp.data) if resp.data else 0
-    except Exception as exc:
-        logger.warning("Retention cleanup youtube_events failed: %s", exc)
-
-    # ── sync_logs: keep 30 days ──
-    cutoff_logs = (now - timedelta(days=30)).isoformat()
+    # 2. Sync logs: delete > 30 days
+    cutoff_30d_ts = (now - timedelta(days=30)).isoformat()
     try:
         resp = (
             client.table("sync_logs")
             .delete()
-            .lt("started_at", cutoff_logs)
+            .lt("started_at", cutoff_30d_ts)
             .execute()
         )
-        results["sync_logs"] = len(resp.data) if resp.data else 0
+        results["sync_logs_deleted"] = len(resp.data) if resp.data else 0
     except Exception as exc:
-        logger.warning("Retention cleanup sync_logs failed: %s", exc)
+        logger.warning("Retention: sync_logs cleanup failed: %s", exc)
+        results["sync_logs_deleted"] = -1
 
-    # ── api_cache: remove expired entries ──
+    # 3. YouTube events: delete > 30 days
+    try:
+        resp = (
+            client.table("youtube_events")
+            .delete()
+            .lt("scheduled_at", cutoff_30d_ts)
+            .execute()
+        )
+        results["youtube_events_deleted"] = len(resp.data) if resp.data else 0
+    except Exception as exc:
+        logger.warning("Retention: youtube_events cleanup failed: %s", exc)
+        results["youtube_events_deleted"] = -1
+
+    # 4. Expired api_cache rows: physical delete (skip 13f -- stale-while-revalidate)
+    now_iso = now.isoformat()
     try:
         resp = (
             client.table("api_cache")
             .delete()
-            .lt("expires_at", now.isoformat())
+            .lt("expires_at", now_iso)
+            .neq("category", "13f")
             .execute()
         )
-        results["api_cache"] = len(resp.data) if resp.data else 0
+        results["expired_cache_deleted"] = len(resp.data) if resp.data else 0
     except Exception as exc:
-        logger.warning("Retention cleanup api_cache failed: %s", exc)
+        logger.warning("Retention: api_cache cleanup failed: %s", exc)
+        results["expired_cache_deleted"] = -1
 
-    total = sum(results.values())
-    if total > 0:
-        logger.info("Retention cleanup deleted %d rows: %s", total, results)
-    else:
-        logger.debug("Retention cleanup: nothing to delete")
-
+    logger.info("Retention cleanup: %s", results)
     return results

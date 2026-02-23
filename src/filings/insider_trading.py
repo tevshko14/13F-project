@@ -598,14 +598,102 @@ def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
     return []
 
 
+def _fetch_historical_from_efts(ticker: str, max_results: int = 50) -> list[InsiderTrade]:
+    """Fetch historical Form 4 filings from SEC EDGAR full-text search.
+
+    Queries the EFTS endpoint for Form 4 filings mentioning the ticker.
+    Returns InsiderTrade objects with filing metadata (filing_date,
+    insider_name, sec_url).  Trade detail columns (price, qty, value)
+    are set to empty strings since EFTS only returns filing metadata.
+
+    Falls back to empty list on any error.
+    """
+    import os
+    import re
+
+    identity = os.environ.get("SEC_IDENTITY", "13f-tool-user user@example.com")
+    headers = {"User-Agent": identity}
+    url = "https://efts.sec.gov/LATEST/search-index"
+    params = {
+        "q": f'"{ticker.upper()}"',
+        "forms": "4",
+        "from": "0",
+        "size": str(min(max_results, 100)),
+    }
+
+    try:
+        resp = httpx.get(url, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as exc:
+        logger.debug("EFTS Form 4 query for %s failed: %s", ticker, exc)
+        return []
+
+    trades: list[InsiderTrade] = []
+    seen_urls: set[str] = set()
+
+    for hit in data.get("hits", {}).get("hits", []):
+        source = hit.get("_source", {})
+        file_date = source.get("file_date", "")
+        # display_names: ["INSIDER NAME  (CIK 0001234567)"]
+        display_names = source.get("display_names", [])
+        insider_name = ""
+        for dn in display_names:
+            match = re.match(r"^(.+?)\s+\(CIK\s+\d+\)", dn)
+            if match:
+                insider_name = match.group(1).strip()
+                break
+        if not insider_name and display_names:
+            insider_name = display_names[0]
+
+        # Build SEC URL from file_num or accession
+        file_num = source.get("file_num", "")
+        # EFTS results have root_form, form_type, etc.
+        sec_url = ""
+        # Try to build URL from the filing's accession number if available
+        accession = hit.get("_id", "")
+        if accession:
+            # accession format: "0001234567-25-000001"
+            acc_clean = accession.replace("-", "")
+            # CIK from display_names
+            cik_match = re.search(r"\(CIK\s+(\d+)\)", " ".join(display_names))
+            if cik_match:
+                cik = cik_match.group(1)
+                sec_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{accession}-index.htm"
+
+        if sec_url in seen_urls:
+            continue
+        if sec_url:
+            seen_urls.add(sec_url)
+
+        trades.append(InsiderTrade(
+            filing_date=file_date,
+            trade_date=file_date,  # Best approximation; EFTS lacks exact trade date
+            ticker=ticker.upper(),
+            company_name="",
+            insider_name=insider_name,
+            title="",
+            trade_type="Form 4",
+            price="",
+            qty="",
+            owned="",
+            delta_own="",
+            value="",
+            sec_url=sec_url,
+        ))
+
+    return trades
+
+
 def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
     """Fetch insider trades for a specific ticker -- Supabase-first.
 
     Data flow:
       1. L1 in-memory cache (10 min TTL)
-      2. Query ``insider_trades`` table by ticker
-      3. Fallback: scrape OpenInsider + backfill to Supabase
-      4. Last resort: return stale L1 data (never show empty/error)
+      2. Query ``insider_trades`` table by ticker (hot 30-day window)
+      3. Supplement with SEC EDGAR EFTS historical data (cold)
+      4. Fallback: scrape OpenInsider + backfill to Supabase
+      5. Last resort: return stale L1 data (never show empty/error)
     """
     key = ticker.upper()
     cache_key = f"ticker:{key}"
@@ -615,13 +703,27 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
     if stale_data is not None and is_fresh:
         return stale_data
 
-    # ── L2: Supabase dedicated table ──
+    # ── L2: Supabase dedicated table (hot 30-day window) ──
     rows = supabase_cache.get_insider_trades_by_ticker(key)
 
     if rows:
-        trades = [InsiderTrade.from_db_row(r) for r in rows]
-        _set_cached(cache_key, trades)
-        return trades
+        hot_trades = [InsiderTrade.from_db_row(r) for r in rows]
+
+        # ── L2.5: Supplement with EFTS historical data (cold) ──
+        try:
+            historical = _fetch_historical_from_efts(key)
+            if historical:
+                seen_urls = {t.sec_url for t in hot_trades if t.sec_url}
+                cold_unique = [t for t in historical if t.sec_url and t.sec_url not in seen_urls]
+                combined = hot_trades + cold_unique
+            else:
+                combined = hot_trades
+        except Exception:
+            logger.debug("EFTS supplement failed for %s -- using hot data only", key)
+            combined = hot_trades
+
+        _set_cached(cache_key, combined)
+        return combined
 
     # ── L3: Fallback -- scrape + backfill ──
     logger.warning("No Supabase data for %s -- scraping OpenInsider", key)
