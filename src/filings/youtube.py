@@ -31,14 +31,10 @@ _RECENT_TTL = 300    # 5 minutes
 # ── L3 static fallback: always available even when Supabase is down ──
 
 _STATIC_CHANNELS: list[dict] = [
-    {"channel_id": "UCUvvj5lwue7PspotMDjk5UA", "channel_name": "Meet Kevin", "handle": "@MeetKevin", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCV6KDgJskWaEckne5aPA0aQ", "channel_name": "Graham Stephan", "handle": "@GrahamStephan", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 3.5, "thumbnail_url": ""},
-    {"channel_id": "UCGy7SkBjcIAgTiwkXEtPnYg", "channel_name": "Andrei Jikh", "handle": "@AndreiJikh", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 2.5, "thumbnail_url": ""},
-    {"channel_id": "UCJwKCyEIFHwUOPQQ-4kC1Zw", "channel_name": "Tom Nash", "handle": "@TomNashYT", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 3.5, "thumbnail_url": ""},
     {"channel_id": "UCnMn36GT_H0X-w5_ckLtlgQ", "channel_name": "Financial Education", "handle": "@FinancialEducation", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
     {"channel_id": "UCbta0n8i6Rljh0obO7HzG9A", "channel_name": "Joseph Carlson", "handle": "@JosephCarlsonShow", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 2.0, "thumbnail_url": ""},
-    {"channel_id": "UChvd7RCRJS50RWlwbfcwr3A", "channel_name": "Fun of Investing", "handle": "@FunofInvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCyZNir5FhvazX5L3_Q77UbA", "channel_name": "Real Matt Money", "handle": "@RealMattMoney", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
+    {"channel_id": "UChvd7RCRJS50RWlwbfcwr3A", "channel_name": "Tevis (FunOfInvesting)", "handle": "@FunofInvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
+    {"channel_id": "UCyZNir5FhvazX5L3_Q77UbA", "channel_name": "MattMoney", "handle": "@RealMattMoney", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
     {"channel_id": "UCqlIWs2hwTzS8wIE-_pkC1A", "channel_name": "Kross Roads", "handle": "@Kross_Roads", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
     {"channel_id": "UCDO_NH0PaRjo5Cn9gS-MH0w", "channel_name": "Dividend Streams", "handle": "@DividendStreams", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
     {"channel_id": "UCvWx0-NX-9qVLCSW9yjdX-g", "channel_name": "Futurenvesting", "handle": "@Futurenvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
