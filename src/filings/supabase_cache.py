@@ -430,6 +430,29 @@ def get_category_keys(category: str) -> list[str]:
         return []
 
 
+def get_cache_keys_by_category(category: str) -> list[str]:
+    """Fetch only cache_key values for a category (lightweight, no data blobs).
+
+    Used by the sync worker to determine which CIKs already exist
+    without loading 20-30MB of response_data.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        resp = (
+            client
+            .table(_TABLE)
+            .select("cache_key")
+            .eq("category", category)
+            .execute()
+        )
+        return [row["cache_key"] for row in (resp.data or [])]
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return []
+
+
 def get_all_by_category(category: str, page_size: int = 10) -> list[dict] | None:
     """Fetch all rows for a given category, paginated to avoid timeouts.
 

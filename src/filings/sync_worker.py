@@ -23,7 +23,9 @@ import os as _os
 # Must be set before edgartools is imported anywhere.
 _os.environ.setdefault("EDGAR_RATE_LIMIT_PER_SEC", "5")
 
+import gc
 import logging
+import resource
 import time
 import uuid
 
@@ -64,13 +66,9 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
     stale_ciks_from_db = {k.replace("13f:", "") for k in stale_keys}
 
     # 2. CIKs with no Supabase entry at all (new investors)
-    existing_rows = supabase_cache.get_all_by_category("13f")
-    existing_ciks: set[str] = set()
-    if existing_rows:
-        for row in existing_rows:
-            ck = row.get("cache_key", "")
-            if ck.startswith("13f:"):
-                existing_ciks.add(ck.replace("13f:", ""))
+    # Use lightweight query (cache_key only) to avoid loading ~30MB of fund data
+    existing_keys = supabase_cache.get_cache_keys_by_category("13f")
+    existing_ciks = {k.replace("13f:", "") for k in existing_keys if k.startswith("13f:")}
 
     missing_ciks = all_ciks - existing_ciks
     ciks_to_sync = sorted(stale_ciks_from_db | missing_ciks)
@@ -121,13 +119,17 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
                 "[%d/%d] FAILED: CIK %s -- %s", idx + 1, len(ciks_to_sync), cik, e,
             )
 
-        # ── Rate limiting ────────────────────────────────────────
+        # ── Cleanup + Rate limiting ───────────────────────────────
+        data = None  # free the large dict immediately
+        gc.collect()
+
         if idx < len(ciks_to_sync) - 1:
             time.sleep(delay_between)
 
-        # Batch pause every 10 funds
+        # Batch pause every 10 funds + log memory usage
         if (idx + 1) % 10 == 0 and idx < len(ciks_to_sync) - 1:
-            logger.info("Batch pause (10 funds done) ...")
+            mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+            logger.info("Batch pause (10 funds done) -- peak RSS: %.0f MB", mem_mb)
             time.sleep(5)
 
     skipped = len(all_ciks) - len(ciks_to_sync)
@@ -145,13 +147,15 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
 def main() -> None:
     """Entry point for ``uv run filings-sync``."""
     _setup_logging()
-    logger.info("=== PaperPanda SEC Sync Worker starting ===")
+    mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+    logger.info("=== PaperPanda SEC Sync Worker starting (RSS: %.0f MB) ===", mem_mb)
     start = time.time()
 
     result = sync_all_funds()
 
     elapsed = round(time.time() - start)
-    logger.info("=== Sync finished in %ds: %s ===", elapsed, result)
+    mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+    logger.info("=== Sync finished in %ds (RSS: %.0f MB): %s ===", elapsed, mem_mb, result)
 
 
 if __name__ == "__main__":
