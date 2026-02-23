@@ -129,6 +129,14 @@ def sync_insider_trades() -> dict:
         "Insider sync complete: %d scraped, %d upserted",
         len(trades), upserted,
     )
+
+    # Run retention cleanup after successful sync
+    try:
+        cleanup = supabase_cache.run_retention_cleanup()
+        logger.info("Post-sync retention cleanup: %s", cleanup)
+    except Exception:
+        logger.debug("Retention cleanup failed (non-fatal)")
+
     return {"scraped": len(trades), "upserted": upserted, "errors": len(errors)}
 
 
