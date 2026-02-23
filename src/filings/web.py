@@ -1012,36 +1012,6 @@ async def support_page(request: Request):
     })
 
 
-# --- YouTube page ---
-
-
-@app.get("/youtube", response_class=HTMLResponse)
-async def youtube_page(request: Request):
-    """Dedicated YouTube page showing recent uploads from tracked finance creators."""
-    try:
-        channels = await asyncio.to_thread(youtube.get_channels)
-        recent = await asyncio.to_thread(youtube.get_recent_uploads, 50)
-        events = await asyncio.to_thread(youtube.get_upcoming_events, 20)
-    except Exception:
-        logger.exception("YouTube page: unexpected error in data fetch")
-        channels = youtube._STATIC_CHANNELS
-        recent, events = [], []
-
-    # Inject channel thumbnails into uploads and events
-    ch_thumbs = {ch["channel_id"]: ch.get("thumbnail_url", "") for ch in channels}
-    for upl in recent:
-        upl["channel_thumbnail"] = ch_thumbs.get(upl.get("channel_id", ""), "")
-    for ev in events:
-        ev["channel_thumbnail"] = ch_thumbs.get(ev.get("channel_id", ""), "")
-
-    return templates.TemplateResponse("youtube.html", {
-        "request": request,
-        "channels": channels,
-        "recent_uploads": recent,
-        "events": events,
-    })
-
-
 # --- Retail Traders (hidden — no nav link) ---
 
 _FINANCE_YOUTUBERS = [
@@ -1138,7 +1108,7 @@ async def retail_calendar_api(request: Request):
     try:
         events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
         channels = await asyncio.to_thread(youtube.get_channels)
-        recent = await asyncio.to_thread(youtube.get_recent_uploads, 20)
+        recent = await asyncio.to_thread(youtube.get_recent_uploads, 50)
     except Exception:
         logger.exception("Calendar API: unexpected error in data fetch")
         events, channels, recent = [], youtube._STATIC_CHANNELS, []
@@ -1167,7 +1137,7 @@ async def retail_calendar_data(request: Request):
     try:
         events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
         channels = await asyncio.to_thread(youtube.get_channels)
-        recent = await asyncio.to_thread(youtube.get_recent_uploads, 20)
+        recent = await asyncio.to_thread(youtube.get_recent_uploads, 50)
     except Exception:
         logger.exception("Calendar data API: unexpected error in data fetch")
         events, channels, recent = [], youtube._STATIC_CHANNELS, []
