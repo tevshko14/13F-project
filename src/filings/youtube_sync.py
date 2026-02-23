@@ -75,14 +75,14 @@ _CHANNELS: dict[str, dict] = {
         "handle": "@RealMattMoney",
         "baseline_posts_per_week": 7.0,
     },
-    "UCqlIWs2hwTzS8wIE-_pkC1A": {
+    "UCD0yDGUSqKLyHviB6FUZzzg": {
         "name": "Kross Roads",
-        "handle": "@Kross_Roads",
+        "handle": "@Kross_Roads-g4j",
         "baseline_posts_per_week": 7.0,
     },
-    "UCDO_NH0PaRjo5Cn9gS-MH0w": {
-        "name": "Dividend Streams",
-        "handle": "@DividendStreams",
+    "UCPss8jtpAyp3k829QVX3jhQ": {
+        "name": "Steven Fiorillo",
+        "handle": "@stevenfiorillo1",
         "baseline_posts_per_week": 7.0,
     },
     "UCvWx0-NX-9qVLCSW9yjdX-g": {
@@ -95,9 +95,9 @@ _CHANNELS: dict[str, dict] = {
         "handle": "@amitinvesting",
         "baseline_posts_per_week": 7.0,
     },
-    "UCGJIGkEd46TER3y2Zvcwe0w": {
+    "UCrGLm-Drgv0vbbemwwHeXJw": {
         "name": "Couch Investor",
-        "handle": "@couch_Investor",
+        "handle": "@CouchInvestor",
         "baseline_posts_per_week": 7.0,
     },
     "UCgYKMfmLTViSE7Qj0Mj_Mhw": {

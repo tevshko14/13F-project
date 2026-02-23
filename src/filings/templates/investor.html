@@ -644,6 +644,14 @@
         if (window.initSortableTables) window.initSortableTables();
     };
 
+    // PostHog: track fund page view
+    if (window.posthog) {
+        posthog.capture('fund_viewed', {
+            fund_name: {{ fund.name|tojson }},
+            cik: {{ fund.cik|tojson }}
+        });
+    }
+
     // ── Quarter tab switching ──
     window.switchChangeQuarter = function(idx) {
         document.querySelectorAll('.quarter-tab').forEach(function(btn) {

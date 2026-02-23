@@ -476,5 +476,21 @@
     });
 
     if (window.initSortableTables) window.initSortableTables();
+
+    /* PostHog: track YouTube video clicks */
+    document.querySelectorAll('.yt-video-card').forEach(function(card) {
+        card.querySelectorAll('a[href*="youtube.com"], a[href*="youtu.be"]').forEach(function(link) {
+            link.addEventListener('click', function() {
+                if (window.posthog) {
+                    var channelEl = card.querySelector('.yt-channel-name');
+                    var titleEl = card.querySelector('.yt-video-title');
+                    posthog.capture('youtube_video_click', {
+                        channel_name: channelEl ? channelEl.textContent.trim() : null,
+                        video_title: titleEl ? titleEl.textContent.trim() : null
+                    });
+                }
+            });
+        });
+    });
 })();
 </script>
