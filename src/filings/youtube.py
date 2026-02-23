@@ -216,6 +216,24 @@ def build_calendar_data(events: list[dict], channels: list[dict], recent_uploads
     freq_alerts = sum(1 for e in events if e.get("frequency_alert"))
     high_impact = [e for e in events if (e.get("impact_score") or 0) >= 9]
 
+    # Enrich channels with latest video info from recent uploads
+    # Build {channel_id: newest_upload} map (recent is already sorted desc)
+    latest_by_channel: dict[str, dict] = {}
+    for upl in recent:
+        cid = upl.get("channel_id", "")
+        if cid and cid not in latest_by_channel:
+            latest_by_channel[cid] = upl
+    for ch in channels:
+        latest = latest_by_channel.get(ch.get("channel_id", ""))
+        if latest:
+            ch["latest_video_title"] = latest.get("title", "")
+            ch["latest_video_url"] = latest.get("video_url", "")
+            ch["latest_video_date"] = latest.get("scheduled_at", "")
+        else:
+            ch["latest_video_title"] = ""
+            ch["latest_video_url"] = ""
+            ch["latest_video_date"] = ""
+
     return {
         "events": events,
         "channels": channels,
