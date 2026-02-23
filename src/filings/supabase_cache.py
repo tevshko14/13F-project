@@ -892,20 +892,63 @@ def get_insider_trades_by_ticker(
         return None
 
 
-def upsert_insider_trades(rows: list[dict]) -> int:
-    """Batch upsert rows into ``insider_trades``.
+def _get_existing_insider_urls(days: int = 7) -> set[str]:
+    """Fetch sec_url values from recent insider_trades (lightweight).
 
-    Uses ``ON CONFLICT (sec_url) DO UPDATE`` for deduplication.
+    Only fetches the unique key column — no row data.  Used to skip
+    re-uploading trades that already exist in Supabase.
+    """
+    client = _get_client()
+    if client is None:
+        return set()
+
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=days)
+    ).isoformat()
+
+    try:
+        resp = (
+            client.table("insider_trades")
+            .select("sec_url")
+            .gte("filing_date", cutoff[:10])  # date only
+            .execute()
+        )
+        return {row["sec_url"] for row in (resp.data or []) if row.get("sec_url")}
+    except Exception:
+        return set()  # On failure, fall through to full upsert
+
+
+def upsert_insider_trades(rows: list[dict]) -> int:
+    """Batch upsert rows into ``insider_trades``, skipping existing ones.
+
+    First fetches existing sec_url keys (lightweight query) and filters
+    them out to avoid re-uploading identical rows.  Only genuinely new
+    trades are sent to Supabase, saving egress.
+
+    Uses ``ON CONFLICT (sec_url) DO UPDATE`` for deduplication safety.
     Returns the number of rows upserted, or 0 on failure.
     """
     client = _get_client()
     if client is None:
         return 0
 
+    # Filter out rows that already exist in Supabase
+    existing_urls = _get_existing_insider_urls()
+    new_rows = [r for r in rows if r.get("sec_url") not in existing_urls]
+
+    if not new_rows:
+        logger.info("All %d insider trades already exist — skipping upsert", len(rows))
+        return len(rows)  # All accounted for
+
+    logger.info(
+        "Insider trades: %d new out of %d total (skipping %d existing)",
+        len(new_rows), len(rows), len(rows) - len(new_rows),
+    )
+
     upserted = 0
     CHUNK = 50
-    for i in range(0, len(rows), CHUNK):
-        chunk = rows[i : i + CHUNK]
+    for i in range(0, len(new_rows), CHUNK):
+        chunk = new_rows[i : i + CHUNK]
         try:
             client.table("insider_trades").upsert(
                 chunk, on_conflict="sec_url"
@@ -1026,20 +1069,72 @@ def complete_sync_log(
 # ── YouTube helpers ──────────────────────────────────────────────
 
 
-def upsert_youtube_events(rows: list[dict]) -> int:
-    """Batch upsert rows into ``youtube_events``.
+def _get_existing_video_ids(days: int = 14) -> set[str]:
+    """Fetch video_id values from recent youtube_events (lightweight).
 
-    Uses ``ON CONFLICT (video_id) DO UPDATE`` for deduplication.
+    Only fetches the unique key column — no row data.  Used to skip
+    re-uploading events that already exist in Supabase.
+    """
+    client = _get_client()
+    if client is None:
+        return set()
+
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=days)
+    ).isoformat()
+
+    try:
+        resp = (
+            client.table("youtube_events")
+            .select("video_id")
+            .gte("created_at", cutoff)
+            .execute()
+        )
+        return {row["video_id"] for row in (resp.data or []) if row.get("video_id")}
+    except Exception:
+        return set()  # On failure, fall through to full upsert
+
+
+def upsert_youtube_events(rows: list[dict]) -> int:
+    """Batch upsert rows into ``youtube_events``, skipping existing ones.
+
+    First fetches existing video_id keys (lightweight query) and filters
+    them out.  Only new events or events needing updates (upcoming streams
+    whose status may have changed) are sent to Supabase.
+
+    Uses ``ON CONFLICT (video_id) DO UPDATE`` for deduplication safety.
     Returns the number of rows upserted, or 0 on failure.
     """
     client = _get_client()
     if client is None:
         return 0
 
+    # Filter out rows that already exist — but ALWAYS re-upsert upcoming
+    # events since their status/scheduled_at may have changed
+    existing_ids = _get_existing_video_ids()
+    new_rows = []
+    for r in rows:
+        vid = r.get("video_id", "")
+        if vid not in existing_ids:
+            new_rows.append(r)  # Brand new event
+        elif r.get("event_type") == "upcoming":
+            new_rows.append(r)  # Upcoming may have updated fields
+
+    skipped = len(rows) - len(new_rows)
+    if not new_rows:
+        logger.info("All %d youtube events already exist — skipping upsert", len(rows))
+        return len(rows)
+
+    if skipped > 0:
+        logger.info(
+            "YouTube events: %d to upsert, %d skipped (already exist)",
+            len(new_rows), skipped,
+        )
+
     upserted = 0
     CHUNK = 50
-    for i in range(0, len(rows), CHUNK):
-        chunk = rows[i : i + CHUNK]
+    for i in range(0, len(new_rows), CHUNK):
+        chunk = new_rows[i : i + CHUNK]
         try:
             client.table("youtube_events").upsert(
                 chunk, on_conflict="video_id"
