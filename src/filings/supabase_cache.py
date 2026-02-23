@@ -1043,3 +1043,85 @@ def get_recent_youtube_uploads(limit: int = 20) -> list[dict] | None:
     except Exception as exc:
         logger.warning("get_recent_youtube_uploads failed: %s", exc)
         return None
+
+
+# ── Retention cleanup ─────────────────────────────────────────────
+
+
+def run_retention_cleanup() -> dict:
+    """Delete old rows to keep the database within the free-tier limit.
+
+    Retention periods:
+      - insider_trades:  6 months (by filing_date)
+      - youtube_events: 30 days  (by updated_at)
+      - sync_logs:      30 days  (by started_at)
+      - api_cache:      expired  (by expires_at)
+
+    Returns a dict of ``{table: rows_deleted}`` for logging.
+    Safe to call when Supabase is unavailable (returns empty dict).
+    """
+    client = _get_client()
+    if client is None:
+        return {}
+
+    results: dict[str, int] = {}
+    now = datetime.now(timezone.utc)
+
+    # ── insider_trades: keep 6 months ──
+    cutoff_insider = (now - timedelta(days=180)).strftime("%Y-%m-%d")
+    try:
+        resp = (
+            client.table("insider_trades")
+            .delete()
+            .lt("filing_date", cutoff_insider)
+            .execute()
+        )
+        results["insider_trades"] = len(resp.data) if resp.data else 0
+    except Exception as exc:
+        logger.warning("Retention cleanup insider_trades failed: %s", exc)
+
+    # ── youtube_events: keep 30 days ──
+    cutoff_yt = (now - timedelta(days=30)).isoformat()
+    try:
+        resp = (
+            client.table("youtube_events")
+            .delete()
+            .lt("updated_at", cutoff_yt)
+            .execute()
+        )
+        results["youtube_events"] = len(resp.data) if resp.data else 0
+    except Exception as exc:
+        logger.warning("Retention cleanup youtube_events failed: %s", exc)
+
+    # ── sync_logs: keep 30 days ──
+    cutoff_logs = (now - timedelta(days=30)).isoformat()
+    try:
+        resp = (
+            client.table("sync_logs")
+            .delete()
+            .lt("started_at", cutoff_logs)
+            .execute()
+        )
+        results["sync_logs"] = len(resp.data) if resp.data else 0
+    except Exception as exc:
+        logger.warning("Retention cleanup sync_logs failed: %s", exc)
+
+    # ── api_cache: remove expired entries ──
+    try:
+        resp = (
+            client.table("api_cache")
+            .delete()
+            .lt("expires_at", now.isoformat())
+            .execute()
+        )
+        results["api_cache"] = len(resp.data) if resp.data else 0
+    except Exception as exc:
+        logger.warning("Retention cleanup api_cache failed: %s", exc)
+
+    total = sum(results.values())
+    if total > 0:
+        logger.info("Retention cleanup deleted %d rows: %s", total, results)
+    else:
+        logger.debug("Retention cleanup: nothing to delete")
+
+    return results
