@@ -1141,6 +1141,14 @@
         }
 
         window.tickerSearchGo = function(ticker, type, cik) {
+            // PostHog: track search selections
+            if (window.posthog) {
+                posthog.capture('stock_search', {
+                    ticker: ticker,
+                    search_type: type,
+                    cik: cik || null
+                });
+            }
             if (type === 'investor' && cik) {
                 window.location.href = "/holdings/" + cik;
             } else {
@@ -1264,7 +1272,12 @@
 
         window.toggleTheme = function() {
             var current = document.documentElement.getAttribute('data-theme');
-            applyTheme(current === 'dark' ? 'light' : 'dark');
+            var newTheme = current === 'dark' ? 'light' : 'dark';
+            applyTheme(newTheme);
+            // PostHog: track theme toggle
+            if (window.posthog) {
+                posthog.capture('dark_mode_toggle', { enabled: newTheme === 'dark' });
+            }
         };
 
         // Apply on DOM ready

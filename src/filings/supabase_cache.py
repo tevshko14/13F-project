@@ -973,10 +973,14 @@ def get_youtube_events(
     if client is None:
         return None
     try:
+        # Only return events scheduled within the last 6 hours or in the future
+        # so stale "upcoming" rows from years ago never appear.
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
         query = (
             client.table("youtube_events")
             .select("*")
             .eq("event_type", "upcoming")
+            .gte("scheduled_at", cutoff)
             .order("scheduled_at", desc=True)
             .limit(limit)
         )
@@ -1010,11 +1014,13 @@ def get_high_impact_youtube_events(min_score: int = 9) -> list[dict] | None:
     if client is None:
         return None
     try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
         resp = (
             client.table("youtube_events")
             .select("*")
             .gte("impact_score", min_score)
             .eq("event_type", "upcoming")
+            .gte("scheduled_at", cutoff)
             .order("scheduled_at", desc=True)
             .limit(10)
             .execute()
