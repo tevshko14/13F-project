@@ -286,6 +286,66 @@ def _record_sec_call() -> None:
 
 # ── Refresh Operations ───────────────────────────────────────────────
 
+def _archive_old_quarters(cik: str, quarterly_changes: list[dict], keep: int = 2) -> bool:
+    """Archive quarters beyond *keep* to cold storage.
+
+    Returns True if all uploads succeeded (safe to trim), False otherwise.
+    On failure, the caller should NOT trim -- hot data stays intact.
+    """
+    if len(quarterly_changes) <= keep:
+        return True  # Nothing to archive
+
+    from filings import cold_storage
+
+    to_archive = quarterly_changes[keep:]
+    for q in to_archive:
+        period = q.get("period", "").replace(" ", "_")
+        if not period:
+            continue
+        if not cold_storage.upload_json(f"13f/{cik}/quarterly/{period}.json", q):
+            logger.warning("Cold storage upload failed for CIK %s period %s", cik, period)
+            return False
+    return True
+
+
+def load_historical_quarters(cik: str) -> list[dict]:
+    """Load archived quarterly changes from Supabase Storage (cold tier).
+
+    Returns a list of quarter dicts sorted newest-first,
+    or empty list on failure / if no archived quarters exist.
+    """
+    from filings import cold_storage
+
+    try:
+        prefix = f"13f/{cik}/quarterly"
+        files = cold_storage.list_files(prefix)
+        if not files:
+            return []
+
+        quarters: list[dict] = []
+        for filename in files:
+            path = f"13f/{cik}/quarterly/{filename}"
+            q = cold_storage.download_json(path)
+            if q and isinstance(q, dict):
+                quarters.append(q)
+
+        # Sort newest-first: Q4 2025, Q3 2025, Q2 2025, ...
+        def _sort_key(q: dict) -> tuple[int, int]:
+            try:
+                parts = q["period"].split()  # "Q3 2024" -> ["Q3", "2024"]
+                q_num = int(parts[0][1])
+                year = int(parts[1])
+                return (-year, -q_num)
+            except (IndexError, ValueError, KeyError):
+                return (0, 0)
+
+        quarters.sort(key=_sort_key)
+        return quarters
+    except Exception as exc:
+        logger.warning("Failed to load historical quarters for CIK %s: %s", cik, exc)
+        return []
+
+
 def refresh_single_fund(cik: str) -> dict | None:
     """Fetch fresh data for a single fund from SEC EDGAR. Synchronous.
 
@@ -294,6 +354,9 @@ def refresh_single_fund(cik: str) -> dict | None:
 
     Write-through: on success the data is also persisted to Supabase L2
     so that subsequent deploys can hydrate from there instantly.
+
+    Hot/cold: archives quarters 3+ to Supabase Storage before trimming
+    the blob to 2 quarters for the hot Postgres cache.
 
     Respects the per-session SEC call cap (see ``_check_sec_rate_limit``).
     """
@@ -305,6 +368,14 @@ def refresh_single_fund(cik: str) -> dict | None:
         _record_sec_call()
         data = get_fund_summary(cik)
         stamped = stamp_fund_data(data)
+
+        # ── Archive older quarters to cold storage, then trim ──
+        quarterly = stamped.get("quarterly_changes", [])
+        if len(quarterly) > 2:
+            if _archive_old_quarters(cik, quarterly, keep=2):
+                stamped["quarterly_changes"] = quarterly[:2]
+                logger.debug("Archived %d quarters for CIK %s", len(quarterly) - 2, cik)
+            # On archive failure, keep all quarters in hot (safe fallback)
 
         # ── Persist to Supabase L2 (non-fatal) ──
         try:

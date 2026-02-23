@@ -34,6 +34,7 @@ filings-web = "filings.web:main"
 filings-sync = "filings.sync_worker:main"
 filings-insider-sync = "filings.insider_sync:main"
 filings-youtube-sync = "filings.youtube_sync:main"
+filings-migrate-cold = "filings.migrate_cold_storage:main"
 
 [build-system]
 requires = ["hatchling"]
