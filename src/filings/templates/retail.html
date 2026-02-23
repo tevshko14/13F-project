@@ -578,6 +578,11 @@
     /* ── Tab Switching + Lazy Load                                ── */
     /* ══════════════════════════════════════════════════════════════ */
     window.switchRetailView = function(view) {
+        // PostHog: track retail tab switch
+        if (window.posthog) {
+            posthog.capture('retail_tab_switch', { tab_name: view });
+        }
+
         document.querySelectorAll('.rt-subtab').forEach(function(btn) {
             btn.classList.toggle('active', btn.dataset.view === view);
         });
@@ -620,7 +625,14 @@
             renderRetailTreemap(data.treemap_data);
             renderBubbleChart(data.bubble_data);
 
-            document.getElementById('retail-leaderboard-content').innerHTML = tableHtml;
+            var lbContainer = document.getElementById('retail-leaderboard-content');
+            lbContainer.innerHTML = tableHtml;
+            /* Re-create <script> tags so they execute after innerHTML injection */
+            lbContainer.querySelectorAll('script').forEach(function(old) {
+                var s = document.createElement('script');
+                s.textContent = old.textContent;
+                old.parentNode.replaceChild(s, old);
+            });
             if (window.initSortableTables) window.initSortableTables();
         }).catch(function() {
             document.getElementById('retail-leaderboard-content').innerHTML =
@@ -637,7 +649,15 @@
                 return r.text();
             })
             .then(function(html) {
-                document.getElementById('retail-calendar-content').innerHTML = html;
+                var container = document.getElementById('retail-calendar-content');
+                container.innerHTML = html;
+                /* Scripts injected via innerHTML don't execute automatically.
+                   Re-create each <script> so the browser evaluates them. */
+                container.querySelectorAll('script').forEach(function(old) {
+                    var s = document.createElement('script');
+                    s.textContent = old.textContent;
+                    old.parentNode.replaceChild(s, old);
+                });
                 if (window.initSortableTables) window.initSortableTables();
             })
             .catch(function() {
