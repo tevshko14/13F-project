@@ -360,7 +360,7 @@
                 <th data-sort="text">Channel</th>
                 <th class="text-right" data-sort="number">Subscribers</th>
                 <th class="text-right" data-sort="number">Avg Views</th>
-                <th class="text-right" data-sort="number">Posts/Week</th>
+                <th data-sort="text">Latest Video</th>
             </tr>
         </thead>
         <tbody>
@@ -393,9 +393,21 @@
                         <span class="text-muted">-</span>
                     {% endif %}
                 </td>
-                <td class="text-right">
-                    {% if ch.avg_posts_per_week %}
-                        {{ "%.1f"|format(ch.avg_posts_per_week|float) }}
+                <td>
+                    {% if ch.latest_video_title %}
+                    <div style="max-width: 220px;">
+                        <a href="{{ ch.latest_video_url }}" target="_blank" rel="noopener"
+                           style="text-decoration: none; font-size: 0.85em; font-weight: 500;
+                                  display: -webkit-box; -webkit-line-clamp: 1;
+                                  -webkit-box-orient: vertical; overflow: hidden;">
+                            {{ ch.latest_video_title }}
+                        </a>
+                        {% if ch.latest_video_date %}
+                        <span class="text-muted" style="font-size: 0.75em;" data-published="{{ ch.latest_video_date }}">
+                            {{ ch.latest_video_date[:10] }}
+                        </span>
+                        {% endif %}
+                    </div>
                     {% else %}
                         <span class="text-muted">-</span>
                     {% endif %}
