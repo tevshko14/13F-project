@@ -72,16 +72,111 @@ def load_cache() -> dict:
         return {}
 
 
+_HASH_FILE = CACHE_DIR / "fund_hashes.json"
+
+
+def _load_local_hashes() -> dict[str, str]:
+    """Load {cache_key: content_hash} from local disk.
+
+    Used to detect which funds changed in Supabase since last startup,
+    so we only fetch the ones that actually changed (saves egress).
+    """
+    if not _HASH_FILE.exists():
+        return {}
+    try:
+        return json.loads(_HASH_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_local_hashes(hashes: dict[str, str]) -> None:
+    """Persist {cache_key: content_hash} to disk for next startup."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        _HASH_FILE.write_text(json.dumps(hashes))
+    except OSError as e:
+        logger.debug("Could not save hash file: %s", e)
+
+
 def load_cache_from_supabase() -> dict:
-    """Load all 13F fund data from Supabase L2 cache.
+    """Load 13F fund data from Supabase L2 cache with delta detection.
+
+    On first run (no local hash file), fetches all funds as before.
+    On subsequent runs, compares content_hash values and only fetches
+    funds whose data actually changed — typically saving 90%+ egress
+    since 13F data only changes quarterly.
 
     Returns a dict keyed by CIK (same structure as ``load_cache()``),
     or ``{}`` if Supabase is unavailable / has no 13F data.
-
-    Fetches funds one at a time to avoid 28MB single-request timeouts
-    on Railway's free tier.
     """
-    # First, get the list of available CIKs (lightweight query)
+    # ── Step 1: Fetch remote hashes (lightweight: ~2 KB for 84 funds) ──
+    remote_hashes = supabase_cache.get_all_content_hashes("13f")
+
+    if not remote_hashes:
+        # Fallback: column might not exist yet, do full load
+        return _load_cache_from_supabase_full()
+
+    # ── Step 2: Compare with local hashes from last startup ──
+    local_hashes = _load_local_hashes()
+    local_cache = load_cache()  # Load existing disk cache
+
+    changed_keys: list[str] = []
+    for key, remote_hash in remote_hashes.items():
+        if not remote_hash:
+            # Hash not populated yet — must fetch
+            changed_keys.append(key)
+        elif local_hashes.get(key) != remote_hash:
+            changed_keys.append(key)
+
+    # CIKs in local cache that aren't in remote anymore (removed funds)
+    remote_ciks = {k.replace("13f:", "") for k in remote_hashes}
+
+    total_funds = len(remote_hashes)
+    unchanged = total_funds - len(changed_keys)
+
+    if not changed_keys and local_cache:
+        # Nothing changed — reuse local cache entirely (zero egress!)
+        logger.info(
+            "All %d funds unchanged (hash match) — zero Supabase egress",
+            total_funds,
+        )
+        _save_local_hashes(remote_hashes)
+        return local_cache
+
+    logger.info(
+        "Delta load: %d/%d funds changed, %d unchanged — fetching only changed",
+        len(changed_keys), total_funds, unchanged,
+    )
+
+    # ── Step 3: Start with local cache, then overwrite changed funds ──
+    result = {cik: data for cik, data in local_cache.items() if cik in remote_ciks}
+
+    for key in changed_keys:
+        cik = key.replace("13f:", "", 1) if key.startswith("13f:") else None
+        if not cik:
+            continue
+        data, _is_fresh = supabase_cache.get_cached_with_stale(key)
+        if isinstance(data, dict):
+            result[cik] = data
+
+    logger.info(
+        "Loaded %d funds (%d from Supabase, %d from local cache)",
+        len(result), len(changed_keys), unchanged,
+    )
+
+    # ── Step 4: Save hashes + full cache to disk for next startup ──
+    _save_local_hashes(remote_hashes)
+    save_cache(result)
+
+    return result
+
+
+def _load_cache_from_supabase_full() -> dict:
+    """Full load from Supabase — used when content_hash column is empty.
+
+    This is the original logic, used as a fallback on first deploy
+    before the sync worker has populated content_hash values.
+    """
     keys = supabase_cache.get_category_keys("13f")
     if not keys:
         return {}
@@ -95,13 +190,10 @@ def load_cache_from_supabase() -> dict:
     if not ciks:
         return {}
 
-    logger.info("Found %d 13f keys in Supabase — loading individually...", len(ciks))
+    logger.info("Full load: %d 13f keys from Supabase (no hash file)...", len(ciks))
     result: dict = {}
     stale_count = 0
     for cik in ciks:
-        # Use stale-aware fetch so we NEVER drop data just because
-        # the TTL expired.  Users should always see the latest cached
-        # figures, even if the sync worker hasn't refreshed yet.
         data, is_fresh = supabase_cache.get_cached_with_stale(f"13f:{cik}")
         if isinstance(data, dict):
             result[cik] = data
@@ -114,6 +206,14 @@ def load_cache_from_supabase() -> dict:
             "Loaded %d funds from Supabase L2 cache (%d fresh, %d stale)",
             len(result), fresh_count, stale_count,
         )
+
+    # Save hashes for next startup (populate from the data we just loaded)
+    hashes: dict[str, str] = {}
+    for cik, data in result.items():
+        hashes[f"13f:{cik}"] = supabase_cache._compute_hash(data)
+    _save_local_hashes(hashes)
+    save_cache(result)
+
     return result
 
 
