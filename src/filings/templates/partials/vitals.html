@@ -96,23 +96,27 @@
 <div class="vitals-grid">
 
 {# ═══════════════════════════════════════════════════════════════════ #}
-{# Card 1: Employee Pulse (People Data Labs)                          #}
+{# Card 1: Company Snapshot (People Data Labs or Glassdoor fallback)  #}
 {# ═══════════════════════════════════════════════════════════════════ #}
 
 {% if pdl %}
 <div class="vitals-card">
     <div class="vitals-card-header">
-        <h3>Employee Pulse</h3>
-        <span class="vitals-source">via People Data Labs</span>
+        <h3>Company Snapshot</h3>
+        <span class="vitals-source">
+            {% if pdl._source is defined and pdl._source == 'glassdoor' %}via Glassdoor{% else %}via People Data Labs{% endif %}
+        </span>
     </div>
 
     <div class="vitals-stat-row">
+        {% if pdl.employee_count and pdl.employee_count > 0 %}
         <div class="vitals-stat">
             <div class="value" style="color: #1976d2;">
                 {{ "{:,}".format(pdl.employee_count) }}
             </div>
             <div class="label">Employees</div>
         </div>
+        {% endif %}
 
         {% if pdl.size %}
         <div class="vitals-stat">
@@ -157,7 +161,7 @@
 {% elif has_pdl_key is defined and has_pdl_key %}
 <div class="vitals-card">
     <div class="vitals-card-header">
-        <h3>Employee Pulse</h3>
+        <h3>Company Snapshot</h3>
         <span class="vitals-source">via People Data Labs</span>
     </div>
     <div class="vitals-empty">
@@ -175,20 +179,8 @@
                 </a> helps us expand our data limits and bring more insights into the app.
             </small>
         {% else %}
-            Employee data not available for <strong>{{ ticker }}</strong>.
+            Company data not available for <strong>{{ ticker }}</strong>.
         {% endif %}
-    </div>
-</div>
-{% else %}
-<div class="vitals-card">
-    <div class="vitals-card-header">
-        <h3>Employee Pulse</h3>
-        <span class="vitals-source">via People Data Labs</span>
-    </div>
-    <div class="vitals-empty">
-        Configure <code>PDL_API_KEY</code> for employee headcount data.
-        <br>
-        <small class="text-muted">Free tier: 100 requests/month, no credit card required.</small>
     </div>
 </div>
 {% endif %}
@@ -523,14 +515,11 @@
 
 {# ── Fallback: nothing available ── #}
 {% if not glassdoor and not pdl and not appstore %}
-{% if (not has_glassdoor_key or not has_pdl_key) %}
+{% if not has_glassdoor_key %}
 <div style="margin-top: 1em;">
     <article>
         <p class="text-muted" style="text-align: center; padding: 1em 0;">
-            Configure API keys for richer vitals data:
-            <br>
-            <code>PDL_API_KEY</code> (employee data) &middot;
-            <code>GLASSDOOR_RAPIDAPI_KEY</code> (culture ratings)
+            Configure <code>GLASSDOOR_RAPIDAPI_KEY</code> for company and culture data.
             <br>
             <small>App Store data is free and requires no API key.</small>
         </p>
