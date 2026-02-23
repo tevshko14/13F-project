@@ -142,6 +142,9 @@ async def lifespan(app: FastAPI):
     # Prefetch S&P 500 market data in background (~30-60s on cold start)
     asyncio.create_task(_prefetch_market_data(app))
 
+    # Retention cleanup: delete old insider trades, youtube events, sync logs
+    asyncio.create_task(asyncio.to_thread(supabase_cache.run_retention_cleanup))
+
     # Self-heal: refresh any stale funds in background
     if _ENABLE_BACKGROUND_REFRESH:
         app.state.refresh_status = "pending"
