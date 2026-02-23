@@ -161,7 +161,22 @@
         <span class="vitals-source">via People Data Labs</span>
     </div>
     <div class="vitals-empty">
-        Employee data not available for <strong>{{ ticker }}</strong>.
+        {% if pdl_quota_exhausted is defined and pdl_quota_exhausted %}
+            <div style="margin-bottom: 0.5em;">
+                <span style="font-size: 1.2em;">&#x23F8;</span>
+            </div>
+            Employee data temporarily unavailable for <strong>{{ ticker }}</strong>.
+            <br>
+            <small class="text-muted" style="line-height: 1.6;">
+                We've hit our monthly API limit for employee data. Data will refresh automatically next month.
+                <br>
+                <a href="/support" style="color: var(--pp-accent, #1976d2); text-decoration: none; font-weight: 500;">
+                    Supporting PaperPanda &#x2764;
+                </a> helps us expand our data limits and bring more insights into the app.
+            </small>
+        {% else %}
+            Employee data not available for <strong>{{ ticker }}</strong>.
+        {% endif %}
     </div>
 </div>
 {% else %}
@@ -359,10 +374,14 @@
             <div style="margin-bottom: 0.5em;">
                 <span style="font-size: 1.2em;">&#x23F8;</span>
             </div>
-            Data currently unavailable for <strong>{{ ticker }}</strong>.
+            Culture data temporarily unavailable for <strong>{{ ticker }}</strong>.
             <br>
-            <small class="text-muted">
-                Monthly API quota reached. Data will refresh automatically next month.
+            <small class="text-muted" style="line-height: 1.6;">
+                We've hit our monthly API limit for Glassdoor data. Data will refresh automatically next month.
+                <br>
+                <a href="/support" style="color: var(--pp-accent, #1976d2); text-decoration: none; font-weight: 500;">
+                    Supporting PaperPanda &#x2764;
+                </a> helps us expand our data limits and bring more insights into the app.
             </small>
         {% else %}
             Employee rating not available for <strong>{{ ticker }}</strong>.
