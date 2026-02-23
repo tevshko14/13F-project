@@ -642,14 +642,14 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
     with _lock:
         _increment_glassdoor_quota()
 
-    # Query RapidAPI Glassdoor endpoint
+    # Query RapidAPI Glassdoor company-search endpoint
     encoded_name = urllib.parse.quote(company_name)
     url = (
         f"https://real-time-glassdoor-data.p.rapidapi.com/"
-        f"company-overview?companyName={encoded_name}"
+        f"company-search?query={encoded_name}"
     )
 
-    raw = _http_get_json(
+    resp = _http_get_json(
         url,
         headers={
             "X-RapidAPI-Key": api_key,
@@ -660,7 +660,7 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
 
     now = time.time()
 
-    if not raw or not isinstance(raw, dict):
+    if not resp or not isinstance(resp, dict):
         logger.info("Glassdoor returned no data for %s (%s)", key, company_name)
         with _lock:
             _glassdoor_cache[key] = (now, None)
@@ -668,12 +668,29 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
             _persist_glassdoor_entry(key, now, None)
         return None
 
+    # Extract best match from search results — prefer stock ticker match
+    results = resp.get("data") or []
+    if not isinstance(results, list) or not results:
+        logger.info("Glassdoor search returned empty results for %s (%s)", key, company_name)
+        with _lock:
+            _glassdoor_cache[key] = (now, None)
+            _evict_oldest(_glassdoor_cache)
+            _persist_glassdoor_entry(key, now, None)
+        return None
+
+    # Try to match by stock ticker first, then fall back to first result
+    raw = results[0]
+    for r in results:
+        if str(r.get("stock", "")).upper() == key:
+            raw = r
+            break
+
     # Parse response — field names may vary by provider
-    overall = raw.get("overallRating") or raw.get("overall_rating")
+    overall = raw.get("overallRating") or raw.get("overall_rating") or raw.get("rating")
     if overall is None:
         ratings = raw.get("ratings") or raw.get("data") or {}
         if isinstance(ratings, dict):
-            overall = ratings.get("overallRating") or ratings.get("overall_rating")
+            overall = ratings.get("overallRating") or ratings.get("overall_rating") or ratings.get("rating")
 
     if overall is None:
         logger.info(
