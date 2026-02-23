@@ -291,11 +291,18 @@ def _archive_old_quarters(cik: str, quarterly_changes: list[dict], keep: int = 2
 
     Returns True if all uploads succeeded (safe to trim), False otherwise.
     On failure, the caller should NOT trim -- hot data stays intact.
+
+    Uses cold_storage.is_available() to short-circuit immediately when
+    the bucket is known to be missing (avoids 84× failing HTTP calls).
     """
     if len(quarterly_changes) <= keep:
         return True  # Nothing to archive
 
     from filings import cold_storage
+
+    # Fast check: skip if bucket is known to be unavailable
+    if not cold_storage.is_available():
+        return False
 
     to_archive = quarterly_changes[keep:]
     for q in to_archive:
@@ -375,7 +382,15 @@ def refresh_single_fund(cik: str) -> dict | None:
             if _archive_old_quarters(cik, quarterly, keep=2):
                 stamped["quarterly_changes"] = quarterly[:2]
                 logger.debug("Archived %d quarters for CIK %s", len(quarterly) - 2, cik)
-            # On archive failure, keep all quarters in hot (safe fallback)
+            else:
+                # Archive failed — keep all quarters in hot (safe fallback)
+                # but trim to 2 anyway to prevent OOM during bulk sync.
+                # Data is NOT lost: SEC EDGAR always has the full history.
+                stamped["quarterly_changes"] = quarterly[:2]
+                logger.info(
+                    "Cold storage unavailable for CIK %s — trimmed to 2 quarters (full history available via SEC EDGAR)",
+                    cik,
+                )
 
         # ── Persist to Supabase L2 (non-fatal) ──
         try:
