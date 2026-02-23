@@ -263,7 +263,7 @@
         font-size: 0.92em;
         margin-bottom: 1em;
     }
-    .feedback-section a.btn-feedback {
+    .feedback-section .btn-feedback {
         display: inline-block;
         background: var(--pp-surface);
         color: var(--pp-text);
@@ -272,12 +272,95 @@
         border-radius: 10px;
         font-size: 1em;
         font-weight: 600;
-        text-decoration: none;
+        cursor: pointer;
         transition: background 0.15s, color 0.15s;
     }
-    .feedback-section a.btn-feedback:hover {
+    .feedback-section .btn-feedback:hover {
         background: var(--pp-support-btn-bg);
         color: var(--pp-support-btn-text);
+    }
+
+    /* ── Feedback Modal ── */
+    .feedback-modal-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        justify-content: center;
+        align-items: center;
+        padding: 1.5em;
+    }
+    .feedback-modal-overlay.open {
+        display: flex;
+    }
+    .feedback-modal {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 16px;
+        width: 100%;
+        max-width: 620px;
+        max-height: 90vh;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        display: flex;
+        flex-direction: column;
+        animation: feedbackModalIn 0.25s ease;
+    }
+    @keyframes feedbackModalIn {
+        from { opacity: 0; transform: translateY(16px) scale(0.97); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .feedback-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1.2em 1.5em;
+        border-bottom: 1px solid var(--pp-border);
+    }
+    .feedback-modal-header h3 {
+        margin: 0;
+        font-size: 1.1em;
+    }
+    .feedback-modal-close {
+        background: none;
+        border: none;
+        font-size: 1.4em;
+        cursor: pointer;
+        color: var(--pp-text-muted);
+        padding: 0.2em;
+        line-height: 1;
+        border-radius: 6px;
+        transition: background 0.15s, color 0.15s;
+    }
+    .feedback-modal-close:hover {
+        background: var(--pp-surface-hover);
+        color: var(--pp-text);
+    }
+    .feedback-modal-body {
+        flex: 1;
+        overflow: hidden;
+    }
+    .feedback-modal-body iframe {
+        width: 100%;
+        height: 520px;
+        border: none;
+        display: block;
+    }
+    .feedback-modal-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 520px;
+        color: var(--pp-text-muted);
+        font-size: 0.9em;
+    }
+    @media (max-width: 640px) {
+        .feedback-modal { max-width: 100%; border-radius: 12px; }
+        .feedback-modal-body iframe { height: 440px; }
+        .feedback-modal-loading { height: 440px; }
     }
 
     /* ── Built-with-love ── */
@@ -417,10 +500,57 @@ function switchDonateTab(tab) {
     <p class="feedback-sub">
         What features do you want to see next? Found a bug? Your feedback drives what gets built.
     </p>
-    <a href="{{ feedback_link }}" target="_blank" rel="noopener" class="btn-feedback">
+    <button class="btn-feedback" onclick="openFeedbackModal()">
         Share Feedback
-    </a>
+    </button>
 </div>
+
+{# ── Feedback Modal ── #}
+<div class="feedback-modal-overlay" id="feedback-overlay" onclick="closeFeedbackModal(event)">
+    <div class="feedback-modal" onclick="event.stopPropagation()">
+        <div class="feedback-modal-header">
+            <h3>Share Feedback</h3>
+            <button class="feedback-modal-close" onclick="closeFeedbackModal()" aria-label="Close">&times;</button>
+        </div>
+        <div class="feedback-modal-body" id="feedback-modal-body">
+            <div class="feedback-modal-loading" id="feedback-loading">Loading form&hellip;</div>
+        </div>
+    </div>
+</div>
+
+{# ── Feedback Modal JS ── #}
+<script>
+var _feedbackLoaded = false;
+function openFeedbackModal() {
+    var overlay = document.getElementById('feedback-overlay');
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    if (!_feedbackLoaded) {
+        var url = '{{ feedback_link }}';
+        if (url && url.indexOf('placeholder') === -1) {
+            var iframe = document.createElement('iframe');
+            iframe.src = url;
+            iframe.title = 'Feedback Form';
+            iframe.onload = function() {
+                var loader = document.getElementById('feedback-loading');
+                if (loader) loader.style.display = 'none';
+            };
+            document.getElementById('feedback-modal-body').appendChild(iframe);
+            _feedbackLoaded = true;
+        } else {
+            document.getElementById('feedback-loading').textContent = 'Feedback form coming soon!';
+        }
+    }
+}
+function closeFeedbackModal(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('feedback-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+}
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeFeedbackModal();
+});
+</script>
 
 {# ── Footer note ── #}
 <div class="built-with-love">
