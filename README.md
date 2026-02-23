@@ -16,7 +16,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 ### Retail Page (`/retail`)
 - **Sentiment Tab** - CNN Fear & Greed gauge, summary cards (Most Mentioned, Biggest Rank Mover, Top 5 Trending)
 - **Leaderboard Tab** - ApeWisdom Reddit trending stocks table (sortable, expandable, lazy-loaded)
-- **Calendar Tab** - Finance YouTuber schedules and topics
+- **Calendar Tab** - Finance YouTube calendar with upcoming livestreams and recent uploads from 11 tracked channels, filterable by channel, with LIVE/VIDEO type tags and duration badges
 
 ### Top Funds Page (`/funds`)
 - **Funds Tab** - Overview of all 84 tracked institutional investors with HTMX lazy-loading
@@ -76,7 +76,9 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 | Sentiment | CNN, Finnhub, ApeWisdom, Alpha Vantage |
 | Vitals | People Data Labs, Glassdoor (RapidAPI), Apple iTunes |
 | Insider Data | OpenInsider (scraped) + Supabase `insider_trades` table |
-| Caching | Supabase Postgres (L2, survives deploys) + disk JSON (L3 fallback) |
+| YouTube Data | YouTube Data API v3 (activities, videos, search) |
+| Caching | Supabase Postgres (L2, survives deploys) + disk JSON (L3 fallback) + cold storage (Supabase Storage) |
+| Analytics | PostHog (product analytics) |
 | Hosting | Railway (auto-deploy from main) |
 | Domain | [paperpanda.io](https://paperpanda.io) |
 
@@ -126,6 +128,7 @@ railway up
 | `PANDA_FUND_RAISED` | No | - | Current month's donation total in dollars |
 | `FEEDBACK_LINK` | No | - | URL to feedback form (Notion, Google Form, etc.) |
 | `ENABLE_BACKGROUND_REFRESH` | No | - | Enable/disable background 13F refresh (default: `true`) |
+| `YOUTUBE_API_KEY` | No | 10,000 units/day | YouTube Data API v3 key (for Calendar tab sync) |
 
 > **Note:** The App Store ratings feature requires no API key (Apple's public iTunes API).
 > Without Supabase env vars, the app works identically using disk-only cache.
@@ -146,6 +149,10 @@ src/filings/
 ├── supabase_cache.py   # Supabase L2 persistent cache (survives deploys)
 ├── insider_trading.py  # Form 4 insider transaction data (Supabase-first + scrape fallback)
 ├── insider_sync.py     # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
+├── youtube.py          # YouTube calendar data layer (L1→L2→L3 tiered cache)
+├── youtube_sync.py     # Cron worker: YouTube Data API → upsert to Supabase (every 6 hours)
+├── cold_storage.py     # Cold storage layer (Supabase Storage for archived 13F quarters)
+├── sync_worker.py      # Cron worker: SEC EDGAR 13F sync (every 12h, with cold storage archival)
 ├── models.py           # Dataclasses (data contracts)
 ├── watchlist.py        # Watchlist persistence
 ├── notifications.py    # Filing notification engine + filing season detection
@@ -174,6 +181,7 @@ src/filings/
         ├── insider_trades.html      # Insider trading table (global)
         ├── stock_insider_trades.html # Insider trades (per-ticker)
         ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded)
+        ├── retail_calendar.html    # YouTube calendar: upcoming streams + recent uploads (lazy-loaded)
         ├── compare_content.html     # Compare quarters (lazy-loaded)
         └── data_error.html          # Reusable error partial (rate limits, HTMX-aware)
 ```
@@ -190,7 +198,11 @@ All endpoints are **cache-first** — data is always served from cache, and exte
 | L2 | Supabase Postgres (`api_cache` table) | **Yes** | ~50ms |
 | L3 | Disk JSON (`~/.13f-cache/`) | Only with volume mount | ~5ms |
 
-On startup, L1 is hydrated from Supabase (one query for all ~100 funds). If Supabase is unavailable, falls back to disk. Every successful API fetch writes through to all tiers. Expired L2 data is returned as stale fallback (never dropped on TTL expiry).
+On startup, L1 is hydrated from Supabase using **delta detection**: content hashes are compared to a local hash file, and only funds whose data actually changed are fetched (~2 KB hash query vs ~30-40 MB full load). If Supabase is unavailable, falls back to disk. Every successful API fetch writes through to all tiers. Expired L2 data is returned as stale fallback (never dropped on TTL expiry).
+
+#### Cold Storage (Supabase Storage)
+
+Quarterly data older than 2 quarters is archived to the `paperpanda-archive` Supabase Storage bucket as JSON files. The hot Postgres cache only keeps the 2 most recent quarters per fund, keeping blob sizes small. A circuit-breaker pattern disables cold storage operations for the entire process if the bucket is unavailable.
 
 #### Insider Trades (4-tier with stale fallback)
 
@@ -203,6 +215,16 @@ On startup, L1 is hydrated from Supabase (one query for all ~100 funds). If Supa
 
 The `insider_sync` cron worker scrapes OpenInsider every 30 minutes and upserts to Supabase. If all upstream sources fail, stale L1 data is returned instead of empty results.
 
+### Cron Workers (Railway Cron Jobs)
+
+| Worker | Entry Point | Frequency | Data Source | Target |
+|--------|------------|-----------|-------------|--------|
+| 13F Sync | `uv run filings-sync` | Every 12h (2h filing season) | SEC EDGAR | `api_cache` table + cold storage |
+| Insider Sync | `uv run filings-insider-sync` | Every 30 min | OpenInsider scrape | `insider_trades` table |
+| YouTube Sync | `uv run filings-youtube-sync` | Every 6h | YouTube Data API v3 | `youtube_events` + `youtube_channels` tables |
+
+All workers use **skip-existing optimization**: before upserting, they fetch existing keys (lightweight query) and only send genuinely new/changed data to Supabase, minimizing egress.
+
 ### What gets cached in Supabase
 
 | Category | Data | TTL |
@@ -213,7 +235,9 @@ The `insider_sync` cron worker scrapes OpenInsider every 30 minutes and upserts 
 | `pdl` | People Data Labs employee data per ticker | 7 days |
 | `pdl_quota` | Monthly PDL API call counter (100/month limit) | Never expires |
 | `appstore` | Apple App Store ratings per ticker | 7 days |
-| `insider_trades` | Insider trades (dedicated table, upsert-only) | No TTL (data persists) |
+| `insider_trades` | Insider trades (dedicated table, upsert-only) | No TTL (30-day retention) |
+| `youtube_events` | Upcoming livestreams + recent uploads from 11 finance channels | No TTL (30-day retention) |
+| `youtube_channels` | Channel metadata (subscribers, views, post frequency) | No TTL (updated every 6h) |
 
 ### TTL by data type
 
