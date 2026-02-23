@@ -472,7 +472,8 @@
         applyFilters();
     };
 
-    /* Convert timestamps to relative time */
+    /* Convert timestamps to pretty relative/absolute time */
+    var _months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     document.querySelectorAll('[data-published]').forEach(function(el) {
         try {
             var pub = new Date(el.dataset.published);
@@ -482,7 +483,9 @@
             if (diff < 60) text = 'Just now';
             else if (diff < 3600) text = Math.floor(diff / 60) + 'm ago';
             else if (diff < 86400) text = Math.floor(diff / 3600) + 'h ago';
-            else text = Math.floor(diff / 86400) + 'd ago';
+            else if (diff < 604800) text = Math.floor(diff / 86400) + 'd ago';
+            else if (pub.getFullYear() === now.getFullYear()) text = _months[pub.getMonth()] + ' ' + pub.getDate();
+            else text = _months[pub.getMonth()] + ' ' + pub.getDate() + ', ' + pub.getFullYear();
             el.textContent = text;
         } catch(e) {}
     });
