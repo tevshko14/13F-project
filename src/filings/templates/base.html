@@ -70,6 +70,19 @@
             --pp-tag-bg: #f4f4f5;
             --pp-tag-text: #3f3f46;
             --pp-tag-hover: #e4e4e7;
+            --pp-chart-axis: #27272a;
+            --pp-chart-axis-secondary: #71717a;
+            --pp-chart-axis-muted: #a1a1aa;
+            --pp-chart-grid: rgba(0, 0, 0, 0.06);
+            --pp-chart-grid-zero: rgba(0, 0, 0, 0.25);
+            --pp-chart-legend: #52525b;
+            --pp-gauge-indicator: #000;
+            --pp-neutral-badge-bg: #f5f5f5;
+            --pp-neutral-badge-text: #616161;
+            --pp-info-text: #666;
+            --pp-sub-text: #888;
+            --pp-sub-text-light: #999;
+            --pp-neutral-orange-bg: #fff3e0;
         }
         :root[data-theme="dark"] {
             --pp-surface: #1a1a1e;
@@ -104,6 +117,19 @@
             --pp-tag-bg: #2a2a2e;
             --pp-tag-text: #d4d4d8;
             --pp-tag-hover: #333338;
+            --pp-chart-axis: #d4d4d8;
+            --pp-chart-axis-secondary: #a1a1aa;
+            --pp-chart-axis-muted: #71717a;
+            --pp-chart-grid: rgba(255, 255, 255, 0.08);
+            --pp-chart-grid-zero: rgba(255, 255, 255, 0.3);
+            --pp-chart-legend: #a1a1aa;
+            --pp-gauge-indicator: #fff;
+            --pp-neutral-badge-bg: #333338;
+            --pp-neutral-badge-text: #a1a1aa;
+            --pp-info-text: #a1a1aa;
+            --pp-sub-text: #a1a1aa;
+            --pp-sub-text-light: #71717a;
+            --pp-neutral-orange-bg: rgba(230, 81, 0, 0.15);
         }
 
         .htmx-indicator { display: none; }
@@ -223,6 +249,20 @@
         .badge-bullish { background: #dcfce7; color: #166534; }
         .badge-bearish { background: #ffe4e6; color: #9f1239; }
         .badge-mixed { background: #fef9c3; color: #a16207; }
+
+        /* Dark mode badge overrides */
+        :root[data-theme="dark"] .badge-new,
+        :root[data-theme="dark"] .badge-add,
+        :root[data-theme="dark"] .badge-bullish { background: rgba(46, 125, 50, 0.18); color: #6fcf7c; }
+        :root[data-theme="dark"] .badge-reduce,
+        :root[data-theme="dark"] .badge-sold,
+        :root[data-theme="dark"] .badge-bearish { background: rgba(198, 40, 40, 0.18); color: #f87171; }
+        :root[data-theme="dark"] .badge-new-entry { background: rgba(124, 58, 237, 0.18); color: #b49aff; }
+        :root[data-theme="dark"] .badge-heavy-add { background: #166534; color: #6fcf7c; }
+        :root[data-theme="dark"] .badge-trim { background: rgba(194, 65, 12, 0.18); color: #fb923c; }
+        :root[data-theme="dark"] .badge-liquidated { background: rgba(251, 113, 133, 0.15); color: #fb7185; }
+        :root[data-theme="dark"] .badge-mixed { background: rgba(161, 98, 7, 0.18); color: #fbbf24; }
+        :root[data-theme="dark"] .badge-neutral { background: var(--pp-surface-hover); color: var(--pp-text-secondary); }
 
         /* Activity stats bar (sticky header) */
         .activity-stats-bar {

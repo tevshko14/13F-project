@@ -32,6 +32,9 @@
     if (existing) existing.dispose();
 
     var chart = echarts.init(container);
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var borderColor = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.4)';
+    var labelBg = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.25)';
 
     chart.setOption({
         tooltip: {
@@ -68,7 +71,7 @@
             levels: [
                 {
                     itemStyle: {
-                        borderColor: 'rgba(0,0,0,0.4)',
+                        borderColor: borderColor,
                         borderWidth: 2,
                         gapWidth: 2
                     },
@@ -78,7 +81,7 @@
                         fontSize: 11,
                         fontWeight: 'bold',
                         color: '#fff',
-                        backgroundColor: 'rgba(0,0,0,0.25)',
+                        backgroundColor: labelBg,
                         padding: [2, 6]
                     }
                 },
