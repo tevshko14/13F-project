@@ -9,11 +9,11 @@ Usage:
     uv run filings-youtube-sync
 
 Quota budget (10,000 units/day):
-    search.list:     15 channels x 100 units x 4 polls = 6,000
+    search.list:     11 channels x 100 units x 4 polls = 4,400
     channels.list:   1 batch call x 1 unit x 4 polls   =     4
-    activities.list: 15 channels x 1 unit x 4 polls    =    60
+    activities.list: 11 channels x 1 unit x 4 polls    =    44
     videos.list:     ~5 batch calls x 1 unit x 4 polls =    20
-    Total: ~6,084 units/day (61% of 10,000 quota)
+    Total: ~4,468 units/day (45% of 10,000 quota)
 """
 
 from __future__ import annotations
@@ -55,26 +55,6 @@ logger = logging.getLogger(__name__)
 # Channel IDs resolved manually. baseline is approximate from known schedules.
 
 _CHANNELS: dict[str, dict] = {
-    "UCUvvj5lwue7PspotMDjk5UA": {
-        "name": "Meet Kevin",
-        "handle": "@MeetKevin",
-        "baseline_posts_per_week": 7.0,
-    },
-    "UCV6KDgJskWaEckne5aPA0aQ": {
-        "name": "Graham Stephan",
-        "handle": "@GrahamStephan",
-        "baseline_posts_per_week": 3.5,
-    },
-    "UCGy7SkBjcIAgTiwkXEtPnYg": {
-        "name": "Andrei Jikh",
-        "handle": "@AndreiJikh",
-        "baseline_posts_per_week": 2.5,
-    },
-    "UCJwKCyEIFHwUOPQQ-4kC1Zw": {
-        "name": "Tom Nash",
-        "handle": "@TomNashYT",
-        "baseline_posts_per_week": 3.5,
-    },
     "UCnMn36GT_H0X-w5_ckLtlgQ": {
         "name": "Financial Education",
         "handle": "@FinancialEducation",
@@ -86,12 +66,12 @@ _CHANNELS: dict[str, dict] = {
         "baseline_posts_per_week": 2.0,
     },
     "UChvd7RCRJS50RWlwbfcwr3A": {
-        "name": "Fun of Investing",
+        "name": "Tevis (FunOfInvesting)",
         "handle": "@FunofInvesting",
         "baseline_posts_per_week": 7.0,
     },
     "UCyZNir5FhvazX5L3_Q77UbA": {
-        "name": "Real Matt Money",
+        "name": "MattMoney",
         "handle": "@RealMattMoney",
         "baseline_posts_per_week": 7.0,
     },

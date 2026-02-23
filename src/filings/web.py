@@ -1015,14 +1015,10 @@ async def support_page(request: Request):
 # --- Retail Traders (hidden — no nav link) ---
 
 _FINANCE_YOUTUBERS = [
-    {"name": "Meet Kevin", "channel": "https://youtube.com/@MeetKevin", "schedule": "Daily ~9am ET", "topics": "Markets, Real Estate, Fed"},
-    {"name": "Graham Stephan", "channel": "https://youtube.com/@GrahamStephan", "schedule": "3-4x/week", "topics": "Personal Finance, Real Estate"},
-    {"name": "Andrei Jikh", "channel": "https://youtube.com/@AndreiJikh", "schedule": "2-3x/week", "topics": "Investing, Crypto"},
-    {"name": "Tom Nash", "channel": "https://youtube.com/@TomNashYT", "schedule": "3-4x/week", "topics": "Tech Stocks, Growth Investing"},
     {"name": "Financial Education", "channel": "https://youtube.com/@FinancialEducation", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
     {"name": "Joseph Carlson", "channel": "https://youtube.com/@JosephCarlsonShow", "schedule": "2x/week", "topics": "Dividend Investing, Portfolio Updates"},
-    {"name": "Fun of Investing", "channel": "https://youtube.com/@FunofInvesting", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
-    {"name": "Real Matt Money", "channel": "https://youtube.com/@RealMattMoney", "schedule": "Daily", "topics": "Investing, Market News"},
+    {"name": "Tevis (FunOfInvesting)", "channel": "https://youtube.com/@FunofInvesting", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
+    {"name": "MattMoney", "channel": "https://youtube.com/@RealMattMoney", "schedule": "Daily", "topics": "Investing, Market News"},
     {"name": "Kross Roads", "channel": "https://youtube.com/@Kross_Roads", "schedule": "Daily", "topics": "Stock Analysis, Growth Investing"},
     {"name": "Dividend Streams", "channel": "https://youtube.com/@DividendStreams", "schedule": "Daily", "topics": "Dividends, Income Investing"},
     {"name": "Futurenvesting", "channel": "https://youtube.com/@Futurenvesting", "schedule": "Daily", "topics": "Investing, Future Trends"},
@@ -1112,7 +1108,7 @@ async def retail_calendar_api(request: Request):
     try:
         events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
         channels = await asyncio.to_thread(youtube.get_channels)
-        recent = await asyncio.to_thread(youtube.get_recent_uploads, 20)
+        recent = await asyncio.to_thread(youtube.get_recent_uploads, 50)
     except Exception:
         logger.exception("Calendar API: unexpected error in data fetch")
         events, channels, recent = [], youtube._STATIC_CHANNELS, []
@@ -1141,7 +1137,7 @@ async def retail_calendar_data(request: Request):
     try:
         events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
         channels = await asyncio.to_thread(youtube.get_channels)
-        recent = await asyncio.to_thread(youtube.get_recent_uploads, 20)
+        recent = await asyncio.to_thread(youtube.get_recent_uploads, 50)
     except Exception:
         logger.exception("Calendar data API: unexpected error in data fetch")
         events, channels, recent = [], youtube._STATIC_CHANNELS, []
