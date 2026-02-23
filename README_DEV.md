@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-22 (Background refresh, vitals persistence, Panda Fund support page, Stripe embed, homepage widget)
+> Last updated: 2026-02-23 (YouTube calendar sync, cold storage, PostHog analytics, egress optimization, circuit-breaker patterns)
 
 ---
 
@@ -108,22 +108,26 @@ uv run filings-web          # starts at http://localhost:8000
 ┌────────────────────────────────────────────────────────────┐
 │                      cache.py                              │
 │  3-Tier Cache: L1 in-memory → L2 Supabase → L3 disk       │
-│  Stale-While-Revalidate pattern                            │
+│  Stale-While-Revalidate + Delta Detection                  │
 │                                                            │
-│  • load_cache_from_supabase()  (L2: Supabase hydration)    │
+│  • load_cache_from_supabase()  (L2: delta-aware hydration) │
+│  • _load_cache_from_supabase_full() (full fallback load)   │
 │  • load_cache() → dict         (L3: read from disk)        │
 │  • save_cache(data)            (L3: atomic write)          │
 │  • is_cache_stale() → bool     (overall file staleness)    │
 │  • is_fund_stale(fund_data)    (per-fund _last_refreshed)  │
 │  • get_stale_ciks(cache, ciks) (selective refresh list)    │
 │  • stamp_fund_data(data)       (add _last_refreshed ts)    │
-│  • refresh_single_fund(cik)    (fetch + write-through L2)  │
+│  • refresh_single_fund(cik)    (fetch + archive + trim)    │
+│  • _archive_old_quarters()     (cold storage archival)     │
+│  • load_historical_quarters()  (cold storage retrieval)    │
 │  • _get_effective_ttl_seconds()(TTL in seconds for L2)     │
 │  • get_cache_age_str() → str   ("5 min ago")               │
 │                                                            │
 │  TTL: 7 days (off-season) / 12 hours (filing season)       │
 │  Cache keys = CIK without leading zeros ("1067983")        │
 │  Supabase keys = "13f:{CIK}" with category "13f"           │
+│  Content-hash: SHA-256 change detection (skip unchanged)   │
 └────────────────────┬───────────────────────────────────────┘
                      │
           ┌──────────┴──────────┐
@@ -156,7 +160,8 @@ uv run filings-web          # starts at http://localhost:8000
 ```
 1. User visits http://localhost:8000/
 2. web.py lifespan (startup):
-   a. load_cache_from_supabase() → ~100 funds from Supabase (single query)
+   a. load_cache_from_supabase() → delta detection via content hashes (~2 KB),
+      only fetches funds that changed since last deploy (zero egress if unchanged)
    b. If Supabase empty/down → load_cache() from disk (fallback)
    c. Starts _prefetch_market_data(app) background task (S&P 500 data, ~30-60s)
    d. If any funds stale → triggers _background_refresh() (per-fund TTL)
@@ -214,7 +219,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
-    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache + insider_trades tables)
+    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache + insider_trades + youtube_events/channels + sync_logs)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification engine: detection, matching, persistence, filing season
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
@@ -224,6 +229,10 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── company_filings.py            # SEC filing links for stock pages
     ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale)
     ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
+    ├── youtube.py                    # YouTube calendar data layer (L1→L2→L3 tiered cache, channel fallbacks)
+    ├── youtube_sync.py               # Cron worker: YouTube Data API v3 → upsert to Supabase (every 6h)
+    ├── cold_storage.py               # Cold storage: Supabase Storage bucket for archived 13F quarters (circuit-breaker)
+    ├── sync_worker.py                # Cron worker: SEC EDGAR 13F sync (every 12h, hot/cold archival, OOM-safe)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -260,6 +269,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── insider_trades.html     # Insider trading table — global screener (lazy-loaded)
             ├── stock_insider_trades.html # Insider trading table — per-ticker (lazy-loaded)
             ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded into retail page)
+            ├── retail_calendar.html    # YouTube calendar: upcoming streams + recent uploads with channel filters
             ├── compare_content.html    # Compare quarters partial (lazy-loaded into investor page)
             └── data_error.html         # Reusable error partial (rate limit CTA, generic fallback, HTMX-aware)
 ```
@@ -697,10 +707,15 @@ TTL Configuration:
   Filing season (±15 days of deadline): 12 hours
   Filing deadlines: Feb 14, May 15, Aug 14, Nov 14
 
-Startup (hydration priority):
-  1. load_cache_from_supabase() → all ~100 funds from Supabase (single query)
-  2. If Supabase empty/down → load_cache() from disk (fallback)
-  3. Check per-fund staleness → trigger background refresh for stale funds
+Startup (hydration priority — delta-aware):
+  1. load_cache_from_supabase() with content-hash change detection:
+     a. Fetch all {cache_key, content_hash} pairs (~2 KB for 84 funds)
+     b. Compare against local fund_hashes.json from last startup
+     c. Only download funds whose hash changed (typically 0 outside filing season)
+     d. Unchanged funds loaded from local disk cache (zero Supabase egress)
+  2. If no hashes exist (first deploy) → _load_cache_from_supabase_full()
+  3. If Supabase empty/down → load_cache() from disk (fallback)
+  4. Check per-fund staleness → trigger background refresh for stale funds
 
 Background refresh (selective, write-through):
   1. get_stale_ciks(cache, all_ciks) → only CIKs whose _last_refreshed is expired
@@ -856,8 +871,74 @@ Dedicated insider trading system with its own Supabase table and sync worker.
 **Sync worker (`insider_sync.py`):**
 - Entry point: `uv run filings-insider-sync`
 - Scrapes 3 OpenInsider pages (all, purchases, sales) with 3-second delays
-- Deduplicates by `sec_url`, upserts to Supabase in chunks of 50
+- Deduplicates by `sec_url`, skips existing rows (fetches `sec_url` keys first), upserts only new trades
 - Logs to `sync_logs` table for observability
+
+### 5.15 YouTube Sync Worker (`youtube_sync.py`)
+
+Polls 11 tracked finance YouTube channels every 6 hours for upcoming livestreams and recent uploads.
+
+**Entry point:** `uv run filings-youtube-sync`
+
+**YouTube Data API v3 usage:**
+- `activities.list` (1 unit/request) — detect recent uploads
+- `search.list` (100 units/request) — find upcoming livestreams
+- `videos.list` with `contentDetails,liveStreamingDetails,statistics,snippet` — fetch duration, view count, live status
+
+**Quota:** ~4,488 units/day across 4 runs (~45% of 10,000 daily limit)
+
+**Features:**
+- ISO 8601 duration parsing (`PT1H2M30S` → `1:02:30`)
+- Content type detection (video/live/upcoming/was_live)
+- Skip-existing optimization: fetches existing `video_id` keys before upserting
+- Still re-upserts `upcoming` events since their status may change
+
+**Tracked channels:** 11 finance YouTubers including Meet Kevin, Graham Stephan, Steven Fiorillo, Couch Investor, etc.
+
+### 5.16 13F Sync Worker (`sync_worker.py`)
+
+Refreshes all 84 superinvestor fund data from SEC EDGAR.
+
+**Entry point:** `uv run filings-sync`
+
+**Hot/cold archival:**
+- Fetches fresh data from SEC EDGAR for each stale fund
+- Archives quarters 3+ to cold storage (`paperpanda-archive` Supabase Storage bucket)
+- Trims to 2 quarters in hot Postgres cache (prevents OOM)
+- If cold storage unavailable, still trims (full history available from SEC EDGAR)
+
+**Content-hash change detection:**
+- Computes SHA-256 hash of fund data before writing
+- If hash matches stored `content_hash`, skips full JSONB upsert (only bumps TTL)
+- ~95% of syncs are no-ops outside filing season
+
+**OOM prevention:**
+- Lightweight CIK lookup (`get_cache_keys_by_category` fetches only keys, not 30MB of JSONB)
+- `gc.collect()` after each fund
+- Memory logging via `resource.getrusage` every 10 funds
+
+### 5.17 Cold Storage (`cold_storage.py`)
+
+Archives older 13F quarterly data to Supabase Storage (S3-compatible).
+
+**Bucket:** `paperpanda-archive` (private, created via `ensure_bucket()`)
+
+**Circuit-breaker pattern:**
+- `_bucket_status` module-level flag tracks bucket availability
+- `is_available()` performs one-time lazy check on first call
+- If bucket missing and creation fails, all subsequent calls short-circuit instantly
+- Prevents 84× failing HTTP calls during sync when bucket is unavailable
+
+### 5.18 Egress Optimization
+
+Supabase free tier has 5 GB/month egress. Optimizations across all layers:
+
+| Layer | Before | After |
+|---|---|---|
+| **Startup hydration** | Pull all 84 fund blobs (~30-40 MB) | Delta: compare content hashes (~2 KB), only fetch changed funds |
+| **13F sync writes** | Upsert all 84 funds every run | Content-hash: skip unchanged funds, TTL-only bump |
+| **Insider sync** | Upsert ~300 trades every 30 min | Skip-existing: fetch `sec_url` keys first, only send new trades |
+| **YouTube sync** | Upsert all events every 6h | Skip-existing: fetch `video_id` keys first, only send new events |
 
 ### 5.12 Panda Fund & Stripe Integration (`web.py` + `support.html`)
 
@@ -916,7 +997,14 @@ JS function (same pattern as grand_portfolio's `.gp-subtab`). URL synced via `hi
 |---|---|---|
 | Sentiment | CNN Fear & Greed + ApeWisdom top stocks | Server-rendered: gauge + summary cards |
 | Leaderboard | ApeWisdom all-stocks (pages 1-5) | Lazy-loaded via `fetch('/api/retail/leaderboard')` |
-| Calendar | `_FINANCE_YOUTUBERS` static list in `web.py` | Server-rendered: YouTuber schedule table |
+| Calendar | YouTube Data API v3 → Supabase `youtube_events` + `youtube_channels` | Lazy-loaded via `fetch('/api/retail/calendar')` |
+
+**Calendar tab details:**
+- 11 tracked finance YouTube channels (synced every 6h by `youtube_sync.py`)
+- Upcoming livestreams section + recent uploads grid
+- Channel avatar filter strip (click to filter by channel)
+- LIVE/VIDEO type tags on video cards with duration badges
+- Powered by `youtube.py` data layer with L1 memory → L2 Supabase → L3 static fallback
 
 **Summary cards (Sentiment tab):**
 - Most Mentioned: ticker with highest mention count
@@ -1389,7 +1477,9 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Vitals tab: Glassdoor ratings, People Data Labs employee data, Apple App Store ratings
 - [x] Insider trading global screener page (dedicated `/insider-trading` route)
 - [x] Insider sync cron worker: scrape OpenInsider → upsert to Supabase every 30 min
-- [x] Retail page (`/retail`): Sentiment, Leaderboard (ApeWisdom), Calendar (YouTuber schedules)
+- [x] YouTube sync cron worker: YouTube Data API v3 → Supabase every 6h (11 channels, upcoming streams + uploads)
+- [x] YouTube Calendar tab: channel filter strip, LIVE/VIDEO tags, duration badges, lazy-loaded
+- [x] Retail page (`/retail`): Sentiment, Leaderboard (ApeWisdom), Calendar (YouTube sync)
 - [x] Nav restructure: Home | Retail | Funds | Insiders (renamed `/grand-portfolio` → `/funds`)
 - [x] Stale-while-revalidate for 13F fund data (never drop data on TTL expiry)
 - [x] Stale-while-revalidate for insider trades (4-tier fallback, never show errors)
@@ -1400,6 +1490,10 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Homepage support widget: Panda Fund progress bar + Stripe Pricing Table embed
 - [x] HTMX-aware error handling: inline data_error.html partial for 429/rate-limit errors with Panda Fund CTA
 - [x] Nav update: replaced auth buttons with "Support the Panda" CTA
+- [x] PostHog analytics: stock_search, fund_viewed, youtube_video_click, retail_tab_switch, dark_mode_toggle
+- [x] 13F sync worker: SEC EDGAR → Supabase every 12h with hot/cold archival, OOM prevention, content-hash change detection
+- [x] Cold storage: Supabase Storage bucket for archived 13F quarterly data with circuit-breaker pattern
+- [x] Egress optimization: content-hash delta detection on startup, skip-existing on all sync workers
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
@@ -1434,6 +1528,11 @@ they don't get re-introduced.
 | Server unresponsive after 84 superinvestor expansion | `save_cache()` called synchronously after every fund during background refresh (84× disk writes blocking event loop); `notifications.json` and `watchlist.json` read from disk on every HTTP request; 84 HTMX lazy-loads fired simultaneously | Batched cache writes (every 10 funds, via `asyncio.to_thread`); in-memory caching for notification/watchlist state; staggered HTMX lazy-loads (3 per second); fire-and-forget disk saves in fund_row endpoint |
 | 13F fund data disappearing after TTL expiry | `load_cache_from_supabase()` called `get_cached()` which returns `None` when TTL expires, causing all fund data to vanish until the sync worker refreshes | Switched to `get_cached_with_stale()` which returns expired data as stale fallback; added L2 Supabase fallback to all fund web endpoints with L1 promotion |
 | Insider trades "failed to load" on deploy | When L1 TTL expires and Supabase query fails (transient), `get_latest_insider_trades()` fell through to OpenInsider scrape which also failed, returning empty list | Added `_get_cached_with_stale()` to insider_trading.py; both global and per-ticker functions now use 4-tier fallback (L1 fresh → L2 Supabase → L3 scrape → L4 stale L1), never returning empty results if data was previously loaded |
+| YouTube channel filter clicks do nothing | `<script>` tags injected via `innerHTML` don't execute per browser spec | Re-create script elements with `document.createElement('script')` in retail.html's `loadCalendar()` and `loadLeaderboard()` |
+| Stale upcoming livestreams from 2017/2021 | `get_youtube_events()` had no date filter — returned any row with `event_type='upcoming'` regardless of age | Added `.gte("scheduled_at", cutoff)` where cutoff is 6 hours ago |
+| 13F sync crash: "Bucket not found" | `paperpanda-archive` Supabase Storage bucket never created; 84 funds each tried to upload and failed, accumulating untrimmed data until OOM | Circuit-breaker in cold_storage.py: one-time check, then short-circuit all calls. Always trim to 2 quarters even on archive failure. |
+| 13F sync OOM on Railway | `get_all_by_category("13f")` loaded all 84 fund JSONB blobs (~30MB) just to check CIK existence | Replaced with `get_cache_keys_by_category()` (fetches only key strings). Added `gc.collect()` + memory logging. |
+| Supabase egress limit exceeded (8 GB / 5 GB) | Every deploy pulled all 84 fund blobs; sync workers re-uploaded identical data every run | Content-hash change detection for 13F; skip-existing for insider/YouTube; delta startup hydration |
 
 ---
 
@@ -1441,8 +1540,8 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-22 (background refresh, vitals
-> persistence, Panda Fund support page, Stripe embed, homepage widget).
+> This file documents the system as of 2026-02-23 (YouTube calendar sync,
+> cold storage, PostHog analytics, egress optimization, circuit-breaker patterns).
 > If told "Context is drifting," the first action should be to re-read
 > `/Users/Tevis_1/13F-project/README_DEV.md` and reconcile any discrepancies
 > with the actual code.

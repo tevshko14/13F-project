@@ -955,10 +955,10 @@ _STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 _STRIPE_BUY_BUTTON_ID = os.environ.get("STRIPE_BUY_BUTTON_ID", "")        # buy_btn_...
 _STRIPE_PRICING_TABLE_ID = os.environ.get("STRIPE_PRICING_TABLE_ID", "")  # prctbl_...
 
-# Feedback form link (Notion form, Google Form, Canny, etc.)
+# Feedback form link (Tally embed, or any iframe-friendly form URL)
 _FEEDBACK_LINK = os.environ.get(
     "FEEDBACK_LINK",
-    "https://paperpanda.notion.site/placeholder",  # replaced with real link via env var
+    "https://tally.so/r/5BzA1d",
 )
 
 _PANDA_FUND_MONTHLY_GOAL = 400  # Cap displayed on frontend
