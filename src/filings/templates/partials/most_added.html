@@ -54,6 +54,11 @@
         var tickers = data.map(function(d) { return d.ticker || (d.cusip || '').substring(0, 6); });
         var counts = data.map(function(d) { return d.add_count; });
 
+        var cs = getComputedStyle(document.documentElement);
+        var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+        var axisSecondary = cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a';
+        var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
         chart.setOption({
             grid: { left: 40, right: 16, top: 10, bottom: 60 },
             xAxis: {
@@ -63,14 +68,19 @@
                     rotate: 45,
                     fontSize: 10,
                     fontWeight: 'bold',
-                    fontFamily: 'monospace'
+                    fontFamily: 'monospace',
+                    color: axisColor
                 },
-                axisTick: { alignWithLabel: true }
+                axisLine: { lineStyle: { color: gridColor } },
+                axisTick: { alignWithLabel: true, lineStyle: { color: gridColor } }
             },
             yAxis: {
                 type: 'value',
                 name: '# Added',
-                nameTextStyle: { fontSize: 10 },
+                nameTextStyle: { fontSize: 10, color: axisSecondary },
+                axisLabel: { color: axisSecondary },
+                axisLine: { lineStyle: { color: gridColor } },
+                splitLine: { lineStyle: { color: gridColor } },
                 minInterval: 1
             },
             tooltip: {
