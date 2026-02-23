@@ -550,6 +550,10 @@ function closeFeedbackModal(e) {
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') closeFeedbackModal();
 });
+// Auto-open modal when linked from other pages (e.g. /support#feedback)
+if (window.location.hash === '#feedback') {
+    openFeedbackModal();
+}
 </script>
 
 {# ── Footer note ── #}
