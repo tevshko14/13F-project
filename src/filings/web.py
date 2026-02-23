@@ -926,6 +926,7 @@ async def vitals_data(request: Request, ticker: str):
         "has_pdl_key": vitals.has_pdl_key(),
         "glassdoor_age": vitals.get_glassdoor_age_str(ticker),
         "glassdoor_quota_exhausted": vitals.get_glassdoor_quota_info()["exhausted"],
+        "pdl_quota_exhausted": vitals.get_pdl_quota_info()["exhausted"],
     })
 
 
