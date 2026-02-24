@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+
 from filings.models import AnalystRating
 
 # ── Thread lock + cache ──────────────────────────────────────────────
@@ -190,14 +192,17 @@ def get_analyst_ratings(ticker: str) -> list[AnalystRating]:
     """Get merged analyst ratings for a ticker.
 
     Uses in-memory cache (5 min TTL). Fetches from Finnhub (if API key
-    is set) and yfinance, then merges and deduplicates.
+    is set) and yfinance **in parallel**, then merges and deduplicates.
     """
     cached = _get_cached(ticker)
     if cached is not None:
         return cached
 
-    finnhub_data = _fetch_finnhub(ticker)
-    yf_data = _fetch_yfinance(ticker)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        f_finnhub = executor.submit(_fetch_finnhub, ticker)
+        f_yf = executor.submit(_fetch_yfinance, ticker)
+        finnhub_data = f_finnhub.result()
+        yf_data = f_yf.result()
 
     merged = _merge_ratings(finnhub_data, yf_data)
 
