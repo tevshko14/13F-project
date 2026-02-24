@@ -19,6 +19,7 @@ dependencies = [
     "PyJWT>=2.0",
     "httpx>=0.27",
     "python-dotenv>=1.0",
+    "stripe>=9.0",
 ]
 
 [project.optional-dependencies]

@@ -3,8 +3,6 @@
 {% block meta_description %}PaperPanda tracks superinvestor 13F filings, insider trading, analyst ratings, and market news — all in one place. See what Buffett, Ackman, and top investors are buying.{% endblock %}
 {% block og_title %}PaperPanda — Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
 {% block content %}
-{# Stripe pricing table — loaded async, no performance impact #}
-<script async src="https://js.stripe.com/v3/pricing-table.js"></script>
 
 {# ── Hero Section ── #}
 <div style="text-align: center; margin-bottom: 0.5em;">
@@ -291,18 +289,17 @@
                 ${{ panda_raised }} / ${{ panda_goal }} this month
             </div>
         </div>
-        {% if stripe_publishable_key and stripe_pricing_table_id %}
-        <div class="pw-pricing-table">
-            <stripe-pricing-table
-                pricing-table-id="{{ stripe_pricing_table_id }}"
-                publishable-key="{{ stripe_publishable_key }}"
-            ></stripe-pricing-table>
+        <div class="pw-tier-pills">
+            <a href="/support#monthly" class="pw-tier-pill" onclick="sessionStorage.setItem('supportTab','monthly')">
+                &#x1F38B; Bamboo <strong>$5/mo</strong>
+            </a>
+            <a href="/support#monthly" class="pw-tier-pill pw-tier-popular" onclick="sessionStorage.setItem('supportTab','monthly')">
+                &#x1F43C; Panda <strong>$15/mo</strong>
+            </a>
+            <a href="/support#monthly" class="pw-tier-pill" onclick="sessionStorage.setItem('supportTab','monthly')">
+                &#x1F451; Giant Panda <strong>$30/mo</strong>
+            </a>
         </div>
-        {% else %}
-        <div class="pw-fallback">
-            <a href="/support" class="pw-fallback-btn">View Support Tiers</a>
-        </div>
-        {% endif %}
         <a href="/support" class="pw-learn-more">Learn more about the Panda Fund &rarr;</a>
     </div>
 </div>
@@ -594,26 +591,36 @@
         margin-top: 0.3em;
         margin-bottom: 0;
     }
-    .pw-pricing-table {
-        margin-bottom: 0.5em;
-    }
-    .pw-fallback {
-        text-align: center;
+    .pw-tier-pills {
+        display: flex;
+        justify-content: center;
+        gap: 0.6em;
         margin-bottom: 0.8em;
+        flex-wrap: wrap;
     }
-    .pw-fallback-btn {
-        display: inline-block;
-        background: var(--pp-support-btn-bg);
-        color: var(--pp-support-btn-text);
-        padding: 0.5em 1.5em;
-        border-radius: 8px;
-        font-size: 0.9em;
-        font-weight: 600;
+    .pw-tier-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4em;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        padding: 0.5em 1.2em;
+        border-radius: 999px;
+        font-size: 0.82em;
+        color: var(--pp-text);
         text-decoration: none;
-        transition: background 0.15s;
+        transition: border-color 0.15s, box-shadow 0.15s;
     }
-    .pw-fallback-btn:hover {
-        background: var(--pp-support-btn-hover);
+    .pw-tier-pill:hover {
+        border-color: #22c55e;
+        box-shadow: 0 2px 8px rgba(34, 197, 94, 0.12);
+    }
+    .pw-tier-pill strong {
+        font-weight: 700;
+    }
+    .pw-tier-popular {
+        border-color: #22c55e;
+        background: rgba(34, 197, 94, 0.06);
     }
     .pw-learn-more {
         display: block;
