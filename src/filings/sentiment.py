@@ -163,16 +163,56 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
 def _get_cnn_fear_greed() -> dict | None:
     """Market-wide Fear & Greed Index (0-100).
 
+    Uses stale-while-revalidate: returns cached data immediately even if
+    expired, then refreshes in the background.
+
     Returns dict with: score, rating, previous_close, one_week_ago,
     one_month_ago, one_year_ago.
     """
     global _cnn_cache
 
+    now = time.time()
     with _lock:
         if _cnn_cache is not None:
             ts, data = _cnn_cache
-            if time.time() - ts < _CNN_TTL:
+            if now - ts < _CNN_TTL:
                 return data
+            # Stale but usable — return immediately, refresh in background
+            if data is not None:
+                _schedule_cnn_refresh()
+                return data
+
+    # Cold start — must fetch synchronously
+    return _fetch_cnn_fear_greed()
+
+
+_cnn_refreshing = False
+
+
+def _schedule_cnn_refresh() -> None:
+    """Kick off a background thread to refresh CNN Fear & Greed data."""
+    global _cnn_refreshing
+    with _lock:
+        if _cnn_refreshing:
+            return
+        _cnn_refreshing = True
+
+    import threading as _thr
+
+    def _do_refresh():
+        global _cnn_refreshing
+        try:
+            _fetch_cnn_fear_greed()
+        finally:
+            with _lock:
+                _cnn_refreshing = False
+
+    _thr.Thread(target=_do_refresh, daemon=True).start()
+
+
+def _fetch_cnn_fear_greed() -> dict | None:
+    """Fetch CNN Fear & Greed data and update cache."""
+    global _cnn_cache
 
     url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
     raw = _http_get_json(
@@ -216,29 +256,77 @@ def _get_cnn_fear_greed() -> dict | None:
 
 
 def _get_apewisdom_all() -> list[dict]:
-    """Fetch all-stocks ranked list from ApeWisdom (pages 1-5)."""
+    """Fetch all-stocks ranked list from ApeWisdom (pages 1-5).
+
+    Uses stale-while-revalidate: returns cached data immediately even if
+    expired, then refreshes in the background so the *next* caller gets
+    fresh data without waiting.  Pages are fetched concurrently.
+    """
     global _apewisdom_cache
 
+    now = time.time()
     with _lock:
         if _apewisdom_cache is not None:
             ts, data = _apewisdom_cache
-            if time.time() - ts < _APEWISDOM_TTL:
+            if now - ts < _APEWISDOM_TTL:
+                return data
+            # Stale but usable — return it and refresh in background
+            if data:
+                _schedule_apewisdom_refresh()
                 return data
 
-    all_results: list[dict] = []
-    for page in range(1, 6):  # pages 1-5 (cap for speed)
+    # Cold start — no cached data at all, must fetch synchronously
+    return _fetch_apewisdom_pages()
+
+
+def _fetch_apewisdom_pages() -> list[dict]:
+    """Fetch 5 ApeWisdom pages concurrently and update cache."""
+    global _apewisdom_cache
+
+    def _fetch_page(page: int) -> list[dict]:
         url = f"https://apewisdom.io/api/v1.0/filter/all-stocks/page/{page}"
         raw = _http_get_json(url, timeout=8)
         if not raw or not isinstance(raw, dict):
-            break
-        results = raw.get("results") or []
-        if not results:
-            break
-        all_results.extend(results)
+            return []
+        return raw.get("results") or []
+
+    all_results: list[dict] = []
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {pool.submit(_fetch_page, p): p for p in range(1, 6)}
+        # Collect in page order so ranking stays consistent
+        page_results: dict[int, list[dict]] = {}
+        for future in as_completed(futures):
+            page_results[futures[future]] = future.result()
+        for p in sorted(page_results):
+            all_results.extend(page_results[p])
 
     with _lock:
         _apewisdom_cache = (time.time(), all_results)
     return all_results
+
+
+_apewisdom_refreshing = False  # guard to prevent duplicate background refreshes
+
+
+def _schedule_apewisdom_refresh() -> None:
+    """Kick off a background thread to refresh ApeWisdom data."""
+    global _apewisdom_refreshing
+    with _lock:
+        if _apewisdom_refreshing:
+            return
+        _apewisdom_refreshing = True
+
+    import threading as _thr
+
+    def _do_refresh():
+        global _apewisdom_refreshing
+        try:
+            _fetch_apewisdom_pages()
+        finally:
+            with _lock:
+                _apewisdom_refreshing = False
+
+    _thr.Thread(target=_do_refresh, daemon=True).start()
 
 
 def _get_apewisdom_for_ticker(ticker: str) -> dict | None:
