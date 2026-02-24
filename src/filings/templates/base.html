@@ -25,7 +25,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+    <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
     {% block extra_head_scripts %}{% endblock %}
     <script>
     /* Lazy-load ECharts on demand (~800 KB saved on pages that don't use charts) */
@@ -49,7 +49,7 @@
         };
     })();
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js" defer></script>
     {% if posthog_key %}
     <script>
         !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
@@ -711,28 +711,32 @@
         /* Stripe Embedded Checkout inherits theme from Stripe Dashboard branding */
     </style>
     {% if supabase_anon_key %}
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" defer></script>
     <script>
-        const _supabase = window.supabase.createClient(
-            '{{ supabase_url }}',
-            '{{ supabase_anon_key }}'
-        );
+        // Wait for deferred Supabase SDK to load before initialising
+        document.addEventListener('DOMContentLoaded', function() {
+            if (!window.supabase) return;
+            window._supabase = window.supabase.createClient(
+                '{{ supabase_url }}',
+                '{{ supabase_anon_key }}'
+            );
 
-        // Sync Supabase auth tokens to HttpOnly cookies via server endpoints
-        _supabase.auth.onAuthStateChange(function(event, session) {
-            if (session) {
-                fetch('/api/auth/set-session', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        access_token: session.access_token,
-                        refresh_token: session.refresh_token,
-                        expires_in: session.expires_in
-                    })
-                });
-            } else {
-                fetch('/api/auth/clear-session', { method: 'POST' });
-            }
+            // Sync Supabase auth tokens to HttpOnly cookies via server endpoints
+            window._supabase.auth.onAuthStateChange(function(event, session) {
+                if (session) {
+                    fetch('/api/auth/set-session', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            access_token: session.access_token,
+                            refresh_token: session.refresh_token,
+                            expires_in: session.expires_in
+                        })
+                    });
+                } else {
+                    fetch('/api/auth/clear-session', { method: 'POST' });
+                }
+            });
         });
     </script>
     {% endif %}

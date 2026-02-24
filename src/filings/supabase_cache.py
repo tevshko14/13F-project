@@ -180,6 +180,14 @@ ALTER TABLE youtube_channels ADD COLUMN IF NOT EXISTS thumbnail_url TEXT NOT NUL
 -- Backfill: add duration and content_type columns for video metadata
 ALTER TABLE youtube_events ADD COLUMN IF NOT EXISTS duration TEXT NOT NULL DEFAULT '';
 ALTER TABLE youtube_events ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'video';
+
+-- ── Additional indexes for high-traffic query patterns ──
+-- Sync worker: WHERE category = '13f' AND last_synced_at IS NULL / < cutoff
+CREATE INDEX IF NOT EXISTS idx_api_cache_category_synced
+    ON api_cache (category, last_synced_at);
+-- YouTube sync dedup: WHERE created_at >= cutoff
+CREATE INDEX IF NOT EXISTS idx_youtube_events_created_at
+    ON youtube_events (created_at DESC);
 """
 
 
@@ -832,7 +840,7 @@ def get_insider_trades(
             .limit(limit)
         )
         if trade_type:
-            query = query.ilike("trade_type", f"%{trade_type}%")
+            query = query.eq("trade_type", trade_type)
 
         resp = query.execute()
         return resp.data
@@ -871,7 +879,7 @@ def get_insider_trades_for_chart(
         buys = (
             client.table("insider_trades")
             .select(_INSIDER_COLS)
-            .ilike("trade_type", "%Purchase%")
+            .eq("trade_type", "Purchase")
             .gte("trade_date", cutoff)
             .order("trade_date", desc=True)
             .limit(limit_per_type)
@@ -881,7 +889,7 @@ def get_insider_trades_for_chart(
         sells = (
             client.table("insider_trades")
             .select(_INSIDER_COLS)
-            .ilike("trade_type", "%Sale%")
+            .in_("trade_type", ["Sale", "Sale+OE"])
             .gte("trade_date", cutoff)
             .order("trade_date", desc=True)
             .limit(limit_per_type)
