@@ -3,9 +3,8 @@
 {% block meta_description %}Help keep PaperPanda free. See exactly where your support goes — API costs, infrastructure, and monthly funding progress.{% endblock %}
 
 {% block content %}
-{# Stripe OOTB components — loaded async, no performance impact #}
-<script async src="https://js.stripe.com/v3/buy-button.js"></script>
-<script async src="https://js.stripe.com/v3/pricing-table.js"></script>
+{# Stripe Embedded Checkout — loaded async #}
+<script async src="https://js.stripe.com/v3/"></script>
 <style>
     .support-hero {
         text-align: center;
@@ -115,18 +114,196 @@
     .donate-panel.active {
         display: block;
     }
-    .donate-panel-center {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 80px;
-    }
     .stripe-not-configured {
         text-align: center;
         padding: 2em 1em;
         color: var(--pp-text-faint);
         font-size: 0.9em;
     }
+
+    /* ── Tier cards ── */
+    .tier-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1em;
+    }
+    .tier-card {
+        background: var(--pp-surface);
+        border: 2px solid var(--pp-border);
+        border-radius: 12px;
+        padding: 1.5em 1.2em;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+        position: relative;
+    }
+    .tier-card:hover {
+        border-color: #22c55e;
+        box-shadow: 0 4px 16px rgba(34, 197, 94, 0.15);
+        transform: translateY(-2px);
+    }
+    .tier-card.popular {
+        border-color: #22c55e;
+    }
+    .tier-card.popular::before {
+        content: 'Most popular';
+        position: absolute;
+        top: -10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #22c55e;
+        color: #fff;
+        font-size: 0.7em;
+        font-weight: 700;
+        padding: 0.2em 0.8em;
+        border-radius: 999px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    .tier-emoji {
+        font-size: 2em;
+        margin-bottom: 0.3em;
+    }
+    .tier-name {
+        font-weight: 700;
+        font-size: 1.05em;
+        margin-bottom: 0.2em;
+        color: var(--pp-text);
+    }
+    .tier-price {
+        font-size: 1.6em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .tier-price small {
+        font-size: 0.5em;
+        font-weight: 400;
+        color: var(--pp-text-muted);
+    }
+    .tier-btn {
+        display: inline-block;
+        margin-top: 1em;
+        background: var(--pp-text);
+        color: var(--pp-surface);
+        border: none;
+        padding: 0.55em 1.8em;
+        border-radius: 8px;
+        font-size: 0.9em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.15s;
+    }
+    .tier-btn:hover { opacity: 0.85; }
+    .tier-onetime-section {
+        text-align: center;
+        margin-top: 1.2em;
+        padding-top: 1.2em;
+        border-top: 1px solid var(--pp-border);
+    }
+    .tier-onetime-btn {
+        display: inline-block;
+        background: none;
+        color: var(--pp-text);
+        border: 2px solid var(--pp-border);
+        padding: 0.55em 2em;
+        border-radius: 8px;
+        font-size: 0.9em;
+        font-weight: 600;
+        cursor: pointer;
+        transition: border-color 0.15s;
+    }
+    .tier-onetime-btn:hover { border-color: var(--pp-text); }
+    @media (max-width: 640px) {
+        .tier-grid { grid-template-columns: 1fr; max-width: 320px; margin: 0 auto; }
+    }
+
+    /* ── Checkout overlay ── */
+    .checkout-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        justify-content: center;
+        align-items: center;
+        padding: 1em;
+    }
+    .checkout-overlay.open {
+        display: flex;
+    }
+    .checkout-overlay-inner {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 16px;
+        width: 100%;
+        max-width: 600px;
+        max-height: 92vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        position: relative;
+        animation: checkoutIn 0.25s ease;
+    }
+    @keyframes checkoutIn {
+        from { opacity: 0; transform: translateY(16px) scale(0.97); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .checkout-close {
+        position: absolute;
+        top: 12px;
+        right: 14px;
+        background: none;
+        border: none;
+        font-size: 1.5em;
+        cursor: pointer;
+        color: var(--pp-text-muted);
+        z-index: 1;
+        line-height: 1;
+        border-radius: 6px;
+        padding: 0.1em 0.3em;
+        transition: background 0.15s, color 0.15s;
+    }
+    .checkout-close:hover {
+        background: var(--pp-surface-hover);
+        color: var(--pp-text);
+    }
+    .checkout-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 200px;
+        color: var(--pp-text-muted);
+        font-size: 0.9em;
+    }
+    #checkout-mount {
+        min-height: 300px;
+    }
+
+    /* ── Thank-you banner ── */
+    .thank-you-banner {
+        background: #dcfce7;
+        border: 1px solid #86efac;
+        border-radius: 12px;
+        padding: 1.5em 2em;
+        margin: 1.5em 0;
+        text-align: center;
+    }
+    .thank-you-banner h2 {
+        color: #166534;
+        font-size: 1.3em;
+        margin-bottom: 0.3em;
+    }
+    .thank-you-banner p {
+        color: #15803d;
+        font-size: 0.95em;
+    }
+    :root[data-theme="dark"] .thank-you-banner {
+        background: #052e16;
+        border-color: #166534;
+    }
+    :root[data-theme="dark"] .thank-you-banner h2 { color: #86efac; }
+    :root[data-theme="dark"] .thank-you-banner p { color: #4ade80; }
 
     /* ── Where-it-goes section ── */
     .where-it-goes {
@@ -400,21 +577,78 @@
     <div class="progress-label">{{ progress_pct }}% funded for {{ current_month_name }}</div>
 </div>
 
+{% if show_thank_you is defined and show_thank_you %}
+{# ── Thank-you banner (shown after successful checkout) ── #}
+<div class="thank-you-banner" id="thank-you-banner" style="display:none;">
+    <h2>Thank you for your support!</h2>
+    <p id="thank-you-msg">Your contribution helps keep PaperPanda free and running.</p>
+</div>
+<script>
+(function() {
+    var sid = new URLSearchParams(window.location.search).get('session_id');
+    if (!sid) return;
+    fetch('/api/session-status?session_id=' + encodeURIComponent(sid))
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.status === 'complete') {
+                document.getElementById('thank-you-banner').style.display = '';
+                if (d.customer_email) {
+                    document.getElementById('thank-you-msg').textContent =
+                        'A receipt has been sent to ' + d.customer_email + '. Thank you!';
+                }
+            }
+        }).catch(function() {});
+})();
+</script>
+{% endif %}
+
 {# ── Donate Widget ── #}
 <div class="donate-widget">
     <div class="donate-tabs">
-        <button class="donate-tab active" onclick="switchDonateTab('onetime')" id="tab-onetime">One-time</button>
         <button class="donate-tab" onclick="switchDonateTab('monthly')" id="tab-monthly">Monthly</button>
+        <button class="donate-tab active" onclick="switchDonateTab('onetime')" id="tab-onetime">One-time</button>
     </div>
 
-    {# ── One-time tab: Stripe Buy Button ── #}
+    {# ── Monthly tab: Tier cards ── #}
+    <div class="donate-panel" id="panel-monthly">
+        {% if stripe_configured %}
+        <div class="tier-grid">
+            <div class="tier-card" onclick="openCheckout('{{ price_bamboo }}', 'subscription')">
+                <div class="tier-emoji">&#x1F38B;</div>
+                <div class="tier-name">Bamboo</div>
+                <div class="tier-price">$5 <small>/mo</small></div>
+                <button class="tier-btn">Subscribe</button>
+            </div>
+            <div class="tier-card popular" onclick="openCheckout('{{ price_panda }}', 'subscription')">
+                <div class="tier-emoji">&#x1F43C;</div>
+                <div class="tier-name">Panda</div>
+                <div class="tier-price">$15 <small>/mo</small></div>
+                <button class="tier-btn">Subscribe</button>
+            </div>
+            <div class="tier-card" onclick="openCheckout('{{ price_giant_panda }}', 'subscription')">
+                <div class="tier-emoji">&#x1F451;</div>
+                <div class="tier-name">Giant Panda</div>
+                <div class="tier-price">$30 <small>/mo</small></div>
+                <button class="tier-btn">Subscribe</button>
+            </div>
+        </div>
+        {% else %}
+        <div class="stripe-not-configured">
+            Monthly support tiers coming soon.
+        </div>
+        {% endif %}
+    </div>
+
+    {# ── One-time tab ── #}
     <div class="donate-panel active" id="panel-onetime">
-        {% if stripe_publishable_key and stripe_buy_button_id %}
-        <div class="donate-panel-center">
-            <stripe-buy-button
-                buy-button-id="{{ stripe_buy_button_id }}"
-                publishable-key="{{ stripe_publishable_key }}"
-            ></stripe-buy-button>
+        {% if stripe_configured and price_onetime %}
+        <div class="tier-onetime-section" style="border-top: none; padding-top: 0;">
+            <p style="color: var(--pp-text-muted); font-size: 0.92em; margin-bottom: 1em;">
+                Make a one-time contribution — every dollar helps cover API costs and hosting.
+            </p>
+            <button class="tier-onetime-btn" onclick="openCheckout('{{ price_onetime }}', 'payment')">
+                Donate Once
+            </button>
         </div>
         {% else %}
         <div class="stripe-not-configured">
@@ -422,30 +656,90 @@
         </div>
         {% endif %}
     </div>
+</div>
 
-    {# ── Monthly tab: Stripe Pricing Table ── #}
-    <div class="donate-panel" id="panel-monthly">
-        {% if stripe_publishable_key and stripe_pricing_table_id %}
-        <stripe-pricing-table
-            pricing-table-id="{{ stripe_pricing_table_id }}"
-            publishable-key="{{ stripe_publishable_key }}"
-        ></stripe-pricing-table>
-        {% else %}
-        <div class="stripe-not-configured">
-            Monthly support tiers coming soon.
-        </div>
-        {% endif %}
+{# ── Checkout Overlay ── #}
+<div class="checkout-overlay" id="checkout-overlay" onclick="closeCheckout(event)">
+    <div class="checkout-overlay-inner" onclick="event.stopPropagation()">
+        <button class="checkout-close" onclick="closeCheckout()" aria-label="Close">&times;</button>
+        <div class="checkout-loading" id="checkout-loading">Loading checkout&hellip;</div>
+        <div id="checkout-mount"></div>
     </div>
 </div>
 
 <script>
+var _stripeInstance = null;
+var _checkoutInstance = null;
+
 function switchDonateTab(tab) {
     document.querySelectorAll('.donate-tab').forEach(function(t) { t.classList.remove('active'); });
     document.querySelectorAll('.donate-panel').forEach(function(p) { p.classList.remove('active'); });
     document.getElementById('tab-' + tab).classList.add('active');
     document.getElementById('panel-' + tab).classList.add('active');
 }
-// Auto-switch to monthly tab if linked from homepage pills
+
+function openCheckout(priceId, mode) {
+    if (!priceId) return;
+    var overlay = document.getElementById('checkout-overlay');
+    var mountEl = document.getElementById('checkout-mount');
+    var loadingEl = document.getElementById('checkout-loading');
+
+    // Reset
+    mountEl.innerHTML = '';
+    loadingEl.style.display = '';
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    // Destroy previous instance if any
+    if (_checkoutInstance) {
+        _checkoutInstance.destroy();
+        _checkoutInstance = null;
+    }
+
+    // Lazy-init Stripe
+    if (!_stripeInstance) {
+        _stripeInstance = Stripe('{{ stripe_publishable_key }}');
+    }
+
+    fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({price_id: priceId, mode: mode})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) {
+            loadingEl.textContent = 'Error: ' + data.error;
+            return;
+        }
+        return _stripeInstance.initEmbeddedCheckout({clientSecret: data.clientSecret});
+    })
+    .then(function(checkout) {
+        if (!checkout) return;
+        _checkoutInstance = checkout;
+        loadingEl.style.display = 'none';
+        checkout.mount('#checkout-mount');
+    })
+    .catch(function(err) {
+        loadingEl.textContent = 'Something went wrong. Please try again.';
+    });
+}
+
+function closeCheckout(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('checkout-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+    if (_checkoutInstance) {
+        _checkoutInstance.destroy();
+        _checkoutInstance = null;
+    }
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeCheckout();
+});
+
+// Auto-switch to monthly tab if linked from homepage
 (function() {
     if (window.location.hash === '#monthly' || sessionStorage.getItem('supportTab') === 'monthly') {
         switchDonateTab('monthly');
