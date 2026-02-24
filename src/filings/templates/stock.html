@@ -1318,8 +1318,10 @@ window.toggleHolders = function(btn) {
         createChart(viewData);
     });
 
-    // ── Initialize with simple view ─────────────────────────────
-    createChart(buildSimpleData());
+    // ── Initialize with simple view (wait for deferred Chart.js) ──
+    document.addEventListener('DOMContentLoaded', function() {
+        createChart(buildSimpleData());
+    });
 })();
 </script>
 {% endif %}
