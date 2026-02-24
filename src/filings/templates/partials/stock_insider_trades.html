@@ -47,7 +47,7 @@
                     {% elif "Sale" in t.trade_type %}
                         <span class="badge badge-reduce">{{ t.trade_type }}</span>
                     {% else %}
-                        <span class="badge" style="background: #f5f5f5; color: #616161;">{{ t.trade_type }}</span>
+                        <span class="badge" style="background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">{{ t.trade_type }}</span>
                     {% endif %}
                 </td>
                 <td class="text-right">{{ t.price }}</td>
@@ -74,17 +74,17 @@
 </article>
 
 <style>
-    .insider-filter {
+    button.insider-filter {
         background: none;
-        border: 1px solid rgba(0,0,0,0.15);
+        border: 1px solid var(--pp-overlay-10);
         border-radius: 4px;
         cursor: pointer;
-        color: rgba(0,0,0,0.55);
+        color: var(--pp-text-muted);
         font-weight: 600;
         transition: all 0.15s;
     }
-    .insider-filter:hover { background: rgba(0,0,0,0.04); color: rgba(0,0,0,0.8); }
-    .insider-filter.active {
+    button.insider-filter:hover { background: var(--pp-overlay-5); color: var(--pp-text-secondary); }
+    button.insider-filter.active {
         background: #1976d2;
         color: #fff;
         border-color: #1976d2;

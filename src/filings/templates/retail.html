@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Retail Sentiment - PaperPanda{% endblock %}
+{% block extra_head_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+{% endblock %}
 {% block content %}
 <hgroup>
     <h1>Retail Traders</h1>
@@ -339,6 +342,9 @@
         var container = document.getElementById('retail-treemap');
         if (!container || !data || data.length === 0) return;
 
+        window.requireECharts(function(err) {
+        if (err) { container.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+
         var existing = echarts.getInstanceByDom(container);
         if (existing) existing.dispose();
 
@@ -406,7 +412,9 @@
             }
         });
 
-        window.addEventListener('resize', function() { chart.resize(); });
+        var _resizeTimer;
+        window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { chart.resize(); }, 150); });
+        }); // end requireECharts
     }
 
     /* ══════════════════════════════════════════════════════════════ */

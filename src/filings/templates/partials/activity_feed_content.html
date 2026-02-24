@@ -315,28 +315,34 @@ window.toggleActivityAccordion = function(btn) {
 };
 
 (function() {
-    /* AUM slider filtering (client-side, instant) */
+    /* AUM slider filtering (client-side, debounced DOM updates) */
     var slider = document.getElementById('aum-slider');
     var label = document.getElementById('aum-label');
     var thresholds = [0, 1e9, 5e9, 10e9, 50e9, 100e9];
     var labels = ['All', '$1B+', '$5B+', '$10B+', '$50B+', '$100B+'];
     if (slider) {
+        var _aumEls = document.querySelectorAll('[data-fund-aum]');
+        var _clusterEls = document.querySelectorAll('.activity-cluster');
+        var _aumTimer;
         slider.addEventListener('input', function() {
             var idx = parseInt(this.value);
             label.textContent = labels[idx];
             var minAum = thresholds[idx];
-            document.querySelectorAll('[data-fund-aum]').forEach(function(el) {
-                var aum = parseInt(el.dataset.fundAum || '0');
-                el.style.display = aum >= minAum ? '' : 'none';
-            });
-            document.querySelectorAll('.activity-cluster').forEach(function(cl) {
-                var rows = cl.querySelectorAll('.cluster-table tr');
-                var anyVisible = false;
-                rows.forEach(function(r) {
-                    if (r.style.display !== 'none') anyVisible = true;
+            clearTimeout(_aumTimer);
+            _aumTimer = setTimeout(function() {
+                _aumEls.forEach(function(el) {
+                    var aum = parseInt(el.dataset.fundAum || '0');
+                    el.style.display = aum >= minAum ? '' : 'none';
                 });
-                cl.style.display = anyVisible ? '' : 'none';
-            });
+                _clusterEls.forEach(function(cl) {
+                    var rows = cl.querySelectorAll('.cluster-table tr');
+                    var anyVisible = false;
+                    rows.forEach(function(r) {
+                        if (r.style.display !== 'none') anyVisible = true;
+                    });
+                    cl.style.display = anyVisible ? '' : 'none';
+                });
+            }, 50);
         });
     }
 

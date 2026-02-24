@@ -5,8 +5,9 @@
     <h1 style="display: flex; align-items: center; gap: 0.5em;">
         {% if stock_info.logo_domain %}
         <img src="https://logo.clearbit.com/{{ stock_info.logo_domain }}"
-             alt=""
-             style="height: 40px; width: 40px; border-radius: 6px; object-fit: contain;"
+             alt="{{ stock_info.ticker }} logo" width="40" height="40"
+             loading="lazy" decoding="async"
+             style="border-radius: 6px; object-fit: contain;"
              onerror="this.style.display='none'">
         {% endif %}
         {% if stock_info.ticker %}
@@ -84,7 +85,7 @@
 </div>
 
 <style>
-    .stock-tab {
+    button.stock-tab {
         background: none;
         border: none;
         border-bottom: 3px solid transparent;
@@ -97,10 +98,10 @@
         color: var(--pp-overlay-50);
         transition: color 0.15s, border-color 0.15s;
     }
-    .stock-tab:hover {
+    button.stock-tab:hover {
         color: var(--pp-text-secondary);
     }
-    .stock-tab.active {
+    button.stock-tab.active {
         color: #1976d2;
         border-bottom-color: #1976d2;
     }
@@ -888,21 +889,33 @@ window.toggleHolders = function(btn) {
 {# ── Tab Switching Logic ── #}
 <script>
 (function() {
+    // Helper: innerHTML doesn't execute <script> tags — re-insert them as live elements
+    function activateScripts(container) {
+        container.querySelectorAll('script').forEach(function(old) {
+            var s = document.createElement('script');
+            s.textContent = old.textContent;
+            old.parentNode.replaceChild(s, old);
+        });
+    }
+
     var analystLoaded = false;
     var sentimentLoaded = false;
     var vitalsLoaded = false;
     var filingsLoaded = false;
     var insiderLoaded = false;
 
+    var _tabBtns = document.querySelectorAll('.stock-tab');
+    var _tabPanels = document.querySelectorAll('.tab-content');
+
     window.switchTab = function(tab) {
         // Toggle tab buttons
-        document.querySelectorAll('.stock-tab').forEach(function(btn) {
+        _tabBtns.forEach(function(btn) {
             btn.classList.remove('active');
         });
         document.getElementById('tab-' + tab + '-btn').classList.add('active');
 
         // Toggle tab content
-        document.querySelectorAll('.tab-content').forEach(function(el) {
+        _tabPanels.forEach(function(el) {
             el.classList.remove('active');
         });
         document.getElementById('tab-' + tab).classList.add('active');
@@ -952,7 +965,9 @@ window.toggleHolders = function(btn) {
                 fetch(sentimentUrl)
                     .then(function(resp) { return resp.text(); })
                     .then(function(html) {
-                        document.getElementById('sentiment-content').innerHTML = html;
+                        var el = document.getElementById('sentiment-content');
+                        el.innerHTML = html;
+                        activateScripts(el);
                         if (window.initSortableTables) window.initSortableTables();
                     })
                     .catch(function() {
@@ -1007,7 +1022,9 @@ window.toggleHolders = function(btn) {
                 fetch(filingsUrl)
                     .then(function(resp) { return resp.text(); })
                     .then(function(html) {
-                        document.getElementById('filings-content').innerHTML = html;
+                        var el = document.getElementById('filings-content');
+                        el.innerHTML = html;
+                        activateScripts(el);
                     })
                     .catch(function() {
                         document.getElementById('filings-content').innerHTML =
@@ -1034,7 +1051,9 @@ window.toggleHolders = function(btn) {
                 fetch(insiderUrl)
                     .then(function(resp) { return resp.text(); })
                     .then(function(html) {
-                        document.getElementById('insider-content').innerHTML = html;
+                        var el = document.getElementById('insider-content');
+                        el.innerHTML = html;
+                        activateScripts(el);
                         if (window.initSortableTables) window.initSortableTables();
                     })
                     .catch(function() {
@@ -1304,4 +1323,8 @@ window.toggleHolders = function(btn) {
 })();
 </script>
 {% endif %}
+{% endblock %}
+
+{% block extra_head_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 {% endblock %}
