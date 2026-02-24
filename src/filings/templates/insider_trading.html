@@ -443,8 +443,10 @@
         }
     });
 
-    /* Auto-load default tab */
-    loadTrades('all');
+    /* Wait for DOMContentLoaded so deferred Chart.js is ready */
+    document.addEventListener('DOMContentLoaded', function() {
+        loadTrades('all');
+    });
 })();
 </script>
 {% endblock %}
