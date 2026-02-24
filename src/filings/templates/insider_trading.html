@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Insider Trading Screener - PaperPanda{% endblock %}
+{% block extra_head_scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+{% endblock %}
 {% block content %}
 <hgroup>
     <h1>Insider Trading</h1>
@@ -36,7 +39,7 @@
 </div>
 
 <style>
-    .insider-tab {
+    button.insider-tab {
         background: none;
         border: none;
         border-bottom: 3px solid transparent;
@@ -49,8 +52,8 @@
         color: var(--pp-overlay-50);
         transition: color 0.15s, border-color 0.15s;
     }
-    .insider-tab:hover { color: var(--pp-text-secondary); }
-    .insider-tab.active {
+    button.insider-tab:hover { color: var(--pp-text-secondary); }
+    button.insider-tab.active {
         color: #1976d2;
         border-bottom-color: #1976d2;
     }

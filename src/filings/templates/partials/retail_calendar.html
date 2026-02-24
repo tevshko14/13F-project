@@ -208,7 +208,7 @@
     {% for ch in channels %}
     <div class="yt-channel-chip" data-channel="{{ ch.channel_id }}" onclick="filterByChannel('{{ ch.channel_id }}')">
         {% if ch.thumbnail_url %}
-        <img src="{{ ch.thumbnail_url }}" alt="" class="yt-chip-avatar" loading="lazy">
+        <img src="{{ ch.thumbnail_url }}" alt="" class="yt-chip-avatar" width="52" height="52" loading="lazy" decoding="async">
         {% else %}
         <div class="yt-chip-avatar" style="background: var(--pp-surface-alt); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--pp-text-muted); font-size: 0.75em;">
             {{ ch.channel_name[:2]|upper }}
@@ -237,7 +237,7 @@
     <div class="yt-video-card" data-channel="{{ v.channel_id }}">
         {# Thumbnail with play overlay + type tag + duration badge #}
         <a href="{{ v.video_url }}" target="_blank" rel="noopener" class="yt-thumb-wrap">
-            <img src="{{ v.thumbnail_url }}" alt="" loading="lazy">
+            <img src="{{ v.thumbnail_url }}" alt="" loading="lazy" decoding="async">
             <div class="yt-thumb-overlay">
                 <svg class="yt-play-icon" viewBox="0 0 68 48" xmlns="http://www.w3.org/2000/svg">
                     <path d="M66.52 7.74c-.78-2.93-2.49-5.41-5.42-6.19C55.79.13 34 0 34 0S12.21.13 6.9 1.55C3.97 2.33 2.27 4.81 1.48 7.74.06 13.05 0 24 0 24s.06 10.95 1.48 16.26c.78 2.93 2.49 5.41 5.42 6.19C12.21 47.87 34 48 34 48s21.79-.13 27.1-1.55c2.93-.78 4.64-3.26 5.42-6.19C67.94 34.95 68 24 68 24s-.06-10.95-1.48-16.26z" fill="#FF0000"/>
@@ -258,7 +258,7 @@
         <div class="yt-card-body">
             <div class="yt-channel-row">
                 {% if v.channel_thumbnail %}
-                <img src="{{ v.channel_thumbnail }}" alt="" class="yt-channel-avatar" loading="lazy">
+                <img src="{{ v.channel_thumbnail }}" alt="" class="yt-channel-avatar" width="24" height="24" loading="lazy" decoding="async">
                 {% endif %}
                 <span class="yt-channel-name">{{ v.channel_name }}</span>
             </div>
@@ -309,17 +309,17 @@
                 border-bottom: 1px solid var(--pp-border-light); align-items: center;">
         {% if event.thumbnail_url %}
         <a href="{{ event.video_url }}" target="_blank" rel="noopener" style="flex-shrink: 0;">
-            <img src="{{ event.thumbnail_url }}" alt=""
-                 style="width: 120px; height: 68px; object-fit: cover; border-radius: 6px;"
-                 loading="lazy">
+            <img src="{{ event.thumbnail_url }}" alt="" width="120" height="68"
+                 loading="lazy" decoding="async"
+                 style="object-fit: cover; border-radius: 6px;">
         </a>
         {% endif %}
         <div style="flex: 1; min-width: 0;">
             <div style="display: flex; align-items: center; gap: 0.4em; margin-bottom: 0.2em;">
                 {% if event.channel_thumbnail %}
-                <img src="{{ event.channel_thumbnail }}" alt=""
-                     style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover;"
-                     loading="lazy">
+                <img src="{{ event.channel_thumbnail }}" alt="" width="20" height="20"
+                     loading="lazy" decoding="async"
+                     style="border-radius: 50%; object-fit: cover;">
                 {% endif %}
                 <span style="font-weight: 600; font-size: 0.8em; color: var(--pp-text-muted);">{{ event.channel_name }}</span>
                 {% if event.scheduled_at %}
@@ -369,9 +369,9 @@
                 <td>
                     <div style="display: flex; align-items: center; gap: 0.5em;">
                         {% if ch.thumbnail_url %}
-                        <img src="{{ ch.thumbnail_url }}" alt=""
-                             style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0;"
-                             loading="lazy">
+                        <img src="{{ ch.thumbnail_url }}" alt="" width="28" height="28"
+                             loading="lazy" decoding="async"
+                             style="border-radius: 50%; object-fit: cover; flex-shrink: 0;">
                         {% endif %}
                         <a href="https://youtube.com/{{ ch.handle }}" target="_blank" rel="noopener"
                            style="font-weight: 600; text-decoration: none;">

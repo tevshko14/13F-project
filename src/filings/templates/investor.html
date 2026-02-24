@@ -295,6 +295,9 @@
                 });
             }
 
+            window.requireECharts(function(err) {
+            if (err) { chartEl.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+
             var chart = echarts.init(chartEl);
             chart.setOption({
                 tooltip: {
@@ -410,8 +413,10 @@
                 if (d && d.ticker) window.location.href = '/stock/' + d.ticker;
             });
 
-            // Responsive
-            window.addEventListener('resize', function() { chart.resize(); });
+            // Responsive (debounced)
+            var _resizeTimer;
+            window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { chart.resize(); }, 150); });
+            }); // end requireECharts
         })
         .catch(function() {
             legendEl.innerHTML = '<div class="chart-empty">Failed to load chart data</div>';
