@@ -119,6 +119,10 @@
                 // Success — cookie is set by onAuthStateChange in base.html
                 // Redirect to homepage (or previous page)
                 var redirectTo = new URLSearchParams(window.location.search).get('next') || '/';
+                // Prevent open redirect — only allow relative paths on same origin
+                if (!redirectTo.startsWith('/') || redirectTo.startsWith('//')) {
+                    redirectTo = '/';
+                }
                 window.location.href = redirectTo;
             } catch (err) {
                 errorEl.textContent = 'An unexpected error occurred. Please try again.';

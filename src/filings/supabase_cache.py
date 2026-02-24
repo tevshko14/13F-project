@@ -776,6 +776,9 @@ def fetch_with_cache_and_quota(
 # ── Insider trades queries ───────────────────────────────────────
 
 
+_VALID_INSIDER_TRADE_TYPES = frozenset({"Purchase", "Sale"})
+
+
 def get_insider_trades(
     trade_type: str = "",
     limit: int = 100,
@@ -784,13 +787,19 @@ def get_insider_trades(
 
     Args:
         trade_type: ``"Purchase"`` for buys, ``"Sale"`` for sells,
-                    ``""`` for all.
+                    ``""`` for all.  Must be one of the values in
+                    ``_VALID_INSIDER_TRADE_TYPES`` or empty.
         limit: Max rows to return.
 
     Returns list of row dicts, or ``None`` if Supabase is unavailable.
     """
     client = _get_client()
     if client is None:
+        return None
+
+    # Reject unexpected trade_type values (defense-in-depth).
+    if trade_type and trade_type not in _VALID_INSIDER_TRADE_TYPES:
+        logger.warning("Invalid trade_type rejected: %r", trade_type)
         return None
 
     try:
