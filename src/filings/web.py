@@ -179,6 +179,53 @@ if _has_limiter:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Helpers
+# ═══════════════════════════════════════════════════════════════════════
+
+def _fund_cache() -> dict:
+    """Return the current fund cache dict from app.state."""
+    return getattr(app.state, "fund_cache", {})
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Cached ownership map (avoids O(funds × holdings) on every request)
+# ═══════════════════════════════════════════════════════════════════════
+
+def _get_ownership_map() -> dict[str, list[str]]:
+    """Return ticker → [superinvestor names] map, cached per fund_cache version.
+
+    Rebuilds only when the fund_cache dict object changes (new reference
+    after background refresh). Race conditions are benign — worst case two
+    concurrent requests both rebuild, same as the old per-request behavior.
+    """
+    cache_data = _fund_cache()
+    if not cache_data:
+        return {}
+
+    cache_id = id(cache_data)
+    cached = getattr(app.state, "_ownership_map", None)
+
+    if cached is not None:
+        prev_id, prev_map = cached
+        if prev_id == cache_id:
+            return prev_map
+
+    ownership_map = client.build_ticker_ownership_map(
+        cache_data, SUPERINVESTORS_BY_CIK
+    )
+    app.state._ownership_map = (cache_id, ownership_map)
+    return ownership_map
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Analyst consensus cache (avoids 25 async thread spawns on warm lookups)
+# ═══════════════════════════════════════════════════════════════════════
+
+_consensus_cache: dict[str, tuple[float, dict | None]] = {}
+_CONSENSUS_TTL = 1800  # 30 minutes in seconds
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Middleware
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -473,7 +520,7 @@ async def fund_row(request: Request, cik: str):
 @app.get("/holdings/{cik}", response_class=HTMLResponse)
 async def holdings(request: Request, cik: str, top_n: int = Query(25)):
     si = SUPERINVESTORS_BY_CIK.get(cik)
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
     cached = cache_data.get(cik)
 
     # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
@@ -565,7 +612,7 @@ async def compare(request: Request, cik: str):
 
 @app.get("/api/compare/{cik}", response_class=HTMLResponse)
 async def compare_api(request: Request, cik: str, top_n: int = Query(25)):
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
     cached = cache_data.get(cik)
 
     # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
@@ -608,7 +655,7 @@ async def portfolio_chart_data(request: Request, cik: str):
 
     Used by the ECharts donut on the investor profile page.
     """
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
     cached = cache_data.get(cik)
 
     # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
@@ -623,10 +670,8 @@ async def portfolio_chart_data(request: Request, cik: str):
     if not cached:
         return JSONResponse(content=[])
 
-    # Build ownership map once (single pass through all investors)
-    ownership_map = client.build_ticker_ownership_map(
-        cache_data, SUPERINVESTORS_BY_CIK
-    )
+    # Build ownership map (cached per fund_cache version)
+    ownership_map = _get_ownership_map()
 
     # Get current investor's display name to exclude from "also held by"
     si = SUPERINVESTORS_BY_CIK.get(cik)
@@ -699,7 +744,7 @@ async def funds_page(request: Request, view: str = "funds"):
     if view not in ("funds", "holdings", "activity"):
         view = "funds"
 
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
 
     # ── Build superinvestor summaries (for the Superinvestors tab) ──
     si_summaries = []
@@ -805,7 +850,7 @@ async def funds_page(request: Request, view: str = "funds"):
 
 @app.get("/stock/cusip/{cusip}", response_class=HTMLResponse)
 async def stock_detail_by_cusip(request: Request, cusip: str):
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
 
     # Try to build superinvestor ownership data (may be None)
     detail = None
@@ -839,7 +884,7 @@ async def stock_detail_by_cusip(request: Request, cusip: str):
 
 @app.get("/stock/{ticker}", response_class=HTMLResponse)
 async def stock_detail(request: Request, ticker: str):
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
 
     # Try to build superinvestor ownership data (may be None)
     detail = None
@@ -1050,7 +1095,7 @@ async def retail_page(request: Request, view: str = "sentiment"):
         if best and (best.get("rank_24h_ago") or 0) > best.get("rank", 0):
             biggest_mover = best
 
-    has_guru_data = bool(getattr(app.state, "fund_cache", {}))
+    has_guru_data = bool(_fund_cache())
 
     # High-impact YouTube events for toast notifications
     high_impact_events = await asyncio.to_thread(youtube.get_high_impact_events, 9)
@@ -1071,11 +1116,7 @@ async def retail_page(request: Request, view: str = "sentiment"):
 async def retail_leaderboard_api(request: Request):
     all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
     fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
-    cache_data = getattr(app.state, "fund_cache", {})
-    ownership_map = (
-        client.build_ticker_ownership_map(cache_data, SUPERINVESTORS_BY_CIK)
-        if cache_data else {}
-    )
+    ownership_map = _get_ownership_map()
     enriched = sentiment.build_retail_leaderboard_data(all_data, ownership_map, fear_greed)
     return templates.TemplateResponse("partials/retail_leaderboard_v2.html", {
         "request": request,
@@ -1090,11 +1131,7 @@ async def retail_leaderboard_data(request: Request):
     """Enriched leaderboard JSON for treemap, bubble chart, and guru toggle."""
     all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
     fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
-    cache_data = getattr(app.state, "fund_cache", {})
-    ownership_map = (
-        client.build_ticker_ownership_map(cache_data, SUPERINVESTORS_BY_CIK)
-        if cache_data else {}
-    )
+    ownership_map = _get_ownership_map()
     result = sentiment.build_retail_leaderboard_data(all_data, ownership_map, fear_greed)
     return JSONResponse(content=result)
 
@@ -1186,7 +1223,7 @@ async def stock_insider_trades_api(request: Request, ticker: str):
 
 @app.get("/api/ticker-search-index")
 async def ticker_search_index(request: Request):
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
     data = await asyncio.to_thread(market_data.get_ticker_search_list, cache_data)
     # Strip fields the client doesn't need to reduce payload (~8000 items)
     slim = []
@@ -1230,7 +1267,7 @@ async def api_activity_feed(
 
     PER_PAGE = 50
 
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
     if not cache_data:
         return HTMLResponse(
             '<article><p class="text-muted">No activity data available yet. '
@@ -1375,18 +1412,8 @@ async def heatmap(request: Request, period: str = "1D"):
 
     constituents = await asyncio.to_thread(market_data.get_sp500_constituents)
 
-    cache_data = getattr(app.state, "fund_cache", {})
-    super_ticker_counts: dict[str, int] = {}
-    for cik, fund_data in cache_data.items():
-        if cik in SUPERINVESTORS_BY_CIK:
-            seen_tickers: set[str] = set()
-            for h in fund_data.get("all_holdings", []):
-                t = h.get("ticker")
-                if t:
-                    t_upper = t.upper()
-                    if t_upper not in seen_tickers:
-                        seen_tickers.add(t_upper)
-                        super_ticker_counts[t_upper] = super_ticker_counts.get(t_upper, 0) + 1
+    ownership_map = _get_ownership_map()
+    super_ticker_counts = {t: len(holders) for t, holders in ownership_map.items()}
 
     heatmap_data = market_data.build_heatmap_data(mkt, constituents, super_ticker_counts)
     metadata = mkt.get("_metadata", {})
@@ -1401,7 +1428,7 @@ async def heatmap(request: Request, period: str = "1D"):
 
 @app.get("/api/most-added", response_class=HTMLResponse)
 async def most_added(request: Request):
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
     if not cache_data:
         return HTMLResponse(
             '<article><p class="text-muted">No data available yet.</p></article>'
@@ -1419,17 +1446,34 @@ async def most_added(request: Request):
             market_data.get_52_week_range_bulk, tickers_to_lookup
         )
 
-    # Parallelize analyst lookups (was sequential: ~25 tickers × 1-3s each)
-    async def _lookup_consensus(t: str) -> tuple[str, dict | None]:
-        try:
-            ratings = await asyncio.to_thread(analysts.get_analyst_ratings, t)
-            return t, analysts.get_consensus_summary(ratings)
-        except Exception:
-            return t, None
+    # Parallelize analyst lookups with web-layer cache (30 min TTL)
+    now = time_module.time()
+    consensus_map: dict[str, dict | None] = {}
+    stale_tickers: list[str] = []
 
-    tasks = [_lookup_consensus(e["ticker"]) for e in entries if e.get("ticker")]
-    results = await asyncio.gather(*tasks)
-    consensus_map = dict(results)
+    for e in entries:
+        t = e.get("ticker")
+        if not t:
+            continue
+        cached = _consensus_cache.get(t)
+        if cached and (now - cached[0]) < _CONSENSUS_TTL:
+            consensus_map[t] = cached[1]
+        else:
+            stale_tickers.append(t)
+
+    if stale_tickers:
+        async def _lookup_consensus(t: str) -> tuple[str, dict | None]:
+            try:
+                ratings = await asyncio.to_thread(analysts.get_analyst_ratings, t)
+                result = analysts.get_consensus_summary(ratings)
+            except Exception:
+                result = None
+            _consensus_cache[t] = (time_module.time(), result)
+            return t, result
+
+        tasks = [_lookup_consensus(t) for t in stale_tickers]
+        results = await asyncio.gather(*tasks)
+        consensus_map.update(dict(results))
 
     for entry in entries:
         ticker = entry.get("ticker")
@@ -1493,7 +1537,7 @@ async def logout(request: Request):
 @app.get("/health")
 async def health_check(request: Request):
     uptime = round(time_module.time() - _app_start_time)
-    cache_data = getattr(app.state, "fund_cache", {})
+    cache_data = _fund_cache()
 
     # Count stale funds for observability
     all_ciks = [si.cik for si in SUPERINVESTORS]

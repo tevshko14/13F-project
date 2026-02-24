@@ -221,6 +221,13 @@
     var momentumEl  = document.getElementById('momentum-chart');
     if (!consensusEl || !momentumEl) return;
 
+    window.requireECharts(function(err) {
+    if (err) {
+        consensusEl.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>';
+        momentumEl.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>';
+        return;
+    }
+
     var consensusTickerMap = {};
     for (var i = 0; i < consensusData.length; i++) {
         if (consensusData[i].ticker) consensusTickerMap[consensusData[i].ticker.toUpperCase()] = i;
@@ -305,10 +312,12 @@
     momentumChart.on('mouseover', function(params) { var d = momentumData[params.dataIndex]; if (d && d.ticker) { var c = consensusTickerMap[d.ticker.toUpperCase()]; if (c !== undefined) consensusChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: consensusData.length - 1 - c }); } });
     momentumChart.on('mouseout', function() { consensusChart.dispatchAction({ type: 'downplay', seriesIndex: 0 }); });
 
-    window.addEventListener('resize', function() { consensusChart.resize(); momentumChart.resize(); });
+    var _resizeTimer;
+    window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { consensusChart.resize(); momentumChart.resize(); }, 150); });
 
     // Resize charts when holdings panel becomes visible
     window._gpCharts = { consensus: consensusChart, momentum: momentumChart };
+    }); // end requireECharts
 })();
 </script>
 

@@ -565,7 +565,10 @@ if (window.location.hash === '#feedback') {
 <script>
 (function() {
     var chartDom = document.getElementById('funding-chart');
-    if (!chartDom || typeof echarts === 'undefined') return;
+    if (!chartDom) return;
+
+    window.requireECharts(function(err) {
+    if (err) { chartDom.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
 
     var chart = echarts.init(chartDom);
 
@@ -634,7 +637,9 @@ if (window.location.hash === '#feedback') {
     };
 
     chart.setOption(option);
-    window.addEventListener('resize', function() { chart.resize(); });
+    var _resizeTimer;
+    window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { chart.resize(); }, 150); });
+    }); // end requireECharts
 })();
 </script>
 {% endblock %}
