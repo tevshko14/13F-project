@@ -43,6 +43,7 @@ class HoldingChange:
 @dataclass
 class EnrichedHolding(Holding):
     """Holding with ticker, portfolio %, and activity info."""
+
     ticker: str | None = None
     pct_of_portfolio: float = 0.0
     activity: str | None = None  # "NEW BUY", "ADD", "REDUCE", "SOLD"
@@ -52,6 +53,7 @@ class EnrichedHolding(Holding):
 @dataclass
 class SuperinvestorSummary:
     """Summary data for one superinvestor on the homepage."""
+
     cik: str
     display_name: str
     fund_name: str
@@ -65,6 +67,7 @@ class SuperinvestorSummary:
 @dataclass
 class ActivityItem:
     """A single activity entry for the activity feed."""
+
     fund_display_name: str
     fund_cik: str
     issuer_name: str
@@ -79,48 +82,53 @@ class ActivityItem:
 @dataclass
 class EnrichedActivityItem:
     """Activity entry enriched with conviction score and price data."""
+
     fund_display_name: str
     fund_cik: str
-    fund_aum: int                    # total_value from fund cache
+    fund_aum: int  # total_value from fund cache
     issuer_name: str
     ticker: str | None
     cusip: str
-    action: str                      # "NEW BUY", "ADD", "REDUCE", "SOLD"
-    signal: str                      # "NEW ENTRY", "HEAVY ADD", "ADD", "TRIM", "LIQUIDATED", "REDUCE"
+    action: str  # "NEW BUY", "ADD", "REDUCE", "SOLD"
+    signal: str  # "NEW ENTRY", "HEAVY ADD", "ADD", "TRIM", "LIQUIDATED", "REDUCE"
     share_change: int
     current_value: int
-    portfolio_weight: float          # % of this holding in the fund
-    conviction: float                # abs(share_change) × portfolio_weight / 100
+    portfolio_weight: float  # % of this holding in the fund
+    conviction: float  # abs(share_change) × portfolio_weight / 100
     filing_date: str
-    price_at_filing: float | None    # stock price near filing_date (future)
-    current_price: float | None      # latest stock price
-    price_change_pct: float | None   # % change from filing to current
-    fund_total_holdings: int = 0     # number of positions in this fund
-    portfolio_impact: float = 0.0    # current_value / fund_aum * 100 (trade as % of AUM)
+    price_at_filing: float | None  # stock price near filing_date (future)
+    current_price: float | None  # latest stock price
+    price_change_pct: float | None  # % change from filing to current
+    fund_total_holdings: int = 0  # number of positions in this fund
+    portfolio_impact: float = 0.0  # current_value / fund_aum * 100 (trade as % of AUM)
     pct_share_change: float | None = None  # share_change / previous_shares * 100
-    trade_value: float = 0.0              # abs(share_change) * price - estimated dollar value of trade
+    trade_value: float = (
+        0.0  # abs(share_change) * price - estimated dollar value of trade
+    )
 
 
 @dataclass
 class ActivityCluster:
     """Multiple investors acting on the same ticker — consensus signal."""
+
     ticker: str | None
     cusip: str
     issuer_name: str
-    action_summary: str              # "5 Buying / 2 Selling"
-    net_sentiment: str               # "BULLISH", "BEARISH", "NEUTRAL"
+    action_summary: str  # "5 Buying / 2 Selling"
+    net_sentiment: str  # "BULLISH", "BEARISH", "NEUTRAL"
     investor_count: int
     combined_value: int
     avg_conviction: float
     items: list[EnrichedActivityItem]  # Individual entries (for expand)
-    buy_value: float = 0.0           # total $ bought by all investors in cluster
-    sell_value: float = 0.0          # total $ sold by all investors in cluster
-    net_flow: float = 0.0            # buy_value - sell_value (signed net dollar flow)
+    buy_value: float = 0.0  # total $ bought by all investors in cluster
+    sell_value: float = 0.0  # total $ sold by all investors in cluster
+    net_flow: float = 0.0  # buy_value - sell_value (signed net dollar flow)
 
 
 @dataclass
 class GrandPortfolioEntry:
     """A single stock in the grand portfolio aggregation."""
+
     issuer_name: str
     ticker: str | None
     cusip: str
@@ -133,6 +141,7 @@ class GrandPortfolioEntry:
 @dataclass
 class StockInfo:
     """Basic stock identity — used for any ticker, even without superinvestor data."""
+
     ticker: str
     issuer_name: str | None
     cusip: str | None
@@ -142,6 +151,7 @@ class StockInfo:
 @dataclass
 class StockHolder:
     """One superinvestor's position in a specific stock."""
+
     fund_display_name: str
     fund_cik: str
     pct_of_portfolio: float
@@ -154,6 +164,7 @@ class StockHolder:
 @dataclass
 class StockDetail:
     """Aggregated detail for a single stock across all superinvestors."""
+
     issuer_name: str
     ticker: str | None
     cusip: str
@@ -165,26 +176,29 @@ class StockDetail:
 @dataclass
 class StockQuarterEntry:
     """One investor's activity on a stock in a single quarter."""
+
     fund_display_name: str
     fund_cik: str
-    activity: str          # "NEW BUY", "ADD", "REDUCE", "SOLD"
+    activity: str  # "NEW BUY", "ADD", "REDUCE", "SOLD"
     share_change: int
-    pct_change: float      # % change in share count vs previous quarter
+    pct_change: float  # % change in share count vs previous quarter
 
 
 @dataclass
 class StockQuarter:
     """All activity on a stock in one quarter, across all superinvestors."""
-    period: str            # e.g. "Q3 2025"
-    report_date: str       # e.g. "09-30-2025"
+
+    period: str  # e.g. "Q3 2025"
+    report_date: str  # e.g. "09-30-2025"
     entries: list[StockQuarterEntry]
 
 
 @dataclass
 class AnalystRating:
     """A single analyst (firm-level) rating for a stock."""
-    firm: str           # e.g. "JP Morgan", "Goldman Sachs"
-    action: str         # "upgrade", "downgrade", "maintain", "init", "reiterate"
-    from_grade: str     # e.g. "Hold", "" if N/A
-    to_grade: str       # e.g. "Buy"
-    date: str           # ISO date string "2025-01-15"
+
+    firm: str  # e.g. "JP Morgan", "Goldman Sachs"
+    action: str  # "upgrade", "downgrade", "maintain", "init", "reiterate"
+    from_grade: str  # e.g. "Hold", "" if N/A
+    to_grade: str  # e.g. "Buy"
+    date: str  # ISO date string "2025-01-15"

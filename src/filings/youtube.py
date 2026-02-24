@@ -9,6 +9,7 @@ Data flow:
   L3: Static channel list fallback (always available)
   L4: Stale L1 data (never show empty/error to users)
 """
+
 from __future__ import annotations
 
 import logging
@@ -23,25 +24,113 @@ _lock = threading.Lock()
 _events_cache: tuple[float, list[dict]] | None = None
 _channels_cache: tuple[float, list[dict]] | None = None
 _recent_cache: tuple[float, list[dict]] | None = None
-_EVENTS_TTL = 300    # 5 minutes
+_EVENTS_TTL = 300  # 5 minutes
 _CHANNELS_TTL = 600  # 10 minutes
-_RECENT_TTL = 300    # 5 minutes
+_RECENT_TTL = 300  # 5 minutes
 
 
 # ── L3 static fallback: always available even when Supabase is down ──
 
 _STATIC_CHANNELS: list[dict] = [
-    {"channel_id": "UCnMn36GT_H0X-w5_ckLtlgQ", "channel_name": "Financial Education", "handle": "@FinancialEducation", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCbta0n8i6Rljh0obO7HzG9A", "channel_name": "Joseph Carlson", "handle": "@JosephCarlsonShow", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 2.0, "thumbnail_url": ""},
-    {"channel_id": "UChvd7RCRJS50RWlwbfcwr3A", "channel_name": "Tevis (FunOfInvesting)", "handle": "@FunofInvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCyZNir5FhvazX5L3_Q77UbA", "channel_name": "MattMoney", "handle": "@RealMattMoney", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCD0yDGUSqKLyHviB6FUZzzg", "channel_name": "Kross Roads", "handle": "@Kross_Roads-g4j", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCPss8jtpAyp3k829QVX3jhQ", "channel_name": "Steven Fiorillo", "handle": "@stevenfiorillo1", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCvWx0-NX-9qVLCSW9yjdX-g", "channel_name": "Futurenvesting", "handle": "@Futurenvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCjZnbgPb08NFg7MHyPQRZ3Q", "channel_name": "Amit Investing", "handle": "@amitinvesting", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCrGLm-Drgv0vbbemwwHeXJw", "channel_name": "Couch Investor", "handle": "@CouchInvestor", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCgYKMfmLTViSE7Qj0Mj_Mhw", "channel_name": "Endicott Invests", "handle": "@EndicottInvests", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
-    {"channel_id": "UCEXnaoFOX1P-4pyq2LbruYA", "channel_name": "Kris Patel", "handle": "@KrisPatel99", "subscriber_count": 0, "avg_views_30d": 0, "avg_posts_per_week": 7.0, "thumbnail_url": ""},
+    {
+        "channel_id": "UCnMn36GT_H0X-w5_ckLtlgQ",
+        "channel_name": "Financial Education",
+        "handle": "@FinancialEducation",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCbta0n8i6Rljh0obO7HzG9A",
+        "channel_name": "Joseph Carlson",
+        "handle": "@JosephCarlsonShow",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 2.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UChvd7RCRJS50RWlwbfcwr3A",
+        "channel_name": "Tevis (FunOfInvesting)",
+        "handle": "@FunofInvesting",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCyZNir5FhvazX5L3_Q77UbA",
+        "channel_name": "MattMoney",
+        "handle": "@RealMattMoney",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCD0yDGUSqKLyHviB6FUZzzg",
+        "channel_name": "Kross Roads",
+        "handle": "@Kross_Roads-g4j",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCPss8jtpAyp3k829QVX3jhQ",
+        "channel_name": "Steven Fiorillo",
+        "handle": "@stevenfiorillo1",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCvWx0-NX-9qVLCSW9yjdX-g",
+        "channel_name": "Futurenvesting",
+        "handle": "@Futurenvesting",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCjZnbgPb08NFg7MHyPQRZ3Q",
+        "channel_name": "Amit Investing",
+        "handle": "@amitinvesting",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCrGLm-Drgv0vbbemwwHeXJw",
+        "channel_name": "Couch Investor",
+        "handle": "@CouchInvestor",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCgYKMfmLTViSE7Qj0Mj_Mhw",
+        "channel_name": "Endicott Invests",
+        "handle": "@EndicottInvests",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
+    {
+        "channel_id": "UCEXnaoFOX1P-4pyq2LbruYA",
+        "channel_name": "Kris Patel",
+        "handle": "@KrisPatel99",
+        "subscriber_count": 0,
+        "avg_views_30d": 0,
+        "avg_posts_per_week": 7.0,
+        "thumbnail_url": "",
+    },
 ]
 
 
@@ -96,7 +185,8 @@ def get_upcoming_events(limit: int = 50) -> list[dict]:
     # ── L4: stale L1 data -- better than nothing ──
     if stale_data is not None:
         logger.info(
-            "Returning stale YouTube events (%d items)", len(stale_data),
+            "Returning stale YouTube events (%d items)",
+            len(stale_data),
         )
         return stale_data[:limit]
 
@@ -116,7 +206,8 @@ def get_channels() -> list[dict]:
     # ── L1: fresh in-memory cache ──
     with _lock:
         stale_data, is_fresh = _get_cached_with_stale(
-            _channels_cache, _CHANNELS_TTL,
+            _channels_cache,
+            _CHANNELS_TTL,
         )
     if stale_data is not None and is_fresh:
         return stale_data
@@ -141,7 +232,8 @@ def get_channels() -> list[dict]:
 
     # ── L4: stale L1 data ──
     logger.info(
-        "Returning stale YouTube channels (%d items)", len(stale_data),
+        "Returning stale YouTube channels (%d items)",
+        len(stale_data),
     )
     return stale_data
 
@@ -173,7 +265,8 @@ def get_recent_uploads(limit: int = 20) -> list[dict]:
     # ── L4: stale L1 data -- better than nothing ──
     if stale_data is not None:
         logger.info(
-            "Returning stale recent uploads (%d items)", len(stale_data),
+            "Returning stale recent uploads (%d items)",
+            len(stale_data),
         )
         return stale_data[:limit]
 
@@ -192,7 +285,9 @@ def get_high_impact_events(min_score: int = 9) -> list[dict]:
         return []
 
 
-def build_calendar_data(events: list[dict], channels: list[dict], recent_uploads: list[dict] | None = None) -> dict:
+def build_calendar_data(
+    events: list[dict], channels: list[dict], recent_uploads: list[dict] | None = None
+) -> dict:
     """Build enriched calendar data for the frontend.
 
     Returns:

@@ -40,6 +40,7 @@ FILING_SEASON_REFRESH_INTERVAL = timedelta(hours=12)
 def _get_effective_ttl() -> timedelta:
     """Return the appropriate TTL based on filing season."""
     from filings.notifications import is_filing_season
+
     try:
         if is_filing_season():
             return FILING_SEASON_REFRESH_INTERVAL
@@ -54,6 +55,7 @@ def _get_effective_ttl_seconds() -> int:
 
 
 # ── Core Cache Operations ────────────────────────────────────────────
+
 
 def load_cache() -> dict:
     """Load all cached fund data from disk. Returns empty dict if no cache.
@@ -145,7 +147,9 @@ def load_cache_from_supabase() -> dict:
 
     logger.info(
         "Delta load: %d/%d funds changed, %d unchanged — fetching only changed",
-        len(changed_keys), total_funds, unchanged,
+        len(changed_keys),
+        total_funds,
+        unchanged,
     )
 
     # ── Step 3: Start with local cache, then overwrite changed funds ──
@@ -161,7 +165,9 @@ def load_cache_from_supabase() -> dict:
 
     logger.info(
         "Loaded %d funds (%d from Supabase, %d from local cache)",
-        len(result), len(changed_keys), unchanged,
+        len(result),
+        len(changed_keys),
+        unchanged,
     )
 
     # ── Step 4: Save hashes + full cache to disk for next startup ──
@@ -214,7 +220,9 @@ def _load_cache_from_supabase_full() -> dict:
         fresh_count = len(result) - stale_count
         logger.info(
             "Loaded %d funds from Supabase L2 cache (%d fresh, %d stale)",
-            len(result), fresh_count, stale_count,
+            len(result),
+            fresh_count,
+            stale_count,
         )
 
     # Save hashes for next startup (populate from the data we just loaded)
@@ -239,6 +247,7 @@ def save_cache(data: dict) -> None:
 
 
 # ── Staleness Checks ────────────────────────────────────────────────
+
 
 def is_cache_stale(cache_data: dict | None = None) -> bool:
     """Check if the cache needs a background refresh.
@@ -311,6 +320,7 @@ def get_stale_ciks(cache_data: dict, cik_list: list[str]) -> list[str]:
 
 # ── Cache Metadata ───────────────────────────────────────────────────
 
+
 def stamp_fund_data(data: dict) -> dict:
     """Add a `_last_refreshed` timestamp to fund data.
 
@@ -382,8 +392,8 @@ def get_fund_age_str(fund_data: dict) -> str:
 # Guard against excessive SEC API calls during deploys / background refreshes.
 _sec_calls_this_session = 0
 _SEC_MAX_CALLS_PER_SESSION = int(os.environ.get("SEC_MAX_CALLS", "200"))
-_SEC_BATCH_SIZE = 10               # Pause after every N funds
-_SEC_BATCH_PAUSE = 5               # Seconds to pause between batches
+_SEC_BATCH_SIZE = 10  # Pause after every N funds
+_SEC_BATCH_PAUSE = 5  # Seconds to pause between batches
 
 
 def _check_sec_rate_limit() -> bool:
@@ -405,7 +415,10 @@ def _record_sec_call() -> None:
 
 # ── Refresh Operations ───────────────────────────────────────────────
 
-def _archive_old_quarters(cik: str, quarterly_changes: list[dict], keep: int = 2) -> bool:
+
+def _archive_old_quarters(
+    cik: str, quarterly_changes: list[dict], keep: int = 2
+) -> bool:
     """Archive quarters beyond *keep* to cold storage.
 
     Returns True if all uploads succeeded (safe to trim), False otherwise.
@@ -429,7 +442,9 @@ def _archive_old_quarters(cik: str, quarterly_changes: list[dict], keep: int = 2
         if not period:
             continue
         if not cold_storage.upload_json(f"13f/{cik}/quarterly/{period}.json", q):
-            logger.warning("Cold storage upload failed for CIK %s period %s", cik, period)
+            logger.warning(
+                "Cold storage upload failed for CIK %s period %s", cik, period
+            )
             return False
     return True
 
@@ -490,6 +505,7 @@ def refresh_single_fund(cik: str) -> dict | None:
         return None
 
     from filings.client import get_fund_summary
+
     try:
         _record_sec_call()
         data = get_fund_summary(cik)

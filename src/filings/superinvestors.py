@@ -20,7 +20,9 @@ SUPERINVESTORS: list[SuperinvestorInfo] = [
     # B
     SuperinvestorInfo("1061768", "Seth Klarman", "Baupost Group"),
     SuperinvestorInfo("1067983", "Warren Buffett", "Berkshire Hathaway"),
-    SuperinvestorInfo("1166559", "Bill & Melinda Gates Foundation", "Gates Foundation Trust"),
+    SuperinvestorInfo(
+        "1166559", "Bill & Melinda Gates Foundation", "Gates Foundation Trust"
+    ),
     SuperinvestorInfo("1336528", "Bill Ackman", "Pershing Square"),
     SuperinvestorInfo("1135778", "Bill Miller", "Miller Value Partners"),
     SuperinvestorInfo("813917", "Bill Nygren", "Harris Associates"),
@@ -48,7 +50,9 @@ SUPERINVESTORS: list[SuperinvestorInfo] = [
     SuperinvestorInfo("1559771", "Glenn Welling", "Engaged Capital"),
     # F
     SuperinvestorInfo("915191", "Prem Watsa", "Fairfax Financial Holdings"),
-    SuperinvestorInfo("1325447", "First Eagle Investment Mgmt", "First Eagle Investment Mgmt"),
+    SuperinvestorInfo(
+        "1325447", "First Eagle Investment Mgmt", "First Eagle Investment Mgmt"
+    ),
     SuperinvestorInfo("1377581", "Steven Romick", "First Pacific Advisors"),
     SuperinvestorInfo("1327055", "FPA Queens Road", "Bragg Financial Advisors"),
     SuperinvestorInfo("1569205", "Terry Smith", "Fundsmith"),
@@ -66,7 +70,9 @@ SUPERINVESTORS: list[SuperinvestorInfo] = [
     # I
     SuperinvestorInfo("921669", "Carl Icahn", "Icahn Capital"),
     # J
-    SuperinvestorInfo("1106129", "Jensen Investment Mgmt", "Jensen Investment Management"),
+    SuperinvestorInfo(
+        "1106129", "Jensen Investment Mgmt", "Jensen Investment Management"
+    ),
     # K
     SuperinvestorInfo("1039565", "Kahn Brothers", "Kahn Brothers Group"),
     # L
@@ -119,6 +125,4 @@ SUPERINVESTORS: list[SuperinvestorInfo] = [
     SuperinvestorInfo("1358706", "David Abrams", "Abrams Capital Management"),
 ]
 
-SUPERINVESTORS_BY_CIK: dict[str, SuperinvestorInfo] = {
-    s.cik: s for s in SUPERINVESTORS
-}
+SUPERINVESTORS_BY_CIK: dict[str, SuperinvestorInfo] = {s.cik: s for s in SUPERINVESTORS}

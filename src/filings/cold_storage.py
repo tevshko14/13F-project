@@ -125,7 +125,9 @@ def upload_json(path: str, data: dict | list) -> bool:
         err = str(exc).lower()
         # If bucket disappeared mid-run, flip the circuit-breaker
         if "bucket not found" in err or "404" in err:
-            logger.warning("Bucket %s not found — disabling cold storage for this run", BUCKET_NAME)
+            logger.warning(
+                "Bucket %s not found — disabling cold storage for this run", BUCKET_NAME
+            )
             _bucket_status = False
             return False
         logger.warning("upload_json(%s) failed: %s", path, exc)

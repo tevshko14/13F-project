@@ -53,7 +53,13 @@ def migrate_13f_to_cold_storage() -> dict:
     # Ensure bucket exists before uploading
     if not cold_storage.ensure_bucket():
         logger.error("Could not ensure archive bucket -- aborting 13F migration")
-        return {"archived": 0, "trimmed": 0, "skipped": 0, "failed": 0, "error": "bucket_creation_failed"}
+        return {
+            "archived": 0,
+            "trimmed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "error": "bucket_creation_failed",
+        }
 
     keys = supabase_cache.get_category_keys("13f")
     if not keys:
@@ -77,7 +83,9 @@ def migrate_13f_to_cold_storage() -> dict:
 
         quarterly = data.get("quarterly_changes", [])
         if len(quarterly) <= 2:
-            logger.debug("%s has only %d quarters -- no archiving needed", key, len(quarterly))
+            logger.debug(
+                "%s has only %d quarters -- no archiving needed", key, len(quarterly)
+            )
             stats["skipped"] += 1
             continue
 
@@ -88,7 +96,9 @@ def migrate_13f_to_cold_storage() -> dict:
         for q in to_archive:
             period = q.get("period", "").replace(" ", "_")
             if not period:
-                logger.warning("Quarter missing period label in %s -- skipping quarter", key)
+                logger.warning(
+                    "Quarter missing period label in %s -- skipping quarter", key
+                )
                 continue
             path = f"13f/{cik}/quarterly/{period}.json"
             if cold_storage.upload_json(path, q):
@@ -116,7 +126,9 @@ def migrate_13f_to_cold_storage() -> dict:
             stats["trimmed"] += 1
             logger.info(
                 "Archived %d quarters and trimmed %s (kept %d)",
-                archived_count, key, len(data["quarterly_changes"]),
+                archived_count,
+                key,
+                len(data["quarterly_changes"]),
             )
         else:
             logger.error("Failed to write trimmed blob for %s", key)
@@ -142,10 +154,7 @@ def cleanup_old_insider_trades(days: int = 30) -> int:
 
     try:
         resp = (
-            client.table("insider_trades")
-            .delete()
-            .lt("trade_date", cutoff)
-            .execute()
+            client.table("insider_trades").delete().lt("trade_date", cutoff).execute()
         )
         count = len(resp.data) if resp.data else 0
         logger.info("Deleted %d insider trades older than %s", count, cutoff)
@@ -210,7 +219,10 @@ def main() -> None:
     elapsed = round(time.time() - start)
     logger.info(
         "=== Migration complete in %ds: 13f=%s, insider_deleted=%d, cache_deleted=%d ===",
-        elapsed, stats_13f, insider_deleted, cache_deleted,
+        elapsed,
+        stats_13f,
+        insider_deleted,
+        cache_deleted,
     )
 
 
