@@ -310,7 +310,8 @@
                 /* Check if email confirmation is required */
                 if (result.data.user && !result.data.session) {
                     form.style.display = 'none';
-                    successEl.innerHTML = '<strong>Check your email!</strong><br>We sent a confirmation link to <strong>' + email + '</strong>. Click it to activate your account.';
+                    var safeEmail = email.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+                    successEl.innerHTML = '<strong>Check your email!</strong><br>We sent a confirmation link to <strong>' + safeEmail + '</strong>. Click it to activate your account.';
                     successEl.style.display = 'block';
                     if (window.ppToast) {
                         window.ppToast({
