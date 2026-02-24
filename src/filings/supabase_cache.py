@@ -24,6 +24,7 @@ import json as _json
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
@@ -36,6 +37,27 @@ _table_verified = False  # True once we've confirmed the table exists
 _init_lock = threading.Lock()  # Protects one-time client creation
 
 _TABLE = "api_cache"
+
+# ── Column projections (egress optimization — avoid SELECT *) ─────
+# Only fetch columns the web layer actually reads.
+
+_INSIDER_COLS = (
+    "filing_date,trade_date,ticker,company_name,insider_name,"
+    "title,trade_type,price_fmt,qty_fmt,owned_fmt,delta_own_fmt,"
+    "value_fmt,sec_url"
+)
+
+_YOUTUBE_EVENT_COLS = (
+    "video_id,channel_id,channel_name,title,scheduled_at,"
+    "event_type,sentiment,tickers,impact_score,subscriber_count,"
+    "avg_views,frequency_alert,frequency_detail,thumbnail_url,"
+    "video_url,duration,content_type"
+)
+
+_YOUTUBE_CHANNEL_COLS = (
+    "channel_id,channel_name,handle,subscriber_count,"
+    "avg_views_30d,avg_posts_per_week,thumbnail_url"
+)
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS api_cache (
@@ -804,7 +826,7 @@ def get_insider_trades(
     try:
         query = (
             client.table("insider_trades")
-            .select("*")
+            .select(_INSIDER_COLS)
             .order("filing_date", desc=True)
             .order("trade_date", desc=True)
             .limit(limit)
@@ -848,7 +870,7 @@ def get_insider_trades_for_chart(
 
         buys = (
             client.table("insider_trades")
-            .select("*")
+            .select(_INSIDER_COLS)
             .ilike("trade_type", "%Purchase%")
             .gte("trade_date", cutoff)
             .order("trade_date", desc=True)
@@ -858,7 +880,7 @@ def get_insider_trades_for_chart(
 
         sells = (
             client.table("insider_trades")
-            .select("*")
+            .select(_INSIDER_COLS)
             .ilike("trade_type", "%Sale%")
             .gte("trade_date", cutoff)
             .order("trade_date", desc=True)
@@ -888,7 +910,7 @@ def get_insider_trades_by_ticker(
     try:
         resp = (
             client.table("insider_trades")
-            .select("*")
+            .select(_INSIDER_COLS)
             .eq("ticker", ticker.upper())
             .order("trade_date", desc=True)
             .limit(limit)
@@ -1203,7 +1225,7 @@ def get_youtube_events(
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
         query = (
             client.table("youtube_events")
-            .select("*")
+            .select(_YOUTUBE_EVENT_COLS)
             .eq("event_type", "upcoming")
             .gte("scheduled_at", cutoff)
             .order("scheduled_at", desc=True)
@@ -1226,15 +1248,31 @@ def get_youtube_channels() -> list[dict] | None:
     if client is None:
         return None
     try:
-        resp = client.table("youtube_channels").select("*").execute()
+        resp = client.table("youtube_channels").select(_YOUTUBE_CHANNEL_COLS).execute()
         return resp.data
     except Exception as exc:
         logger.warning("get_youtube_channels failed: %s", exc)
         return None
 
 
+_high_impact_cache: tuple[float, list[dict]] | None = None
+_HIGH_IMPACT_TTL = 300  # 5 minutes
+
+
 def get_high_impact_youtube_events(min_score: int = 9) -> list[dict] | None:
-    """Return upcoming events with ``impact_score >= min_score``."""
+    """Return upcoming events with ``impact_score >= min_score``.
+
+    Results are cached in-memory for 5 minutes to avoid hitting
+    Supabase on every ``/retail`` page load.
+    """
+    global _high_impact_cache
+
+    # ── L1: in-memory cache ──
+    if _high_impact_cache is not None:
+        ts, data = _high_impact_cache
+        if time.time() - ts < _HIGH_IMPACT_TTL:
+            return data
+
     client = _get_client()
     if client is None:
         return None
@@ -1242,7 +1280,7 @@ def get_high_impact_youtube_events(min_score: int = 9) -> list[dict] | None:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
         resp = (
             client.table("youtube_events")
-            .select("*")
+            .select(_YOUTUBE_EVENT_COLS)
             .gte("impact_score", min_score)
             .eq("event_type", "upcoming")
             .gte("scheduled_at", cutoff)
@@ -1250,7 +1288,9 @@ def get_high_impact_youtube_events(min_score: int = 9) -> list[dict] | None:
             .limit(10)
             .execute()
         )
-        return resp.data
+        result = resp.data
+        _high_impact_cache = (time.time(), result)
+        return result
     except Exception as exc:
         logger.warning("get_high_impact_youtube_events failed: %s", exc)
         return None
@@ -1270,7 +1310,7 @@ def get_recent_youtube_uploads(limit: int = 20) -> list[dict] | None:
     try:
         resp = (
             client.table("youtube_events")
-            .select("*")
+            .select(_YOUTUBE_EVENT_COLS)
             .eq("event_type", "recent_upload")
             .order("scheduled_at", desc=True)
             .limit(limit)
@@ -1306,15 +1346,16 @@ def run_retention_cleanup() -> dict:
     results: dict[str, int] = {}
 
     # 1. Insider trades: delete > 30 days
+    # Use count="exact" + minimal select to avoid returning full deleted rows (saves egress)
     cutoff_30d = (now - timedelta(days=30)).strftime("%Y-%m-%d")
     try:
         resp = (
             client.table("insider_trades")
-            .delete()
+            .delete(count="exact")
             .lt("trade_date", cutoff_30d)
             .execute()
         )
-        results["insider_trades_deleted"] = len(resp.data) if resp.data else 0
+        results["insider_trades_deleted"] = resp.count if resp.count is not None else 0
     except Exception as exc:
         logger.warning("Retention: insider_trades cleanup failed: %s", exc)
         results["insider_trades_deleted"] = -1
@@ -1323,9 +1364,12 @@ def run_retention_cleanup() -> dict:
     cutoff_30d_ts = (now - timedelta(days=30)).isoformat()
     try:
         resp = (
-            client.table("sync_logs").delete().lt("started_at", cutoff_30d_ts).execute()
+            client.table("sync_logs")
+            .delete(count="exact")
+            .lt("started_at", cutoff_30d_ts)
+            .execute()
         )
-        results["sync_logs_deleted"] = len(resp.data) if resp.data else 0
+        results["sync_logs_deleted"] = resp.count if resp.count is not None else 0
     except Exception as exc:
         logger.warning("Retention: sync_logs cleanup failed: %s", exc)
         results["sync_logs_deleted"] = -1
@@ -1334,11 +1378,11 @@ def run_retention_cleanup() -> dict:
     try:
         resp = (
             client.table("youtube_events")
-            .delete()
+            .delete(count="exact")
             .lt("scheduled_at", cutoff_30d_ts)
             .execute()
         )
-        results["youtube_events_deleted"] = len(resp.data) if resp.data else 0
+        results["youtube_events_deleted"] = resp.count if resp.count is not None else 0
     except Exception as exc:
         logger.warning("Retention: youtube_events cleanup failed: %s", exc)
         results["youtube_events_deleted"] = -1
@@ -1348,12 +1392,12 @@ def run_retention_cleanup() -> dict:
     try:
         resp = (
             client.table("api_cache")
-            .delete()
+            .delete(count="exact")
             .lt("expires_at", now_iso)
             .neq("category", "13f")
             .execute()
         )
-        results["expired_cache_deleted"] = len(resp.data) if resp.data else 0
+        results["expired_cache_deleted"] = resp.count if resp.count is not None else 0
     except Exception as exc:
         logger.warning("Retention: api_cache cleanup failed: %s", exc)
         results["expired_cache_deleted"] = -1
