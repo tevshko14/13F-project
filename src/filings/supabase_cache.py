@@ -30,8 +30,8 @@ from datetime import datetime, timedelta, timezone
 logger = logging.getLogger(__name__)
 
 # ── Lazy-initialised Supabase client ──────────────────────────────
-_client = None           # supabase.Client | None
-_initialised = False     # True once we've attempted init (even if it failed)
+_client = None  # supabase.Client | None
+_initialised = False  # True once we've attempted init (even if it failed)
 _table_verified = False  # True once we've confirmed the table exists
 _init_lock = threading.Lock()  # Protects one-time client creation
 
@@ -213,10 +213,13 @@ def _auto_migrate() -> None:
             cur.close()
             conn.close()
             _table_verified = True
-            logger.info("Supabase api_cache + sync_logs + insider_trades tables verified via auto-migration")
+            logger.info(
+                "Supabase api_cache + sync_logs + insider_trades tables verified via auto-migration"
+            )
             # Create cold storage bucket (non-fatal)
             try:
                 from filings import cold_storage
+
                 cold_storage.ensure_bucket()
             except Exception:
                 logger.debug("Cold storage bucket creation skipped (non-fatal)")
@@ -253,11 +256,14 @@ def _get_client():
         key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 
         if not url or not key:
-            logger.info("Supabase not configured (SUPABASE_URL / SUPABASE_SERVICE_KEY missing)")
+            logger.info(
+                "Supabase not configured (SUPABASE_URL / SUPABASE_SERVICE_KEY missing)"
+            )
             return None
 
         try:
             from supabase import create_client
+
             _client = create_client(url, key)
             logger.info("Supabase client initialised (%s)", url)
             # Try auto-migration (non-fatal)
@@ -304,8 +310,7 @@ def get_cached(cache_key: str) -> dict | None:
 
     try:
         resp = (
-            client
-            .table(_TABLE)
+            client.table(_TABLE)
             .select("response_data, expires_at")
             .eq("cache_key", cache_key)
             .maybe_single()
@@ -341,8 +346,7 @@ def get_cached_with_stale(cache_key: str) -> tuple[dict | list | None, bool]:
 
     try:
         resp = (
-            client
-            .table(_TABLE)
+            client.table(_TABLE)
             .select("response_data, expires_at")
             .eq("cache_key", cache_key)
             .maybe_single()
@@ -387,8 +391,7 @@ def get_content_hash(cache_key: str) -> str:
 
     try:
         resp = (
-            client
-            .table(_TABLE)
+            client.table(_TABLE)
             .select("content_hash")
             .eq("cache_key", cache_key)
             .maybe_single()
@@ -413,8 +416,7 @@ def get_all_content_hashes(category: str) -> dict[str, str]:
 
     try:
         resp = (
-            client
-            .table(_TABLE)
+            client.table(_TABLE)
             .select("cache_key, content_hash")
             .eq("category", category)
             .execute()
@@ -466,7 +468,9 @@ def set_cached(
         try:
             update_row: dict = {"expires_at": expires_at}
             client.table(_TABLE).update(update_row).eq("cache_key", cache_key).execute()
-            logger.debug("Cache unchanged for %s (hash=%s), bumped TTL only", cache_key, new_hash)
+            logger.debug(
+                "Cache unchanged for %s (hash=%s), bumped TTL only", cache_key, new_hash
+            )
             return True
         except Exception:
             pass  # Fall through to full upsert
@@ -509,11 +513,7 @@ def get_category_keys(category: str) -> list[str]:
 
     try:
         resp = (
-            client
-            .table(_TABLE)
-            .select("cache_key")
-            .eq("category", category)
-            .execute()
+            client.table(_TABLE).select("cache_key").eq("category", category).execute()
         )
         return [row["cache_key"] for row in (resp.data or [])]
     except Exception as exc:
@@ -532,11 +532,7 @@ def get_cache_keys_by_category(category: str) -> list[str]:
         return []
     try:
         resp = (
-            client
-            .table(_TABLE)
-            .select("cache_key")
-            .eq("category", category)
-            .execute()
+            client.table(_TABLE).select("cache_key").eq("category", category).execute()
         )
         return [row["cache_key"] for row in (resp.data or [])]
     except Exception as exc:
@@ -563,8 +559,7 @@ def get_all_by_category(category: str, page_size: int = 10) -> list[dict] | None
     try:
         while True:
             resp = (
-                client
-                .table(_TABLE)
+                client.table(_TABLE)
                 .select("cache_key, response_data, created_at")
                 .eq("category", category)
                 .range(offset, offset + page_size - 1)
@@ -627,7 +622,9 @@ def increment_quota(category: str, month: str) -> int:
 
         return new_count
     except Exception as exc:
-        logger.warning("Supabase increment_quota(%s, %s) failed: %s", category, month, exc)
+        logger.warning(
+            "Supabase increment_quota(%s, %s) failed: %s", category, month, exc
+        )
         return -1
 
 
@@ -741,7 +738,9 @@ def fetch_with_cache_and_quota(
         if current_count >= max_monthly:
             logger.warning(
                 "Quota exhausted for %s (%d/%d) -- returning %s data for %s",
-                quota_category, current_count, max_monthly,
+                quota_category,
+                current_count,
+                max_monthly,
                 "stale" if cached_data else "no",
                 log_label,
             )
@@ -843,9 +842,9 @@ def get_insider_trades_for_chart(
         return None
 
     try:
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=days)
-        ).strftime("%Y-%m-%d")
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+            "%Y-%m-%d"
+        )
 
         buys = (
             client.table("insider_trades")
@@ -911,9 +910,7 @@ def _get_existing_insider_urls(days: int = 7) -> set[str]:
     if client is None:
         return set()
 
-    cutoff = (
-        datetime.now(timezone.utc) - timedelta(days=days)
-    ).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     try:
         resp = (
@@ -951,7 +948,9 @@ def upsert_insider_trades(rows: list[dict]) -> int:
 
     logger.info(
         "Insider trades: %d new out of %d total (skipping %d existing)",
-        len(new_rows), len(rows), len(rows) - len(new_rows),
+        len(new_rows),
+        len(rows),
+        len(rows) - len(new_rows),
     )
 
     upserted = 0
@@ -982,10 +981,12 @@ def update_sync_status(cache_key: str, status: str) -> bool:
         return False
     now = datetime.now(timezone.utc).isoformat()
     try:
-        client.table(_TABLE).update({
-            "last_synced_at": now,
-            "sync_status": status,
-        }).eq("cache_key", cache_key).execute()
+        client.table(_TABLE).update(
+            {
+                "last_synced_at": now,
+                "sync_status": status,
+            }
+        ).eq("cache_key", cache_key).execute()
         return True
     except Exception as exc:
         logger.warning("update_sync_status failed for %s: %s", cache_key, exc)
@@ -1002,9 +1003,7 @@ def get_stale_sync_keys(max_age_hours: int = 24) -> list[str]:
     if client is None:
         return []
 
-    cutoff = (
-        datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
-    ).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max_age_hours)).isoformat()
 
     try:
         # Keys where never synced
@@ -1040,9 +1039,11 @@ def create_sync_log(run_id: str) -> bool:
     if client is None:
         return False
     try:
-        client.table("sync_logs").insert({
-            "run_id": run_id,
-        }).execute()
+        client.table("sync_logs").insert(
+            {
+                "run_id": run_id,
+            }
+        ).execute()
         return True
     except Exception as exc:
         logger.warning("create_sync_log failed: %s", exc)
@@ -1062,13 +1063,15 @@ def complete_sync_log(
         return False
     now = datetime.now(timezone.utc).isoformat()
     try:
-        client.table("sync_logs").update({
-            "completed_at": now,
-            "funds_updated": funds_updated,
-            "funds_failed": funds_failed,
-            "funds_skipped": funds_skipped,
-            "error_messages": errors[:50],  # Cap stored errors
-        }).eq("run_id", run_id).execute()
+        client.table("sync_logs").update(
+            {
+                "completed_at": now,
+                "funds_updated": funds_updated,
+                "funds_failed": funds_failed,
+                "funds_skipped": funds_skipped,
+                "error_messages": errors[:50],  # Cap stored errors
+            }
+        ).eq("run_id", run_id).execute()
         return True
     except Exception as exc:
         logger.warning("complete_sync_log failed: %s", exc)
@@ -1088,9 +1091,7 @@ def _get_existing_video_ids(days: int = 14) -> set[str]:
     if client is None:
         return set()
 
-    cutoff = (
-        datetime.now(timezone.utc) - timedelta(days=days)
-    ).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     try:
         resp = (
@@ -1137,7 +1138,8 @@ def upsert_youtube_events(rows: list[dict]) -> int:
     if skipped > 0:
         logger.info(
             "YouTube events: %d to upsert, %d skipped (already exist)",
-            len(new_rows), skipped,
+            len(new_rows),
+            skipped,
         )
 
     upserted = 0
@@ -1175,7 +1177,8 @@ def upsert_youtube_channels(rows: list[dict]) -> int:
         except Exception as exc:
             logger.warning(
                 "upsert_youtube_channels failed for %s: %s",
-                row.get("channel_id"), exc,
+                row.get("channel_id"),
+                exc,
             )
 
     return upserted
@@ -1320,10 +1323,7 @@ def run_retention_cleanup() -> dict:
     cutoff_30d_ts = (now - timedelta(days=30)).isoformat()
     try:
         resp = (
-            client.table("sync_logs")
-            .delete()
-            .lt("started_at", cutoff_30d_ts)
-            .execute()
+            client.table("sync_logs").delete().lt("started_at", cutoff_30d_ts).execute()
         )
         results["sync_logs_deleted"] = len(resp.data) if resp.data else 0
     except Exception as exc:

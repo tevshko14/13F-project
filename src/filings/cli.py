@@ -35,19 +35,25 @@ def main():
         if command == "search":
             if len(args) < 2:
                 console.print("[red]Please provide a search term.[/red]")
-                console.print("Example: [bold]filings search \"Berkshire Hathaway\"[/bold]")
+                console.print(
+                    'Example: [bold]filings search "Berkshire Hathaway"[/bold]'
+                )
                 return
             query = " ".join(args[1:])
             results = client.search_managers(query)
             if not results:
-                console.print(f"[yellow]No fund managers found matching '{query}'[/yellow]")
+                console.print(
+                    f"[yellow]No fund managers found matching '{query}'[/yellow]"
+                )
                 return
             display.display_search_results(results)
 
         elif command == "holdings":
             if len(args) < 2:
                 console.print("[red]Please provide a CIK number.[/red]")
-                console.print("Tip: Use [bold]filings search <name>[/bold] to find a CIK first.")
+                console.print(
+                    "Tip: Use [bold]filings search <name>[/bold] to find a CIK first."
+                )
                 return
             cik = args[1]
             top_n = 25
@@ -57,7 +63,9 @@ def main():
         elif command == "compare":
             if len(args) < 2:
                 console.print("[red]Please provide a CIK number.[/red]")
-                console.print("Tip: Use [bold]filings search <name>[/bold] to find a CIK first.")
+                console.print(
+                    "Tip: Use [bold]filings search <name>[/bold] to find a CIK first."
+                )
                 return
             cik = args[1]
             current, previous, changes = client.compare_quarters(cik)

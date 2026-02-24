@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 # ── Cache TTLs ──────────────────────────────────────────────────────
-_FINNHUB_TTL = 7200       # 2 hours
-_CNN_TTL = 3600            # 1 hour
-_APEWISDOM_TTL = 1800      # 30 minutes
+_FINNHUB_TTL = 7200  # 2 hours
+_CNN_TTL = 3600  # 1 hour
+_APEWISDOM_TTL = 1800  # 30 minutes
 _ALPHAVANTAGE_TTL = 43200  # 12 hours
 
 # ── LRU max entries for per-ticker caches ─────────────────────────────
@@ -43,7 +43,7 @@ _alphavantage_cache: dict[str, tuple[float, dict | None]] = {}
 _cnn_cache: tuple[float, dict | None] | None = None
 _apewisdom_cache: tuple[float, list[dict]] | None = None
 _leaderboard_cache: tuple[float, dict] | None = None
-_LEADERBOARD_TTL = 1800    # 30 minutes
+_LEADERBOARD_TTL = 1800  # 30 minutes
 
 # ── Alpha Vantage daily budget tracker ──────────────────────────────
 _av_daily_count = 0
@@ -56,11 +56,12 @@ def _evict_oldest(cache: dict, max_size: int = _MAX_CACHE_ENTRIES) -> None:
     if len(cache) <= max_size:
         return
     sorted_keys = sorted(cache, key=lambda k: cache[k][0])
-    for k in sorted_keys[:len(cache) - max_size]:
+    for k in sorted_keys[: len(cache) - max_size]:
         del cache[k]
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
+
 
 def has_finnhub_key() -> bool:
     return bool(os.environ.get("FINNHUB_API_KEY"))
@@ -76,7 +77,9 @@ _BROWSER_UA = (
 )
 
 
-def _http_get_json(url: str, headers: dict | None = None, timeout: int = 10) -> dict | list | None:
+def _http_get_json(
+    url: str, headers: dict | None = None, timeout: int = 10
+) -> dict | list | None:
     """Simple GET→JSON helper using stdlib urllib."""
     req = urllib.request.Request(url)
     req.add_header("User-Agent", _BROWSER_UA)
@@ -94,6 +97,7 @@ def _http_get_json(url: str, headers: dict | None = None, timeout: int = 10) -> 
 # ═══════════════════════════════════════════════════════════════════
 # 1. Finnhub News Sentiment
 # ═══════════════════════════════════════════════════════════════════
+
 
 def _get_finnhub_sentiment(ticker: str) -> dict | None:
     """Per-ticker news sentiment from Finnhub.
@@ -117,6 +121,7 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
 
     try:
         import finnhub
+
         client = finnhub.Client(api_key=api_key)
         raw = client.news_sentiment(key)
     except Exception as exc:
@@ -153,6 +158,7 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
 # 2. CNN Fear & Greed Index
 # ═══════════════════════════════════════════════════════════════════
 
+
 def _get_cnn_fear_greed() -> dict | None:
     """Market-wide Fear & Greed Index (0-100).
 
@@ -168,11 +174,14 @@ def _get_cnn_fear_greed() -> dict | None:
                 return data
 
     url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-    raw = _http_get_json(url, headers={
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://edition.cnn.com/",
-        "Origin": "https://edition.cnn.com",
-    })
+    raw = _http_get_json(
+        url,
+        headers={
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://edition.cnn.com/",
+            "Origin": "https://edition.cnn.com",
+        },
+    )
 
     if not raw or not isinstance(raw, dict):
         with _lock:
@@ -203,6 +212,7 @@ def _get_cnn_fear_greed() -> dict | None:
 # ═══════════════════════════════════════════════════════════════════
 # 3. ApeWisdom (Reddit Mentions)
 # ═══════════════════════════════════════════════════════════════════
+
 
 def _get_apewisdom_all() -> list[dict]:
     """Fetch all-stocks ranked list from ApeWisdom (pages 1-5)."""
@@ -251,6 +261,7 @@ def _get_apewisdom_for_ticker(ticker: str) -> dict | None:
 # 4. Alpha Vantage News Sentiment
 # ═══════════════════════════════════════════════════════════════════
 
+
 def _check_and_increment_av_budget() -> bool:
     """Atomically check and increment the Alpha Vantage daily budget.
 
@@ -292,7 +303,11 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
         return None
 
     if not _check_and_increment_av_budget():
-        logger.info("Alpha Vantage daily budget exhausted (%d/%d)", _av_daily_count, _AV_DAILY_MAX)
+        logger.info(
+            "Alpha Vantage daily budget exhausted (%d/%d)",
+            _av_daily_count,
+            _AV_DAILY_MAX,
+        )
         return None
 
     url = (
@@ -309,8 +324,11 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
 
     # Check for error/rate-limit responses
     if "Note" in raw or "Error Message" in raw or "Information" in raw:
-        logger.warning("Alpha Vantage returned error for %s: %s",
-                       key, raw.get("Note") or raw.get("Error Message") or raw.get("Information"))
+        logger.warning(
+            "Alpha Vantage returned error for %s: %s",
+            key,
+            raw.get("Note") or raw.get("Error Message") or raw.get("Information"),
+        )
         with _lock:
             _alphavantage_cache[key] = (time.time(), None)
             _evict_oldest(_alphavantage_cache)
@@ -330,7 +348,7 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
     for item in feed[:10]:
         # Find the ticker-specific sentiment from the per-ticker array
         ticker_sent = {}
-        for ts_item in (item.get("ticker_sentiment") or []):
+        for ts_item in item.get("ticker_sentiment") or []:
             if (ts_item.get("ticker") or "").upper() == key:
                 ticker_sent = ts_item
                 break
@@ -338,14 +356,16 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
         t_score = float(ticker_sent.get("ticker_sentiment_score", 0))
         t_label = ticker_sent.get("ticker_sentiment_label", "Neutral")
 
-        articles.append({
-            "title": item.get("title", ""),
-            "url": item.get("url", ""),
-            "source": item.get("source", ""),
-            "published": item.get("time_published", "")[:10],  # YYYYMMDD or similar
-            "ticker_sentiment_score": t_score,
-            "ticker_sentiment_label": t_label,
-        })
+        articles.append(
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "source": item.get("source", ""),
+                "published": item.get("time_published", "")[:10],  # YYYYMMDD or similar
+                "ticker_sentiment_score": t_score,
+                "ticker_sentiment_label": t_label,
+            }
+        )
 
         total_score += t_score
         score_count += 1
@@ -377,6 +397,7 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════
 # Public API
 # ═══════════════════════════════════════════════════════════════════
+
 
 def get_sentiment_data(ticker: str) -> dict:
     """Aggregate sentiment from all sources for a ticker.
@@ -509,51 +530,57 @@ def build_retail_leaderboard_data(
         # Heat level 0-5 (based on absolute velocity)
         heat = min(5, max(0, int(abs(velocity_pct) / 20)))
 
-        rows.append({
-            "rank": rank,
-            "ticker": ticker,
-            "name": item.get("name") or "",
-            "mentions": mentions,
-            "mentions_24h_ago": mentions_24h,
-            "velocity_pct": round(velocity_pct, 1),
-            "upvotes": upvotes,
-            "engagement_ratio": engagement_ratio,
-            "rank_change": rank_change,
-            "guru_count": guru_count,
-            "guru_names": guru_names[:5],  # cap for JSON size
-            "heat": heat,
-        })
+        rows.append(
+            {
+                "rank": rank,
+                "ticker": ticker,
+                "name": item.get("name") or "",
+                "mentions": mentions,
+                "mentions_24h_ago": mentions_24h,
+                "velocity_pct": round(velocity_pct, 1),
+                "upvotes": upvotes,
+                "engagement_ratio": engagement_ratio,
+                "rank_change": rank_change,
+                "guru_count": guru_count,
+                "guru_names": guru_names[:5],  # cap for JSON size
+                "heat": heat,
+            }
+        )
 
     # ── Treemap data: top N by mentions ──
     treemap_sorted = sorted(rows, key=lambda r: r["mentions"], reverse=True)
     treemap_data = []
     for r in treemap_sorted[:treemap_limit]:
-        treemap_data.append({
-            "name": r["ticker"],
-            "value": max(r["mentions"], 1),  # treemap needs value > 0
-            "velocity_pct": r["velocity_pct"],
-            "mentions": r["mentions"],
-            "engagement_ratio": r["engagement_ratio"],
-            "upvotes": r["upvotes"],
-            "guru_count": r["guru_count"],
-            "guru_names": r["guru_names"],
-            "link": f"/stock/{r['ticker']}",
-            "itemStyle": {"color": _velocity_to_color(r["velocity_pct"])},
-        })
+        treemap_data.append(
+            {
+                "name": r["ticker"],
+                "value": max(r["mentions"], 1),  # treemap needs value > 0
+                "velocity_pct": r["velocity_pct"],
+                "mentions": r["mentions"],
+                "engagement_ratio": r["engagement_ratio"],
+                "upvotes": r["upvotes"],
+                "guru_count": r["guru_count"],
+                "guru_names": r["guru_names"],
+                "link": f"/stock/{r['ticker']}",
+                "itemStyle": {"color": _velocity_to_color(r["velocity_pct"])},
+            }
+        )
 
     # ── Bubble data: top N by absolute velocity ──
     bubble_sorted = sorted(rows, key=lambda r: abs(r["velocity_pct"]), reverse=True)
     bubble_data = []
     for r in bubble_sorted[:bubble_limit]:
-        bubble_data.append({
-            "ticker": r["ticker"],
-            "name": r["name"],
-            "x": r["engagement_ratio"],
-            "y": r["velocity_pct"],
-            "r": r["mentions"],
-            "guru_count": r["guru_count"],
-            "rank": r["rank"],
-        })
+        bubble_data.append(
+            {
+                "ticker": r["ticker"],
+                "name": r["name"],
+                "x": r["engagement_ratio"],
+                "y": r["velocity_pct"],
+                "r": r["mentions"],
+                "guru_count": r["guru_count"],
+                "rank": r["rank"],
+            }
+        )
 
     result = {
         "treemap_data": treemap_data,
