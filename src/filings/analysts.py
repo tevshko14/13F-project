@@ -9,8 +9,6 @@ from __future__ import annotations
 import os
 import threading
 import time
-from datetime import datetime
-
 from filings.models import AnalystRating
 
 # ── Thread lock + cache ──────────────────────────────────────────────
@@ -36,11 +34,12 @@ def _set_cached(ticker: str, data: list[AnalystRating]) -> None:
         # Evict oldest if over limit
         if len(_cache) > _MAX_CACHE_ENTRIES:
             sorted_keys = sorted(_cache, key=lambda k: _cache[k][0])
-            for k in sorted_keys[:len(_cache) - _MAX_CACHE_ENTRIES]:
+            for k in sorted_keys[: len(_cache) - _MAX_CACHE_ENTRIES]:
                 del _cache[k]
 
 
 # ── Finnhub source ──────────────────────────────────────────────────
+
 
 def _fetch_finnhub(ticker: str) -> list[AnalystRating]:
     """Fetch upgrade/downgrade data from Finnhub free API."""
@@ -50,13 +49,14 @@ def _fetch_finnhub(ticker: str) -> list[AnalystRating]:
 
     try:
         import finnhub
+
         client = finnhub.Client(api_key=api_key)
         data = client.upgrade_downgrade(symbol=ticker.upper())
     except Exception:
         return []
 
     ratings: list[AnalystRating] = []
-    for item in (data or []):
+    for item in data or []:
         action = (item.get("action") or "").lower()
         # Normalise action names
         action_map = {
@@ -73,18 +73,21 @@ def _fetch_finnhub(ticker: str) -> list[AnalystRating]:
             # Finnhub returns "YYYY-MM-DD HH:MM:SS" — keep date part
             grade_date = grade_date[:10]
 
-        ratings.append(AnalystRating(
-            firm=item.get("company", "Unknown"),
-            action=action,
-            from_grade=item.get("fromGrade", ""),
-            to_grade=item.get("toGrade", ""),
-            date=grade_date,
-        ))
+        ratings.append(
+            AnalystRating(
+                firm=item.get("company", "Unknown"),
+                action=action,
+                from_grade=item.get("fromGrade", ""),
+                to_grade=item.get("toGrade", ""),
+                date=grade_date,
+            )
+        )
 
     return ratings
 
 
 # ── yfinance source ─────────────────────────────────────────────────
+
 
 def _fetch_yfinance(ticker: str) -> list[AnalystRating]:
     """Fetch upgrade/downgrade data from yfinance (free, no API key).
@@ -94,6 +97,7 @@ def _fetch_yfinance(ticker: str) -> list[AnalystRating]:
     """
     try:
         import yfinance as yf
+
         tk = yf.Ticker(ticker.upper())
         ud = tk.upgrades_downgrades
     except Exception:
@@ -127,18 +131,21 @@ def _fetch_yfinance(ticker: str) -> list[AnalystRating]:
         to_grade = str(getattr(row, "ToGrade", "") or "")
         from_grade = str(getattr(row, "FromGrade", "") or "")
 
-        ratings.append(AnalystRating(
-            firm=firm,
-            action=action,
-            from_grade=from_grade if from_grade != "nan" else "",
-            to_grade=to_grade if to_grade != "nan" else "",
-            date=date_str,
-        ))
+        ratings.append(
+            AnalystRating(
+                firm=firm,
+                action=action,
+                from_grade=from_grade if from_grade != "nan" else "",
+                to_grade=to_grade if to_grade != "nan" else "",
+                date=date_str,
+            )
+        )
 
     return ratings
 
 
 # ── Merge & deduplicate ─────────────────────────────────────────────
+
 
 def _normalize_firm(name: str) -> str:
     """Normalize firm name for dedup matching."""
@@ -178,6 +185,7 @@ def _merge_ratings(
 
 # ── Public API ───────────────────────────────────────────────────────
 
+
 def get_analyst_ratings(ticker: str) -> list[AnalystRating]:
     """Get merged analyst ratings for a ticker.
 
@@ -210,18 +218,41 @@ def get_consensus_summary(ratings: list[AnalystRating]) -> dict[str, int]:
             latest_by_firm[norm] = r  # ratings are already sorted date-desc
 
     buy_grades = {
-        "buy", "strong buy", "strongbuy", "outperform", "overweight",
-        "positive", "accumulate", "sector outperform", "market outperform",
-        "top pick", "conviction buy",
+        "buy",
+        "strong buy",
+        "strongbuy",
+        "outperform",
+        "overweight",
+        "positive",
+        "accumulate",
+        "sector outperform",
+        "market outperform",
+        "top pick",
+        "conviction buy",
     }
     hold_grades = {
-        "hold", "neutral", "equal-weight", "equal weight", "equalweight",
-        "market perform", "sector perform", "in-line", "inline",
-        "peer perform", "sector weight",
+        "hold",
+        "neutral",
+        "equal-weight",
+        "equal weight",
+        "equalweight",
+        "market perform",
+        "sector perform",
+        "in-line",
+        "inline",
+        "peer perform",
+        "sector weight",
     }
     sell_grades = {
-        "sell", "strong sell", "strongsell", "underperform", "underweight",
-        "negative", "reduce", "sector underperform", "market underperform",
+        "sell",
+        "strong sell",
+        "strongsell",
+        "underperform",
+        "underweight",
+        "negative",
+        "reduce",
+        "sector underperform",
+        "market underperform",
     }
 
     counts = {"buy": 0, "hold": 0, "sell": 0, "other": 0}

@@ -14,8 +14,9 @@ echo "start.sh: No START_COMMAND set, starting gunicorn"
 
 exec gunicorn filings.web:app \
   --bind "0.0.0.0:${PORT:-8000}" \
-  --workers "${WEB_WORKERS:-2}" \
+  --workers "${WEB_WORKERS:-1}" \
   --worker-class uvicorn.workers.UvicornWorker \
   --timeout 120 \
   --graceful-timeout 30 \
+  --preload \
   --access-logfile -

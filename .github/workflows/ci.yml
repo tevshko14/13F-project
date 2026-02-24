@@ -36,4 +36,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install hatchling && pip install .
-      - run: python -c "from filings.web import app; print('OK: app imported successfully')"
+      - run: |
+          python -c "from filings.web import app; print('OK')"

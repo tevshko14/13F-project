@@ -26,9 +26,11 @@ def display_search_results(results: list[SearchResult]) -> None:
     )
 
 
-def display_holdings(fund: FundInfo, holdings: list[Holding], showing: int | None = None) -> None:
+def display_holdings(
+    fund: FundInfo, holdings: list[Holding], showing: int | None = None
+) -> None:
     """Print fund summary and holdings table."""
-    total_display = f"${fund.total_value :,.0f}"
+    total_display = f"${fund.total_value:,.0f}"
     summary = (
         f"[bold]{fund.name}[/bold]\n"
         f"CIK: {fund.cik}  |  Report Period: {fund.report_period}  |  "
@@ -47,11 +49,15 @@ def display_holdings(fund: FundInfo, holdings: list[Holding], showing: int | Non
     table.add_column("Shares", justify="right", style="cyan")
 
     for i, h in enumerate(holdings, 1):
-        value_display = f"${h.value :,.0f}"
+        value_display = f"${h.value:,.0f}"
         shares_display = f"{h.shares:,}"
         table.add_row(
-            str(i), h.issuer_name, h.title_of_class,
-            h.cusip, value_display, shares_display,
+            str(i),
+            h.issuer_name,
+            h.title_of_class,
+            h.cusip,
+            value_display,
+            shares_display,
         )
 
     console.print(table)
@@ -64,7 +70,9 @@ def display_holdings(fund: FundInfo, holdings: list[Holding], showing: int | Non
 
 
 def display_comparison(
-    current: FundInfo, previous: FundInfo, changes: list[HoldingChange],
+    current: FundInfo,
+    previous: FundInfo,
+    changes: list[HoldingChange],
 ) -> None:
     """Print quarter-over-quarter comparison table."""
     summary = (
@@ -72,7 +80,7 @@ def display_comparison(
         f"Comparing: [cyan]{previous.report_period}[/cyan] -> "
         f"[cyan]{current.report_period}[/cyan]\n"
         f"Previous Value: ${previous.total_value:,.0f}  |  "
-        f"Current Value: ${current.total_value :,.0f}"
+        f"Current Value: ${current.total_value:,.0f}"
     )
     console.print(Panel(summary, title="Quarter Comparison", border_style="blue"))
 
@@ -98,12 +106,14 @@ def display_comparison(
         change_str = f"{c.share_change:+,}" if c.share_change != 0 else "-"
         prev_str = f"{c.previous_shares:,}" if c.previous_shares else "-"
         curr_str = f"{c.current_shares:,}" if c.current_shares else "-"
-        value_str = f"${c.current_value :,.0f}" if c.current_value else "-"
+        value_str = f"${c.current_value:,.0f}" if c.current_value else "-"
 
         table.add_row(
-            str(i), c.issuer_name,
+            str(i),
+            c.issuer_name,
             f"[{style}]{c.status}[/{style}]",
-            prev_str, curr_str,
+            prev_str,
+            curr_str,
             f"[{style}]{change_str}[/{style}]",
             value_str,
         )

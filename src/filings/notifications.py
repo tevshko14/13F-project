@@ -6,7 +6,6 @@ Detection works by comparing filing_date in fresh data vs. seen_filing_dates.
 
 import json
 from datetime import date, datetime
-from pathlib import Path
 
 from filings.cache import CACHE_DIR
 
@@ -25,6 +24,7 @@ _state_cache: dict | None = None
 
 
 # ── Persistence ──────────────────────────────────────────────────────
+
 
 def load_notification_state() -> dict:
     """Read notification state, using in-memory cache when available."""
@@ -76,6 +76,7 @@ def initialize_if_needed(cache_data: dict) -> None:
 
 # ── Detection ────────────────────────────────────────────────────────
 
+
 def get_seen_filing_dates() -> dict[str, str]:
     """Return {CIK: filing_date} map of already-processed filings."""
     state = load_notification_state()
@@ -101,6 +102,7 @@ def mark_filing_seen(cik: str, filing_date: str) -> None:
 
 
 # ── Watchlist Matching ───────────────────────────────────────────────
+
 
 def check_watchlist_matches(
     cik: str,
@@ -183,6 +185,7 @@ def check_watchlist_matches(
 
 # ── Notification CRUD ────────────────────────────────────────────────
 
+
 def add_notification(notif: dict) -> None:
     """Append a notification (deduplicates by id). Newest first."""
     state = load_notification_state()
@@ -235,6 +238,7 @@ def mark_all_read() -> None:
 
 # ── Scheduling ───────────────────────────────────────────────────────
 
+
 def is_filing_season() -> bool:
     """Return True if we're within ±15 days of a 13F filing deadline.
 
@@ -264,5 +268,5 @@ def get_poll_interval_seconds() -> int:
     Off-season: 12 hours (minimal activity)
     """
     if is_filing_season():
-        return 2 * 3600   # 2 hours
-    return 12 * 3600      # 12 hours
+        return 2 * 3600  # 2 hours
+    return 12 * 3600  # 12 hours

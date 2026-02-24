@@ -58,17 +58,26 @@ def _scrape_global_trades() -> list[insider_trading.InsiderTrade]:
     for trade_type, label in filters:
         url = f"{insider_trading._OI_BASE}/screener"
         params: dict[str, str] = {
-            "s": "", "o": "", "pl": "", "ph": "",
-            "st": "0", "tc": "1",
+            "s": "",
+            "o": "",
+            "pl": "",
+            "ph": "",
+            "st": "0",
+            "tc": "1",
             "t": trade_type,
-            "vf": "", "o2d": "2", "sortcol": "0",
-            "cnt": "100", "page": "1",
+            "vf": "",
+            "o2d": "2",
+            "sortcol": "0",
+            "cnt": "100",
+            "page": "1",
         }
         try:
             resp = httpx.get(
-                url, params=params,
+                url,
+                params=params,
                 headers=insider_trading._HEADERS,
-                timeout=20, follow_redirects=True,
+                timeout=20,
+                follow_redirects=True,
             )
             resp.raise_for_status()
             trades = insider_trading._parse_table(resp.text, has_company_col=True)
@@ -80,7 +89,9 @@ def _scrape_global_trades() -> list[insider_trading.InsiderTrade]:
                     new_count += 1
             logger.info(
                 "Scraped %d %s trades (%d new unique)",
-                len(trades), label, new_count,
+                len(trades),
+                label,
+                new_count,
             )
         except Exception:
             logger.exception("Failed to scrape OpenInsider %s", label)
@@ -127,7 +138,8 @@ def sync_insider_trades() -> dict:
 
     logger.info(
         "Insider sync complete: %d scraped, %d upserted",
-        len(trades), upserted,
+        len(trades),
+        upserted,
     )
 
     # Run retention cleanup after successful sync

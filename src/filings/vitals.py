@@ -27,7 +27,6 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime
-from pathlib import Path
 
 from filings import supabase_cache
 from filings.cache import CACHE_DIR
@@ -38,13 +37,13 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 # ── Cache TTLs ──────────────────────────────────────────────────────
-_GLASSDOOR_TTL = 2_592_000   # 30 days — ratings change very slowly
-_PDL_TTL = 604_800           # 7 days — headcount changes slowly
-_APPSTORE_TTL = 604_800      # 7 days — app ratings change slowly
+_GLASSDOOR_TTL = 2_592_000  # 30 days — ratings change very slowly
+_PDL_TTL = 604_800  # 7 days — headcount changes slowly
+_APPSTORE_TTL = 604_800  # 7 days — app ratings change slowly
 
 # ── Glassdoor quota configuration ────────────────────────────────────
-MAX_MONTHLY_QUOTA = 90                # Hard cap on Glassdoor API calls/month
-_GLASSDOOR_STALE_REFRESH_CAP = 80     # Only background-refresh stale entries below this
+MAX_MONTHLY_QUOTA = 90  # Hard cap on Glassdoor API calls/month
+_GLASSDOOR_STALE_REFRESH_CAP = 80  # Only background-refresh stale entries below this
 GLASSDOOR_CACHE_FILE = CACHE_DIR / "glassdoor_cache.json"
 
 # ── LRU max entries for per-ticker caches ─────────────────────────────
@@ -77,6 +76,7 @@ def _evict_oldest(cache: dict, max_size: int = _MAX_CACHE_ENTRIES) -> None:
 # ═══════════════════════════════════════════════════════════════════
 # Glassdoor Persistent Cache (disk-backed, survives deploys)
 # ═══════════════════════════════════════════════════════════════════
+
 
 def _load_glassdoor_disk_cache() -> dict:
     """Load Glassdoor cache from disk.
@@ -163,14 +163,21 @@ def _hydrate_glassdoor_cache() -> None:
             cache_key = row.get("cache_key", "")  # e.g. "glassdoor:AAPL"
             payload = row.get("response_data", {})
             # Extract ticker from cache_key
-            ticker_key = cache_key.replace("glassdoor:", "", 1) if cache_key.startswith("glassdoor:") else cache_key
+            ticker_key = (
+                cache_key.replace("glassdoor:", "", 1)
+                if cache_key.startswith("glassdoor:")
+                else cache_key
+            )
             ts = payload.get("ts", 0.0)
             data = payload.get("data")
             if ticker_key:
                 _glassdoor_cache[ticker_key] = (ts, data)
                 loaded += 1
         if loaded:
-            logger.info("Hydrated Glassdoor in-memory cache with %d entries from Supabase", loaded)
+            logger.info(
+                "Hydrated Glassdoor in-memory cache with %d entries from Supabase",
+                loaded,
+            )
         return
 
     # ── Fallback: disk cache ──
@@ -183,12 +190,15 @@ def _hydrate_glassdoor_cache() -> None:
         _glassdoor_cache[ticker_key] = (ts, data)
         loaded += 1
     if loaded:
-        logger.info("Hydrated Glassdoor in-memory cache with %d entries from disk", loaded)
+        logger.info(
+            "Hydrated Glassdoor in-memory cache with %d entries from disk", loaded
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════
 # Glassdoor Monthly Quota Tracker (persistent)
 # ═══════════════════════════════════════════════════════════════════
+
 
 def _get_current_month_str() -> str:
     """Return current month as 'YYYY-MM' string."""
@@ -235,7 +245,9 @@ def _increment_glassdoor_quota() -> int:
     # ── Supabase L2 ──
     sb_count = supabase_cache.increment_quota("glassdoor", current_month)
     if sb_count > 0:
-        logger.info("Glassdoor monthly quota (Supabase): %d/%d", sb_count, MAX_MONTHLY_QUOTA)
+        logger.info(
+            "Glassdoor monthly quota (Supabase): %d/%d", sb_count, MAX_MONTHLY_QUOTA
+        )
 
     # ── Disk (always update to keep in sync) ──
     disk = _load_glassdoor_disk_cache()
@@ -258,6 +270,7 @@ def _increment_glassdoor_quota() -> int:
 # PDL Persistent Cache (Supabase-backed)
 # ═══════════════════════════════════════════════════════════════════
 
+
 def _hydrate_pdl_cache() -> None:
     """One-time load of PDL data from Supabase into in-memory cache.
 
@@ -274,14 +287,20 @@ def _hydrate_pdl_cache() -> None:
         for row in rows:
             cache_key = row.get("cache_key", "")  # e.g. "pdl:AAPL"
             payload = row.get("response_data", {})
-            ticker_key = cache_key.replace("pdl:", "", 1) if cache_key.startswith("pdl:") else cache_key
+            ticker_key = (
+                cache_key.replace("pdl:", "", 1)
+                if cache_key.startswith("pdl:")
+                else cache_key
+            )
             ts = payload.get("ts", 0.0)
             data = payload.get("data")
             if ticker_key:
                 _pdl_cache[ticker_key] = (ts, data)
                 loaded += 1
         if loaded:
-            logger.info("Hydrated PDL in-memory cache with %d entries from Supabase", loaded)
+            logger.info(
+                "Hydrated PDL in-memory cache with %d entries from Supabase", loaded
+            )
 
 
 def _persist_pdl_entry(ticker_key: str, ts: float, data: dict | None) -> None:
@@ -297,6 +316,7 @@ def _persist_pdl_entry(ticker_key: str, ts: float, data: dict | None) -> None:
 
 # ── PDL Monthly Quota Tracker ────────────────────────────────────────
 
+
 def _check_pdl_quota(threshold: int = MAX_MONTHLY_PDL_QUOTA) -> bool:
     """Return True if we can still make PDL API calls this month."""
     current_month = _get_current_month_str()
@@ -311,7 +331,9 @@ def _increment_pdl_quota() -> int:
     current_month = _get_current_month_str()
     sb_count = supabase_cache.increment_quota("pdl", current_month)
     if sb_count > 0:
-        logger.info("PDL monthly quota (Supabase): %d/%d", sb_count, MAX_MONTHLY_PDL_QUOTA)
+        logger.info(
+            "PDL monthly quota (Supabase): %d/%d", sb_count, MAX_MONTHLY_PDL_QUOTA
+        )
     return sb_count
 
 
@@ -333,6 +355,7 @@ def get_pdl_quota_info() -> dict:
 # App Store Persistent Cache (Supabase-backed)
 # ═══════════════════════════════════════════════════════════════════
 
+
 def _hydrate_appstore_cache() -> None:
     """One-time load of App Store data from Supabase into in-memory cache.
 
@@ -349,14 +372,21 @@ def _hydrate_appstore_cache() -> None:
         for row in rows:
             cache_key = row.get("cache_key", "")  # e.g. "appstore:AAPL"
             payload = row.get("response_data", {})
-            ticker_key = cache_key.replace("appstore:", "", 1) if cache_key.startswith("appstore:") else cache_key
+            ticker_key = (
+                cache_key.replace("appstore:", "", 1)
+                if cache_key.startswith("appstore:")
+                else cache_key
+            )
             ts = payload.get("ts", 0.0)
             data = payload.get("data")
             if ticker_key:
                 _appstore_cache[ticker_key] = (ts, data)
                 loaded += 1
         if loaded:
-            logger.info("Hydrated App Store in-memory cache with %d entries from Supabase", loaded)
+            logger.info(
+                "Hydrated App Store in-memory cache with %d entries from Supabase",
+                loaded,
+            )
 
 
 def _persist_appstore_entry(ticker_key: str, ts: float, data: dict | None) -> None:
@@ -397,6 +427,7 @@ def _http_get_json(
 
 # ── Shared company-name resolver ──────────────────────────────────────
 
+
 def _resolve_company_name(ticker: str) -> str | None:
     """Resolve ticker to company name via yfinance (reuses existing pattern)."""
     try:
@@ -412,6 +443,7 @@ def _resolve_company_name(ticker: str) -> str | None:
 
 # ── Key checks ────────────────────────────────────────────────────────
 
+
 def has_glassdoor_key() -> bool:
     return bool(os.environ.get("GLASSDOOR_RAPIDAPI_KEY"))
 
@@ -423,6 +455,7 @@ def has_pdl_key() -> bool:
 # ═══════════════════════════════════════════════════════════════════
 # 1. Employee Pulse — People Data Labs
 # ═══════════════════════════════════════════════════════════════════
+
 
 def _get_pdl_data(ticker: str) -> dict | None:
     """Fetch company employee data from People Data Labs.
@@ -457,7 +490,9 @@ def _get_pdl_data(ticker: str) -> dict | None:
 
         # Case 2: Stale cache — return stale data, conserve quota
         if data is not None:
-            logger.debug("PDL stale data for %s (age %.0fs) — returning cached", key, age)
+            logger.debug(
+                "PDL stale data for %s (age %.0fs) — returning cached", key, age
+            )
         return data
 
     # ── Case 3: Not cached at all — must call API ──
@@ -502,7 +537,9 @@ def _fetch_pdl_from_api(key: str) -> dict | None:
 
     # Check for error status
     if raw.get("status") and raw["status"] != 200:
-        logger.info("PDL error for %s: %s", key, raw.get("error", {}).get("message", "unknown"))
+        logger.info(
+            "PDL error for %s: %s", key, raw.get("error", {}).get("message", "unknown")
+        )
         with _lock:
             _pdl_cache[key] = (now, None)
             _evict_oldest(_pdl_cache)
@@ -522,7 +559,14 @@ def _fetch_pdl_from_api(key: str) -> dict | None:
     location = raw.get("location") or {}
     if isinstance(location, dict):
         loc_str = ", ".join(
-            filter(None, [location.get("locality"), location.get("region"), location.get("country")])
+            filter(
+                None,
+                [
+                    location.get("locality"),
+                    location.get("region"),
+                    location.get("country"),
+                ],
+            )
         )
     else:
         loc_str = str(location) if location else ""
@@ -539,8 +583,12 @@ def _fetch_pdl_from_api(key: str) -> dict | None:
         "_fetched_at": datetime.now().isoformat(timespec="seconds"),
     }
 
-    logger.info("PDL data for %s: %d employees, industry=%s",
-                key, result["employee_count"], result["industry"])
+    logger.info(
+        "PDL data for %s: %d employees, industry=%s",
+        key,
+        result["employee_count"],
+        result["industry"],
+    )
 
     with _lock:
         _pdl_cache[key] = (now, result)
@@ -552,6 +600,7 @@ def _fetch_pdl_from_api(key: str) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════
 # 2. Culture — Glassdoor (via RapidAPI) — Quota-First Persistent Cache
 # ═══════════════════════════════════════════════════════════════════
+
 
 def _get_glassdoor_data(ticker: str) -> dict | None:
     """Fetch Glassdoor company ratings via RapidAPI.
@@ -574,6 +623,7 @@ def _get_glassdoor_data(ticker: str) -> dict | None:
     # TODO: Replace with API fetch once UI is finalized.
     if os.environ.get("USE_MOCK_GLASSDOOR") == "1":
         from filings.mocks.glassdoor_data import MOCK_GLASSDOOR_AAPL
+
         logger.info("Using MOCK Glassdoor data for %s", key)
         return dict(MOCK_GLASSDOOR_AAPL)  # Return a copy
 
@@ -598,7 +648,8 @@ def _get_glassdoor_data(ticker: str) -> dict | None:
         elif data is not None:
             logger.info(
                 "Glassdoor stale data for %s — quota near limit (%d), skipping refresh",
-                key, MAX_MONTHLY_QUOTA,
+                key,
+                MAX_MONTHLY_QUOTA,
             )
         # Return stale data (or stale None)
         return data
@@ -610,7 +661,8 @@ def _get_glassdoor_data(ticker: str) -> dict | None:
 
     if not _check_glassdoor_quota(MAX_MONTHLY_QUOTA):
         logger.warning(
-            "Glassdoor quota exhausted — cannot fetch %s (no cached data)", key,
+            "Glassdoor quota exhausted — cannot fetch %s (no cached data)",
+            key,
         )
         return None
 
@@ -671,7 +723,9 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
     # Extract best match from search results — prefer stock ticker match
     results = resp.get("data") or []
     if not isinstance(results, list) or not results:
-        logger.info("Glassdoor search returned empty results for %s (%s)", key, company_name)
+        logger.info(
+            "Glassdoor search returned empty results for %s (%s)", key, company_name
+        )
         with _lock:
             _glassdoor_cache[key] = (now, None)
             _evict_oldest(_glassdoor_cache)
@@ -690,7 +744,11 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
     if overall is None:
         ratings = raw.get("ratings") or raw.get("data") or {}
         if isinstance(ratings, dict):
-            overall = ratings.get("overallRating") or ratings.get("overall_rating") or ratings.get("rating")
+            overall = (
+                ratings.get("overallRating")
+                or ratings.get("overall_rating")
+                or ratings.get("rating")
+            )
 
     if overall is None:
         logger.info(
@@ -744,12 +802,7 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
             or raw.get("ceo_rating")
             or raw.get("ceoApprovalPercent")
         ),
-        "ceo_name": (
-            raw.get("ceoName")
-            or raw.get("ceo_name")
-            or raw.get("ceo")
-            or ""
-        ),
+        "ceo_name": (raw.get("ceoName") or raw.get("ceo_name") or raw.get("ceo") or ""),
         "review_count": int(
             raw.get("reviewCount")
             or raw.get("review_count")
@@ -765,24 +818,20 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
         "company_name": raw.get("companyName") or raw.get("name") or company_name,
         # ── Sub-ratings (1.0-5.0 scale) ──
         "culture_and_values_rating": _rating(
-            raw.get("cultureAndValues")
-            or raw.get("culture_and_values_rating")
+            raw.get("cultureAndValues") or raw.get("culture_and_values_rating")
         ),
         "work_life_balance_rating": _rating(
-            raw.get("workLifeBalance")
-            or raw.get("work_life_balance_rating")
+            raw.get("workLifeBalance") or raw.get("work_life_balance_rating")
         ),
         "senior_management_rating": _rating(
-            raw.get("seniorManagement")
-            or raw.get("senior_management_rating")
+            raw.get("seniorManagement") or raw.get("senior_management_rating")
         ),
         "compensation_and_benefits_rating": _rating(
             raw.get("compensationAndBenefits")
             or raw.get("compensation_and_benefits_rating")
         ),
         "career_opportunities_rating": _rating(
-            raw.get("careerOpportunities")
-            or raw.get("career_opportunities_rating")
+            raw.get("careerOpportunities") or raw.get("career_opportunities_rating")
         ),
         "diversity_and_inclusion_rating": _rating(
             raw.get("diversityAndInclusion")
@@ -790,7 +839,9 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
         ),
         # ── Company details ──
         "logo_url": raw.get("logo") or raw.get("squareLogo") or "",
-        "headquarters": raw.get("headquarters_location") or raw.get("headquarters") or "",
+        "headquarters": raw.get("headquarters_location")
+        or raw.get("headquarters")
+        or "",
         "website": raw.get("website") or "",
         "company_size": raw.get("company_size") or raw.get("size") or "",
         "industry": raw.get("industry") or "",
@@ -844,6 +895,7 @@ def _schedule_glassdoor_refresh(key: str) -> None:
 
 
 # ── Glassdoor public helpers ─────────────────────────────────────────
+
 
 def get_glassdoor_age_str(ticker: str) -> str:
     """Return human-readable age of cached Glassdoor data for a ticker.
@@ -971,7 +1023,9 @@ def _get_appstore_data(ticker: str) -> dict | None:
 
         # Case 2: Stale cache — return stale data
         if data is not None:
-            logger.debug("App Store stale data for %s (age %.0fs) — returning cached", key, age)
+            logger.debug(
+                "App Store stale data for %s (age %.0fs) — returning cached", key, age
+            )
         return data
 
     # ── Case 3: Not cached at all — fetch from iTunes ──
@@ -1001,10 +1055,28 @@ def _fetch_appstore_from_api(key: str) -> dict | None:
 
         # Clean company name for search (remove common suffixes)
         search_name = company_name
-        for suffix in [", Inc.", " Inc.", " Inc", " Corp.", " Corp", " Corporation",
-                       " Ltd.", " Ltd", " Limited", " S.A.", " SE", " PLC",
-                       " plc", " N.V.", " Group", " Holdings", " Co.",
-                       " Technologies", " Technology", " Platforms"]:
+        for suffix in [
+            ", Inc.",
+            " Inc.",
+            " Inc",
+            " Corp.",
+            " Corp",
+            " Corporation",
+            " Ltd.",
+            " Ltd",
+            " Limited",
+            " S.A.",
+            " SE",
+            " PLC",
+            " plc",
+            " N.V.",
+            " Group",
+            " Holdings",
+            " Co.",
+            " Technologies",
+            " Technology",
+            " Platforms",
+        ]:
             search_name = search_name.replace(suffix, "")
         search_name = search_name.strip()
 
@@ -1096,6 +1168,7 @@ def _fetch_appstore_from_api(key: str) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════
 # Public API
 # ═══════════════════════════════════════════════════════════════════
+
 
 def _glassdoor_to_company_info(gd: dict) -> dict | None:
     """Extract company-info fields from Glassdoor data as PDL fallback.

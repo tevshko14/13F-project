@@ -90,14 +90,14 @@ class InsiderTrade:
     ticker: str
     company_name: str
     insider_name: str
-    title: str          # CEO, CFO, Director, 10%, etc.
-    trade_type: str     # Purchase, Sale, Sale+OE, etc.
-    price: str          # keep as formatted string for display
-    qty: str            # e.g. "+75,000" or "-3,752"
-    owned: str          # shares owned after
-    delta_own: str      # e.g. "+13%", "-4%"
-    value: str          # e.g. "+$150,000"
-    sec_url: str        # link to SEC Form 4
+    title: str  # CEO, CFO, Director, 10%, etc.
+    trade_type: str  # Purchase, Sale, Sale+OE, etc.
+    price: str  # keep as formatted string for display
+    qty: str  # e.g. "+75,000" or "-3,752"
+    owned: str  # shares owned after
+    delta_own: str  # e.g. "+13%", "-4%"
+    value: str  # e.g. "+$150,000"
+    sec_url: str  # link to SEC Form 4
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -153,8 +153,8 @@ _OI_BASE = "http://openinsider.com"
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, list[InsiderTrade]]] = {}
-_GLOBAL_TTL = 300       # 5 min for global screener
-_TICKER_TTL = 600       # 10 min for per-ticker
+_GLOBAL_TTL = 300  # 5 min for global screener
+_TICKER_TTL = 600  # 10 min for per-ticker
 _MAX_CACHE = 300
 
 
@@ -174,7 +174,9 @@ def _get_cached(key: str, ttl: int) -> list[InsiderTrade] | None:
     return None
 
 
-def _get_cached_with_stale(key: str, ttl: int) -> tuple[list[InsiderTrade] | None, bool]:
+def _get_cached_with_stale(
+    key: str, ttl: int
+) -> tuple[list[InsiderTrade] | None, bool]:
     """Return ``(data, is_fresh)`` — stale data is returned instead of ``None``.
 
     Unlike ``_get_cached`` which returns ``None`` when TTL expires, this
@@ -327,7 +329,9 @@ def aggregate_top_tickers(
                 "buy_value": 0.0,
                 "sell_value": 0.0,
                 "trade_count": 0,
-                "insiders": defaultdict(lambda: {"buy_value": 0.0, "sell_value": 0.0, "count": 0}),
+                "insiders": defaultdict(
+                    lambda: {"buy_value": 0.0, "sell_value": 0.0, "count": 0}
+                ),
                 "dates": [],
             }
 
@@ -360,12 +364,12 @@ def aggregate_top_tickers(
 
         net_negative = sorted(
             [d for d in all_tickers if d["_net"] < 0],
-            key=lambda d: d["_net"],           # most negative first
+            key=lambda d: d["_net"],  # most negative first
         )
         net_positive = sorted(
             [d for d in all_tickers if d["_net"] > 0],
             key=lambda d: d["_net"],
-            reverse=True,                      # most positive first
+            reverse=True,  # most positive first
         )
 
         top_sells = net_negative[:half]
@@ -414,16 +418,18 @@ def aggregate_top_tickers(
             )
         ]
 
-        result.append({
-            "ticker": d["ticker"],
-            "company_name": d["company_name"],
-            "buy_value": round(d["buy_value"], 2),
-            "sell_value": round(d["sell_value"], 2),
-            "net_flow": round(d["buy_value"] - d["sell_value"], 2),
-            "trade_count": d["trade_count"],
-            "insider_details": insider_details,
-            "date_range": date_range,
-        })
+        result.append(
+            {
+                "ticker": d["ticker"],
+                "company_name": d["company_name"],
+                "buy_value": round(d["buy_value"], 2),
+                "sell_value": round(d["sell_value"], 2),
+                "net_flow": round(d["buy_value"] - d["sell_value"], 2),
+                "trade_count": d["trade_count"],
+                "insider_details": insider_details,
+                "date_range": date_range,
+            }
+        )
 
     return result
 
@@ -438,15 +444,23 @@ def _scrape_openinsider_global(
     """Direct scrape of OpenInsider global screener (fallback path)."""
     url = f"{_OI_BASE}/screener"
     params: dict[str, str] = {
-        "s": "", "o": "", "pl": "", "ph": "",
-        "st": "0", "tc": "1",
+        "s": "",
+        "o": "",
+        "pl": "",
+        "ph": "",
+        "st": "0",
+        "tc": "1",
         "t": trade_type,
-        "vf": "", "o2d": "2", "sortcol": "0",
-        "cnt": str(min(count, 100)), "page": "1",
+        "vf": "",
+        "o2d": "2",
+        "sortcol": "0",
+        "cnt": str(min(count, 100)),
+        "page": "1",
     }
     try:
-        resp = httpx.get(url, params=params, headers=_HEADERS,
-                         timeout=15, follow_redirects=True)
+        resp = httpx.get(
+            url, params=params, headers=_HEADERS, timeout=15, follow_redirects=True
+        )
         resp.raise_for_status()
         return _parse_table(resp.text, has_company_col=True)
     except Exception:
@@ -457,8 +471,9 @@ def _scrape_openinsider_global(
 def _scrape_openinsider_ticker(ticker: str) -> list[InsiderTrade]:
     """Direct scrape of OpenInsider per-ticker page (fallback path)."""
     try:
-        resp = httpx.get(f"{_OI_BASE}/{ticker}", headers=_HEADERS,
-                         timeout=15, follow_redirects=True)
+        resp = httpx.get(
+            f"{_OI_BASE}/{ticker}", headers=_HEADERS, timeout=15, follow_redirects=True
+        )
         resp.raise_for_status()
         return _parse_table(resp.text, has_company_col=False)
     except Exception:
@@ -532,7 +547,11 @@ def get_latest_insider_trades(
 
     # ── L4: Stale L1 data -- never show empty/error to users ──
     if stale_data:
-        logger.info("Returning stale L1 insider data for key=%s (%d trades)", cache_key, len(stale_data))
+        logger.info(
+            "Returning stale L1 insider data for key=%s (%d trades)",
+            cache_key,
+            len(stale_data),
+        )
         return stale_data
 
     return []
@@ -564,10 +583,12 @@ def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
         rows = supabase_cache.get_insider_trades_for_chart(days=30, limit_per_type=250)
         if rows:
             trades = [InsiderTrade.from_db_row(r) for r in rows]
-            logger.info("Chart L2 hit: %d trades (%d buys, %d sells)",
-                        len(trades),
-                        sum(1 for t in trades if "Purchase" in t.trade_type),
-                        sum(1 for t in trades if "Sale" in t.trade_type))
+            logger.info(
+                "Chart L2 hit: %d trades (%d buys, %d sells)",
+                len(trades),
+                sum(1 for t in trades if "Purchase" in t.trade_type),
+                sum(1 for t in trades if "Sale" in t.trade_type),
+            )
             _set_cached(cache_key, trades)
             return aggregate_top_tickers(trades, limit=limit, mixed=True)
 
@@ -598,7 +619,9 @@ def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
     return []
 
 
-def _fetch_historical_from_efts(ticker: str, max_results: int = 50) -> list[InsiderTrade]:
+def _fetch_historical_from_efts(
+    ticker: str, max_results: int = 50
+) -> list[InsiderTrade]:
     """Fetch historical Form 4 filings from SEC EDGAR full-text search.
 
     Queries the EFTS endpoint for Form 4 filings mentioning the ticker.
@@ -646,8 +669,7 @@ def _fetch_historical_from_efts(ticker: str, max_results: int = 50) -> list[Insi
         if not insider_name and display_names:
             insider_name = display_names[0]
 
-        # Build SEC URL from file_num or accession
-        file_num = source.get("file_num", "")
+        # Build SEC URL from accession number
         # EFTS results have root_form, form_type, etc.
         sec_url = ""
         # Try to build URL from the filing's accession number if available
@@ -666,21 +688,23 @@ def _fetch_historical_from_efts(ticker: str, max_results: int = 50) -> list[Insi
         if sec_url:
             seen_urls.add(sec_url)
 
-        trades.append(InsiderTrade(
-            filing_date=file_date,
-            trade_date=file_date,  # Best approximation; EFTS lacks exact trade date
-            ticker=ticker.upper(),
-            company_name="",
-            insider_name=insider_name,
-            title="",
-            trade_type="Form 4",
-            price="",
-            qty="",
-            owned="",
-            delta_own="",
-            value="",
-            sec_url=sec_url,
-        ))
+        trades.append(
+            InsiderTrade(
+                filing_date=file_date,
+                trade_date=file_date,  # Best approximation; EFTS lacks exact trade date
+                ticker=ticker.upper(),
+                company_name="",
+                insider_name=insider_name,
+                title="",
+                trade_type="Form 4",
+                price="",
+                qty="",
+                owned="",
+                delta_own="",
+                value="",
+                sec_url=sec_url,
+            )
+        )
 
     return trades
 
@@ -714,7 +738,9 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
             historical = _fetch_historical_from_efts(key)
             if historical:
                 seen_urls = {t.sec_url for t in hot_trades if t.sec_url}
-                cold_unique = [t for t in historical if t.sec_url and t.sec_url not in seen_urls]
+                cold_unique = [
+                    t for t in historical if t.sec_url and t.sec_url not in seen_urls
+                ]
                 combined = hot_trades + cold_unique
             else:
                 combined = hot_trades
@@ -734,7 +760,11 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
 
     # ── L4: Stale L1 data -- never show empty/error to users ──
     if stale_data:
-        logger.info("Returning stale L1 insider data for ticker=%s (%d trades)", key, len(stale_data))
+        logger.info(
+            "Returning stale L1 insider data for ticker=%s (%d trades)",
+            key,
+            len(stale_data),
+        )
         return stale_data
 
     return []
