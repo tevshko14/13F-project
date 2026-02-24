@@ -708,11 +708,7 @@
         :root[data-theme="dark"] .logo-light { display: none; }
         :root[data-theme="dark"] .logo-dark { display: inline; }
 
-        /* ── Stripe embeds: invert colors in dark mode ── */
-        :root[data-theme="dark"] stripe-pricing-table,
-        :root[data-theme="dark"] stripe-buy-button {
-            filter: invert(1) hue-rotate(180deg);
-        }
+        /* Stripe Embedded Checkout inherits theme from Stripe Dashboard branding */
     </style>
     {% if supabase_anon_key %}
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
