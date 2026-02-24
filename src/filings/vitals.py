@@ -26,6 +26,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from filings import supabase_cache
@@ -1205,34 +1206,31 @@ def _glassdoor_to_company_info(gd: dict) -> dict | None:
 def get_vitals_data(ticker: str) -> dict:
     """Aggregate vitals from all sources for a ticker.
 
-    Each source is fetched independently; failures in one do not
-    affect the others. Returns dict with keys:
+    Each source is fetched independently **in parallel**; failures in
+    one do not affect the others.  Returns dict with keys:
         glassdoor, pdl, appstore
     Each value is either a dict of data or None.
     """
+    tasks = {
+        "glassdoor": lambda: _get_glassdoor_data(ticker),
+        "pdl": lambda: _get_pdl_data(ticker),
+        "appstore": lambda: _get_appstore_data(ticker),
+    }
     result: dict[str, dict | None] = {}
 
-    try:
-        result["glassdoor"] = _get_glassdoor_data(ticker)
-    except Exception as exc:
-        logger.warning("Glassdoor vitals failed for %s: %s", ticker, exc)
-        result["glassdoor"] = None
-
-    try:
-        result["pdl"] = _get_pdl_data(ticker)
-    except Exception as exc:
-        logger.warning("PDL vitals failed for %s: %s", ticker, exc)
-        result["pdl"] = None
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(fn): key for key, fn in tasks.items()}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                result[key] = future.result()
+            except Exception as exc:
+                logger.warning("%s vitals failed: %s", key, exc)
+                result[key] = None
 
     # Fallback: derive company info from Glassdoor when PDL unavailable
-    if not result["pdl"] and not has_pdl_key() and result["glassdoor"]:
+    if not result.get("pdl") and not has_pdl_key() and result.get("glassdoor"):
         result["pdl"] = _glassdoor_to_company_info(result["glassdoor"])
-
-    try:
-        result["appstore"] = _get_appstore_data(ticker)
-    except Exception as exc:
-        logger.warning("App Store vitals failed for %s: %s", ticker, exc)
-        result["appstore"] = None
 
     return result
 

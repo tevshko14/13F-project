@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import urllib.request
 
@@ -402,38 +403,30 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
 def get_sentiment_data(ticker: str) -> dict:
     """Aggregate sentiment from all sources for a ticker.
 
-    Each source is fetched independently; failures in one do not
-    affect the others. Returns dict with keys:
+    Each source is fetched independently **in parallel**; failures in
+    one do not affect the others.  Returns dict with keys:
         finnhub, cnn_fear_greed, apewisdom, alphavantage
     Each value is either a dict of data or None.
 
     Note: Glassdoor data was migrated to vitals.py (Vitals tab).
     """
+    tasks = {
+        "finnhub": lambda: _get_finnhub_sentiment(ticker),
+        "cnn_fear_greed": lambda: _get_cnn_fear_greed(),
+        "apewisdom": lambda: _get_apewisdom_for_ticker(ticker),
+        "alphavantage": lambda: _get_alphavantage_sentiment(ticker),
+    }
     result: dict[str, dict | None] = {}
 
-    try:
-        result["finnhub"] = _get_finnhub_sentiment(ticker)
-    except Exception as exc:
-        logger.warning("Finnhub sentiment failed for %s: %s", ticker, exc)
-        result["finnhub"] = None
-
-    try:
-        result["cnn_fear_greed"] = _get_cnn_fear_greed()
-    except Exception as exc:
-        logger.warning("CNN Fear & Greed failed: %s", exc)
-        result["cnn_fear_greed"] = None
-
-    try:
-        result["apewisdom"] = _get_apewisdom_for_ticker(ticker)
-    except Exception as exc:
-        logger.warning("ApeWisdom failed for %s: %s", ticker, exc)
-        result["apewisdom"] = None
-
-    try:
-        result["alphavantage"] = _get_alphavantage_sentiment(ticker)
-    except Exception as exc:
-        logger.warning("Alpha Vantage failed for %s: %s", ticker, exc)
-        result["alphavantage"] = None
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(fn): key for key, fn in tasks.items()}
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                result[key] = future.result()
+            except Exception as exc:
+                logger.warning("%s sentiment failed: %s", key, exc)
+                result[key] = None
 
     return result
 
