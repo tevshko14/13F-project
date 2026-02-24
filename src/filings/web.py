@@ -33,6 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from filings import (
     client,
@@ -107,10 +108,25 @@ _POSTHOG_KEY = os.environ.get("POSTHOG_KEY", "")
 
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
-    from slowapi.util import get_remote_address
     from slowapi.errors import RateLimitExceeded
 
-    limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+    def _real_ip(request: Request) -> str:
+        """Return the real client IP, trusting Railway's X-Forwarded-For header.
+
+        Railway (and most reverse proxies) append the true client IP as the
+        first value in X-Forwarded-For.  Falling back to request.client.host
+        would give the proxy's internal IP, causing all users to share one
+        rate-limit bucket.
+        """
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            # Header may be a comma-separated list; first entry is the origin
+            return forwarded_for.split(",")[0].strip()
+        if request.client:
+            return request.client.host
+        return "unknown"
+
+    limiter = Limiter(key_func=_real_ip, default_limits=["60/minute"])
     _has_limiter = True
 except ImportError:
     limiter = None
@@ -130,8 +146,19 @@ _app_start_time = time_module.time()
 _ENABLE_BACKGROUND_REFRESH = (
     os.environ.get("ENABLE_BACKGROUND_REFRESH", "true").lower() == "true"
 )
-_refresh_lock = asyncio.Lock()
+# Per-CIK locks so the background sweep and request-triggered refreshes
+# can run concurrently for *different* funds without blocking each other.
+_refresh_locks: dict[str, asyncio.Lock] = {}
+_refresh_locks_mu = asyncio.Lock()          # guards the dict itself
 _refresh_in_progress: set[str] = set()
+
+
+async def _get_refresh_lock(cik: str) -> asyncio.Lock:
+    """Return (creating if needed) the per-CIK refresh lock."""
+    async with _refresh_locks_mu:
+        if cik not in _refresh_locks:
+            _refresh_locks[cik] = asyncio.Lock()
+        return _refresh_locks[cik]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -252,8 +279,22 @@ def _get_ownership_map() -> dict[str, list[str]]:
 # Analyst consensus cache (avoids 25 async thread spawns on warm lookups)
 # ═══════════════════════════════════════════════════════════════════════
 
-_consensus_cache: dict[str, tuple[float, dict | None]] = {}
-_CONSENSUS_TTL = 1800  # 30 minutes in seconds
+_consensus_cache: "OrderedDict[str, tuple[float, dict | None]]"
+try:
+    from collections import OrderedDict as _OrderedDict
+    _consensus_cache = _OrderedDict()
+except ImportError:
+    _consensus_cache = {}  # type: ignore[assignment]
+_CONSENSUS_TTL = 1800   # 30 minutes in seconds
+_CONSENSUS_MAX = 2000   # ~2 MB worst-case; evict oldest when exceeded
+
+
+def _consensus_cache_set(key: str, value: tuple[float, dict | None]) -> None:
+    """Insert/update *key* in the consensus LRU cache, evicting if needed."""
+    _consensus_cache[key] = value
+    _consensus_cache.move_to_end(key)      # mark as most-recently used
+    while len(_consensus_cache) > _CONSENSUS_MAX:
+        _consensus_cache.popitem(last=False)  # evict the oldest (LRU) entry
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -360,6 +401,12 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
+# Trust Railway's reverse-proxy headers so X-Forwarded-For reaches our rate
+# limiter and request.client reflects the real client IP.
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"],  # Railway terminates TLS; actual host validation not needed
+)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
@@ -480,72 +527,81 @@ async def _refresh_single_fund_async(app: FastAPI, cik: str) -> bool:
 async def _background_refresh_sweep(app: FastAPI) -> None:
     """Sweep all stale funds and refresh them in the background.
 
-    Runs serially with rate-limit pauses matching the sync worker.
+    Uses per-CIK locks so request-triggered refreshes for *other* funds
+    can still proceed concurrently while the sweep is running.
     """
-    async with _refresh_lock:
-        try:
-            cache_data = app.state.fund_cache
-            all_ciks = [si.cik for si in SUPERINVESTORS]
-            stale_ciks = await asyncio.to_thread(
-                cache.get_stale_ciks, cache_data, all_ciks
-            )
+    try:
+        cache_data = app.state.fund_cache
+        all_ciks = [si.cik for si in SUPERINVESTORS]
+        stale_ciks = await asyncio.to_thread(
+            cache.get_stale_ciks, cache_data, all_ciks
+        )
 
-            if not stale_ciks:
-                logger.info("Background sweep: all %d funds fresh", len(all_ciks))
-                app.state.refresh_status = "idle"
-                return
+        if not stale_ciks:
+            logger.info("Background sweep: all %d funds fresh", len(all_ciks))
+            app.state.refresh_status = "idle"
+            return
 
-            logger.info(
-                "Background sweep: refreshing %d/%d stale funds",
-                len(stale_ciks),
-                len(all_ciks),
-            )
-            app.state.refresh_status = "running"
-            app.state.refresh_progress = {
-                "total": len(stale_ciks),
-                "done": 0,
-                "failed": 0,
-            }
+        logger.info(
+            "Background sweep: refreshing %d/%d stale funds",
+            len(stale_ciks),
+            len(all_ciks),
+        )
+        app.state.refresh_status = "running"
+        app.state.refresh_progress = {
+            "total": len(stale_ciks),
+            "done": 0,
+            "failed": 0,
+        }
 
-            for idx, cik in enumerate(stale_ciks):
-                if not cache._check_sec_rate_limit():
-                    logger.warning(
-                        "Background sweep: SEC session limit reached at %d/%d",
-                        idx,
-                        len(stale_ciks),
-                    )
-                    break
+        for idx, cik in enumerate(stale_ciks):
+            if not cache._check_sec_rate_limit():
+                logger.warning(
+                    "Background sweep: SEC session limit reached at %d/%d",
+                    idx,
+                    len(stale_ciks),
+                )
+                break
 
+            # Acquire the per-CIK lock — if an on-demand refresh is already
+            # running for this fund, skip it rather than waiting.
+            lock = await _get_refresh_lock(cik)
+            if lock.locked():
+                logger.debug("Sweep skipping CIK %s (on-demand refresh in progress)", cik)
+                app.state.refresh_progress["done"] += 1
+                continue
+
+            async with lock:
                 success = await _refresh_single_fund_async(app, cik)
 
-                if success:
-                    app.state.refresh_progress["done"] += 1
-                else:
-                    app.state.refresh_progress["failed"] += 1
+            if success:
+                app.state.refresh_progress["done"] += 1
+            else:
+                app.state.refresh_progress["failed"] += 1
 
-                # Rate limiting: 2s between funds
-                if idx < len(stale_ciks) - 1:
-                    await asyncio.sleep(2)
+            # Rate limiting: 2s between funds
+            if idx < len(stale_ciks) - 1:
+                await asyncio.sleep(2)
 
-                # Batch pause every 10 funds
-                if (idx + 1) % cache._SEC_BATCH_SIZE == 0 and idx < len(stale_ciks) - 1:
-                    logger.info(
-                        "Background sweep: batch pause at %d/%d",
-                        idx + 1,
-                        len(stale_ciks),
-                    )
-                    await asyncio.sleep(cache._SEC_BATCH_PAUSE)
+            # Batch pause every 10 funds
+            if (idx + 1) % cache._SEC_BATCH_SIZE == 0 and idx < len(stale_ciks) - 1:
+                logger.info(
+                    "Background sweep: batch pause at %d/%d",
+                    idx + 1,
+                    len(stale_ciks),
+                )
+                await asyncio.sleep(cache._SEC_BATCH_PAUSE)
 
-            done = app.state.refresh_progress["done"]
-            failed = app.state.refresh_progress["failed"]
-            logger.info(
-                "Background sweep complete: %d refreshed, %d failed", done, failed
-            )
-            app.state.refresh_status = "idle"
+        done = app.state.refresh_progress["done"]
+        failed = app.state.refresh_progress["failed"]
+        logger.info(
+            "Background sweep complete: %d refreshed, %d failed", done, failed
+        )
+        app.state.refresh_status = "idle"
 
-        except Exception:
-            logger.exception("Background sweep crashed")
-            app.state.refresh_status = "error"
+    except Exception:
+        logger.exception("Background sweep crashed")
+        app.state.refresh_status = "error"
 
 
 async def _delayed_refresh_sweep(app: FastAPI) -> None:
@@ -557,17 +613,22 @@ async def _delayed_refresh_sweep(app: FastAPI) -> None:
 async def _trigger_single_refresh(app: FastAPI, cik: str) -> None:
     """Request-triggered refresh for a single stale fund.
 
-    Acquires the refresh lock with a short timeout to avoid blocking
-    if a full sweep is already running.
+    Uses a per-CIK lock so it only blocks if *this specific fund* is
+    already being refreshed (by the sweep or another request), never
+    blocking refreshes for different funds.
     """
     try:
-        async with asyncio.timeout(1):
-            async with _refresh_lock:
+        lock = await _get_refresh_lock(cik)
+        if lock.locked():
+            logger.debug("Skipping on-demand refresh for CIK %s (already in progress)", cik)
+            return
+        async with asyncio.timeout(5):
+            async with lock:
                 if not cache._check_sec_rate_limit():
                     return
                 await _refresh_single_fund_async(app, cik)
     except TimeoutError:
-        logger.debug("Skipping on-demand refresh for CIK %s (sweep in progress)", cik)
+        logger.debug("On-demand refresh timed out for CIK %s", cik)
     except Exception:
         logger.debug("On-demand refresh failed for CIK %s", cik)
 
@@ -1936,6 +1997,10 @@ async def most_added(request: Request):
         cached = _consensus_cache.get(t)
         if cached and (now - cached[0]) < _CONSENSUS_TTL:
             consensus_map[t] = cached[1]
+            try:
+                _consensus_cache.move_to_end(t)  # mark as recently used for LRU
+            except (AttributeError, KeyError):
+                pass
         else:
             stale_tickers.append(t)
 
@@ -1947,7 +2012,7 @@ async def most_added(request: Request):
                 result = analysts.get_consensus_summary(ratings)
             except Exception:
                 result = None
-            _consensus_cache[t] = (time_module.time(), result)
+            _consensus_cache_set(t, (time_module.time(), result))
             return t, result
 
         tasks = [_lookup_consensus(t) for t in stale_tickers]

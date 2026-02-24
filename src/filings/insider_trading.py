@@ -155,14 +155,14 @@ _lock = threading.Lock()
 _cache: dict[str, tuple[float, list[InsiderTrade]]] = {}
 _GLOBAL_TTL = 300  # 5 min for global screener
 _TICKER_TTL = 600  # 10 min for per-ticker
-_MAX_CACHE = 300
+_MAX_CACHE = 50  # ~150 MB worst-case at 300; keep at 50 to stay well under Railway RAM
 
 
 def _evict_oldest() -> None:
-    if len(_cache) <= _MAX_CACHE:
-        return
-    oldest = min(_cache, key=lambda k: _cache[k][0])
-    _cache.pop(oldest, None)
+    """Remove the oldest entry when the cache exceeds _MAX_CACHE."""
+    while len(_cache) > _MAX_CACHE:
+        oldest = min(_cache, key=lambda k: _cache[k][0])
+        _cache.pop(oldest, None)
 
 
 def _get_cached(key: str, ttl: int) -> list[InsiderTrade] | None:
