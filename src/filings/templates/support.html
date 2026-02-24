@@ -194,25 +194,17 @@
         transition: opacity 0.15s;
     }
     .tier-btn:hover { opacity: 0.85; }
-    .tier-onetime-section {
-        text-align: center;
-        margin-top: 1.2em;
-        padding-top: 1.2em;
-        border-top: 1px solid var(--pp-border);
+    .tier-grid-single {
+        grid-template-columns: 1fr;
+        max-width: 320px;
+        margin: 0 auto;
     }
-    .tier-onetime-btn {
-        display: inline-block;
-        background: none;
-        color: var(--pp-text);
-        border: 2px solid var(--pp-border);
-        padding: 0.55em 2em;
-        border-radius: 8px;
-        font-size: 0.9em;
-        font-weight: 600;
-        cursor: pointer;
-        transition: border-color 0.15s;
+    .tier-desc {
+        font-size: 0.85em;
+        color: var(--pp-text-muted);
+        margin: 0.3em 0 0;
+        line-height: 1.4;
     }
-    .tier-onetime-btn:hover { border-color: var(--pp-text); }
     @media (max-width: 640px) {
         .tier-grid { grid-template-columns: 1fr; max-width: 320px; margin: 0 auto; }
     }
@@ -318,29 +310,46 @@
         font-size: 0.95em;
         line-height: 1.6;
         max-width: 650px;
-        margin-bottom: 1em;
+        margin-bottom: 1.2em;
     }
-    .line-items-list {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-    }
-    .line-items-list li {
-        padding: 0.55em 0;
-        border-bottom: 1px solid var(--pp-border-light);
-        font-size: 0.92em;
-        color: var(--pp-text-secondary);
+    .cost-tiles {
         display: flex;
-        align-items: center;
-        gap: 0.5em;
+        gap: 0.7em;
+        flex-wrap: wrap;
     }
-    .line-items-list li:last-child { border-bottom: none; }
-    .li-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: #22c55e;
-        flex-shrink: 0;
+    .cost-tile {
+        flex: 1 1 0;
+        min-width: 100px;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 10px;
+        padding: 1em 0.8em;
+        text-align: center;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .cost-tile:hover {
+        border-color: #22c55e;
+        box-shadow: 0 2px 10px rgba(34, 197, 94, 0.1);
+    }
+    .cost-tile-icon {
+        font-size: 1.5em;
+        margin-bottom: 0.3em;
+    }
+    .cost-tile-label {
+        font-size: 0.78em;
+        color: var(--pp-text-muted);
+        line-height: 1.35;
+    }
+    @media (max-width: 640px) {
+        .cost-tiles {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+    @media (max-width: 400px) {
+        .cost-tiles {
+            grid-template-columns: repeat(2, 1fr);
+        }
     }
 
     /* ── Funding history chart ── */
@@ -377,6 +386,66 @@
         width: 10px;
         height: 10px;
         border-radius: 3px;
+    }
+
+    /* ── Roadmap / What's Next ── */
+    .roadmap-section {
+        margin: 2.5em 0 1.5em;
+    }
+    .roadmap-section h2 {
+        font-size: 1.3em;
+        margin-bottom: 0.3em;
+    }
+    .roadmap-caveat {
+        color: var(--pp-text-muted);
+        font-size: 0.88em;
+        line-height: 1.5;
+        margin-bottom: 1.2em;
+        max-width: 650px;
+    }
+    .roadmap-tiles {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 0.7em;
+    }
+    .roadmap-tile {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 10px;
+        padding: 1em 0.7em;
+        text-align: center;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .roadmap-tile:hover {
+        border-color: #1976d2;
+        box-shadow: 0 2px 10px rgba(25, 118, 210, 0.12);
+        transform: translateY(-1px);
+    }
+    .roadmap-tile-icon {
+        font-size: 1.4em;
+        margin-bottom: 0.3em;
+    }
+    .roadmap-tile-label {
+        font-size: 0.78em;
+        font-weight: 600;
+        color: var(--pp-text);
+        line-height: 1.3;
+        margin-bottom: 0.2em;
+    }
+    .roadmap-tile-desc {
+        font-size: 0.68em;
+        color: var(--pp-text-faint);
+        line-height: 1.35;
+    }
+    @media (max-width: 768px) {
+        .roadmap-tiles {
+            grid-template-columns: repeat(3, 1fr);
+        }
+    }
+    @media (max-width: 480px) {
+        .roadmap-tiles {
+            grid-template-columns: repeat(2, 1fr);
+        }
     }
 
     /* ── Other ways to support ── */
@@ -540,14 +609,6 @@
         .feedback-modal-loading { height: 440px; }
     }
 
-    /* ── Built-with-love ── */
-    .built-with-love {
-        text-align: center;
-        padding: 1em 0 2em;
-        font-size: 0.85em;
-        color: var(--pp-text-faint);
-    }
-
     @media (max-width: 640px) {
         .panda-progress { padding: 1em 1.2em; }
         .panda-progress .progress-header .amount { font-size: 1.4em; }
@@ -642,13 +703,13 @@
     {# ── One-time tab ── #}
     <div class="donate-panel active" id="panel-onetime">
         {% if stripe_configured and price_onetime %}
-        <div class="tier-onetime-section" style="border-top: none; padding-top: 0;">
-            <p style="color: var(--pp-text-muted); font-size: 0.92em; margin-bottom: 1em;">
-                Make a one-time contribution — every dollar helps cover API costs and hosting.
-            </p>
-            <button class="tier-onetime-btn" onclick="openCheckout('{{ price_onetime }}', 'payment')">
-                Donate Once
-            </button>
+        <div class="tier-grid tier-grid-single">
+            <div class="tier-card popular" onclick="openCheckout('{{ price_onetime }}', 'payment')">
+                <div class="tier-emoji">&#x2764;&#xFE0F;</div>
+                <div class="tier-name">One-Time Donation</div>
+                <div class="tier-desc">Every dollar helps cover API costs and hosting</div>
+                <button class="tier-btn">Donate Now</button>
+            </div>
         </div>
         {% else %}
         <div class="stripe-not-configured">
@@ -756,11 +817,28 @@ document.addEventListener('keydown', function(e) {
         cloud infrastructure, and the tools that make development possible.
         There are no salaries, no investors, no hidden fees.
     </p>
-    <ul class="line-items-list">
-        {% for item in line_items %}
-        <li><span class="li-dot"></span> {{ item }}</li>
-        {% endfor %}
-    </ul>
+    <div class="cost-tiles">
+        <div class="cost-tile">
+            <div class="cost-tile-icon">&#x1F4CA;</div>
+            <div class="cost-tile-label">Data APIs<br><small style="color:var(--pp-text-faint);">SEC, Glassdoor, PDL</small></div>
+        </div>
+        <div class="cost-tile">
+            <div class="cost-tile-icon">&#x2601;&#xFE0F;</div>
+            <div class="cost-tile-label">Cloud Hosting<br><small style="color:var(--pp-text-faint);">Railway</small></div>
+        </div>
+        <div class="cost-tile">
+            <div class="cost-tile-icon">&#x1F5C4;&#xFE0F;</div>
+            <div class="cost-tile-label">Database<br><small style="color:var(--pp-text-faint);">Supabase Postgres</small></div>
+        </div>
+        <div class="cost-tile">
+            <div class="cost-tile-icon">&#x1F310;</div>
+            <div class="cost-tile-label">Domain &amp; DNS</div>
+        </div>
+        <div class="cost-tile">
+            <div class="cost-tile-icon">&#x1F916;</div>
+            <div class="cost-tile-label">AI Coding<br><small style="color:var(--pp-text-faint);">Assistants</small></div>
+        </div>
+    </div>
 </div>
 
 {# ── Funding History Chart ── #}
@@ -770,6 +848,42 @@ document.addEventListener('keydown', function(e) {
     <div class="chart-legend">
         <span><span class="legend-dot" style="background: #22c55e;"></span> Fully funded</span>
         <span><span class="legend-dot" style="background: #d4d4d8;"></span> Subsidized (out of pocket)</span>
+    </div>
+</div>
+
+{# ── What's Next Roadmap ── #}
+<div class="roadmap-section">
+    <h2>What's Next</h2>
+    <p class="roadmap-caveat">
+        These are features on the drawing board. What actually ships depends on whether PaperPanda
+        can sustain itself long enough to build them -- your support directly decides that.
+    </p>
+    <div class="roadmap-tiles">
+        <div class="roadmap-tile">
+            <div class="roadmap-tile-icon">&#x1F4C8;</div>
+            <div class="roadmap-tile-label">Alternative Data</div>
+            <div class="roadmap-tile-desc">Google Trends &amp; SimilarWeb traffic for retail sentiment</div>
+        </div>
+        <div class="roadmap-tile">
+            <div class="roadmap-tile-icon">&#x1F514;</div>
+            <div class="roadmap-tile-label">Filing Alerts</div>
+            <div class="roadmap-tile-desc">Get notified when funds you follow make new moves</div>
+        </div>
+        <div class="roadmap-tile">
+            <div class="roadmap-tile-icon">&#x1F50D;</div>
+            <div class="roadmap-tile-label">Advanced Screener</div>
+            <div class="roadmap-tile-desc">Filter holdings by sector, size, conviction, &amp; more</div>
+        </div>
+        <div class="roadmap-tile">
+            <div class="roadmap-tile-icon">&#x1F4CA;</div>
+            <div class="roadmap-tile-label">Portfolio Tracking</div>
+            <div class="roadmap-tile-desc">Build &amp; track a watchlist mirroring top fund positions</div>
+        </div>
+        <div class="roadmap-tile">
+            <div class="roadmap-tile-icon">&#x1F4AC;</div>
+            <div class="roadmap-tile-label">Earnings Transcripts</div>
+            <div class="roadmap-tile-desc">AI-summarized call highlights alongside holdings data</div>
+        </div>
     </div>
 </div>
 
@@ -849,11 +963,6 @@ if (window.location.hash === '#feedback') {
     openFeedbackModal();
 }
 </script>
-
-{# ── Footer note ── #}
-<div class="built-with-love">
-    Built with bamboo and late nights by Tevis &middot; <a href="https://youtube.com/@funofinvesting" target="_blank" rel="noopener" style="color: inherit;">@funofinvesting</a>
-</div>
 
 {# ── Chart ── #}
 <script>
