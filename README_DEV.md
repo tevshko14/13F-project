@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-23 (YouTube calendar sync, cold storage, PostHog analytics, egress optimization, circuit-breaker patterns)
+> Last updated: 2026-02-24 (security hardening, CI pipeline fix, Railway deploy fix, ruff formatting, Glassdoor Company Snapshot)
 
 ---
 
@@ -43,10 +43,12 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | Market data   | `yfinance` + NASDAQ Trader (~8K listings) + Wikipedia (sectors) |
 | Analyst data  | `yfinance` (free) + `finnhub-python` (free tier, optional key) |
 | Sentiment     | CNN Fear & Greed, Finnhub, ApeWisdom, Alpha Vantage |
-| Vitals        | People Data Labs, Glassdoor (RapidAPI), Apple iTunes Search |
+| Vitals        | Glassdoor (RapidAPI) + Apple iTunes Search (PDL optional) |
 | Caching       | 3-tier: in-memory (L1) → Supabase Postgres (L2) → disk JSON (L3) |
+| Monitoring    | Sentry (error tracking, 10% sampling) + PostHog (product analytics) |
+| CI/CD         | GitHub Actions (ruff lint/format + pytest + import smoke test) |
 | Hosting       | Railway (auto-deploy from main) at [paperpanda.io](https://paperpanda.io) |
-| Entry points  | `filings` (CLI), `filings-web` (web, port 8000) |
+| Entry points  | `filings` (CLI), `filings-web`, `filings-sync`, `filings-insider-sync`, `filings-youtube-sync`, `filings-migrate-cold` |
 
 ### How to Run
 
@@ -1046,47 +1048,64 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/retail` | `retail_page` | CNN, ApeWisdom, YouTubers (static) | `retail.html` |
 | GET | `/funds` | `funds_page` | Cache only | `grand_portfolio.html` |
 | GET | `/insider-trading` | `insider_trading_page` | — (JS lazy-loads) | `insider_trading.html` |
-| GET | `/grand-portfolio` | `grand_portfolio_redirect` | 301 redirect → `/funds` | — |
+| GET | `/grand-portfolio` | `grand_portfolio_redirect` | 301 redirect → `/funds` (view param allowlisted) | — |
 | GET | `/superinvestors` | `superinvestors_page` | 301 redirect → `/funds?view=funds` | — |
-| GET | `/api/fund-row/{cik}` | `fund_row` | Cache first → SEC on miss (L2 Supabase fallback) | `partials/fund_row.html` |
-| GET | `/search` | `search_page` | SEC API (live) | `search.html` |
-| GET | `/holdings/{cik}` | `holdings` | Cache first → SEC on miss | `investor.html` |
-| GET | `/compare/{cik}` | `compare` | Redirect | → `/holdings/{cik}` (302) |
-| GET | `/api/compare/{cik}` | `compare_api` | Cache first → SEC on miss | `partials/compare_content.html` |
-| GET | `/activity` | `activity_feed` | Cache only | `activity.html` |
-| GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
-| GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only | `stock.html` |
-| GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (live, 5-min cache) | `partials/analyst_ratings.html` |
+| GET | `/activity` | `activity_feed` | 302 redirect → `/funds?view=activity` | — |
+| GET | `/api/fund-row/{cik}` | `fund_row` | Cache first → SEC on miss (CIK validated) | `partials/fund_row.html` |
+| GET | `/holdings/{cik}` | `holdings` | Cache first → SEC on miss (top_n: 1–200) | `investor.html` |
+| GET | `/compare/{cik}` | `compare` | Redirect (CIK validated) | → `/holdings/{cik}` (302) |
+| GET | `/api/compare/{cik}` | `compare_api` | Cache first → SEC on miss (top_n: 1–200) | `partials/compare_content.html` |
+| GET | `/api/portfolio-chart/{cik}` | `portfolio_chart_data` | Cache (CIK validated) | JSON response |
+| GET | `/stock/{ticker}` | `stock_detail` | Cache only (ticker validated) | `stock.html` |
+| GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only (CUSIP validated) | `stock.html` |
+| GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (30-min web cache) | `partials/analyst_ratings.html` |
 | GET | `/api/sentiment/{ticker}` | `sentiment_data` | CNN, Finnhub, ApeWisdom, Alpha Vantage | `partials/sentiment.html` |
-| GET | `/api/vitals/{ticker}` | `vitals_data` | Glassdoor, PDL, Apple iTunes | `partials/vitals.html` |
+| GET | `/api/vitals/{ticker}` | `vitals_data` | Glassdoor, Apple iTunes | `partials/vitals.html` |
 | GET | `/api/company-filings/{ticker}` | `company_filings_tab` | SEC EDGAR | `partials/company_filings.html` |
 | GET | `/api/insider-trades` | `insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/insider_trades.html` |
 | GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/stock_insider_trades.html` |
 | GET | `/api/retail/leaderboard` | `retail_leaderboard_api` | ApeWisdom + CNN Fear & Greed | `partials/retail_leaderboard.html` |
+| GET | `/api/retail/leaderboard-data` | `retail_leaderboard_data` | ApeWisdom + CNN Fear & Greed | JSON response |
+| GET | `/api/retail/calendar` | `retail_calendar_api` | YouTube sync (Supabase) | `partials/retail_calendar.html` |
+| GET | `/api/retail/calendar-data` | `retail_calendar_data` | YouTube sync (Supabase) | JSON response |
 | GET | `/api/ticker-search-index` | `ticker_search_index` | NASDAQ Trader + S&P 500 + cache | JSON response |
+| GET | `/api/activity-feed` | `api_activity_feed` | Cache (cursor-based pagination) | `partials/activity_feed_content.html` |
 | GET | `/api/heatmap` | `heatmap` | yfinance (30-min cache) + Wikipedia | `partials/heatmap.html` |
 | GET | `/api/most-added` | `most_added` | Cache + analysts + yfinance | `partials/most_added.html` |
-| POST | `/api/watchlist/{ticker}` | `watchlist_add` | Watchlist JSON | `partials/watchlist_response.html` |
-| DELETE | `/api/watchlist/{ticker}` | `watchlist_remove` | Watchlist JSON + Cache | `partials/watchlist_response.html` or `partials/watchlist_sidebar.html` |
-| GET | `/api/watchlist-sidebar` | `watchlist_sidebar_refresh` | Watchlist JSON | `partials/watchlist_sidebar.html` |
-| GET | `/api/notifications/stream` | `notification_stream` | SSE (real-time) | StreamingResponse (text/event-stream) |
-| GET | `/api/notifications/bell` | `notification_bell` | Notifications JSON | `partials/notification_bell.html` |
-| GET | `/notifications` | `notifications_page` | Notifications JSON | `notifications.html` |
-| POST | `/api/notifications/read/{id}` | `mark_read` | Notifications JSON | Empty HTML |
-| POST | `/api/notifications/read-all` | `mark_all_read` | Notifications JSON | `partials/notification_bell.html` |
 | GET | `/support` | `support_page` | Env vars (PANDA_FUND_RAISED, Stripe IDs) | `support.html` |
-| POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
+| GET | `/login` | `login_page` | — | `login.html` (open redirect protected) |
+| GET | `/signup` | `signup_page` | — | `signup.html` (XSS-safe email display) |
+| GET | `/reset-password` | `reset_password_page` | — | `reset_password.html` (XSS-safe email display) |
+| GET | `/logout` | `logout` | Clears auth cookies | Redirect → `/` |
+| POST | `/api/auth/set-session` | `set_session` | CSRF-checked, sets HttpOnly cookies | JSON `{"ok": true}` |
+| POST | `/api/auth/clear-session` | `clear_session` | CSRF-checked, clears auth cookies | JSON `{"ok": true}` |
+| GET | `/health` | `health_check` | — | JSON `{"status": "ok"}` (public) |
+| GET | `/health/detail` | `health_detail` | App state + cache | JSON (behind `X-Health-Secret` header) |
+| GET | `/robots.txt` | `robots_txt` | — | PlainTextResponse |
+| GET | `/sitemap.xml` | `sitemap_xml` | Superinvestors list | XML response |
 
 **Key patterns:**
 - All endpoints are cache-first. SEC EDGAR is only called on cache miss or during background refresh.
-- Fund data endpoints (`/api/fund-row`, `/api/holdings`, `/api/compare`) have L2 Supabase fallback with L1 promotion when L1 misses.
+- Fund data endpoints (`/api/fund-row`, `/holdings`, `/api/compare`) have L2 Supabase fallback with L1 promotion when L1 misses.
 - Fund data endpoints trigger self-healing background refresh when stale data is detected (request-triggered via `_trigger_single_refresh`).
 - Insider trade endpoints use 4-tier fallback: L1 fresh → L2 Supabase → L3 scrape → L4 stale L1 (never empty).
-- Backward-compat redirects: `/grand-portfolio` → `/funds` (301), `/superinvestors` → `/funds?view=funds` (301).
-- Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
+- Backward-compat redirects: `/grand-portfolio` → `/funds` (301), `/superinvestors` → `/funds?view=funds` (301), `/activity` → `/funds?view=activity` (302).
 - Exception handlers detect HTMX requests (`HX-Request` header) and API paths to return inline `data_error.html` partial instead of full error pages.
-- `/support` and homepage widget use Stripe OOTB web components (Buy Button + Pricing Table) -- zero backend Stripe SDK needed.
-- `/health` endpoint includes `stale_funds`, `refresh_status`, `refresh_progress`, and `vitals_cache` diagnostics.
+- `/support` and homepage widget use Stripe OOTB web components (Buy Button + Pricing Table) — zero backend Stripe SDK needed.
+- `/health` returns minimal `{"status": "ok"}`; detailed diagnostics at `/health/detail` behind `X-Health-Secret` header.
+
+**Security (added in PRs 119–123):**
+- **CSP header** on all responses (allowlisted CDN sources + `'unsafe-inline'` for Pico CSS).
+- **HSTS** sent unconditionally (Railway terminates TLS upstream).
+- **CSRF origin checking** on all POST endpoints (`_check_csrf_origin()`).
+- **Input validation** via compiled regex: CIK (`^[0-9]{1,20}$`), ticker (`^[A-Za-z.]{1,12}$`), CUSIP (`^[A-Za-z0-9]{6,9}$`).
+- **View param allowlisted** against `("funds", "holdings", "activity")`.
+- **`top_n` bounded** to `ge=1, le=200` on holdings and compare endpoints.
+- **Open redirect prevention** on login page (`?next=` must start with `/`, not `//`).
+- **innerHTML XSS prevention** in signup/reset_password (HTML-escape email before insertion).
+- **HttpOnly + Secure + SameSite=Lax cookies** via server-side `/api/auth/set-session`.
+- **Rate limiting** on page routes (20–30/min), API endpoints (10–30/min), auth (10/min), health/detail (5/min).
+- **Insider trade type allowlist** in `supabase_cache.py`: `_VALID_INSIDER_TRADE_TYPES = frozenset({"Purchase", "Sale"})`.
 
 ---
 
@@ -1453,6 +1472,14 @@ the cache — every CLI command makes live SEC API calls.
   The background refresh uses a 1-second delay between funds. Aggressive
   concurrent fetching will get your IP temporarily blocked.
 
+- **`import re` placement:** `import re as _re` must stay at the top of `web.py`
+  (not inline with the security helpers section) to satisfy ruff E402. The
+  security helpers section uses `_re` to compile regex patterns at module level.
+
+- **Gunicorn workers:** Railway's memory limit requires 1 worker (default).
+  Two workers load edgartools/pandas twice (~500 MB each) and get OOM-killed.
+  Scale via `WEB_WORKERS` env var only if Railway plan has sufficient memory.
+
 ---
 
 ## 10. Pending Tasks & Future Work
@@ -1494,6 +1521,16 @@ the cache — every CLI command makes live SEC API calls.
 - [x] 13F sync worker: SEC EDGAR → Supabase every 12h with hot/cold archival, OOM prevention, content-hash change detection
 - [x] Cold storage: Supabase Storage bucket for archived 13F quarterly data with circuit-breaker pattern
 - [x] Egress optimization: content-hash delta detection on startup, skip-existing on all sync workers
+- [x] Security hardening: CSP, HSTS, CSRF origin check, input validation (regex), HttpOnly cookies
+- [x] Open redirect prevention on login page (`?next=` validated)
+- [x] innerHTML XSS prevention: HTML-escape email in signup/reset_password templates
+- [x] Health endpoint info disclosure: `/health` returns only `{"status":"ok"}`, details behind secret header
+- [x] Glassdoor Company Snapshot card (replaces PDL for employee headcount + culture ratings)
+- [x] CI pipeline: GitHub Actions with ruff lint + format + pytest + import smoke test
+- [x] Railway deploy optimization: 1 worker + `--preload` + 120s health check timeout
+- [x] Code formatting: all Python files auto-formatted with `ruff format`
+- [x] Dark mode accessibility: PicoCSS specificity overrides for charts, badges, tables
+- [x] Performance: ownership map caching, consensus cache (30-min TTL), `_fund_cache()` helper
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
@@ -1505,10 +1542,11 @@ the cache — every CLI command makes live SEC API calls.
 - [ ] CLI should optionally read from cache instead of always hitting SEC API
 - [x] `get_enriched_holdings()` bypassed with `get_enriched_holdings_from_cache()` —
       now reads from cached data instead of calling SEC API + compare_quarters()
-- [ ] Add proper logging (currently all errors are silently caught with `pass`)
+- [x] Add proper logging → structured JSON logging in production (Railway), verbose library silencing
 - [ ] Add error handling for malformed SEC data (corrupt DataFrames, missing columns)
-- [ ] Unit tests (none exist currently)
+- [x] Unit tests → 12 tests passing in CI (homepage, health, security headers, redirects, input validation)
 - [ ] Type checking with mypy (type hints are used but not enforced)
+- [ ] Lazy-import `edgartools` in `client.py` to reduce startup memory (currently ~500MB at import time)
 
 ---
 
@@ -1533,6 +1571,12 @@ they don't get re-introduced.
 | 13F sync crash: "Bucket not found" | `paperpanda-archive` Supabase Storage bucket never created; 84 funds each tried to upload and failed, accumulating untrimmed data until OOM | Circuit-breaker in cold_storage.py: one-time check, then short-circuit all calls. Always trim to 2 quarters even on archive failure. |
 | 13F sync OOM on Railway | `get_all_by_category("13f")` loaded all 84 fund JSONB blobs (~30MB) just to check CIK existence | Replaced with `get_cache_keys_by_category()` (fetches only key strings). Added `gc.collect()` + memory logging. |
 | Supabase egress limit exceeded (8 GB / 5 GB) | Every deploy pulled all 84 fund blobs; sync workers re-uploaded identical data every run | Content-hash change detection for 13F; skip-existing for insider/YouTube; delta startup hydration |
+| GitHub Actions CI never passed (100+ runs) | YAML colon in unquoted string on ci.yml line 39 (`print('OK: app imported')`) confused parser | Use block scalar (`\|`) syntax for the run step; simplified print message |
+| Railway OOM crash on deploy (PRs 119-120) | Gunicorn spawned 2 workers, each loading edgartools/pandas (~500 MB), exceeding Railway memory limit → SIGKILL → health check never responds | Reduced default to 1 worker + `--preload` flag; increased health check timeout to 120s |
+| innerHTML XSS in signup/reset_password | User email from URL params injected directly into innerHTML without escaping | HTML-escape email (`&`, `<`, `>`, `"`) before innerHTML insertion |
+| Open redirect on login page | `?next=` parameter accepted arbitrary URLs (e.g., `?next=https://evil.com`) | Validate redirect: must start with `/` and not `//` |
+| PostHog API key leaked in HTML source | Key hardcoded directly in `base.html` template, visible in page source | Externalized to `POSTHOG_KEY` env var; template uses `{{ posthog_key }}` with `{% if posthog_key %}` guard |
+| ruff lint failures (E402, F401, F841) | `import re` placed mid-file in security helpers section; unused imports accumulated | Moved import to top-of-file; removed unused imports in 4 files; removed unused variable in insider_trading.py |
 
 ---
 
