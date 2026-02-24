@@ -1,351 +1,245 @@
-{# ── YouTube Calendar Tab (lazy-loaded partial) ── #}
+{# ── YouTube Event Calendar (lazy-loaded partial) ── #}
 
-<style>
-    /* ── Channel avatar strip ── */
-    .yt-channel-strip {
-        display: flex;
-        gap: 1em;
-        overflow-x: auto;
-        padding: 0.5em 0 1em;
-        margin-bottom: 0.75em;
-        scrollbar-width: thin;
-    }
-    .yt-channel-chip {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 0.3em;
-        min-width: 72px;
-        cursor: pointer;
-        text-decoration: none;
-        transition: opacity 0.15s;
-    }
-    .yt-channel-chip:hover { opacity: 0.8; }
-    .yt-channel-chip.dimmed { opacity: 0.3; }
-    .yt-channel-chip.active .yt-chip-avatar { border-color: #c62828; }
-    .yt-chip-avatar {
-        width: 52px;
-        height: 52px;
-        border-radius: 50%;
-        object-fit: cover;
-        border: 3px solid transparent;
-        transition: border-color 0.15s;
-    }
-    .yt-chip-name {
-        font-size: 0.65em;
-        font-weight: 500;
-        color: var(--pp-text-muted);
-        text-align: center;
-        max-width: 72px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    /* ── Stats bar ── */
-    .yt-stats-bar {
-        display: flex;
-        align-items: center;
-        margin-bottom: 1.25em;
-    }
-
-    /* ── Video grid ── */
-    .yt-video-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: 1.25em;
-    }
-    .yt-video-card {
-        border-radius: 12px;
-        overflow: hidden;
-        transition: transform 0.15s, box-shadow 0.15s;
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border-light);
-    }
-    .yt-video-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 16px var(--pp-overlay-8);
-    }
-    .yt-thumb-wrap {
-        display: block;
-        position: relative;
-        overflow: hidden;
-    }
-    .yt-thumb-wrap img {
-        width: 100%;
-        aspect-ratio: 16/9;
-        object-fit: cover;
-        display: block;
-    }
-    .yt-thumb-overlay {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(0,0,0,0);
-        transition: background 0.2s;
-    }
-    .yt-thumb-wrap:hover .yt-thumb-overlay {
-        background: rgba(0,0,0,0.3);
-    }
-    .yt-play-icon {
-        width: 48px;
-        height: 48px;
-        opacity: 0;
-        transition: opacity 0.2s;
-        filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
-    }
-    .yt-thumb-wrap:hover .yt-play-icon {
-        opacity: 1;
-    }
-    .yt-duration-badge {
-        position: absolute;
-        bottom: 6px;
-        right: 6px;
-        background: rgba(0,0,0,0.8);
-        color: #fff;
-        font-size: 0.7em;
-        font-weight: 600;
-        padding: 0.1em 0.4em;
-        border-radius: 3px;
-        font-family: monospace;
-        letter-spacing: 0.02em;
-    }
-    .yt-type-tag {
-        position: absolute;
-        top: 8px;
-        left: 8px;
-        font-size: 0.62em;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        padding: 0.15em 0.5em;
-        border-radius: 3px;
-    }
-    .yt-type-tag--live {
-        background: #c62828;
-        color: #fff;
-    }
-    .yt-type-tag--video {
-        background: rgba(0,0,0,0.7);
-        color: #fff;
-    }
-    .yt-card-body {
-        padding: 0.75em 0.6em 0.6em;
-    }
-    .yt-channel-row {
-        display: flex;
-        align-items: center;
-        gap: 0.5em;
-        margin-bottom: 0.3em;
-    }
-    .yt-channel-avatar {
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        object-fit: cover;
-        flex-shrink: 0;
-    }
-    .yt-channel-name {
-        font-weight: 600;
-        font-size: 0.78em;
-        color: var(--pp-text-muted);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .yt-video-title {
-        text-decoration: none;
-        font-weight: 500;
-        color: var(--pp-text);
-        font-size: 0.88em;
-        line-height: 1.35;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
-    .yt-video-title:hover { color: #c62828; }
-    .yt-meta-row {
-        display: flex;
-        align-items: center;
-        gap: 0.4em;
-        flex-wrap: wrap;
-        margin-top: 0.35em;
-    }
-    .yt-time {
-        font-size: 0.73em;
-        color: var(--pp-text-faint);
-    }
-    .yt-ticker-pill {
-        font-size: 0.7em;
-        text-decoration: none;
-        font-weight: 600;
-        background: var(--pp-tag-bg);
-        color: var(--pp-tag-text);
-        padding: 0.1em 0.4em;
-        border-radius: 3px;
-        font-family: monospace;
-    }
-    .yt-ticker-pill:hover { opacity: 0.8; }
-
-    @media (max-width: 640px) {
-        .yt-video-grid { grid-template-columns: 1fr; }
-    }
-</style>
-
-{# ── Channel avatar strip (clickable filter) ── #}
-{% if channels and channels|length > 0 %}
-<div class="yt-channel-strip" id="channel-strip">
-    <div class="yt-channel-chip active" data-channel="all" onclick="filterByChannel('all')">
-        <div class="yt-chip-avatar" style="border-color: #c62828;
-                    display: flex; align-items: center; justify-content: center;
-                    background: var(--pp-surface-alt); font-size: 0.8em; font-weight: 700;
-                    color: var(--pp-text-muted);">ALL</div>
-        <span class="yt-chip-name">All</span>
-    </div>
-    {% for ch in channels %}
-    <div class="yt-channel-chip" data-channel="{{ ch.channel_id }}" onclick="filterByChannel('{{ ch.channel_id }}')">
-        {% if ch.thumbnail_url %}
-        <img src="{{ ch.thumbnail_url }}" alt="" class="yt-chip-avatar" width="52" height="52" loading="lazy" decoding="async">
-        {% else %}
-        <div class="yt-chip-avatar" style="background: var(--pp-surface-alt); display: flex; align-items: center; justify-content: center; font-weight: 700; color: var(--pp-text-muted); font-size: 0.75em;">
-            {{ ch.channel_name[:2]|upper }}
-        </div>
-        {% endif %}
-        <span class="yt-chip-name">{{ ch.channel_name }}</span>
-    </div>
-    {% endfor %}
-</div>
-{% endif %}
-
-{# ── Stats bar ── #}
+{# ── Stats summary row ── #}
 {% if stats %}
-<div class="yt-stats-bar">
-    <span style="font-size: 0.8em; color: var(--pp-text-faint);">
-        {{ stats.recent_count }} video{{ 's' if stats.recent_count != 1 else '' }}
-        {% if stats.total_upcoming %} &middot; {{ stats.total_upcoming }} upcoming{% endif %}
+<div style="display: flex; align-items: center; gap: 0.75em; margin-bottom: 1em; flex-wrap: wrap;">
+    {% if stats.recent_count %}
+    <span style="background: #eff6ff; color: #1e40af; font-size: 0.85em; padding: 0.3em 0.8em; border-radius: 6px; font-weight: 500;">
+        {{ stats.recent_count }} Recently Posted
     </span>
+    {% endif %}
+    <span style="background: var(--pp-tag-bg); color: var(--pp-tag-text); font-size: 0.85em; padding: 0.3em 0.8em; border-radius: 6px; font-weight: 500;">
+        {{ stats.total_upcoming }} Upcoming
+    </span>
+    {% if stats.bullish_count %}
+    <span style="background: #dcfce7; color: #166534; font-size: 0.82em; padding: 0.25em 0.7em; border-radius: 6px; font-weight: 500;">
+        {{ stats.bullish_count }} Bullish
+    </span>
+    {% endif %}
+    {% if stats.bearish_count %}
+    <span style="background: #ffe4e6; color: #9f1239; font-size: 0.82em; padding: 0.25em 0.7em; border-radius: 6px; font-weight: 500;">
+        {{ stats.bearish_count }} Bearish
+    </span>
+    {% endif %}
+    {% if stats.frequency_alerts %}
+    <span style="background: #fff7ed; color: #c2410c; font-size: 0.82em; padding: 0.25em 0.7em; border-radius: 6px; font-weight: 500;">
+        &#x26A0; {{ stats.frequency_alerts }} Retail Alert{{ 's' if stats.frequency_alerts > 1 else '' }}
+    </span>
+    {% endif %}
 </div>
 {% endif %}
 
-{# ── Video grid ── #}
+{# ── Recently Posted section ── #}
 {% if recent_uploads and recent_uploads|length > 0 %}
-<div class="yt-video-grid" id="video-grid">
-    {% for v in recent_uploads %}
-    <div class="yt-video-card" data-channel="{{ v.channel_id }}">
-        {# Thumbnail with play overlay + type tag + duration badge #}
-        <a href="{{ v.video_url }}" target="_blank" rel="noopener" class="yt-thumb-wrap">
-            <img src="{{ v.thumbnail_url }}" alt="" loading="lazy" decoding="async">
-            <div class="yt-thumb-overlay">
-                <svg class="yt-play-icon" viewBox="0 0 68 48" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M66.52 7.74c-.78-2.93-2.49-5.41-5.42-6.19C55.79.13 34 0 34 0S12.21.13 6.9 1.55C3.97 2.33 2.27 4.81 1.48 7.74.06 13.05 0 24 0 24s.06 10.95 1.48 16.26c.78 2.93 2.49 5.41 5.42 6.19C12.21 47.87 34 48 34 48s21.79-.13 27.1-1.55c2.93-.78 4.64-3.26 5.42-6.19C67.94 34.95 68 24 68 24s-.06-10.95-1.48-16.26z" fill="#FF0000"/>
-                    <path d="M45 24L27 14v20" fill="#fff"/>
-                </svg>
-            </div>
-            {% if v.content_type == 'live' or v.content_type == 'upcoming' %}
-            <span class="yt-type-tag yt-type-tag--live">&#9679; LIVE</span>
-            {% else %}
-            <span class="yt-type-tag yt-type-tag--video">VIDEO</span>
-            {% endif %}
-            {% if v.duration %}
-            <span class="yt-duration-badge">{{ v.duration }}</span>
-            {% endif %}
-        </a>
-
-        {# Card body #}
-        <div class="yt-card-body">
-            <div class="yt-channel-row">
-                {% if v.channel_thumbnail %}
-                <img src="{{ v.channel_thumbnail }}" alt="" class="yt-channel-avatar" width="24" height="24" loading="lazy" decoding="async">
-                {% endif %}
-                <span class="yt-channel-name">{{ v.channel_name }}</span>
-            </div>
-
-            <a href="{{ v.video_url }}" target="_blank" rel="noopener" class="yt-video-title">
-                {{ v.title }}
-            </a>
-
-            <div class="yt-meta-row">
-                {% if v.scheduled_at %}
-                <span class="yt-time" data-published="{{ v.scheduled_at }}">
-                    {{ v.scheduled_at[:16]|replace('T', ' ') }}
-                </span>
-                {% endif %}
-                {% if v.tickers and v.tickers|length > 0 %}
-                {% for ticker in v.tickers[:4] %}
-                <a href="/stock/{{ ticker }}" class="yt-ticker-pill">${{ ticker }}</a>
-                {% endfor %}
-                {% if v.tickers|length > 4 %}
-                <span style="font-size: 0.7em; color: var(--pp-text-faint);">+{{ v.tickers|length - 4 }}</span>
-                {% endif %}
-                {% endif %}
-            </div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
-{% else %}
-<div style="text-align: center; padding: 3em 1em; color: var(--pp-text-faint);">
-    <p style="font-size: 1.2em; margin-bottom: 0.3em;">No recent videos found</p>
-    <p>The YouTube sync runs every 6 hours. Check back soon!</p>
-</div>
-{% endif %}
-
-{# ── Upcoming streams section ── #}
-{% if events and events|length > 0 %}
-<article style="margin-top: 2em;">
+<article style="margin-bottom: 1.5em;">
     <header>
-        <strong>Upcoming Live Streams</strong>
+        <strong>Recently Posted</strong>
         <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            {{ events|length }} scheduled
+            {{ recent_uploads|length }} video{{ 's' if recent_uploads|length != 1 else '' }} in the last 48 hours
         </span>
     </header>
 
-    {% for event in events %}
-    <div class="calendar-event-card"
-         style="display: flex; gap: 1em; padding: 0.75em 0;
-                border-bottom: 1px solid var(--pp-border-light); align-items: center;">
-        {% if event.thumbnail_url %}
-        <a href="{{ event.video_url }}" target="_blank" rel="noopener" style="flex-shrink: 0;">
-            <img src="{{ event.thumbnail_url }}" alt="" width="120" height="68"
-                 loading="lazy" decoding="async"
-                 style="object-fit: cover; border-radius: 6px;">
-        </a>
-        {% endif %}
-        <div style="flex: 1; min-width: 0;">
-            <div style="display: flex; align-items: center; gap: 0.4em; margin-bottom: 0.2em;">
-                {% if event.channel_thumbnail %}
-                <img src="{{ event.channel_thumbnail }}" alt="" width="20" height="20"
-                     loading="lazy" decoding="async"
-                     style="border-radius: 50%; object-fit: cover;">
-                {% endif %}
-                <span style="font-weight: 600; font-size: 0.8em; color: var(--pp-text-muted);">{{ event.channel_name }}</span>
-                {% if event.scheduled_at %}
-                <span class="text-muted" style="font-size: 0.75em;">{{ event.scheduled_at[:16]|replace('T', ' ') }} UTC</span>
-                {% endif %}
-            </div>
-            <a href="{{ event.video_url }}" target="_blank" rel="noopener"
-               style="text-decoration: none; font-weight: 500; color: var(--pp-text); font-size: 0.9em;">
-                {{ event.title }}
+    <div class="recent-uploads-grid">
+        {% for upl in recent_uploads %}
+        <div class="recent-upload-card{% if loop.index > 8 %} recent-upload-extra{% endif %}">
+            {# Video thumbnail #}
+            <a href="{{ upl.video_url }}" target="_blank" rel="noopener"
+               class="recent-upload-thumb-link">
+                <img src="{{ upl.thumbnail_url }}" alt=""
+                     class="recent-upload-thumb"
+                     loading="{% if loop.index <= 8 %}eager{% else %}lazy{% endif %}">
+                {# Sentiment dot overlay #}
+                <span class="recent-upload-sentiment-dot"
+                      style="background: {% if upl.sentiment == 'bullish' %}#16a34a{% elif upl.sentiment == 'bearish' %}#e11d48{% else %}#a1a1aa{% endif %};"></span>
             </a>
-            {% if event.tickers and event.tickers|length > 0 %}
-            <div style="display: flex; gap: 0.3em; flex-wrap: wrap; margin-top: 0.3em;">
-                {% for ticker in event.tickers %}
-                <a href="/stock/{{ ticker }}" class="yt-ticker-pill">${{ ticker }}</a>
-                {% endfor %}
+
+            {# Card body #}
+            <div class="recent-upload-body">
+                {# Channel info row #}
+                <div style="display: flex; align-items: center; gap: 0.4em; margin-bottom: 0.25em;">
+                    {% if upl.channel_thumbnail %}
+                    <img src="{{ upl.channel_thumbnail }}" alt=""
+                         style="width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex-shrink: 0;"
+                         loading="lazy">
+                    {% endif %}
+                    <span style="font-weight: 600; font-size: 0.75em; color: var(--pp-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                        {{ upl.channel_name }}
+                    </span>
+                </div>
+
+                {# Title #}
+                <a href="{{ upl.video_url }}" target="_blank" rel="noopener"
+                   class="recent-upload-title">
+                    {{ upl.title }}
+                </a>
+
+                {# Bottom row: time + tickers #}
+                <div style="display: flex; align-items: center; gap: 0.4em; flex-wrap: wrap; margin-top: auto; padding-top: 0.3em;">
+                    {% if upl.scheduled_at %}
+                    <span class="text-muted" style="font-size: 0.7em;" data-published="{{ upl.scheduled_at }}">
+                        {{ upl.scheduled_at[:16]|replace('T', ' ') }}
+                    </span>
+                    {% endif %}
+                    {% if upl.tickers and upl.tickers|length > 0 %}
+                    {% for ticker in upl.tickers[:3] %}
+                    <a href="/stock/{{ ticker }}"
+                       style="font-size: 0.7em; text-decoration: none; font-weight: 600;
+                              background: var(--pp-tag-bg); color: var(--pp-tag-text); padding: 0.1em 0.4em;
+                              border-radius: 3px; font-family: monospace;">
+                        ${{ ticker }}
+                    </a>
+                    {% endfor %}
+                    {% endif %}
+                </div>
             </div>
-            {% endif %}
         </div>
+        {% endfor %}
     </div>
-    {% endfor %}
+
+    {% if recent_uploads|length > 8 %}
+    <div style="text-align: center; margin-top: 0.75em;">
+        <button id="recent-uploads-expand-btn"
+                onclick="expandRecentUploads()"
+                style="background: none; border: 1px solid var(--pp-border); border-radius: 8px;
+                       padding: 0.4em 1.2em; font-size: 0.85em; color: var(--pp-text-muted);
+                       cursor: pointer; display: inline-flex; align-items: center; gap: 0.4em;
+                       transition: background 0.15s, color 0.15s;">
+            <span>Show {{ recent_uploads|length - 8 }} more</span>
+            <span style="font-size: 0.8em;">&#x25BC;</span>
+        </button>
+    </div>
+    {% endif %}
 </article>
 {% endif %}
 
-{# ── Tracked channels table ── #}
+{# ── Event timeline ── #}
+{% if events and events|length > 0 %}
+<article>
+    <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5em;">
+        <div>
+            <strong>Upcoming Live Streams</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Finance YouTuber event calendar
+            </span>
+        </div>
+        <div style="display: flex; gap: 0.4em;">
+            <button class="calendar-filter-pill active" data-filter="all"
+                    onclick="filterCalendar('all')">All</button>
+            <button class="calendar-filter-pill" data-filter="bullish"
+                    onclick="filterCalendar('bullish')">Bullish</button>
+            <button class="calendar-filter-pill" data-filter="bearish"
+                    onclick="filterCalendar('bearish')">Bearish</button>
+        </div>
+    </header>
+
+    <div id="calendar-events-list">
+        {% for event in events %}
+        <div class="calendar-event-card" data-sentiment="{{ event.sentiment }}"
+             style="display: flex; gap: 1em; padding: 1em 0;
+                    border-bottom: 1px solid var(--pp-border-light); align-items: flex-start;">
+
+            {# Sentiment indicator bar #}
+            <div style="width: 4px; min-height: 60px; border-radius: 2px; flex-shrink: 0;
+                        background: {% if event.sentiment == 'bullish' %}#166534{% elif event.sentiment == 'bearish' %}#9f1239{% else %}#a1a1aa{% endif %};">
+            </div>
+
+            {# Thumbnail #}
+            {% if event.thumbnail_url %}
+            <a href="{{ event.video_url }}" target="_blank" rel="noopener"
+               style="flex-shrink: 0;">
+                <img src="{{ event.thumbnail_url }}" alt=""
+                     style="width: 120px; height: 68px; object-fit: cover; border-radius: 6px;"
+                     loading="lazy">
+            </a>
+            {% endif %}
+
+            {# Content #}
+            <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; margin-bottom: 0.3em;">
+                    {% if event.channel_thumbnail %}
+                    <img src="{{ event.channel_thumbnail }}" alt=""
+                         style="width: 24px; height: 24px; border-radius: 50%; object-fit: cover; flex-shrink: 0;"
+                         loading="lazy">
+                    {% endif %}
+                    <span style="font-weight: 600; font-size: 0.8em; color: var(--pp-text-muted);">
+                        {{ event.channel_name }}
+                    </span>
+                    {% if event.scheduled_at %}
+                    <span class="text-muted" style="font-size: 0.75em;">
+                        {{ event.scheduled_at[:16]|replace('T', ' ') }} UTC
+                    </span>
+                    {% endif %}
+                    {% if event.frequency_alert %}
+                    <span style="background: #fff7ed; color: #c2410c; font-size: 0.7em;
+                                 padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;"
+                          title="{{ event.frequency_detail }}">
+                        &#x26A0; Retail Alert
+                    </span>
+                    {% endif %}
+                </div>
+
+                <a href="{{ event.video_url }}" target="_blank" rel="noopener"
+                   style="text-decoration: none; font-weight: 500; color: var(--pp-text);
+                          font-size: 0.95em; line-height: 1.3;">
+                    {{ event.title }}
+                </a>
+
+                {# Ticker pills #}
+                {% if event.tickers and event.tickers|length > 0 %}
+                <div style="display: flex; gap: 0.3em; flex-wrap: wrap; margin-top: 0.4em;">
+                    {% for ticker in event.tickers %}
+                    <a href="/stock/{{ ticker }}"
+                       style="font-size: 0.75em; text-decoration: none; font-weight: 600;
+                              background: var(--pp-tag-bg); color: var(--pp-tag-text); padding: 0.15em 0.5em;
+                              border-radius: 4px; font-family: monospace;">
+                        ${{ ticker }}
+                    </a>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+
+            {# Impact score + sentiment badge #}
+            <div style="flex-shrink: 0; text-align: center; min-width: 50px;">
+                <div style="font-size: 1.4em; font-weight: 700;
+                            color: {% if event.impact_score >= 9 %}#FFD700{% elif event.impact_score >= 7 %}var(--pp-text){% else %}var(--pp-text-faint){% endif %};">
+                    {{ event.impact_score }}
+                </div>
+                <div style="font-size: 0.6em; text-transform: uppercase;
+                            letter-spacing: 0.05em; color: var(--pp-text-faint);">
+                    Impact
+                </div>
+                <div style="margin-top: 0.3em;">
+                    {% if event.sentiment == 'bullish' %}
+                    <span style="background: #dcfce7; color: #166534; font-size: 0.7em;
+                                 padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;">
+                        Bullish
+                    </span>
+                    {% elif event.sentiment == 'bearish' %}
+                    <span style="background: #ffe4e6; color: #9f1239; font-size: 0.7em;
+                                 padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;">
+                        Bearish
+                    </span>
+                    {% else %}
+                    <span style="background: var(--pp-tag-bg); color: var(--pp-text-muted); font-size: 0.7em;
+                                 padding: 0.15em 0.5em; border-radius: 4px; font-weight: 500;">
+                        Neutral
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.75em;">
+        Data from YouTube Data API v3 - Updated every 6 hours. Sentiment is keyword-based (approximate).
+    </footer>
+</article>
+
+{# ── Channels overview ── #}
 {% if channels and channels|length > 0 %}
-<article style="margin-top: 2em;">
+<article style="margin-top: 1em;">
     <header>
         <strong>Tracked Channels</strong>
         <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
@@ -357,10 +251,10 @@
     <table class="pp-table">
         <thead>
             <tr>
-                <th data-sort="text">Channel</th>
-                <th class="text-right" data-sort="number">Subscribers</th>
-                <th class="text-right" data-sort="number">Avg Views</th>
-                <th data-sort="text">Latest Video</th>
+                <th>Channel</th>
+                <th style="text-align: right;">Subscribers</th>
+                <th style="text-align: right;">Avg Views</th>
+                <th style="text-align: right;">Posts/Week</th>
             </tr>
         </thead>
         <tbody>
@@ -369,9 +263,9 @@
                 <td>
                     <div style="display: flex; align-items: center; gap: 0.5em;">
                         {% if ch.thumbnail_url %}
-                        <img src="{{ ch.thumbnail_url }}" alt="" width="28" height="28"
-                             loading="lazy" decoding="async"
-                             style="border-radius: 50%; object-fit: cover; flex-shrink: 0;">
+                        <img src="{{ ch.thumbnail_url }}" alt=""
+                             style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0;"
+                             loading="lazy">
                         {% endif %}
                         <a href="https://youtube.com/{{ ch.handle }}" target="_blank" rel="noopener"
                            style="font-weight: 600; text-decoration: none;">
@@ -379,35 +273,23 @@
                         </a>
                     </div>
                 </td>
-                <td class="text-right">
+                <td style="text-align: right;">
                     {% if ch.subscriber_count %}
                         {{ "{:,}".format(ch.subscriber_count) }}
                     {% else %}
                         <span class="text-muted">-</span>
                     {% endif %}
                 </td>
-                <td class="text-right">
+                <td style="text-align: right;">
                     {% if ch.avg_views_30d %}
                         {{ "{:,}".format(ch.avg_views_30d) }}
                     {% else %}
                         <span class="text-muted">-</span>
                     {% endif %}
                 </td>
-                <td>
-                    {% if ch.latest_video_title %}
-                    <div style="max-width: 220px;">
-                        <a href="{{ ch.latest_video_url }}" target="_blank" rel="noopener"
-                           style="text-decoration: none; font-size: 0.85em; font-weight: 500;
-                                  display: -webkit-box; -webkit-line-clamp: 1;
-                                  -webkit-box-orient: vertical; overflow: hidden;">
-                            {{ ch.latest_video_title }}
-                        </a>
-                        {% if ch.latest_video_date %}
-                        <span class="text-muted" style="font-size: 0.75em;" data-published="{{ ch.latest_video_date }}">
-                            {{ ch.latest_video_date[:10] }}
-                        </span>
-                        {% endif %}
-                    </div>
+                <td style="text-align: right;">
+                    {% if ch.avg_posts_per_week %}
+                        {{ "%.1f"|format(ch.avg_posts_per_week|float) }}
                     {% else %}
                         <span class="text-muted">-</span>
                     {% endif %}
@@ -421,59 +303,191 @@
 </article>
 {% endif %}
 
-{# ── Suggest a Channel CTA ── #}
-<div style="text-align: center; margin: 2em 0 0.5em; padding: 1.5em 1em;
-            background: var(--pp-surface); border: 1px solid var(--pp-border);
-            border-radius: 12px;">
-    <p style="font-size: 0.95em; color: var(--pp-text); margin-bottom: 0.3em; font-weight: 600;">
-        Know a finance creator we should track?
+{% else %}
+{# ── Fallback: no upcoming events yet ── #}
+<article>
+    <header>
+        <strong>Finance YouTuber Calendar</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Live event calendar - Updated every 6 hours
+        </span>
+    </header>
+    <p class="text-muted" style="text-align: center; padding: 2em 0;">
+        No upcoming live streams found. The calendar syncs with YouTube every 6 hours.
     </p>
-    <p style="font-size: 0.85em; color: var(--pp-text-muted); margin-bottom: 1em;">
-        Suggest a YouTube channel and we'll add it to the calendar.
-    </p>
-    <a href="/support#feedback" style="display: inline-block; background: var(--pp-surface);
-       color: var(--pp-text); border: 2px solid var(--pp-text); padding: 0.5em 1.8em;
-       border-radius: 10px; font-size: 0.9em; font-weight: 600; text-decoration: none;
-       transition: background 0.15s, color 0.15s;"
-       onmouseover="this.style.background='var(--pp-support-btn-bg)'; this.style.color='var(--pp-support-btn-text)'"
-       onmouseout="this.style.background='var(--pp-surface)'; this.style.color='var(--pp-text)'">
-        Suggest a Channel
-    </a>
-</div>
 
-<footer class="text-muted text-small" style="text-align: center; padding-top: 1em;">
-    Data from YouTube Data API v3. Updated every 6 hours.
-</footer>
+    {# Show static channel list as fallback #}
+    {% if channels and channels|length > 0 %}
+    <div class="pp-table-wrap">
+    <table class="pp-table">
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th style="text-align: right;">Subscribers</th>
+                <th style="text-align: right;">Posts/Week</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ch in channels %}
+            <tr>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 0.5em;">
+                        {% if ch.thumbnail_url %}
+                        <img src="{{ ch.thumbnail_url }}" alt=""
+                             style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0;"
+                             loading="lazy">
+                        {% endif %}
+                        <a href="https://youtube.com/{{ ch.handle }}" target="_blank" rel="noopener"
+                           style="font-weight: 600; text-decoration: none;">
+                            {{ ch.channel_name }}
+                        </a>
+                    </div>
+                </td>
+                <td style="text-align: right;">
+                    {% if ch.subscriber_count %}
+                        {{ "{:,}".format(ch.subscriber_count) }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td style="text-align: right;">
+                    {% if ch.avg_posts_per_week %}
+                        {{ "%.1f"|format(ch.avg_posts_per_week|float) }}
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% endif %}
+</article>
+{% endif %}
 
-<script>
-(function() {
-    var activeChannel = 'all';
-
-    function applyFilters() {
-        var cards = document.querySelectorAll('.yt-video-card');
-        cards.forEach(function(card) {
-            var matchChannel = activeChannel === 'all' || card.dataset.channel === activeChannel;
-            card.style.display = matchChannel ? '' : 'none';
-        });
-
-        /* Dim non-active channel chips */
-        document.querySelectorAll('.yt-channel-chip').forEach(function(chip) {
-            chip.classList.remove('active', 'dimmed');
-            if (chip.dataset.channel === activeChannel) {
-                chip.classList.add('active');
-            } else if (activeChannel !== 'all') {
-                chip.classList.add('dimmed');
-            }
-        });
+{# ── Recently Posted + Filter styles + script ── #}
+<style>
+    .recent-uploads-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1em;
+        margin-top: 0.5em;
+    }
+    .recent-upload-extra { display: none; }
+    .recent-upload-card {
+        border: 1px solid var(--pp-border-light);
+        border-radius: 10px;
+        overflow: hidden;
+        transition: box-shadow 0.15s;
+        display: flex;
+        flex-direction: column;
+    }
+    .recent-upload-card:hover {
+        box-shadow: 0 2px 8px var(--pp-overlay-8);
+    }
+    .recent-upload-thumb-link {
+        display: block;
+        position: relative;
+        flex-shrink: 0;
+    }
+    .recent-upload-thumb {
+        width: 100%;
+        aspect-ratio: 16/9;
+        object-fit: cover;
+        display: block;
+    }
+    .recent-upload-sentiment-dot {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        border: 2px solid var(--pp-surface);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+    .recent-upload-body {
+        padding: 0.6em 0.75em 0.5em;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+    }
+    .recent-upload-title {
+        text-decoration: none;
+        font-weight: 500;
+        color: var(--pp-text);
+        font-size: 0.85em;
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+    .recent-upload-title:hover {
+        color: #3b82f6;
     }
 
-    window.filterByChannel = function(channelId) {
-        activeChannel = channelId;
-        applyFilters();
-    };
+    .calendar-filter-pill {
+        background: none;
+        border: 1px solid var(--pp-border);
+        border-radius: 6px;
+        padding: 0.25em 0.8em;
+        font-size: 0.8em;
+        font-weight: 500;
+        cursor: pointer;
+        color: var(--pp-text-muted);
+        transition: all 0.15s;
+    }
+    .calendar-filter-pill:hover {
+        background: var(--pp-surface-alt);
+        color: var(--pp-tag-text);
+    }
+    .calendar-filter-pill.active {
+        background: var(--pp-text);
+        color: var(--pp-surface);
+        border-color: var(--pp-text);
+    }
 
-    /* Convert timestamps to pretty relative/absolute time */
-    var _months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    @media (max-width: 768px) {
+        .recent-uploads-grid {
+            grid-template-columns: 1fr;
+        }
+        .calendar-event-card {
+            flex-direction: column !important;
+        }
+        .calendar-event-card img {
+            width: 100% !important;
+            height: auto !important;
+        }
+    }
+</style>
+
+<script>
+window.expandRecentUploads = function() {
+    document.querySelectorAll('.recent-upload-extra').forEach(function(card) {
+        card.style.display = '';
+    });
+    var btn = document.getElementById('recent-uploads-expand-btn');
+    if (btn) btn.parentNode.removeChild(btn);
+};
+
+window.filterCalendar = function(sentiment) {
+    document.querySelectorAll('.calendar-filter-pill').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.filter === sentiment);
+    });
+    document.querySelectorAll('.calendar-event-card').forEach(function(card) {
+        if (sentiment === 'all' || card.dataset.sentiment === sentiment) {
+            card.style.display = '';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+};
+
+{# Convert published timestamps to relative time #}
+(function() {
     document.querySelectorAll('[data-published]').forEach(function(el) {
         try {
             var pub = new Date(el.dataset.published);
@@ -483,29 +497,9 @@
             if (diff < 60) text = 'Just now';
             else if (diff < 3600) text = Math.floor(diff / 60) + 'm ago';
             else if (diff < 86400) text = Math.floor(diff / 3600) + 'h ago';
-            else if (diff < 604800) text = Math.floor(diff / 86400) + 'd ago';
-            else if (pub.getFullYear() === now.getFullYear()) text = _months[pub.getMonth()] + ' ' + pub.getDate();
-            else text = _months[pub.getMonth()] + ' ' + pub.getDate() + ', ' + pub.getFullYear();
+            else text = Math.floor(diff / 86400) + 'd ago';
             el.textContent = text;
         } catch(e) {}
-    });
-
-    if (window.initSortableTables) window.initSortableTables();
-
-    /* PostHog: track YouTube video clicks */
-    document.querySelectorAll('.yt-video-card').forEach(function(card) {
-        card.querySelectorAll('a[href*="youtube.com"], a[href*="youtu.be"]').forEach(function(link) {
-            link.addEventListener('click', function() {
-                if (window.posthog) {
-                    var channelEl = card.querySelector('.yt-channel-name');
-                    var titleEl = card.querySelector('.yt-video-title');
-                    posthog.capture('youtube_video_click', {
-                        channel_name: channelEl ? channelEl.textContent.trim() : null,
-                        video_title: titleEl ? titleEl.textContent.trim() : null
-                    });
-                }
-            });
-        });
     });
 })();
 </script>

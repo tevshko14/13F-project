@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-24 (security hardening, CI pipeline fix, Railway deploy fix, ruff formatting, Glassdoor Company Snapshot)
+> Last updated: 2026-02-24 (Dark mode, dynamic TradingView/Stripe theme sync, dark-mode logo, Supabase startup timeout, automatic retention cleanup)
 
 ---
 
@@ -43,12 +43,10 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | Market data   | `yfinance` + NASDAQ Trader (~8K listings) + Wikipedia (sectors) |
 | Analyst data  | `yfinance` (free) + `finnhub-python` (free tier, optional key) |
 | Sentiment     | CNN Fear & Greed, Finnhub, ApeWisdom, Alpha Vantage |
-| Vitals        | Glassdoor (RapidAPI) + Apple iTunes Search (PDL optional) |
+| Vitals        | People Data Labs, Glassdoor (RapidAPI), Apple iTunes Search |
 | Caching       | 3-tier: in-memory (L1) → Supabase Postgres (L2) → disk JSON (L3) |
-| Monitoring    | Sentry (error tracking, 10% sampling) + PostHog (product analytics) |
-| CI/CD         | GitHub Actions (ruff lint/format + pytest + import smoke test) |
 | Hosting       | Railway (auto-deploy from main) at [paperpanda.io](https://paperpanda.io) |
-| Entry points  | `filings` (CLI), `filings-web`, `filings-sync`, `filings-insider-sync`, `filings-youtube-sync`, `filings-migrate-cold` |
+| Entry points  | `filings` (CLI), `filings-web` (web, port 8000) |
 
 ### How to Run
 
@@ -110,26 +108,22 @@ uv run filings-web          # starts at http://localhost:8000
 ┌────────────────────────────────────────────────────────────┐
 │                      cache.py                              │
 │  3-Tier Cache: L1 in-memory → L2 Supabase → L3 disk       │
-│  Stale-While-Revalidate + Delta Detection                  │
+│  Stale-While-Revalidate pattern                            │
 │                                                            │
-│  • load_cache_from_supabase()  (L2: delta-aware hydration) │
-│  • _load_cache_from_supabase_full() (full fallback load)   │
+│  • load_cache_from_supabase()  (L2: Supabase hydration)    │
 │  • load_cache() → dict         (L3: read from disk)        │
 │  • save_cache(data)            (L3: atomic write)          │
 │  • is_cache_stale() → bool     (overall file staleness)    │
 │  • is_fund_stale(fund_data)    (per-fund _last_refreshed)  │
 │  • get_stale_ciks(cache, ciks) (selective refresh list)    │
 │  • stamp_fund_data(data)       (add _last_refreshed ts)    │
-│  • refresh_single_fund(cik)    (fetch + archive + trim)    │
-│  • _archive_old_quarters()     (cold storage archival)     │
-│  • load_historical_quarters()  (cold storage retrieval)    │
+│  • refresh_single_fund(cik)    (fetch + write-through L2)  │
 │  • _get_effective_ttl_seconds()(TTL in seconds for L2)     │
 │  • get_cache_age_str() → str   ("5 min ago")               │
 │                                                            │
 │  TTL: 7 days (off-season) / 12 hours (filing season)       │
 │  Cache keys = CIK without leading zeros ("1067983")        │
 │  Supabase keys = "13f:{CIK}" with category "13f"           │
-│  Content-hash: SHA-256 change detection (skip unchanged)   │
 └────────────────────┬───────────────────────────────────────┘
                      │
           ┌──────────┴──────────┐
@@ -162,8 +156,7 @@ uv run filings-web          # starts at http://localhost:8000
 ```
 1. User visits http://localhost:8000/
 2. web.py lifespan (startup):
-   a. load_cache_from_supabase() → delta detection via content hashes (~2 KB),
-      only fetches funds that changed since last deploy (zero egress if unchanged)
+   a. load_cache_from_supabase() → ~100 funds from Supabase (single query)
    b. If Supabase empty/down → load_cache() from disk (fallback)
    c. Starts _prefetch_market_data(app) background task (S&P 500 data, ~30-60s)
    d. If any funds stale → triggers _background_refresh() (per-fund TTL)
@@ -221,7 +214,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
-    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache + insider_trades + youtube_events/channels + sync_logs)
+    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache + insider_trades tables)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification engine: detection, matching, persistence, filing season
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
@@ -231,18 +224,17 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── company_filings.py            # SEC filing links for stock pages
     ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale)
     ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
-    ├── youtube.py                    # YouTube calendar data layer (L1→L2→L3 tiered cache, channel fallbacks)
-    ├── youtube_sync.py               # Cron worker: YouTube Data API v3 → upsert to Supabase (every 6h)
-    ├── cold_storage.py               # Cold storage: Supabase Storage bucket for archived 13F quarters (circuit-breaker)
-    ├── sync_worker.py                # Cron worker: SEC EDGAR 13F sync (every 12h, hot/cold archival, OOM-safe)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
     ├── cli.py                        # CLI entry point (search/holdings/compare)
     ├── web.py                        # FastAPI app (40+ routes + background refresh + Stripe/support + SSE + polling)
+    ├── static/
+    │   ├── logo-nav.png              # Light-mode navbar logo
+    │   └── logo-nav-dark.png         # Dark-mode navbar logo (transparent bg; switched via CSS [data-theme="dark"])
     └── templates/
-        ├── base.html                 # Master layout: nav (Home|Retail|Funds|Insiders|Support), PicoCSS, HTMX, ECharts, Fuse.js, sidebar, sortable tables
-        ├── home.html                 # Homepage: heatmap + most-added + cards + Panda Fund support widget (Stripe Pricing Table)
+        ├── base.html                 # Master layout: nav (Home|Retail|Funds|Insiders|Support), PicoCSS, HTMX, ECharts, Fuse.js, sidebar, sortable tables, dark mode toggle + CSS custom properties
+        ├── home.html                 # Homepage: heatmap + most-added + cards + Panda Fund support widget (Stripe Pricing Table); TradingView widget rebuilt on theme change
         ├── retail.html               # Retail page: Sentiment, Leaderboard, Calendar sub-tabs
         ├── grand_portfolio.html      # Top Funds page: Funds, Holdings, Activity sub-tabs (URL: /funds)
         ├── insider_trading.html      # Insider trading screener: global buys/sells with chart
@@ -271,7 +263,6 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── insider_trades.html     # Insider trading table — global screener (lazy-loaded)
             ├── stock_insider_trades.html # Insider trading table — per-ticker (lazy-loaded)
             ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded into retail page)
-            ├── retail_calendar.html    # YouTube calendar: upcoming streams + recent uploads with channel filters
             ├── compare_content.html    # Compare quarters partial (lazy-loaded into investor page)
             └── data_error.html         # Reusable error partial (rate limit CTA, generic fallback, HTMX-aware)
 ```
@@ -709,15 +700,13 @@ TTL Configuration:
   Filing season (±15 days of deadline): 12 hours
   Filing deadlines: Feb 14, May 15, Aug 14, Nov 14
 
-Startup (hydration priority — delta-aware):
-  1. load_cache_from_supabase() with content-hash change detection:
-     a. Fetch all {cache_key, content_hash} pairs (~2 KB for 84 funds)
-     b. Compare against local fund_hashes.json from last startup
-     c. Only download funds whose hash changed (typically 0 outside filing season)
-     d. Unchanged funds loaded from local disk cache (zero Supabase egress)
-  2. If no hashes exist (first deploy) → _load_cache_from_supabase_full()
-  3. If Supabase empty/down → load_cache() from disk (fallback)
-  4. Check per-fund staleness → trigger background refresh for stale funds
+Startup (hydration priority):
+  1. load_cache_from_supabase() → all ~100 funds from Supabase (single query)
+     wrapped in asyncio.wait_for(..., timeout=30) — if Supabase is slow or
+     unavailable, the timeout fires and the app falls back to disk rather than
+     hanging until Railway's gunicorn worker kills it.
+  2. If Supabase empty/down/timeout → load_cache() from disk (fallback)
+  3. Check per-fund staleness → trigger background refresh for stale funds
 
 Background refresh (selective, write-through):
   1. get_stale_ciks(cache, all_ciks) → only CIKs whose _last_refreshed is expired
@@ -773,6 +762,22 @@ Sync worker (insider_sync.py, Railway cron every 30 min):
   3. Upsert to Supabase (ON CONFLICT sec_url DO UPDATE)
   4. Never deletes old data — only adds/updates
 ```
+
+#### Automatic Retention Cleanup (`supabase_cache.run_retention_cleanup`)
+
+Runs as a fire-and-forget background task on every app startup (`asyncio.to_thread`),
+keeping the Supabase free-tier row limit from being exceeded.
+
+```
+Table           Retention    Cutoff column
+insider_trades  6 months     filing_date
+youtube_events  30 days      updated_at
+sync_logs       30 days      started_at
+api_cache       expired      expires_at  (only rows where expires_at < now())
+```
+
+Returns a `{table: rows_deleted}` dict logged at INFO level. Safe to call when
+Supabase is unavailable — each table's delete is independently try/except'd.
 
 ### 5.8 Market Data Module (`market_data.py`)
 
@@ -873,74 +878,8 @@ Dedicated insider trading system with its own Supabase table and sync worker.
 **Sync worker (`insider_sync.py`):**
 - Entry point: `uv run filings-insider-sync`
 - Scrapes 3 OpenInsider pages (all, purchases, sales) with 3-second delays
-- Deduplicates by `sec_url`, skips existing rows (fetches `sec_url` keys first), upserts only new trades
+- Deduplicates by `sec_url`, upserts to Supabase in chunks of 50
 - Logs to `sync_logs` table for observability
-
-### 5.15 YouTube Sync Worker (`youtube_sync.py`)
-
-Polls 11 tracked finance YouTube channels every 6 hours for upcoming livestreams and recent uploads.
-
-**Entry point:** `uv run filings-youtube-sync`
-
-**YouTube Data API v3 usage:**
-- `activities.list` (1 unit/request) — detect recent uploads
-- `search.list` (100 units/request) — find upcoming livestreams
-- `videos.list` with `contentDetails,liveStreamingDetails,statistics,snippet` — fetch duration, view count, live status
-
-**Quota:** ~4,488 units/day across 4 runs (~45% of 10,000 daily limit)
-
-**Features:**
-- ISO 8601 duration parsing (`PT1H2M30S` → `1:02:30`)
-- Content type detection (video/live/upcoming/was_live)
-- Skip-existing optimization: fetches existing `video_id` keys before upserting
-- Still re-upserts `upcoming` events since their status may change
-
-**Tracked channels:** 11 finance YouTubers including Meet Kevin, Graham Stephan, Steven Fiorillo, Couch Investor, etc.
-
-### 5.16 13F Sync Worker (`sync_worker.py`)
-
-Refreshes all 84 superinvestor fund data from SEC EDGAR.
-
-**Entry point:** `uv run filings-sync`
-
-**Hot/cold archival:**
-- Fetches fresh data from SEC EDGAR for each stale fund
-- Archives quarters 3+ to cold storage (`paperpanda-archive` Supabase Storage bucket)
-- Trims to 2 quarters in hot Postgres cache (prevents OOM)
-- If cold storage unavailable, still trims (full history available from SEC EDGAR)
-
-**Content-hash change detection:**
-- Computes SHA-256 hash of fund data before writing
-- If hash matches stored `content_hash`, skips full JSONB upsert (only bumps TTL)
-- ~95% of syncs are no-ops outside filing season
-
-**OOM prevention:**
-- Lightweight CIK lookup (`get_cache_keys_by_category` fetches only keys, not 30MB of JSONB)
-- `gc.collect()` after each fund
-- Memory logging via `resource.getrusage` every 10 funds
-
-### 5.17 Cold Storage (`cold_storage.py`)
-
-Archives older 13F quarterly data to Supabase Storage (S3-compatible).
-
-**Bucket:** `paperpanda-archive` (private, created via `ensure_bucket()`)
-
-**Circuit-breaker pattern:**
-- `_bucket_status` module-level flag tracks bucket availability
-- `is_available()` performs one-time lazy check on first call
-- If bucket missing and creation fails, all subsequent calls short-circuit instantly
-- Prevents 84× failing HTTP calls during sync when bucket is unavailable
-
-### 5.18 Egress Optimization
-
-Supabase free tier has 5 GB/month egress. Optimizations across all layers:
-
-| Layer | Before | After |
-|---|---|---|
-| **Startup hydration** | Pull all 84 fund blobs (~30-40 MB) | Delta: compare content hashes (~2 KB), only fetch changed funds |
-| **13F sync writes** | Upsert all 84 funds every run | Content-hash: skip unchanged funds, TTL-only bump |
-| **Insider sync** | Upsert ~300 trades every 30 min | Skip-existing: fetch `sec_url` keys first, only send new trades |
-| **YouTube sync** | Upsert all events every 6h | Skip-existing: fetch `video_id` keys first, only send new events |
 
 ### 5.12 Panda Fund & Stripe Integration (`web.py` + `support.html`)
 
@@ -999,14 +938,7 @@ JS function (same pattern as grand_portfolio's `.gp-subtab`). URL synced via `hi
 |---|---|---|
 | Sentiment | CNN Fear & Greed + ApeWisdom top stocks | Server-rendered: gauge + summary cards |
 | Leaderboard | ApeWisdom all-stocks (pages 1-5) | Lazy-loaded via `fetch('/api/retail/leaderboard')` |
-| Calendar | YouTube Data API v3 → Supabase `youtube_events` + `youtube_channels` | Lazy-loaded via `fetch('/api/retail/calendar')` |
-
-**Calendar tab details:**
-- 11 tracked finance YouTube channels (synced every 6h by `youtube_sync.py`)
-- Upcoming livestreams section + recent uploads grid
-- Channel avatar filter strip (click to filter by channel)
-- LIVE/VIDEO type tags on video cards with duration badges
-- Powered by `youtube.py` data layer with L1 memory → L2 Supabase → L3 static fallback
+| Calendar | `_FINANCE_YOUTUBERS` static list in `web.py` | Server-rendered: YouTuber schedule table |
 
 **Summary cards (Sentiment tab):**
 - Most Mentioned: ticker with highest mention count
@@ -1048,64 +980,47 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/retail` | `retail_page` | CNN, ApeWisdom, YouTubers (static) | `retail.html` |
 | GET | `/funds` | `funds_page` | Cache only | `grand_portfolio.html` |
 | GET | `/insider-trading` | `insider_trading_page` | — (JS lazy-loads) | `insider_trading.html` |
-| GET | `/grand-portfolio` | `grand_portfolio_redirect` | 301 redirect → `/funds` (view param allowlisted) | — |
+| GET | `/grand-portfolio` | `grand_portfolio_redirect` | 301 redirect → `/funds` | — |
 | GET | `/superinvestors` | `superinvestors_page` | 301 redirect → `/funds?view=funds` | — |
-| GET | `/activity` | `activity_feed` | 302 redirect → `/funds?view=activity` | — |
-| GET | `/api/fund-row/{cik}` | `fund_row` | Cache first → SEC on miss (CIK validated) | `partials/fund_row.html` |
-| GET | `/holdings/{cik}` | `holdings` | Cache first → SEC on miss (top_n: 1–200) | `investor.html` |
-| GET | `/compare/{cik}` | `compare` | Redirect (CIK validated) | → `/holdings/{cik}` (302) |
-| GET | `/api/compare/{cik}` | `compare_api` | Cache first → SEC on miss (top_n: 1–200) | `partials/compare_content.html` |
-| GET | `/api/portfolio-chart/{cik}` | `portfolio_chart_data` | Cache (CIK validated) | JSON response |
-| GET | `/stock/{ticker}` | `stock_detail` | Cache only (ticker validated) | `stock.html` |
-| GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only (CUSIP validated) | `stock.html` |
-| GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (30-min web cache) | `partials/analyst_ratings.html` |
+| GET | `/api/fund-row/{cik}` | `fund_row` | Cache first → SEC on miss (L2 Supabase fallback) | `partials/fund_row.html` |
+| GET | `/search` | `search_page` | SEC API (live) | `search.html` |
+| GET | `/holdings/{cik}` | `holdings` | Cache first → SEC on miss | `investor.html` |
+| GET | `/compare/{cik}` | `compare` | Redirect | → `/holdings/{cik}` (302) |
+| GET | `/api/compare/{cik}` | `compare_api` | Cache first → SEC on miss | `partials/compare_content.html` |
+| GET | `/activity` | `activity_feed` | Cache only | `activity.html` |
+| GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
+| GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only | `stock.html` |
+| GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (live, 5-min cache) | `partials/analyst_ratings.html` |
 | GET | `/api/sentiment/{ticker}` | `sentiment_data` | CNN, Finnhub, ApeWisdom, Alpha Vantage | `partials/sentiment.html` |
-| GET | `/api/vitals/{ticker}` | `vitals_data` | Glassdoor, Apple iTunes | `partials/vitals.html` |
+| GET | `/api/vitals/{ticker}` | `vitals_data` | Glassdoor, PDL, Apple iTunes | `partials/vitals.html` |
 | GET | `/api/company-filings/{ticker}` | `company_filings_tab` | SEC EDGAR | `partials/company_filings.html` |
 | GET | `/api/insider-trades` | `insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/insider_trades.html` |
 | GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/stock_insider_trades.html` |
 | GET | `/api/retail/leaderboard` | `retail_leaderboard_api` | ApeWisdom + CNN Fear & Greed | `partials/retail_leaderboard.html` |
-| GET | `/api/retail/leaderboard-data` | `retail_leaderboard_data` | ApeWisdom + CNN Fear & Greed | JSON response |
-| GET | `/api/retail/calendar` | `retail_calendar_api` | YouTube sync (Supabase) | `partials/retail_calendar.html` |
-| GET | `/api/retail/calendar-data` | `retail_calendar_data` | YouTube sync (Supabase) | JSON response |
 | GET | `/api/ticker-search-index` | `ticker_search_index` | NASDAQ Trader + S&P 500 + cache | JSON response |
-| GET | `/api/activity-feed` | `api_activity_feed` | Cache (cursor-based pagination) | `partials/activity_feed_content.html` |
 | GET | `/api/heatmap` | `heatmap` | yfinance (30-min cache) + Wikipedia | `partials/heatmap.html` |
 | GET | `/api/most-added` | `most_added` | Cache + analysts + yfinance | `partials/most_added.html` |
+| POST | `/api/watchlist/{ticker}` | `watchlist_add` | Watchlist JSON | `partials/watchlist_response.html` |
+| DELETE | `/api/watchlist/{ticker}` | `watchlist_remove` | Watchlist JSON + Cache | `partials/watchlist_response.html` or `partials/watchlist_sidebar.html` |
+| GET | `/api/watchlist-sidebar` | `watchlist_sidebar_refresh` | Watchlist JSON | `partials/watchlist_sidebar.html` |
+| GET | `/api/notifications/stream` | `notification_stream` | SSE (real-time) | StreamingResponse (text/event-stream) |
+| GET | `/api/notifications/bell` | `notification_bell` | Notifications JSON | `partials/notification_bell.html` |
+| GET | `/notifications` | `notifications_page` | Notifications JSON | `notifications.html` |
+| POST | `/api/notifications/read/{id}` | `mark_read` | Notifications JSON | Empty HTML |
+| POST | `/api/notifications/read-all` | `mark_all_read` | Notifications JSON | `partials/notification_bell.html` |
 | GET | `/support` | `support_page` | Env vars (PANDA_FUND_RAISED, Stripe IDs) | `support.html` |
-| GET | `/login` | `login_page` | — | `login.html` (open redirect protected) |
-| GET | `/signup` | `signup_page` | — | `signup.html` (XSS-safe email display) |
-| GET | `/reset-password` | `reset_password_page` | — | `reset_password.html` (XSS-safe email display) |
-| GET | `/logout` | `logout` | Clears auth cookies | Redirect → `/` |
-| POST | `/api/auth/set-session` | `set_session` | CSRF-checked, sets HttpOnly cookies | JSON `{"ok": true}` |
-| POST | `/api/auth/clear-session` | `clear_session` | CSRF-checked, clears auth cookies | JSON `{"ok": true}` |
-| GET | `/health` | `health_check` | — | JSON `{"status": "ok"}` (public) |
-| GET | `/health/detail` | `health_detail` | App state + cache | JSON (behind `X-Health-Secret` header) |
-| GET | `/robots.txt` | `robots_txt` | — | PlainTextResponse |
-| GET | `/sitemap.xml` | `sitemap_xml` | Superinvestors list | XML response |
+| POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**
 - All endpoints are cache-first. SEC EDGAR is only called on cache miss or during background refresh.
-- Fund data endpoints (`/api/fund-row`, `/holdings`, `/api/compare`) have L2 Supabase fallback with L1 promotion when L1 misses.
+- Fund data endpoints (`/api/fund-row`, `/api/holdings`, `/api/compare`) have L2 Supabase fallback with L1 promotion when L1 misses.
 - Fund data endpoints trigger self-healing background refresh when stale data is detected (request-triggered via `_trigger_single_refresh`).
 - Insider trade endpoints use 4-tier fallback: L1 fresh → L2 Supabase → L3 scrape → L4 stale L1 (never empty).
-- Backward-compat redirects: `/grand-portfolio` → `/funds` (301), `/superinvestors` → `/funds?view=funds` (301), `/activity` → `/funds?view=activity` (302).
+- Backward-compat redirects: `/grand-portfolio` → `/funds` (301), `/superinvestors` → `/funds?view=funds` (301).
+- Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
 - Exception handlers detect HTMX requests (`HX-Request` header) and API paths to return inline `data_error.html` partial instead of full error pages.
-- `/support` and homepage widget use Stripe OOTB web components (Buy Button + Pricing Table) — zero backend Stripe SDK needed.
-- `/health` returns minimal `{"status": "ok"}`; detailed diagnostics at `/health/detail` behind `X-Health-Secret` header.
-
-**Security (added in PRs 119–123):**
-- **CSP header** on all responses (allowlisted CDN sources + `'unsafe-inline'` for Pico CSS).
-- **HSTS** sent unconditionally (Railway terminates TLS upstream).
-- **CSRF origin checking** on all POST endpoints (`_check_csrf_origin()`).
-- **Input validation** via compiled regex: CIK (`^[0-9]{1,20}$`), ticker (`^[A-Za-z.]{1,12}$`), CUSIP (`^[A-Za-z0-9]{6,9}$`).
-- **View param allowlisted** against `("funds", "holdings", "activity")`.
-- **`top_n` bounded** to `ge=1, le=200` on holdings and compare endpoints.
-- **Open redirect prevention** on login page (`?next=` must start with `/`, not `//`).
-- **innerHTML XSS prevention** in signup/reset_password (HTML-escape email before insertion).
-- **HttpOnly + Secure + SameSite=Lax cookies** via server-side `/api/auth/set-session`.
-- **Rate limiting** on page routes (20–30/min), API endpoints (10–30/min), auth (10/min), health/detail (5/min).
-- **Insider trade type allowlist** in `supabase_cache.py`: `_VALID_INSIDER_TRADE_TYPES = frozenset({"Purchase", "Sale"})`.
+- `/support` and homepage widget use Stripe OOTB web components (Buy Button + Pricing Table) -- zero backend Stripe SDK needed.
+- `/health` endpoint includes `stale_funds`, `refresh_status`, `refresh_progress`, and `vitals_cache` diagnostics.
 
 ---
 
@@ -1113,8 +1028,54 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 
 ### Styling System (in base.html `<style>`)
 
-| CSS Class | Purpose |
+#### Dark Mode — CSS Custom Properties
+
+The entire color system is defined as CSS custom properties (design tokens) on `:root`,
+with separate values for light and dark themes. Components reference tokens via `var(--pp-*)`;
+never use raw hex values.
+
+| Token | Light | Dark | Purpose |
+|---|---|---|---|
+| `--pp-surface` | `#fff` | `#1a1a1e` | Card / page background |
+| `--pp-surface-alt` | `#fafafa` | `#222226` | Table header, alternating rows |
+| `--pp-surface-hover` | `#f4f4f5` | `#2a2a2e` | Row hover |
+| `--pp-border` | `#e4e4e7` | `#333338` | Primary borders |
+| `--pp-border-light` | `#f4f4f5` | `#2a2a2e` | Subtle borders / dividers |
+| `--pp-text` | `#18181b` | `#e4e4e7` | Primary text |
+| `--pp-text-secondary` | `#27272a` | `#d4d4d8` | Body / table cell text |
+| `--pp-text-muted` | `#71717a` | `#a1a1aa` | Secondary / placeholder text |
+| `--pp-text-faint` | `#a1a1aa` | `#71717a` | Tertiary / disabled text |
+| `--pp-nav-bg` | `rgba(255,255,255,0.85)` | `rgba(24,24,27,0.85)` | Sticky nav backdrop |
+| `--pp-support-btn-bg` | `#18181b` | `#1976d2` | "Support the Panda" button |
+| `--pp-tag-bg/text/hover` | zinc-100 tones | zinc-800 tones | Tag pills |
+| `--pp-toast-bg/text` | dark | gray | Notification toast cards |
+| `--pp-card-shadow` | light box-shadow | heavier box-shadow | Card depth |
+| `--pp-overlay-{5,8,10,35,40,50,65}` | `rgba(0,0,0,N)` | `rgba(255,255,255,N)` | Semi-transparent overlays |
+
+**Theme toggle (`.theme-toggle`):**
+- A 52px wide pill button in the navbar with a sliding `.theme-toggle-thumb` (sun/moon icon)
+- Clicking it flips `data-theme` on `<html>` and persists the choice to `localStorage('pp-theme')`
+- On first visit, defaults to the OS `prefers-color-scheme` setting
+- Anti-FOUC: an inline `<script>` at the top of `<head>` reads localStorage/media-query and sets `data-theme` before any CSS renders
+
+**Logo swap:** Two `<img>` tags are rendered side-by-side in the nav:
+- `.logo-light` (`logo-nav.png`) — visible in light mode via `display:none` on `[data-theme="dark"]`
+- `.logo-dark` (`logo-nav-dark.png`) — visible in dark mode
+
+**TradingView widgets:** When the theme changes, all TradingView `<iframe>` embed containers
+are cleared and the widget script is re-injected with the new `theme` param, so charts
+always match the active theme.
+
+**Stripe Pricing Table:** Stripe's web component doesn't natively support a `theme` prop,
+so in dark mode a CSS `filter: invert(0.85) hue-rotate(180deg)` is applied to the
+`<stripe-pricing-table>` element (toggled via a `dark-stripe` class on the container).
+
+| CSS Class / Selector | Purpose |
 |---|---|
+| `.theme-toggle` | 52px pill button for light/dark switch |
+| `.theme-toggle-thumb` | Sliding circle with icon; `transform: translateX(24px)` in dark |
+| `.logo-light` / `.logo-dark` | Show/hide logos based on `[data-theme]` |
+| `.dark-stripe` on Stripe container | Applies CSS filter inversion to Stripe embeds in dark mode |
 | `.badge` | Inline-block pill label for activity |
 | `.badge-new` | Green background: NEW BUY |
 | `.badge-add` | Green background: ADD |
@@ -1472,14 +1433,6 @@ the cache — every CLI command makes live SEC API calls.
   The background refresh uses a 1-second delay between funds. Aggressive
   concurrent fetching will get your IP temporarily blocked.
 
-- **`import re` placement:** `import re as _re` must stay at the top of `web.py`
-  (not inline with the security helpers section) to satisfy ruff E402. The
-  security helpers section uses `_re` to compile regex patterns at module level.
-
-- **Gunicorn workers:** Railway's memory limit requires 1 worker (default).
-  Two workers load edgartools/pandas twice (~500 MB each) and get OOM-killed.
-  Scale via `WEB_WORKERS` env var only if Railway plan has sufficient memory.
-
 ---
 
 ## 10. Pending Tasks & Future Work
@@ -1504,9 +1457,7 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Vitals tab: Glassdoor ratings, People Data Labs employee data, Apple App Store ratings
 - [x] Insider trading global screener page (dedicated `/insider-trading` route)
 - [x] Insider sync cron worker: scrape OpenInsider → upsert to Supabase every 30 min
-- [x] YouTube sync cron worker: YouTube Data API v3 → Supabase every 6h (11 channels, upcoming streams + uploads)
-- [x] YouTube Calendar tab: channel filter strip, LIVE/VIDEO tags, duration badges, lazy-loaded
-- [x] Retail page (`/retail`): Sentiment, Leaderboard (ApeWisdom), Calendar (YouTube sync)
+- [x] Retail page (`/retail`): Sentiment, Leaderboard (ApeWisdom), Calendar (YouTuber schedules)
 - [x] Nav restructure: Home | Retail | Funds | Insiders (renamed `/grand-portfolio` → `/funds`)
 - [x] Stale-while-revalidate for 13F fund data (never drop data on TTL expiry)
 - [x] Stale-while-revalidate for insider trades (4-tier fallback, never show errors)
@@ -1517,20 +1468,12 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Homepage support widget: Panda Fund progress bar + Stripe Pricing Table embed
 - [x] HTMX-aware error handling: inline data_error.html partial for 429/rate-limit errors with Panda Fund CTA
 - [x] Nav update: replaced auth buttons with "Support the Panda" CTA
-- [x] PostHog analytics: stock_search, fund_viewed, youtube_video_click, retail_tab_switch, dark_mode_toggle
-- [x] 13F sync worker: SEC EDGAR → Supabase every 12h with hot/cold archival, OOM prevention, content-hash change detection
-- [x] Cold storage: Supabase Storage bucket for archived 13F quarterly data with circuit-breaker pattern
-- [x] Egress optimization: content-hash delta detection on startup, skip-existing on all sync workers
-- [x] Security hardening: CSP, HSTS, CSRF origin check, input validation (regex), HttpOnly cookies
-- [x] Open redirect prevention on login page (`?next=` validated)
-- [x] innerHTML XSS prevention: HTML-escape email in signup/reset_password templates
-- [x] Health endpoint info disclosure: `/health` returns only `{"status":"ok"}`, details behind secret header
-- [x] Glassdoor Company Snapshot card (replaces PDL for employee headcount + culture ratings)
-- [x] CI pipeline: GitHub Actions with ruff lint + format + pytest + import smoke test
-- [x] Railway deploy optimization: 1 worker + `--preload` + 120s health check timeout
-- [x] Code formatting: all Python files auto-formatted with `ruff format`
-- [x] Dark mode accessibility: PicoCSS specificity overrides for charts, badges, tables
-- [x] Performance: ownership map caching, consensus cache (30-min TTL), `_fund_cache()` helper
+- [x] Dark mode toggle (sun/moon pill in navbar, CSS custom properties refactor, `localStorage` persistence, system-preference default, anti-FOUC inline script)
+- [x] Dark mode logo: `logo-nav-dark.png` (transparent bg) swapped in via CSS `[data-theme="dark"]`
+- [x] TradingView widgets dynamically rebuilt when theme changes (re-inject script with new `theme` param)
+- [x] Stripe Pricing Table dark mode via CSS `filter: invert` on container
+- [x] Supabase startup cache load wrapped in 30-second timeout (falls back to disk on timeout)
+- [x] Automatic retention cleanup on startup: insider_trades (6 mo), youtube_events (30 d), sync_logs (30 d), api_cache expired entries
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
@@ -1542,11 +1485,10 @@ the cache — every CLI command makes live SEC API calls.
 - [ ] CLI should optionally read from cache instead of always hitting SEC API
 - [x] `get_enriched_holdings()` bypassed with `get_enriched_holdings_from_cache()` —
       now reads from cached data instead of calling SEC API + compare_quarters()
-- [x] Add proper logging → structured JSON logging in production (Railway), verbose library silencing
+- [ ] Add proper logging (currently all errors are silently caught with `pass`)
 - [ ] Add error handling for malformed SEC data (corrupt DataFrames, missing columns)
-- [x] Unit tests → 12 tests passing in CI (homepage, health, security headers, redirects, input validation)
+- [ ] Unit tests (none exist currently)
 - [ ] Type checking with mypy (type hints are used but not enforced)
-- [ ] Lazy-import `edgartools` in `client.py` to reduce startup memory (currently ~500MB at import time)
 
 ---
 
@@ -1566,17 +1508,6 @@ they don't get re-introduced.
 | Server unresponsive after 84 superinvestor expansion | `save_cache()` called synchronously after every fund during background refresh (84× disk writes blocking event loop); `notifications.json` and `watchlist.json` read from disk on every HTTP request; 84 HTMX lazy-loads fired simultaneously | Batched cache writes (every 10 funds, via `asyncio.to_thread`); in-memory caching for notification/watchlist state; staggered HTMX lazy-loads (3 per second); fire-and-forget disk saves in fund_row endpoint |
 | 13F fund data disappearing after TTL expiry | `load_cache_from_supabase()` called `get_cached()` which returns `None` when TTL expires, causing all fund data to vanish until the sync worker refreshes | Switched to `get_cached_with_stale()` which returns expired data as stale fallback; added L2 Supabase fallback to all fund web endpoints with L1 promotion |
 | Insider trades "failed to load" on deploy | When L1 TTL expires and Supabase query fails (transient), `get_latest_insider_trades()` fell through to OpenInsider scrape which also failed, returning empty list | Added `_get_cached_with_stale()` to insider_trading.py; both global and per-ticker functions now use 4-tier fallback (L1 fresh → L2 Supabase → L3 scrape → L4 stale L1), never returning empty results if data was previously loaded |
-| YouTube channel filter clicks do nothing | `<script>` tags injected via `innerHTML` don't execute per browser spec | Re-create script elements with `document.createElement('script')` in retail.html's `loadCalendar()` and `loadLeaderboard()` |
-| Stale upcoming livestreams from 2017/2021 | `get_youtube_events()` had no date filter — returned any row with `event_type='upcoming'` regardless of age | Added `.gte("scheduled_at", cutoff)` where cutoff is 6 hours ago |
-| 13F sync crash: "Bucket not found" | `paperpanda-archive` Supabase Storage bucket never created; 84 funds each tried to upload and failed, accumulating untrimmed data until OOM | Circuit-breaker in cold_storage.py: one-time check, then short-circuit all calls. Always trim to 2 quarters even on archive failure. |
-| 13F sync OOM on Railway | `get_all_by_category("13f")` loaded all 84 fund JSONB blobs (~30MB) just to check CIK existence | Replaced with `get_cache_keys_by_category()` (fetches only key strings). Added `gc.collect()` + memory logging. |
-| Supabase egress limit exceeded (8 GB / 5 GB) | Every deploy pulled all 84 fund blobs; sync workers re-uploaded identical data every run | Content-hash change detection for 13F; skip-existing for insider/YouTube; delta startup hydration |
-| GitHub Actions CI never passed (100+ runs) | YAML colon in unquoted string on ci.yml line 39 (`print('OK: app imported')`) confused parser | Use block scalar (`\|`) syntax for the run step; simplified print message |
-| Railway OOM crash on deploy (PRs 119-120) | Gunicorn spawned 2 workers, each loading edgartools/pandas (~500 MB), exceeding Railway memory limit → SIGKILL → health check never responds | Reduced default to 1 worker + `--preload` flag; increased health check timeout to 120s |
-| innerHTML XSS in signup/reset_password | User email from URL params injected directly into innerHTML without escaping | HTML-escape email (`&`, `<`, `>`, `"`) before innerHTML insertion |
-| Open redirect on login page | `?next=` parameter accepted arbitrary URLs (e.g., `?next=https://evil.com`) | Validate redirect: must start with `/` and not `//` |
-| PostHog API key leaked in HTML source | Key hardcoded directly in `base.html` template, visible in page source | Externalized to `POSTHOG_KEY` env var; template uses `{{ posthog_key }}` with `{% if posthog_key %}` guard |
-| ruff lint failures (E402, F401, F841) | `import re` placed mid-file in security helpers section; unused imports accumulated | Moved import to top-of-file; removed unused imports in 4 files; removed unused variable in insider_trading.py |
 
 ---
 
@@ -1584,8 +1515,10 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-23 (YouTube calendar sync,
-> cold storage, PostHog analytics, egress optimization, circuit-breaker patterns).
+> This file documents the system as of 2026-02-24 (dark mode, TradingView/Stripe
+> theme sync, dark-mode logo, Supabase startup timeout, automatic retention cleanup,
+> background refresh, vitals persistence, Panda Fund support page, Stripe embed,
+> homepage widget).
 > If told "Context is drifting," the first action should be to re-read
 > `/Users/Tevis_1/13F-project/README_DEV.md` and reconcile any discrepancies
 > with the actual code.

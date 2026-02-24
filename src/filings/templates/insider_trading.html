@@ -98,6 +98,7 @@
     var insiderChart = null;
     var chartView = 'simple';
     var lastViewType = null;   /* track simple/detailed for smooth updates */
+    var retried = {};           /* per-filter retry flag */
 
     /* ── Number formatting ── */
     function fmtDollar(num) {
@@ -336,8 +337,14 @@
         };
     }
 
-    /* ── Render chart ── */
+    /* ── Render chart (guarded: Chart.js may still be loading on first cold load) ── */
     function renderChart(chartData) {
+        if (typeof Chart === 'undefined') {
+            /* Chart.js CDN not yet ready — retry once it is */
+            setTimeout(function() { renderChart(chartData); }, 100);
+            return;
+        }
+
         var section = document.getElementById('insider-chart-section');
         if (!chartData || chartData.length === 0) {
             section.style.display = 'none';
@@ -411,7 +418,10 @@
 
         var url = '/api/insider-trades?filter=' + filter;
         fetch(url)
-            .then(function(resp) { return resp.text(); })
+            .then(function(resp) {
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                return resp.text();
+            })
             .then(function(html) {
                 cache[filter] = html;
                 document.getElementById('insider-trades-content').innerHTML = html;
@@ -425,6 +435,12 @@
                 if (window.initSortableTables) window.initSortableTables();
             })
             .catch(function() {
+                /* Retry once after a short delay before showing the error */
+                if (!retried[filter]) {
+                    retried[filter] = true;
+                    setTimeout(function() { loadTrades(filter); }, 1500);
+                    return;
+                }
                 document.getElementById('insider-trades-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                     'Failed to load insider trades. Please try again later.</p>';

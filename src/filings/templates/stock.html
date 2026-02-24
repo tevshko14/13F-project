@@ -1048,19 +1048,31 @@ window.toggleHolders = function(btn) {
             {% endif %}
 
             if (insiderUrl) {
-                fetch(insiderUrl)
-                    .then(function(resp) { return resp.text(); })
-                    .then(function(html) {
-                        var el = document.getElementById('insider-content');
-                        el.innerHTML = html;
-                        activateScripts(el);
-                        if (window.initSortableTables) window.initSortableTables();
-                    })
-                    .catch(function() {
-                        document.getElementById('insider-content').innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'Failed to load insider trading data. Please try again later.</p>';
-                    });
+                var insiderRetried = false;
+                function fetchInsider() {
+                    fetch(insiderUrl)
+                        .then(function(resp) {
+                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                            return resp.text();
+                        })
+                        .then(function(html) {
+                            var el = document.getElementById('insider-content');
+                            el.innerHTML = html;
+                            activateScripts(el);
+                            if (window.initSortableTables) window.initSortableTables();
+                        })
+                        .catch(function() {
+                            if (!insiderRetried) {
+                                insiderRetried = true;
+                                setTimeout(fetchInsider, 1500);
+                                return;
+                            }
+                            document.getElementById('insider-content').innerHTML =
+                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                                'Failed to load insider trading data. Please try again later.</p>';
+                        });
+                }
+                fetchInsider();
             } else {
                 document.getElementById('insider-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
