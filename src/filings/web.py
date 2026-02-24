@@ -1510,8 +1510,11 @@ async def retail_page(request: Request, view: str = "sentiment"):
     if view not in ("sentiment", "leaderboard", "calendar"):
         view = "sentiment"
 
-    fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
-    apewisdom = await asyncio.to_thread(sentiment._get_apewisdom_all)
+    fear_greed, apewisdom, high_impact_events = await asyncio.gather(
+        asyncio.to_thread(sentiment._get_cnn_fear_greed),
+        asyncio.to_thread(sentiment._get_apewisdom_all),
+        asyncio.to_thread(youtube.get_high_impact_events, 9),
+    )
 
     # Compute summary stats from ApeWisdom data
     top_stocks = apewisdom[:5] if apewisdom else []
@@ -1528,9 +1531,6 @@ async def retail_page(request: Request, view: str = "sentiment"):
             biggest_mover = best
 
     has_guru_data = bool(_fund_cache())
-
-    # High-impact YouTube events for toast notifications
-    high_impact_events = await asyncio.to_thread(youtube.get_high_impact_events, 9)
 
     return templates.TemplateResponse(
         "retail.html",
@@ -1549,8 +1549,10 @@ async def retail_page(request: Request, view: str = "sentiment"):
 
 @app.get("/api/retail/leaderboard", response_class=HTMLResponse)
 async def retail_leaderboard_api(request: Request):
-    all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
-    fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
+    all_data, fear_greed = await asyncio.gather(
+        asyncio.to_thread(sentiment._get_apewisdom_all),
+        asyncio.to_thread(sentiment._get_cnn_fear_greed),
+    )
     ownership_map = _get_ownership_map()
     enriched = sentiment.build_retail_leaderboard_data(
         all_data, ownership_map, fear_greed
@@ -1569,8 +1571,10 @@ async def retail_leaderboard_api(request: Request):
 @app.get("/api/retail/leaderboard-data")
 async def retail_leaderboard_data(request: Request):
     """Enriched leaderboard JSON for treemap, bubble chart, and guru toggle."""
-    all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
-    fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
+    all_data, fear_greed = await asyncio.gather(
+        asyncio.to_thread(sentiment._get_apewisdom_all),
+        asyncio.to_thread(sentiment._get_cnn_fear_greed),
+    )
     ownership_map = _get_ownership_map()
     result = sentiment.build_retail_leaderboard_data(
         all_data, ownership_map, fear_greed
@@ -1586,9 +1590,11 @@ async def retail_calendar_api(request: Request):
     Never returns an error: worst case is empty events + static channels.
     """
     try:
-        events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
-        channels = await asyncio.to_thread(youtube.get_channels)
-        recent = await asyncio.to_thread(youtube.get_recent_uploads, 50)
+        events, channels, recent = await asyncio.gather(
+            asyncio.to_thread(youtube.get_upcoming_events, 50),
+            asyncio.to_thread(youtube.get_channels),
+            asyncio.to_thread(youtube.get_recent_uploads, 50),
+        )
     except Exception:
         logger.exception("Calendar API: unexpected error in data fetch")
         events, channels, recent = [], youtube._STATIC_CHANNELS, []
@@ -1618,9 +1624,11 @@ async def retail_calendar_api(request: Request):
 async def retail_calendar_data(request: Request):
     """JSON data for calendar charts/interactivity."""
     try:
-        events = await asyncio.to_thread(youtube.get_upcoming_events, 50)
-        channels = await asyncio.to_thread(youtube.get_channels)
-        recent = await asyncio.to_thread(youtube.get_recent_uploads, 50)
+        events, channels, recent = await asyncio.gather(
+            asyncio.to_thread(youtube.get_upcoming_events, 50),
+            asyncio.to_thread(youtube.get_channels),
+            asyncio.to_thread(youtube.get_recent_uploads, 50),
+        )
     except Exception:
         logger.exception("Calendar data API: unexpected error in data fetch")
         events, channels, recent = [], youtube._STATIC_CHANNELS, []
@@ -1639,11 +1647,9 @@ async def retail_calendar_data(request: Request):
 @app.get("/api/insider-trades", response_class=HTMLResponse)
 async def insider_trades_api(request: Request, filter: str = "all"):
     trade_type = {"buys": "p", "sells": "s", "all": ""}.get(filter, "")
-    trades = await asyncio.to_thread(
-        insider_trading.get_latest_insider_trades, trade_type
-    )
-    chart_data = await asyncio.to_thread(
-        insider_trading.get_insider_chart_data, 10, trade_type
+    trades, chart_data = await asyncio.gather(
+        asyncio.to_thread(insider_trading.get_latest_insider_trades, trade_type),
+        asyncio.to_thread(insider_trading.get_insider_chart_data, 10, trade_type),
     )
     return templates.TemplateResponse(
         "partials/insider_trades.html",
@@ -1869,13 +1875,14 @@ async def heatmap(request: Request, period: str = "1D"):
             '<div hx-get="/api/heatmap" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
         )
 
-    mkt = await asyncio.to_thread(market_data.get_sp500_market_data, period)
+    mkt, constituents = await asyncio.gather(
+        asyncio.to_thread(market_data.get_sp500_market_data, period),
+        asyncio.to_thread(market_data.get_sp500_constituents),
+    )
     if not mkt or "_metadata" not in mkt:
         return HTMLResponse(
             '<article><p class="text-muted">Market data unavailable.</p></article>'
         )
-
-    constituents = await asyncio.to_thread(market_data.get_sp500_constituents)
 
     ownership_map = _get_ownership_map()
     super_ticker_counts = {t: len(holders) for t, holders in ownership_map.items()}
