@@ -289,22 +289,140 @@
                 ${{ panda_raised }} / ${{ panda_goal }} this month
             </div>
         </div>
+        {% if stripe_configured %}
         <div class="pw-tier-pills">
-            <a href="/support#monthly" class="pw-tier-pill" onclick="sessionStorage.setItem('supportTab','monthly')">
+            <button class="pw-tier-pill" onclick="openHomeCheckout('{{ price_bamboo }}', 'subscription')">
                 &#x1F38B; Bamboo <strong>$5/mo</strong>
-            </a>
-            <a href="/support#monthly" class="pw-tier-pill pw-tier-popular" onclick="sessionStorage.setItem('supportTab','monthly')">
+            </button>
+            <button class="pw-tier-pill pw-tier-popular" onclick="openHomeCheckout('{{ price_panda }}', 'subscription')">
                 &#x1F43C; Panda <strong>$15/mo</strong>
-            </a>
-            <a href="/support#monthly" class="pw-tier-pill" onclick="sessionStorage.setItem('supportTab','monthly')">
+            </button>
+            <button class="pw-tier-pill" onclick="openHomeCheckout('{{ price_giant_panda }}', 'subscription')">
                 &#x1F451; Giant Panda <strong>$30/mo</strong>
-            </a>
+            </button>
+            <button class="pw-tier-pill pw-tier-onetime" onclick="openHomeCheckout('{{ price_onetime }}', 'payment')">
+                &#x2764;&#xFE0F; One-time donation
+            </button>
         </div>
+        {% else %}
+        <div class="pw-tier-pills">
+            <a href="/support" class="pw-tier-pill">&#x1F43C; Support &rarr;</a>
+        </div>
+        {% endif %}
         <a href="/support" class="pw-learn-more">Learn more about the Panda Fund &rarr;</a>
     </div>
 </div>
 
+{% if stripe_configured %}
+{# ── Homepage Checkout Overlay (embedded Stripe) ── #}
+<script async src="https://js.stripe.com/v3/"></script>
+<div class="checkout-overlay" id="home-checkout-overlay" onclick="closeHomeCheckout(event)">
+    <div class="checkout-overlay-inner" onclick="event.stopPropagation()">
+        <button class="checkout-close" onclick="closeHomeCheckout()" aria-label="Close">&times;</button>
+        <div class="checkout-loading" id="home-checkout-loading">Loading checkout&hellip;</div>
+        <div id="home-checkout-mount"></div>
+    </div>
+</div>
+<script>
+var _homeStripe = null;
+var _homeCheckout = null;
+
+function openHomeCheckout(priceId, mode) {
+    if (!priceId) return;
+    var overlay = document.getElementById('home-checkout-overlay');
+    var mountEl = document.getElementById('home-checkout-mount');
+    var loadingEl = document.getElementById('home-checkout-loading');
+
+    mountEl.innerHTML = '';
+    loadingEl.style.display = '';
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    if (_homeCheckout) {
+        _homeCheckout.destroy();
+        _homeCheckout = null;
+    }
+    if (!_homeStripe) {
+        _homeStripe = Stripe('{{ stripe_publishable_key }}');
+    }
+
+    fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({price_id: priceId, mode: mode})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { loadingEl.textContent = 'Error: ' + data.error; return; }
+        return _homeStripe.initEmbeddedCheckout({clientSecret: data.clientSecret});
+    })
+    .then(function(checkout) {
+        if (!checkout) return;
+        _homeCheckout = checkout;
+        loadingEl.style.display = 'none';
+        checkout.mount('#home-checkout-mount');
+    })
+    .catch(function() { loadingEl.textContent = 'Something went wrong. Please try again.'; });
+}
+
+function closeHomeCheckout(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('home-checkout-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+    if (_homeCheckout) { _homeCheckout.destroy(); _homeCheckout = null; }
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeHomeCheckout();
+});
+</script>
+{% endif %}
+
 <style>
+    /* ── Checkout overlay (homepage) ── */
+    .checkout-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        justify-content: center;
+        align-items: center;
+        padding: 1em;
+    }
+    .checkout-overlay.open { display: flex; }
+    .checkout-overlay-inner {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 16px;
+        width: 100%;
+        max-width: 600px;
+        max-height: 92vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        position: relative;
+        animation: homeCheckoutIn 0.25s ease;
+    }
+    @keyframes homeCheckoutIn {
+        from { opacity: 0; transform: translateY(16px) scale(0.97); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .checkout-close {
+        position: absolute; top: 12px; right: 14px;
+        background: none; border: none; font-size: 1.5em;
+        cursor: pointer; color: var(--pp-text-muted); z-index: 1;
+        line-height: 1; border-radius: 6px; padding: 0.1em 0.3em;
+        transition: background 0.15s, color 0.15s;
+    }
+    .checkout-close:hover { background: var(--pp-surface-hover); color: var(--pp-text); }
+    .checkout-loading {
+        display: flex; align-items: center; justify-content: center;
+        min-height: 200px; color: var(--pp-text-muted); font-size: 0.9em;
+    }
+    #home-checkout-mount { min-height: 300px; }
+
     /* ── Hero Search Bar (Brave-style pill) ── */
     .hero-search-wrapper {
         display: flex;
@@ -609,6 +727,7 @@
         font-size: 0.82em;
         color: var(--pp-text);
         text-decoration: none;
+        cursor: pointer;
         transition: border-color 0.15s, box-shadow 0.15s;
     }
     .pw-tier-pill:hover {
@@ -621,6 +740,12 @@
     .pw-tier-popular {
         border-color: #22c55e;
         background: rgba(34, 197, 94, 0.06);
+    }
+    .pw-tier-onetime {
+        border-style: dashed;
+    }
+    .pw-tier-onetime:hover {
+        border-style: solid;
     }
     .pw-learn-more {
         display: block;

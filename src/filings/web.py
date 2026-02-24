@@ -594,6 +594,12 @@ async def homepage(request: Request):
             "panda_raised": raised_this_month,
             "panda_goal": monthly_goal,
             "panda_pct": progress_pct,
+            "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
+            "stripe_configured": bool(_STRIPE_SECRET_KEY and _STRIPE_PUBLISHABLE_KEY),
+            "price_onetime": _STRIPE_PRICE_ONETIME,
+            "price_bamboo": _STRIPE_PRICE_BAMBOO,
+            "price_panda": _STRIPE_PRICE_PANDA,
+            "price_giant_panda": _STRIPE_PRICE_GIANT_PANDA,
         },
     )
 
