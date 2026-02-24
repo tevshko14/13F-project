@@ -10,6 +10,7 @@ and the app behaves exactly as before (anonymous-only).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import threading
@@ -139,7 +140,9 @@ def _build_auth_middleware():
                     claims = decode_token(token)
                     if claims:
                         request.state.user = claims
-                        request.state.profile = get_profile(claims.get("sub", ""))
+                        request.state.profile = await asyncio.to_thread(
+                            get_profile, claims.get("sub", "")
+                        )
 
             return await call_next(request)
 
