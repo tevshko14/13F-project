@@ -338,7 +338,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "connect-src 'self' "
             "https://us.i.posthog.com https://*.supabase.co "
             "https://js.stripe.com https://*.tradingview.com; "
-            "frame-src https://js.stripe.com https://*.tradingview.com; "
+            "frame-src https://js.stripe.com https://*.tradingview.com https://tally.so; "
             "object-src 'none'; "
             "base-uri 'self'"
         )
@@ -1255,7 +1255,7 @@ _FEEDBACK_LINK = os.environ.get(
     "https://tally.so/r/5BzA1d",
 )
 
-_PANDA_FUND_MONTHLY_GOAL = 400  # Cap displayed on frontend
+_PANDA_FUND_MONTHLY_GOAL = 200  # Cap displayed on frontend
 
 # What the fund covers (labels only, no dollar amounts exposed)
 _PANDA_FUND_LINE_ITEMS = [
