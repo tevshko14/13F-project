@@ -106,5 +106,5 @@ async def test_cik_validation(client):
 @pytest.mark.anyio
 async def test_ticker_validation(client):
     """Endpoints reject invalid ticker values."""
-    resp = await client.get("/api/analysts/<script>alert(1)</script>")
+    resp = await client.get("/api/analysts/DROP;TABLE")
     assert resp.status_code == 400
