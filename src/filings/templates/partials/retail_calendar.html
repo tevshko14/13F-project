@@ -8,10 +8,7 @@
         {{ stats.recent_count }} Recently Posted
     </span>
     {% endif %}
-    <span style="background: var(--pp-tag-bg); color: var(--pp-tag-text); font-size: 0.85em; padding: 0.3em 0.8em; border-radius: 6px; font-weight: 500;">
-        {{ stats.total_upcoming }} Upcoming
-    </span>
-    {% if stats.bullish_count %}
+{% if stats.bullish_count %}
     <span style="background: #dcfce7; color: #166534; font-size: 0.82em; padding: 0.25em 0.7em; border-radius: 6px; font-weight: 500;">
         {{ stats.bullish_count }} Bullish
     </span>
@@ -370,7 +367,7 @@
 <style>
     .recent-uploads-grid {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 1em;
         margin-top: 0.5em;
     }
@@ -452,7 +449,7 @@
 
     @media (max-width: 768px) {
         .recent-uploads-grid {
-            grid-template-columns: 1fr;
+            grid-template-columns: repeat(2, 1fr);
         }
         .calendar-event-card {
             flex-direction: column !important;
