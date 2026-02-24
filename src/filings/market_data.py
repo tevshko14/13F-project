@@ -21,7 +21,7 @@ _lock = threading.Lock()
 _constituents_cache: tuple[float, list[dict]] | None = None
 _CONSTITUENTS_TTL = 86_400  # 24 hours
 
-_market_data_cache: tuple[float, dict] | None = None
+_market_data_cache: dict[str, tuple[float, dict]] = {}
 _MARKET_DATA_TTL = 1_800  # 30 minutes
 
 # Stores the raw close DataFrame for multi-timeframe % change
@@ -200,13 +200,12 @@ def get_sp500_market_data(period: str = "1D") -> dict:
 
     Uses 30-min TTL cache per period. Returns empty dict on failure.
     """
-    global _market_data_cache
-
-    # Cache key includes period — reuse cache only for same period
+    # Cache lookup by period key — each period cached independently
     with _lock:
-        if _market_data_cache is not None:
-            ts, data = _market_data_cache
-            if time.time() - ts < _MARKET_DATA_TTL and data.get("_metadata", {}).get("period") == period:
+        cached = _market_data_cache.get(period)
+        if cached is not None:
+            ts, data = cached
+            if time.time() - ts < _MARKET_DATA_TTL:
                 return data
 
     close_data = _ensure_close_df()
@@ -259,7 +258,7 @@ def get_sp500_market_data(period: str = "1D") -> dict:
 
     logger.info("Computed %s market data for %d tickers", period, len(result) - 1)
     with _lock:
-        _market_data_cache = (time.time(), result)
+        _market_data_cache[period] = (time.time(), result)
     return result
 
 

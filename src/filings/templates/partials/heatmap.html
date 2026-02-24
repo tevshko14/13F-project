@@ -27,6 +27,9 @@
     var container = document.getElementById('heatmap-container');
     if (!container || !heatmapData || heatmapData.length === 0) return;
 
+    window.requireECharts(function(err) {
+    if (err) { container.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+
     // Dispose previous chart instance if it exists (HTMX re-render)
     var existing = echarts.getInstanceByDom(container);
     if (existing) existing.dispose();
@@ -118,10 +121,12 @@
         }
     });
 
-    // Responsive resize
-    window.addEventListener('resize', function() { chart.resize(); });
+    // Responsive resize (debounced)
+    var _resizeTimer;
+    window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { chart.resize(); }, 150); });
 
     // Re-init sortable tables if any were loaded
     if (window.initSortableTables) window.initSortableTables();
+    }); // end requireECharts
 })();
 </script>

@@ -40,7 +40,7 @@
                 {% elif "Sale" in t.trade_type %}
                     <span class="badge badge-reduce">{{ t.trade_type }}</span>
                 {% else %}
-                    <span class="badge" style="background: #f5f5f5; color: #616161;">{{ t.trade_type }}</span>
+                    <span class="badge" style="background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">{{ t.trade_type }}</span>
                 {% endif %}
             </td>
             <td class="text-right">{{ t.qty }}</td>

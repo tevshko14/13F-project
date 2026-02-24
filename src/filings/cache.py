@@ -17,7 +17,7 @@ timestamp, allowing selective refresh of only stale funds.
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from filings import supabase_cache
@@ -174,31 +174,41 @@ def load_cache_from_supabase() -> dict:
 def _load_cache_from_supabase_full() -> dict:
     """Full load from Supabase — used when content_hash column is empty.
 
-    This is the original logic, used as a fallback on first deploy
-    before the sync worker has populated content_hash values.
+    Uses get_all_by_category() to fetch all 13f rows in paginated
+    batches (~5 round-trips for 84 funds) instead of one query per
+    fund (~85 round-trips).
     """
-    keys = supabase_cache.get_category_keys("13f")
-    if not keys:
+    rows = supabase_cache.get_all_by_category("13f", page_size=20)
+    if rows is None:
         return {}
 
-    ciks = []
-    for key in keys:
-        cik = key.replace("13f:", "", 1) if key.startswith("13f:") else None
-        if cik:
-            ciks.append(cik)
-
-    if not ciks:
-        return {}
-
-    logger.info("Full load: %d 13f keys from Supabase (no hash file)...", len(ciks))
+    now = datetime.now(timezone.utc)
+    ttl = _get_effective_ttl()
     result: dict = {}
     stale_count = 0
-    for cik in ciks:
-        data, is_fresh = supabase_cache.get_cached_with_stale(f"13f:{cik}")
-        if isinstance(data, dict):
-            result[cik] = data
-            if not is_fresh:
+
+    for row in rows:
+        key = row.get("cache_key", "")
+        if not key.startswith("13f:"):
+            continue
+        cik = key[4:]  # strip "13f:" prefix
+        data = row.get("response_data")
+        if not isinstance(data, dict):
+            continue
+
+        result[cik] = data
+
+        # Determine freshness from created_at (approximates expires_at)
+        created_at = row.get("created_at")
+        if created_at:
+            try:
+                ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                if (now - ts) > ttl:
+                    stale_count += 1
+            except (ValueError, TypeError):
                 stale_count += 1
+        else:
+            stale_count += 1
 
     if result:
         fresh_count = len(result) - stale_count
@@ -274,11 +284,27 @@ def get_stale_ciks(cache_data: dict, cik_list: list[str]) -> list[str]:
 
     Allows selective refresh: only re-fetch funds that actually need it,
     avoiding unnecessary API calls for recently-refreshed funds.
+
+    Hoists TTL and datetime.now() out of the loop so they're computed once
+    instead of 84× (is_filing_season() can't change mid-iteration).
     """
+    ttl = _get_effective_ttl()
+    now = datetime.now()
     stale = []
     for cik in cik_list:
         fund_data = cache_data.get(cik)
-        if fund_data is None or is_fund_stale(fund_data):
+        if fund_data is None:
+            stale.append(cik)
+            continue
+        last_refreshed = fund_data.get("_last_refreshed")
+        if not last_refreshed:
+            stale.append(cik)
+            continue
+        try:
+            refreshed_dt = datetime.fromisoformat(last_refreshed)
+            if (now - refreshed_dt) > ttl:
+                stale.append(cik)
+        except (ValueError, TypeError):
             stale.append(cik)
     return stale
 
@@ -347,14 +373,7 @@ def get_fund_age_str(fund_data: dict) -> str:
     try:
         refreshed_dt = datetime.fromisoformat(last_refreshed)
         age = datetime.now() - refreshed_dt
-        if age.total_seconds() < 60:
-            return "Just now"
-        elif age.total_seconds() < 3600:
-            return f"{int(age.total_seconds() / 60)} min ago"
-        elif age.total_seconds() < 86400:
-            return f"{int(age.total_seconds() / 3600)} hours ago"
-        else:
-            return f"{int(age.total_seconds() / 86400)} days ago"
+        return _format_age(age)
     except (ValueError, TypeError):
         return "Unknown"
 
