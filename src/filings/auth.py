@@ -28,11 +28,12 @@ _SKIP_PREFIXES = ("/health", "/static", "/favicon.ico")
 # ── Profile cache (avoid Supabase HTTP round-trip on every request) ──
 _profile_lock = threading.Lock()
 _profile_cache: dict[str, tuple[float, dict | None]] = {}
-_PROFILE_TTL = 60           # seconds
-_MAX_PROFILE_CACHE = 500    # LRU eviction threshold
+_PROFILE_TTL = 60  # seconds
+_MAX_PROFILE_CACHE = 500  # LRU eviction threshold
 
 
 # ── JWT helpers ─────────────────────────────────────────────────────
+
 
 def decode_token(token: str) -> dict | None:
     """Decode and validate a Supabase JWT.
@@ -86,13 +87,7 @@ def get_profile(user_id: str) -> dict | None:
         client = _get_client()
         if not client:
             return None
-        resp = (
-            client.table("profiles")
-            .select("*")
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
+        resp = client.table("profiles").select("*").eq("id", user_id).single().execute()
         profile = resp.data
     except Exception as exc:
         logger.debug("Profile fetch failed for %s: %s", user_id, exc)
@@ -103,7 +98,8 @@ def get_profile(user_id: str) -> dict | None:
         _profile_cache[user_id] = (now, profile)
         if len(_profile_cache) > _MAX_PROFILE_CACHE:
             sorted_keys = sorted(
-                _profile_cache, key=lambda k: _profile_cache[k][0],
+                _profile_cache,
+                key=lambda k: _profile_cache[k][0],
             )
             for k in sorted_keys[: len(_profile_cache) - _MAX_PROFILE_CACHE]:
                 del _profile_cache[k]
@@ -112,6 +108,7 @@ def get_profile(user_id: str) -> dict | None:
 
 
 # ── Middleware ───────────────────────────────────────────────────────
+
 
 def _build_auth_middleware():
     """Return the AuthMiddleware class.

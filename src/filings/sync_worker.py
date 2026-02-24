@@ -34,6 +34,7 @@ from filings.superinvestors import SUPERINVESTORS
 
 # ── Logging ──────────────────────────────────────────────────────────
 
+
 def _setup_logging() -> None:
     log_level = _os.environ.get("LOG_LEVEL", "INFO").upper()
     if _os.environ.get("RAILWAY_ENVIRONMENT"):
@@ -49,6 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 # ── Sync logic ───────────────────────────────────────────────────────
+
 
 def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
     """Sync all stale superinvestor funds from SEC EDGAR to Supabase.
@@ -68,7 +70,9 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
     # 2. CIKs with no Supabase entry at all (new investors)
     # Use lightweight query (cache_key only) to avoid loading ~30MB of fund data
     existing_keys = supabase_cache.get_cache_keys_by_category("13f")
-    existing_ciks = {k.replace("13f:", "") for k in existing_keys if k.startswith("13f:")}
+    existing_ciks = {
+        k.replace("13f:", "") for k in existing_keys if k.startswith("13f:")
+    }
 
     missing_ciks = all_ciks - existing_ciks
     ciks_to_sync = sorted(stale_ciks_from_db | missing_ciks)
@@ -80,8 +84,10 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
 
     logger.info(
         "Syncing %d/%d funds (stale=%d, missing=%d)",
-        len(ciks_to_sync), len(all_ciks),
-        len(stale_ciks_from_db), len(missing_ciks),
+        len(ciks_to_sync),
+        len(all_ciks),
+        len(stale_ciks_from_db),
+        len(missing_ciks),
     )
 
     # ── Iterate and refresh ──────────────────────────────────────
@@ -101,7 +107,10 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
                 updated += 1
                 logger.info(
                     "[%d/%d] OK: CIK %s (%s)",
-                    idx + 1, len(ciks_to_sync), cik, data.get("name", ""),
+                    idx + 1,
+                    len(ciks_to_sync),
+                    cik,
+                    data.get("name", ""),
                 )
             else:
                 # refresh_single_fund returned None (rate limit or SEC error)
@@ -116,7 +125,11 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
             error_msg = f"CIK {cik}: {str(e)[:200]}"
             errors.append(error_msg)
             logger.warning(
-                "[%d/%d] FAILED: CIK %s -- %s", idx + 1, len(ciks_to_sync), cik, e,
+                "[%d/%d] FAILED: CIK %s -- %s",
+                idx + 1,
+                len(ciks_to_sync),
+                cik,
+                e,
             )
 
         # ── Cleanup + Rate limiting ───────────────────────────────
@@ -137,12 +150,15 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
 
     logger.info(
         "Sync complete: %d updated, %d failed, %d skipped",
-        updated, failed, skipped,
+        updated,
+        failed,
+        skipped,
     )
     return {"updated": updated, "failed": failed, "skipped": skipped}
 
 
 # ── Entry point ──────────────────────────────────────────────────────
+
 
 def main() -> None:
     """Entry point for ``uv run filings-sync``."""
@@ -155,7 +171,9 @@ def main() -> None:
 
     elapsed = round(time.time() - start)
     mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
-    logger.info("=== Sync finished in %ds (RSS: %.0f MB): %s ===", elapsed, mem_mb, result)
+    logger.info(
+        "=== Sync finished in %ds (RSS: %.0f MB): %s ===", elapsed, mem_mb, result
+    )
 
 
 if __name__ == "__main__":

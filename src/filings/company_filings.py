@@ -58,13 +58,15 @@ def get_company_filings(ticker: str, limit: int = 25) -> list[dict]:
         for i, f in enumerate(raw):
             if i >= limit:
                 break
-            results.append({
-                "form": f.form,
-                "filing_date": str(f.filing_date),
-                "description": f.primary_doc_description or f.form,
-                "sec_url": f.homepage_url,
-                "items": f.items or "",
-            })
+            results.append(
+                {
+                    "form": f.form,
+                    "filing_date": str(f.filing_date),
+                    "description": f.primary_doc_description or f.form,
+                    "sec_url": f.homepage_url,
+                    "items": f.items or "",
+                }
+            )
     except Exception:
         logger.exception("Failed to fetch company filings for %s", key)
         results = []

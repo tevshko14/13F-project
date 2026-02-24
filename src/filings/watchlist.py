@@ -6,7 +6,6 @@ Stores a list of starred/favorited tickers in
 
 import json
 from datetime import datetime
-from pathlib import Path
 
 from filings.cache import CACHE_DIR
 
@@ -47,12 +46,14 @@ def add_to_watchlist(ticker: str, cusip: str = "", issuer_name: str = "") -> lis
     # Check if already present
     if any(e["ticker"] == ticker.upper() for e in entries):
         return entries
-    entries.append({
-        "ticker": ticker.upper(),
-        "cusip": cusip,
-        "issuer_name": issuer_name,
-        "added_at": datetime.now().isoformat(timespec="seconds"),
-    })
+    entries.append(
+        {
+            "ticker": ticker.upper(),
+            "cusip": cusip,
+            "issuer_name": issuer_name,
+            "added_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
     save_watchlist(entries)
     return entries
 

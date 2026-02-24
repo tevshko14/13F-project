@@ -47,7 +47,11 @@ _FALLBACK_SP500 = [
     {"ticker": "AMZN", "name": "Amazon.com Inc.", "sector": "Consumer Discretionary"},
     {"ticker": "NVDA", "name": "NVIDIA Corp.", "sector": "Information Technology"},
     {"ticker": "GOOGL", "name": "Alphabet Inc.", "sector": "Communication Services"},
-    {"ticker": "META", "name": "Meta Platforms Inc.", "sector": "Communication Services"},
+    {
+        "ticker": "META",
+        "name": "Meta Platforms Inc.",
+        "sector": "Communication Services",
+    },
     {"ticker": "BRK-B", "name": "Berkshire Hathaway", "sector": "Financials"},
     {"ticker": "TSLA", "name": "Tesla Inc.", "sector": "Consumer Discretionary"},
     {"ticker": "UNH", "name": "UnitedHealth Group", "sector": "Health Care"},
@@ -125,14 +129,18 @@ def get_sp500_constituents() -> list[dict]:
             name = str(row.get("Security", "")).strip()
             sector = str(row.get("GICS Sector", "")).strip()
             if ticker and name:
-                constituents.append({
-                    "ticker": ticker,
-                    "name": name,
-                    "sector": sector,
-                })
+                constituents.append(
+                    {
+                        "ticker": ticker,
+                        "name": name,
+                        "sector": sector,
+                    }
+                )
 
         if len(constituents) > 400:
-            logger.info("Fetched %d S&P 500 constituents from Wikipedia", len(constituents))
+            logger.info(
+                "Fetched %d S&P 500 constituents from Wikipedia", len(constituents)
+            )
             with _lock:
                 _constituents_cache = (time.time(), constituents)
             return constituents
@@ -147,6 +155,7 @@ def get_sp500_constituents() -> list[dict]:
 
 
 # ── Market Data (daily % change) ──────────────────────────────────────
+
 
 def _ensure_close_df():
     """Download 1-month of S&P 500 close data and cache it.
@@ -174,12 +183,20 @@ def _ensure_close_df():
             logger.warning("yfinance returned empty DataFrame for S&P 500")
             return None
 
-        close_data = df["Close"] if "Close" in df.columns.get_level_values(0) else df.get("Close")
+        close_data = (
+            df["Close"]
+            if "Close" in df.columns.get_level_values(0)
+            else df.get("Close")
+        )
 
         if close_data is None or close_data.empty:
             return None
 
-        logger.info("Downloaded 1-month close data: %d rows x %d tickers", len(close_data), len(close_data.columns))
+        logger.info(
+            "Downloaded 1-month close data: %d rows x %d tickers",
+            len(close_data),
+            len(close_data.columns),
+        )
         with _lock:
             _close_df_cache = (time.time(), close_data)
         return close_data
@@ -217,11 +234,11 @@ def get_sp500_market_data(period: str = "1D") -> dict:
 
     # Determine how far back to look for the "start" price
     if period == "1W":
-        lookback = 5   # ~5 trading days
+        lookback = 5  # ~5 trading days
     elif period == "1M":
         lookback = None  # use first available row
     else:
-        lookback = 1   # 1D default
+        lookback = 1  # 1D default
 
     result: dict = {}
     for ticker in tickers:
@@ -263,6 +280,7 @@ def get_sp500_market_data(period: str = "1D") -> dict:
 
 
 # ── 52-Week Range (bulk) ──────────────────────────────────────────────
+
 
 def get_52_week_range_bulk(tickers: list[str]) -> dict:
     """Get 52-week high/low/current for tickers via yfinance bulk download.
@@ -314,7 +332,11 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
                 current = float(closes.iloc[-1])
                 range_span = w52_high - w52_low
 
-                pct = round((current - w52_low) / range_span * 100, 1) if range_span > 0 else 50.0
+                pct = (
+                    round((current - w52_low) / range_span * 100, 1)
+                    if range_span > 0
+                    else 50.0
+                )
                 result[t] = {
                     "low": round(w52_low, 2),
                     "high": round(w52_high, 2),
@@ -398,6 +420,7 @@ def get_current_prices_batch(tickers: list[str]) -> dict[str, float]:
 
 # ── Heatmap Builder ───────────────────────────────────────────────────
 
+
 def _pct_to_color(pct: float) -> str:
     """Map % change to hex color. -5%=deep red, 0=gray, +5%=deep green."""
     pct = max(-5.0, min(5.0, pct))
@@ -457,15 +480,18 @@ def build_heatmap_data(
     # Sort sectors by number of children (largest first)
     result = []
     for name in sorted(sectors, key=lambda s: -len(sectors[s])):
-        result.append({
-            "name": name,
-            "children": sectors[name],
-        })
+        result.append(
+            {
+                "name": name,
+                "children": sectors[name],
+            }
+        )
 
     return result
 
 
 # ── Most Added by Superinvestors ──────────────────────────────────────
+
 
 def build_most_added_table(
     cache_data: dict,
@@ -641,22 +667,25 @@ def get_all_listed_tickers() -> list[dict]:
                     clean_name = clean_name[: -len(suffix)].strip()
                     break
 
-            results.append({
-                "ticker": symbol,
-                "name": clean_name,
-                "exchange": exchange,
-                "is_etf": is_etf,
-            })
+            results.append(
+                {
+                    "ticker": symbol,
+                    "name": clean_name,
+                    "exchange": exchange,
+                    "is_etf": is_etf,
+                }
+            )
 
-        logger.info(
-            "Fetched %d NYSE/NASDAQ listings from NASDAQ Trader", len(results)
-        )
+        logger.info("Fetched %d NYSE/NASDAQ listings from NASDAQ Trader", len(results))
         with _lock:
             _all_listings_cache = (time.time(), results)
         return results
 
     except Exception as e:
-        logger.warning("NASDAQ Trader listings fetch failed: %s — search will use S&P 500 + holdings only", e)
+        logger.warning(
+            "NASDAQ Trader listings fetch failed: %s — search will use S&P 500 + holdings only",
+            e,
+        )
         return []
 
 

@@ -15,6 +15,7 @@ import asyncio
 import json as json_module
 import logging
 import os
+import re as _re
 import time as time_module
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -22,13 +23,30 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request, Query
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from filings import client, cache, analysts, market_data, sentiment, vitals, company_filings, insider_trading, supabase_cache, auth, youtube
+from filings import (
+    client,
+    cache,
+    analysts,
+    market_data,
+    sentiment,
+    vitals,
+    company_filings,
+    insider_trading,
+    supabase_cache,
+    auth,
+    youtube,
+)
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
@@ -36,6 +54,7 @@ from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 # ═══════════════════════════════════════════════════════════════════════
 # Logging
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def _setup_logging() -> None:
     """Configure structured JSON logging for production (Railway)."""
@@ -54,6 +73,7 @@ def _setup_logging() -> None:
     logging.getLogger("yfinance").setLevel(logging.WARNING)
     logging.getLogger("peewee").setLevel(logging.WARNING)
 
+
 _setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -66,6 +86,7 @@ _sentry_dsn = os.environ.get("SENTRY_DSN", "")
 if _sentry_dsn:
     try:
         import sentry_sdk
+
         sentry_sdk.init(
             dsn=_sentry_dsn,
             traces_sample_rate=0.1,
@@ -106,7 +127,9 @@ _app_start_time = time_module.time()
 # ── Background refresh configuration ─────────────────────────────────
 # Self-healing: the web app can refresh stale 13F data in the background,
 # reducing dependency on the Railway cron job.  Disable via env var if needed.
-_ENABLE_BACKGROUND_REFRESH = os.environ.get("ENABLE_BACKGROUND_REFRESH", "true").lower() == "true"
+_ENABLE_BACKGROUND_REFRESH = (
+    os.environ.get("ENABLE_BACKGROUND_REFRESH", "true").lower() == "true"
+)
 _refresh_lock = asyncio.Lock()
 _refresh_in_progress: set[str] = set()
 
@@ -114,6 +137,7 @@ _refresh_in_progress: set[str] = set()
 # ═══════════════════════════════════════════════════════════════════════
 # Lifespan
 # ═══════════════════════════════════════════════════════════════════════
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -132,7 +156,9 @@ async def lifespan(app: FastAPI):
             timeout=30,
         )
     except (asyncio.TimeoutError, Exception) as exc:
-        logger.warning("Supabase startup cache load failed (%s), falling back to disk", exc)
+        logger.warning(
+            "Supabase startup cache load failed (%s), falling back to disk", exc
+        )
         app.state.fund_cache = {}
 
     if not app.state.fund_cache:
@@ -163,12 +189,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PaperPanda", lifespan=lifespan)
 
-templates = Jinja2Templates(
-    directory=Path(__file__).parent / "templates"
-)
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 # Static files (logo, favicon, etc.)
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+app.mount(
+    "/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static"
+)
 
 # Template globals
 templates.env.globals["current_year"] = datetime.now().year
@@ -187,6 +213,7 @@ if _has_limiter:
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def _fund_cache() -> dict:
     """Return the current fund cache dict from app.state."""
     return getattr(app.state, "fund_cache", {})
@@ -195,6 +222,7 @@ def _fund_cache() -> dict:
 # ═══════════════════════════════════════════════════════════════════════
 # Cached ownership map (avoids O(funds × holdings) on every request)
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def _get_ownership_map() -> dict[str, list[str]]:
     """Return ticker → [superinvestor names] map, cached per fund_cache version.
@@ -215,9 +243,7 @@ def _get_ownership_map() -> dict[str, list[str]]:
         if prev_id == cache_id:
             return prev_map
 
-    ownership_map = client.build_ticker_ownership_map(
-        cache_data, SUPERINVESTORS_BY_CIK
-    )
+    ownership_map = client.build_ticker_ownership_map(cache_data, SUPERINVESTORS_BY_CIK)
     app.state._ownership_map = (cache_id, ownership_map)
     return ownership_map
 
@@ -234,12 +260,10 @@ _CONSENSUS_TTL = 1800  # 30 minutes in seconds
 # Security helpers
 # ═══════════════════════════════════════════════════════════════════════
 
-import re as _re
-
 _TICKER_RE = _re.compile(r"^[A-Za-z.]{1,12}$")
 _CIK_RE = _re.compile(r"^[0-9]{1,20}$")
 _CUSIP_RE = _re.compile(r"^[A-Za-z0-9]{6,9}$")
-_ALLOWED_HOST: str = os.environ.get("ALLOWED_HOST", "")   # e.g. "paperpanda.io"
+_ALLOWED_HOST: str = os.environ.get("ALLOWED_HOST", "")  # e.g. "paperpanda.io"
 
 
 def _valid_ticker(ticker: str) -> bool:
@@ -268,6 +292,7 @@ def _check_csrf_origin(request: Request) -> JSONResponse | None:
         # Non-browser clients (curl, Postman) don't send Origin; allow.
         return None
     from urllib.parse import urlparse
+
     origin_host = urlparse(origin).hostname or ""
     # Accept localhost/127.0.0.1 for local development
     if origin_host in ("localhost", "127.0.0.1"):
@@ -286,15 +311,20 @@ def _check_csrf_origin(request: Request) -> JSONResponse | None:
 # Middleware
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=()"
+        )
         # HSTS unconditionally — Railway terminates TLS upstream
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
         # Content-Security-Policy — allow known CDN sources
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
@@ -320,7 +350,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         start = time_module.time()
         response = await call_next(request)
         duration_ms = round((time_module.time() - start) * 1000)
-        logger.info("%s %s %s %dms", request.method, request.url.path, response.status_code, duration_ms)
+        logger.info(
+            "%s %s %s %dms",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+        )
         return response
 
 
@@ -338,6 +374,7 @@ if auth.JWT_SECRET:
 # Exception handlers
 # ═══════════════════════════════════════════════════════════════════════
 
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     # HTMX partial requests (api/ endpoints) get inline error fragments
@@ -345,20 +382,28 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
     if exc.status_code == 429:
         if is_htmx or request.url.path.startswith("/api/"):
-            return templates.TemplateResponse("partials/data_error.html", {
-                "request": request,
-                "error_type": "rate_limit",
-            }, status_code=429)
+            return templates.TemplateResponse(
+                "partials/data_error.html",
+                {
+                    "request": request,
+                    "error_type": "rate_limit",
+                },
+                status_code=429,
+            )
         message = "Too many requests. Please slow down and try again in a minute."
     elif exc.status_code == 404:
         message = "The page you're looking for doesn't exist."
     else:
         message = exc.detail or "An unexpected error occurred."
 
-    return templates.TemplateResponse("error.html", {
-        "request": request,
-        "message": message,
-    }, status_code=exc.status_code)
+    return templates.TemplateResponse(
+        "error.html",
+        {
+            "request": request,
+            "message": message,
+        },
+        status_code=exc.status_code,
+    )
 
 
 @app.exception_handler(Exception)
@@ -368,21 +413,30 @@ async def generic_exception_handler(request: Request, exc: Exception):
     # HTMX partial requests get inline error fragments
     is_htmx = request.headers.get("HX-Request") == "true"
     if is_htmx or request.url.path.startswith("/api/"):
-        return templates.TemplateResponse("partials/data_error.html", {
-            "request": request,
-            "error_type": "generic",
-            "message": "Unable to load data right now. Please try again later.",
-        }, status_code=500)
+        return templates.TemplateResponse(
+            "partials/data_error.html",
+            {
+                "request": request,
+                "error_type": "generic",
+                "message": "Unable to load data right now. Please try again later.",
+            },
+            status_code=500,
+        )
 
-    return templates.TemplateResponse("error.html", {
-        "request": request,
-        "message": "Something went wrong on our end. Please try again later.",
-    }, status_code=500)
+    return templates.TemplateResponse(
+        "error.html",
+        {
+            "request": request,
+            "message": "Something went wrong on our end. Please try again later.",
+        },
+        status_code=500,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Background tasks
 # ═══════════════════════════════════════════════════════════════════════
+
 
 async def _prefetch_market_data(app: FastAPI):
     """Prefetch S&P 500 market data on startup (runs in background thread)."""
@@ -443,16 +497,22 @@ async def _background_refresh_sweep(app: FastAPI) -> None:
 
             logger.info(
                 "Background sweep: refreshing %d/%d stale funds",
-                len(stale_ciks), len(all_ciks),
+                len(stale_ciks),
+                len(all_ciks),
             )
             app.state.refresh_status = "running"
-            app.state.refresh_progress = {"total": len(stale_ciks), "done": 0, "failed": 0}
+            app.state.refresh_progress = {
+                "total": len(stale_ciks),
+                "done": 0,
+                "failed": 0,
+            }
 
             for idx, cik in enumerate(stale_ciks):
                 if not cache._check_sec_rate_limit():
                     logger.warning(
                         "Background sweep: SEC session limit reached at %d/%d",
-                        idx, len(stale_ciks),
+                        idx,
+                        len(stale_ciks),
                     )
                     break
 
@@ -469,12 +529,18 @@ async def _background_refresh_sweep(app: FastAPI) -> None:
 
                 # Batch pause every 10 funds
                 if (idx + 1) % cache._SEC_BATCH_SIZE == 0 and idx < len(stale_ciks) - 1:
-                    logger.info("Background sweep: batch pause at %d/%d", idx + 1, len(stale_ciks))
+                    logger.info(
+                        "Background sweep: batch pause at %d/%d",
+                        idx + 1,
+                        len(stale_ciks),
+                    )
                     await asyncio.sleep(cache._SEC_BATCH_PAUSE)
 
             done = app.state.refresh_progress["done"]
             failed = app.state.refresh_progress["failed"]
-            logger.info("Background sweep complete: %d refreshed, %d failed", done, failed)
+            logger.info(
+                "Background sweep complete: %d refreshed, %d failed", done, failed
+            )
             app.state.refresh_status = "idle"
 
         except Exception:
@@ -512,23 +578,30 @@ async def _trigger_single_refresh(app: FastAPI, cik: str) -> None:
 
 # --- Homepage: dashboard with market data & widgets ---
 
+
 @app.get("/", response_class=HTMLResponse)
 async def homepage(request: Request):
     monthly_goal = _PANDA_FUND_MONTHLY_GOAL
     raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
     raised_this_month = min(raw_raised, monthly_goal)
-    progress_pct = min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
-    return templates.TemplateResponse("home.html", {
-        "request": request,
-        "panda_raised": raised_this_month,
-        "panda_goal": monthly_goal,
-        "panda_pct": progress_pct,
-        "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
-        "stripe_pricing_table_id": _STRIPE_PRICING_TABLE_ID,
-    })
+    progress_pct = (
+        min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
+    )
+    return templates.TemplateResponse(
+        "home.html",
+        {
+            "request": request,
+            "panda_raised": raised_this_month,
+            "panda_goal": monthly_goal,
+            "panda_pct": progress_pct,
+            "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
+            "stripe_pricing_table_id": _STRIPE_PRICING_TABLE_ID,
+        },
+    )
 
 
 # --- Superinvestors: portfolio list ---
+
 
 @app.get("/superinvestors", response_class=HTMLResponse)
 async def superinvestors_page(request: Request):
@@ -546,6 +619,7 @@ async def grand_portfolio_redirect(request: Request):
 
 
 # --- Lazy-load a single fund row (HTMX) ---
+
 
 @app.get("/api/fund-row/{cik}", response_class=HTMLResponse)
 async def fund_row(request: Request, cik: str):
@@ -569,30 +643,40 @@ async def fund_row(request: Request, cik: str):
 
     if cached:
         # Trigger background refresh if this fund is stale
-        if _ENABLE_BACKGROUND_REFRESH and cache.is_fund_stale(cached) and cik_normalized not in _refresh_in_progress:
+        if (
+            _ENABLE_BACKGROUND_REFRESH
+            and cache.is_fund_stale(cached)
+            and cik_normalized not in _refresh_in_progress
+        ):
             asyncio.create_task(_trigger_single_refresh(app, cik_normalized))
 
         top_tickers = [
             h.get("ticker") or h.get("issuer", "?")[:8]
             for h in cached.get("top_holdings", [])[:5]
         ]
-        return templates.TemplateResponse("partials/fund_row.html", {
-            "request": request,
-            "si": si,
-            "data": cached,
-            "top_tickers": top_tickers,
-        })
+        return templates.TemplateResponse(
+            "partials/fund_row.html",
+            {
+                "request": request,
+                "si": si,
+                "data": cached,
+                "top_tickers": top_tickers,
+            },
+        )
 
     # Cache miss: data not yet synced by the background worker
-    return templates.TemplateResponse("partials/fund_row_error.html", {
-        "request": request,
-        "si": si,
-        "error": "Data not yet synced. It will be available after the next sync cycle.",
-    })
-
+    return templates.TemplateResponse(
+        "partials/fund_row_error.html",
+        {
+            "request": request,
+            "si": si,
+            "error": "Data not yet synced. It will be available after the next sync cycle.",
+        },
+    )
 
 
 # --- Enhanced Holdings page ---
+
 
 @app.get("/holdings/{cik}", response_class=HTMLResponse)
 async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=200)):
@@ -614,18 +698,28 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=2
 
     if cached:
         # Trigger background refresh if this fund is stale
-        if _ENABLE_BACKGROUND_REFRESH and cache.is_fund_stale(cached) and cik not in _refresh_in_progress:
+        if (
+            _ENABLE_BACKGROUND_REFRESH
+            and cache.is_fund_stale(cached)
+            and cik not in _refresh_in_progress
+        ):
             asyncio.create_task(_trigger_single_refresh(app, cik))
 
         # ── Cache hit: build from stored data (zero SEC calls) ──
-        fund, holdings_list = client.get_enriched_holdings_from_cache(cached, cik, top_n)
+        fund, holdings_list = client.get_enriched_holdings_from_cache(
+            cached, cik, top_n
+        )
     else:
         # ── Cache miss: data not yet synced (no live SEC fallback) ──
-        return templates.TemplateResponse("error.html", {
-            "request": request,
-            "message": f"Data for this fund (CIK {cik}) has not been synced yet. "
-                       "It will be available after the next automatic sync cycle.",
-        }, status_code=404)
+        return templates.TemplateResponse(
+            "error.html",
+            {
+                "request": request,
+                "message": f"Data for this fund (CIK {cik}) has not been synced yet. "
+                "It will be available after the next automatic sync cycle.",
+            },
+            status_code=404,
+        )
 
     # Build quarterly changes with ticker enrichment
     # Merge hot quarters (from Supabase Postgres) with cold quarters
@@ -663,24 +757,30 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=2
                 enriched = dict(c)
                 enriched["ticker"] = cusip_to_ticker.get(c.get("cusip"))
                 enriched_changes.append(enriched)
-            quarterly_changes.append({
-                "period": q.get("period", ""),
-                "report_period": q.get("report_period", ""),
-                "filing_date": q.get("filing_date", ""),
-                "changes": enriched_changes,
-            })
+            quarterly_changes.append(
+                {
+                    "period": q.get("period", ""),
+                    "report_period": q.get("report_period", ""),
+                    "filing_date": q.get("filing_date", ""),
+                    "changes": enriched_changes,
+                }
+            )
 
-    return templates.TemplateResponse("investor.html", {
-        "request": request,
-        "fund": fund,
-        "holdings": holdings_list,
-        "top_n": top_n,
-        "investor_name": si.display_name if si else None,
-        "quarterly_changes": quarterly_changes,
-    })
+    return templates.TemplateResponse(
+        "investor.html",
+        {
+            "request": request,
+            "fund": fund,
+            "holdings": holdings_list,
+            "top_n": top_n,
+            "investor_name": si.display_name if si else None,
+            "quarterly_changes": quarterly_changes,
+        },
+    )
 
 
 # --- Compare page (redirects to investor page) ---
+
 
 @app.get("/compare/{cik}")
 async def compare(request: Request, cik: str):
@@ -690,6 +790,7 @@ async def compare(request: Request, cik: str):
 
 
 # --- Compare API (lazy-loaded into investor page Compare tab) ---
+
 
 @app.get("/api/compare/{cik}", response_class=HTMLResponse)
 async def compare_api(request: Request, cik: str, top_n: int = Query(25, ge=1, le=200)):
@@ -711,26 +812,36 @@ async def compare_api(request: Request, cik: str, top_n: int = Query(25, ge=1, l
         # ── Cache hit: reconstruct comparison from stored data ──
         current, previous, changes = client.get_compare_from_cache(cached, cik, top_n)
         if previous is None:
-            return templates.TemplateResponse("partials/compare_content.html", {
-                "request": request,
-                "error": "Only one quarter available — nothing to compare yet.",
-            })
+            return templates.TemplateResponse(
+                "partials/compare_content.html",
+                {
+                    "request": request,
+                    "error": "Only one quarter available — nothing to compare yet.",
+                },
+            )
     else:
         # ── Cache miss: data not yet synced (no live SEC fallback) ──
-        return templates.TemplateResponse("partials/compare_content.html", {
-            "request": request,
-            "error": "Data not yet synced. Comparison will be available after the next sync cycle.",
-        })
+        return templates.TemplateResponse(
+            "partials/compare_content.html",
+            {
+                "request": request,
+                "error": "Data not yet synced. Comparison will be available after the next sync cycle.",
+            },
+        )
 
-    return templates.TemplateResponse("partials/compare_content.html", {
-        "request": request,
-        "current": current,
-        "previous": previous,
-        "changes": changes,
-    })
+    return templates.TemplateResponse(
+        "partials/compare_content.html",
+        {
+            "request": request,
+            "current": current,
+            "previous": previous,
+            "changes": changes,
+        },
+    )
 
 
 # --- Portfolio Pie Chart Data (lazy-loaded into investor page) ---
+
 
 @app.get("/api/portfolio-chart/{cik}")
 async def portfolio_chart_data(request: Request, cik: str):
@@ -800,21 +911,24 @@ async def portfolio_chart_data(request: Request, cik: str):
         owners = ownership_map.get(t_upper, [])
         other_owners = [n for n in owners if n != current_name]
 
-        result.append({
-            "ticker": ticker or cusip[:6],
-            "issuer": h.get("issuer", ""),
-            "pct": round(pct, 2),
-            "value": h.get("value", 0),
-            "activity": activity,
-            "quarter": period,
-            "also_held_by": len(other_owners),
-            "owner_names": other_owners[:5],
-        })
+        result.append(
+            {
+                "ticker": ticker or cusip[:6],
+                "issuer": h.get("issuer", ""),
+                "pct": round(pct, 2),
+                "value": h.get("value", 0),
+                "activity": activity,
+                "quarter": period,
+                "also_held_by": len(other_owners),
+                "owner_names": other_owners[:5],
+            }
+        )
 
     return JSONResponse(content=result)
 
 
 # --- Activity Feed ---
+
 
 @app.get("/activity", response_class=HTMLResponse)
 async def activity_feed(request: Request):
@@ -823,6 +937,7 @@ async def activity_feed(request: Request):
 
 
 # --- Top Funds (formerly Grand Portfolio) ---
+
 
 @app.get("/funds", response_class=HTMLResponse)
 async def funds_page(request: Request, view: str = "funds"):
@@ -840,31 +955,36 @@ async def funds_page(request: Request, view: str = "funds"):
                 h.get("ticker") or h.get("issuer", "?")[:8]
                 for h in cached.get("top_holdings", [])[:5]
             ]
-            si_summaries.append(SuperinvestorSummary(
-                cik=si.cik,
-                display_name=si.display_name,
-                fund_name=cached.get("name", si.fund_name),
-                portfolio_value=cached.get("total_value", 0),
-                num_holdings=cached.get("total_holdings", 0),
-                top_holdings=top_tickers,
-                report_period=cached.get("report_period", ""),
-                filing_date=cached.get("filing_date", ""),
-            ))
+            si_summaries.append(
+                SuperinvestorSummary(
+                    cik=si.cik,
+                    display_name=si.display_name,
+                    fund_name=cached.get("name", si.fund_name),
+                    portfolio_value=cached.get("total_value", 0),
+                    num_holdings=cached.get("total_holdings", 0),
+                    top_holdings=top_tickers,
+                    report_period=cached.get("report_period", ""),
+                    filing_date=cached.get("filing_date", ""),
+                )
+            )
         else:
             si_summaries.append(None)
 
     if not cache_data:
-        return templates.TemplateResponse("grand_portfolio.html", {
-            "request": request,
-            "entries": [],
-            "empty": True,
-            "consensus_json": "[]",
-            "momentum_json": "[]",
-            "view": view,
-            "superinvestors": SUPERINVESTORS,
-            "summaries": si_summaries,
-            "cache_age": cache.get_cache_age_str(cache_data),
-        })
+        return templates.TemplateResponse(
+            "grand_portfolio.html",
+            {
+                "request": request,
+                "entries": [],
+                "empty": True,
+                "consensus_json": "[]",
+                "momentum_json": "[]",
+                "view": view,
+                "superinvestors": SUPERINVESTORS,
+                "summaries": si_summaries,
+                "cache_age": cache.get_cache_age_str(cache_data),
+            },
+        )
 
     entries = client.build_grand_portfolio(cache_data, SUPERINVESTORS_BY_CIK)
 
@@ -886,15 +1006,17 @@ async def funds_page(request: Request, view: str = "funds"):
         weights = ticker_weights.get(ticker_key, []) if ticker_key else []
         avg_weight = round(sum(weights) / len(weights), 2) if weights else 0
         top_holders = e.holders[:3]
-        consensus_data.append({
-            "ticker": e.ticker or e.cusip[:6],
-            "issuer": e.issuer_name,
-            "holders": e.num_holders,
-            "avg_weight": avg_weight,
-            "top_holders": top_holders,
-            "combined_value": e.combined_value,
-            "link": f"/stock/{e.ticker}" if e.ticker else None,
-        })
+        consensus_data.append(
+            {
+                "ticker": e.ticker or e.cusip[:6],
+                "issuer": e.issuer_name,
+                "holders": e.num_holders,
+                "avg_weight": avg_weight,
+                "top_holders": top_holders,
+                "combined_value": e.combined_value,
+                "link": f"/stock/{e.ticker}" if e.ticker else None,
+            }
+        )
 
     # ── Build Recent Momentum data (most added this quarter) ──
     most_added = await asyncio.to_thread(
@@ -907,31 +1029,37 @@ async def funds_page(request: Request, view: str = "funds"):
     for ma in most_added[:15]:
         ticker = ma.get("ticker") or (ma.get("cusip", "")[:6])
         is_trending = ticker.upper() in consensus_tickers if ticker else False
-        momentum_data.append({
-            "ticker": ticker,
-            "issuer": ma.get("issuer_name", ""),
-            "add_count": ma.get("add_count", 0),
-            "adders": ma.get("adders", []),
-            "total_value": ma.get("total_value", 0),
-            "is_trending": is_trending,
-            "link": f"/stock/{ma['ticker']}" if ma.get("ticker") else None,
-        })
+        momentum_data.append(
+            {
+                "ticker": ticker,
+                "issuer": ma.get("issuer_name", ""),
+                "add_count": ma.get("add_count", 0),
+                "adders": ma.get("adders", []),
+                "total_value": ma.get("total_value", 0),
+                "is_trending": is_trending,
+                "link": f"/stock/{ma['ticker']}" if ma.get("ticker") else None,
+            }
+        )
 
     # Activity feed is now lazy-loaded via HTMX → /api/activity-feed
 
-    return templates.TemplateResponse("grand_portfolio.html", {
-        "request": request,
-        "entries": entries[:100],
-        "consensus_json": json_module.dumps(consensus_data),
-        "momentum_json": json_module.dumps(momentum_data),
-        "view": view,
-        "superinvestors": SUPERINVESTORS,
-        "summaries": si_summaries,
-        "cache_age": cache.get_cache_age_str(cache_data),
-    })
+    return templates.TemplateResponse(
+        "grand_portfolio.html",
+        {
+            "request": request,
+            "entries": entries[:100],
+            "consensus_json": json_module.dumps(consensus_data),
+            "momentum_json": json_module.dumps(momentum_data),
+            "view": view,
+            "superinvestors": SUPERINVESTORS,
+            "summaries": si_summaries,
+            "cache_age": cache.get_cache_age_str(cache_data),
+        },
+    )
 
 
 # --- Stock Detail ---
+
 
 @app.get("/stock/cusip/{cusip}", response_class=HTMLResponse)
 async def stock_detail_by_cusip(request: Request, cusip: str):
@@ -961,12 +1089,15 @@ async def stock_detail_by_cusip(request: Request, cusip: str):
     else:
         stock_info = StockInfo(ticker="", issuer_name=None, cusip=cusip)
 
-    return templates.TemplateResponse("stock.html", {
-        "request": request,
-        "stock_info": stock_info,
-        "stock": detail,
-        "history": history,
-    })
+    return templates.TemplateResponse(
+        "stock.html",
+        {
+            "request": request,
+            "stock_info": stock_info,
+            "stock": detail,
+            "history": history,
+        },
+    )
 
 
 @app.get("/stock/{ticker}", response_class=HTMLResponse)
@@ -979,9 +1110,7 @@ async def stock_detail(request: Request, ticker: str):
     detail = None
     history = []
     if cache_data:
-        detail = client.build_stock_detail(
-            ticker, cache_data, SUPERINVESTORS_BY_CIK
-        )
+        detail = client.build_stock_detail(ticker, cache_data, SUPERINVESTORS_BY_CIK)
         if detail:
             history = client.build_stock_history(
                 ticker, cache_data, SUPERINVESTORS_BY_CIK
@@ -998,15 +1127,19 @@ async def stock_detail(request: Request, ticker: str):
         stock_info.cusip = detail.cusip or stock_info.cusip
         stock_info.ticker = detail.ticker or stock_info.ticker
 
-    return templates.TemplateResponse("stock.html", {
-        "request": request,
-        "stock_info": stock_info,
-        "stock": detail,
-        "history": history,
-    })
+    return templates.TemplateResponse(
+        "stock.html",
+        {
+            "request": request,
+            "stock_info": stock_info,
+            "stock": detail,
+            "history": history,
+        },
+    )
 
 
 # --- Analyst Ratings API (lazy-loaded via HTMX) ---
+
 
 @app.get("/api/analysts/{ticker}", response_class=HTMLResponse)
 async def analyst_ratings(request: Request, ticker: str):
@@ -1014,12 +1147,15 @@ async def analyst_ratings(request: Request, ticker: str):
         return PlainTextResponse("Invalid ticker", status_code=400)
     ratings = await asyncio.to_thread(analysts.get_analyst_ratings, ticker)
     consensus = analysts.get_consensus_summary(ratings)
-    return templates.TemplateResponse("partials/analyst_ratings.html", {
-        "request": request,
-        "ratings": ratings[:50],
-        "consensus": consensus,
-        "ticker": ticker.upper(),
-    })
+    return templates.TemplateResponse(
+        "partials/analyst_ratings.html",
+        {
+            "request": request,
+            "ratings": ratings[:50],
+            "consensus": consensus,
+            "ticker": ticker.upper(),
+        },
+    )
 
 
 @app.get("/api/sentiment/{ticker}", response_class=HTMLResponse)
@@ -1027,16 +1163,19 @@ async def sentiment_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
     data = await asyncio.to_thread(sentiment.get_sentiment_data, ticker)
-    return templates.TemplateResponse("partials/sentiment.html", {
-        "request": request,
-        "ticker": ticker.upper(),
-        "cnn": data.get("cnn_fear_greed"),
-        "finnhub": data.get("finnhub"),
-        "apewisdom": data.get("apewisdom"),
-        "alphavantage": data.get("alphavantage"),
-        "has_finnhub_key": sentiment.has_finnhub_key(),
-        "has_alphavantage_key": sentiment.has_alphavantage_key(),
-    })
+    return templates.TemplateResponse(
+        "partials/sentiment.html",
+        {
+            "request": request,
+            "ticker": ticker.upper(),
+            "cnn": data.get("cnn_fear_greed"),
+            "finnhub": data.get("finnhub"),
+            "apewisdom": data.get("apewisdom"),
+            "alphavantage": data.get("alphavantage"),
+            "has_finnhub_key": sentiment.has_finnhub_key(),
+            "has_alphavantage_key": sentiment.has_alphavantage_key(),
+        },
+    )
 
 
 @app.get("/api/vitals/{ticker}", response_class=HTMLResponse)
@@ -1056,18 +1195,21 @@ async def vitals_data(request: Request, ticker: str):
     #         })
 
     data = await asyncio.to_thread(vitals.get_vitals_data, ticker)
-    return templates.TemplateResponse("partials/vitals.html", {
-        "request": request,
-        "ticker": ticker.upper(),
-        "glassdoor": data.get("glassdoor"),
-        "pdl": data.get("pdl"),
-        "appstore": data.get("appstore"),
-        "has_glassdoor_key": vitals.has_glassdoor_key(),
-        "has_pdl_key": vitals.has_pdl_key(),
-        "glassdoor_age": vitals.get_glassdoor_age_str(ticker),
-        "glassdoor_quota_exhausted": vitals.get_glassdoor_quota_info()["exhausted"],
-        "pdl_quota_exhausted": vitals.get_pdl_quota_info()["exhausted"],
-    })
+    return templates.TemplateResponse(
+        "partials/vitals.html",
+        {
+            "request": request,
+            "ticker": ticker.upper(),
+            "glassdoor": data.get("glassdoor"),
+            "pdl": data.get("pdl"),
+            "appstore": data.get("appstore"),
+            "has_glassdoor_key": vitals.has_glassdoor_key(),
+            "has_pdl_key": vitals.has_pdl_key(),
+            "glassdoor_age": vitals.get_glassdoor_age_str(ticker),
+            "glassdoor_quota_exhausted": vitals.get_glassdoor_quota_info()["exhausted"],
+            "pdl_quota_exhausted": vitals.get_pdl_quota_info()["exhausted"],
+        },
+    )
 
 
 @app.get("/api/company-filings/{ticker}", response_class=HTMLResponse)
@@ -1075,27 +1217,34 @@ async def company_filings_tab(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
     filings = await asyncio.to_thread(company_filings.get_company_filings, ticker)
-    return templates.TemplateResponse("partials/company_filings.html", {
-        "request": request,
-        "filings": filings,
-        "ticker": ticker.upper(),
-    })
+    return templates.TemplateResponse(
+        "partials/company_filings.html",
+        {
+            "request": request,
+            "filings": filings,
+            "ticker": ticker.upper(),
+        },
+    )
 
 
 # --- Insider Trading ---
 
+
 @app.get("/insider-trading", response_class=HTMLResponse)
 async def insider_trading_page(request: Request):
-    return templates.TemplateResponse("insider_trading.html", {
-        "request": request,
-    })
+    return templates.TemplateResponse(
+        "insider_trading.html",
+        {
+            "request": request,
+        },
+    )
 
 
 # --- Support / Panda Fund ---
 
 # Stripe embeddable components (configured in Stripe Dashboard, no backend SDK needed)
 _STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
-_STRIPE_BUY_BUTTON_ID = os.environ.get("STRIPE_BUY_BUTTON_ID", "")        # buy_btn_...
+_STRIPE_BUY_BUTTON_ID = os.environ.get("STRIPE_BUY_BUTTON_ID", "")  # buy_btn_...
 _STRIPE_PRICING_TABLE_ID = os.environ.get("STRIPE_PRICING_TABLE_ID", "")  # prctbl_...
 
 # Feedback form link (Tally embed, or any iframe-friendly form URL)
@@ -1133,42 +1282,105 @@ async def support_page(request: Request):
     raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
     # Cap at goal for display — even if we collect more, show $400 max
     raised_this_month = min(raw_raised, monthly_goal)
-    progress_pct = min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
+    progress_pct = (
+        min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
+    )
 
     from calendar import month_name as _month_names
+
     current_month_name = _month_names[datetime.now().month]
 
-    return templates.TemplateResponse("support.html", {
-        "request": request,
-        "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
-        "stripe_buy_button_id": _STRIPE_BUY_BUTTON_ID,
-        "stripe_pricing_table_id": _STRIPE_PRICING_TABLE_ID,
-        "feedback_link": _FEEDBACK_LINK,
-        "monthly_goal": monthly_goal,
-        "raised_this_month": raised_this_month,
-        "progress_pct": progress_pct,
-        "goal_reached": raw_raised >= monthly_goal,
-        "current_month_name": current_month_name,
-        "line_items": _PANDA_FUND_LINE_ITEMS,
-        "funding_history_months": [h["month"] for h in _PANDA_FUND_HISTORY],
-        "funding_history_raised": [min(h["raised"], monthly_goal) for h in _PANDA_FUND_HISTORY],
-    })
+    return templates.TemplateResponse(
+        "support.html",
+        {
+            "request": request,
+            "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
+            "stripe_buy_button_id": _STRIPE_BUY_BUTTON_ID,
+            "stripe_pricing_table_id": _STRIPE_PRICING_TABLE_ID,
+            "feedback_link": _FEEDBACK_LINK,
+            "monthly_goal": monthly_goal,
+            "raised_this_month": raised_this_month,
+            "progress_pct": progress_pct,
+            "goal_reached": raw_raised >= monthly_goal,
+            "current_month_name": current_month_name,
+            "line_items": _PANDA_FUND_LINE_ITEMS,
+            "funding_history_months": [h["month"] for h in _PANDA_FUND_HISTORY],
+            "funding_history_raised": [
+                min(h["raised"], monthly_goal) for h in _PANDA_FUND_HISTORY
+            ],
+        },
+    )
 
 
 # --- Retail Traders (hidden — no nav link) ---
 
 _FINANCE_YOUTUBERS = [
-    {"name": "Financial Education", "channel": "https://youtube.com/@FinancialEducation", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
-    {"name": "Joseph Carlson", "channel": "https://youtube.com/@JosephCarlsonShow", "schedule": "2x/week", "topics": "Dividend Investing, Portfolio Updates"},
-    {"name": "Tevis (FunOfInvesting)", "channel": "https://youtube.com/@FunofInvesting", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
-    {"name": "MattMoney", "channel": "https://youtube.com/@RealMattMoney", "schedule": "Daily", "topics": "Investing, Market News"},
-    {"name": "Kross Roads", "channel": "https://youtube.com/@Kross_Roads", "schedule": "Daily", "topics": "Stock Analysis, Growth Investing"},
-    {"name": "Dividend Streams", "channel": "https://youtube.com/@DividendStreams", "schedule": "Daily", "topics": "Dividends, Income Investing"},
-    {"name": "Futurenvesting", "channel": "https://youtube.com/@Futurenvesting", "schedule": "Daily", "topics": "Investing, Future Trends"},
-    {"name": "Amit Investing", "channel": "https://youtube.com/@amitinvesting", "schedule": "Daily", "topics": "Stock Picks, Market Analysis"},
-    {"name": "Couch Investor", "channel": "https://youtube.com/@couch_Investor", "schedule": "Daily", "topics": "Investing, Portfolio Strategy"},
-    {"name": "Endicott Invests", "channel": "https://youtube.com/@EndicottInvests", "schedule": "Daily", "topics": "Stock Analysis, Investing"},
-    {"name": "Kris Patel", "channel": "https://youtube.com/@KrisPatel99", "schedule": "Daily", "topics": "Stock Picks, Market News"},
+    {
+        "name": "Financial Education",
+        "channel": "https://youtube.com/@FinancialEducation",
+        "schedule": "Daily",
+        "topics": "Stock Picks, Market Analysis",
+    },
+    {
+        "name": "Joseph Carlson",
+        "channel": "https://youtube.com/@JosephCarlsonShow",
+        "schedule": "2x/week",
+        "topics": "Dividend Investing, Portfolio Updates",
+    },
+    {
+        "name": "Tevis (FunOfInvesting)",
+        "channel": "https://youtube.com/@FunofInvesting",
+        "schedule": "Daily",
+        "topics": "Stock Picks, Market Analysis",
+    },
+    {
+        "name": "MattMoney",
+        "channel": "https://youtube.com/@RealMattMoney",
+        "schedule": "Daily",
+        "topics": "Investing, Market News",
+    },
+    {
+        "name": "Kross Roads",
+        "channel": "https://youtube.com/@Kross_Roads",
+        "schedule": "Daily",
+        "topics": "Stock Analysis, Growth Investing",
+    },
+    {
+        "name": "Dividend Streams",
+        "channel": "https://youtube.com/@DividendStreams",
+        "schedule": "Daily",
+        "topics": "Dividends, Income Investing",
+    },
+    {
+        "name": "Futurenvesting",
+        "channel": "https://youtube.com/@Futurenvesting",
+        "schedule": "Daily",
+        "topics": "Investing, Future Trends",
+    },
+    {
+        "name": "Amit Investing",
+        "channel": "https://youtube.com/@amitinvesting",
+        "schedule": "Daily",
+        "topics": "Stock Picks, Market Analysis",
+    },
+    {
+        "name": "Couch Investor",
+        "channel": "https://youtube.com/@couch_Investor",
+        "schedule": "Daily",
+        "topics": "Investing, Portfolio Strategy",
+    },
+    {
+        "name": "Endicott Invests",
+        "channel": "https://youtube.com/@EndicottInvests",
+        "schedule": "Daily",
+        "topics": "Stock Analysis, Investing",
+    },
+    {
+        "name": "Kris Patel",
+        "channel": "https://youtube.com/@KrisPatel99",
+        "schedule": "Daily",
+        "topics": "Stock Picks, Market News",
+    },
 ]
 
 
@@ -1186,7 +1398,9 @@ async def retail_page(request: Request, view: str = "sentiment"):
     if apewisdom:
         best = max(
             apewisdom,
-            key=lambda s: (s.get("rank_24h_ago") or s.get("rank", 0)) - s.get("rank", 0),
+            key=lambda s: (
+                (s.get("rank_24h_ago") or s.get("rank", 0)) - s.get("rank", 0)
+            ),
             default=None,
         )
         if best and (best.get("rank_24h_ago") or 0) > best.get("rank", 0):
@@ -1197,16 +1411,19 @@ async def retail_page(request: Request, view: str = "sentiment"):
     # High-impact YouTube events for toast notifications
     high_impact_events = await asyncio.to_thread(youtube.get_high_impact_events, 9)
 
-    return templates.TemplateResponse("retail.html", {
-        "request": request,
-        "view": view,
-        "fear_greed": fear_greed,
-        "top_stocks": top_stocks,
-        "biggest_mover": biggest_mover,
-        "youtubers": _FINANCE_YOUTUBERS,
-        "has_guru_data": has_guru_data,
-        "high_impact_events": high_impact_events,
-    })
+    return templates.TemplateResponse(
+        "retail.html",
+        {
+            "request": request,
+            "view": view,
+            "fear_greed": fear_greed,
+            "top_stocks": top_stocks,
+            "biggest_mover": biggest_mover,
+            "youtubers": _FINANCE_YOUTUBERS,
+            "has_guru_data": has_guru_data,
+            "high_impact_events": high_impact_events,
+        },
+    )
 
 
 @app.get("/api/retail/leaderboard", response_class=HTMLResponse)
@@ -1214,13 +1431,18 @@ async def retail_leaderboard_api(request: Request):
     all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
     fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
     ownership_map = _get_ownership_map()
-    enriched = sentiment.build_retail_leaderboard_data(all_data, ownership_map, fear_greed)
-    return templates.TemplateResponse("partials/retail_leaderboard_v2.html", {
-        "request": request,
-        "rows": enriched["leaderboard_rows"],
-        "fear_greed": fear_greed,
-        "metadata": enriched["metadata"],
-    })
+    enriched = sentiment.build_retail_leaderboard_data(
+        all_data, ownership_map, fear_greed
+    )
+    return templates.TemplateResponse(
+        "partials/retail_leaderboard_v2.html",
+        {
+            "request": request,
+            "rows": enriched["leaderboard_rows"],
+            "fear_greed": fear_greed,
+            "metadata": enriched["metadata"],
+        },
+    )
 
 
 @app.get("/api/retail/leaderboard-data")
@@ -1229,7 +1451,9 @@ async def retail_leaderboard_data(request: Request):
     all_data = await asyncio.to_thread(sentiment._get_apewisdom_all)
     fear_greed = await asyncio.to_thread(sentiment._get_cnn_fear_greed)
     ownership_map = _get_ownership_map()
-    result = sentiment.build_retail_leaderboard_data(all_data, ownership_map, fear_greed)
+    result = sentiment.build_retail_leaderboard_data(
+        all_data, ownership_map, fear_greed
+    )
     return JSONResponse(content=result)
 
 
@@ -1256,14 +1480,17 @@ async def retail_calendar_api(request: Request):
         upl["channel_thumbnail"] = ch_thumbs.get(upl.get("channel_id", ""), "")
 
     calendar_data = youtube.build_calendar_data(events, channels, recent)
-    return templates.TemplateResponse("partials/retail_calendar.html", {
-        "request": request,
-        "events": calendar_data["events"],
-        "channels": calendar_data["channels"],
-        "recent_uploads": calendar_data["recent_uploads"],
-        "stats": calendar_data["stats"],
-        "high_impact": calendar_data["high_impact"],
-    })
+    return templates.TemplateResponse(
+        "partials/retail_calendar.html",
+        {
+            "request": request,
+            "events": calendar_data["events"],
+            "channels": calendar_data["channels"],
+            "recent_uploads": calendar_data["recent_uploads"],
+            "stats": calendar_data["stats"],
+            "high_impact": calendar_data["high_impact"],
+        },
+    )
 
 
 @app.get("/api/retail/calendar-data")
@@ -1297,28 +1524,33 @@ async def insider_trades_api(request: Request, filter: str = "all"):
     chart_data = await asyncio.to_thread(
         insider_trading.get_insider_chart_data, 10, trade_type
     )
-    return templates.TemplateResponse("partials/insider_trades.html", {
-        "request": request,
-        "trades": trades,
-        "chart_data_json": json_module.dumps(chart_data),
-    })
+    return templates.TemplateResponse(
+        "partials/insider_trades.html",
+        {
+            "request": request,
+            "trades": trades,
+            "chart_data_json": json_module.dumps(chart_data),
+        },
+    )
 
 
 @app.get("/api/insider-trades/{ticker}", response_class=HTMLResponse)
 async def stock_insider_trades_api(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
-    trades = await asyncio.to_thread(
-        insider_trading.get_ticker_insider_trades, ticker
+    trades = await asyncio.to_thread(insider_trading.get_ticker_insider_trades, ticker)
+    return templates.TemplateResponse(
+        "partials/stock_insider_trades.html",
+        {
+            "request": request,
+            "trades": trades,
+            "ticker": ticker.upper(),
+        },
     )
-    return templates.TemplateResponse("partials/stock_insider_trades.html", {
-        "request": request,
-        "trades": trades,
-        "ticker": ticker.upper(),
-    })
 
 
 # --- Market Data API (heatmap, most-added, ticker search) ---
+
 
 @app.get("/api/ticker-search-index")
 async def ticker_search_index(request: Request):
@@ -1327,7 +1559,11 @@ async def ticker_search_index(request: Request):
     # Strip fields the client doesn't need to reduce payload (~8000 items)
     slim = []
     for item in data:
-        entry: dict = {"ticker": item["ticker"], "name": item["name"], "type": item["type"]}
+        entry: dict = {
+            "ticker": item["ticker"],
+            "name": item["name"],
+            "type": item["type"],
+        }
         if item.get("held_by_super"):
             entry["held_by_super"] = True
         if item.get("in_sp500"):
@@ -1343,6 +1579,7 @@ async def ticker_search_index(request: Request):
 
 
 # --- Activity Feed Intelligence Dashboard (HTMX partial) ---
+
 
 @app.get("/api/activity-feed", response_class=HTMLResponse)
 async def api_activity_feed(
@@ -1370,7 +1607,7 @@ async def api_activity_feed(
     if not cache_data:
         return HTMLResponse(
             '<article><p class="text-muted">No activity data available yet. '
-            'Data will load as superinvestor portfolios are cached.</p></article>'
+            "Data will load as superinvestor portfolios are cached.</p></article>"
         )
 
     clusters = []
@@ -1394,6 +1631,7 @@ async def api_activity_feed(
 
             # Reconstruct dataclass instances from dicts
             from filings.models import EnrichedActivityItem, ActivityCluster
+
             solo_items = []
             for s in solo_raw:
                 s.setdefault("fund_total_holdings", 0)
@@ -1433,7 +1671,11 @@ async def api_activity_feed(
 
         clusters, solo_items, stats = await asyncio.to_thread(
             client.build_enriched_activity_feed,
-            cache_data, SUPERINVESTORS_BY_CIK, price_data, timeframe, ptype,
+            cache_data,
+            SUPERINVESTORS_BY_CIK,
+            price_data,
+            timeframe,
+            ptype,
         )
 
         has_prices = bool(price_data)
@@ -1441,10 +1683,13 @@ async def api_activity_feed(
         # ── Cache to Supabase ──
         try:
             from dataclasses import asdict
+
             serialized = {
                 "clusters": [
-                    {**{k: v for k, v in asdict(c).items() if k != "items"},
-                     "items": [asdict(i) for i in c.items]}
+                    {
+                        **{k: v for k, v in asdict(c).items() if k != "items"},
+                        "items": [asdict(i) for i in c.items],
+                    }
                     for c in clusters
                 ],
                 "solo_items": [asdict(i) for i in solo_items],
@@ -1463,7 +1708,7 @@ async def api_activity_feed(
     # ── Paginate solo_items ──
     total_solo = len(solo_items)
     start = (page - 1) * PER_PAGE
-    paginated_solo = solo_items[start:start + PER_PAGE]
+    paginated_solo = solo_items[start : start + PER_PAGE]
     has_more = (start + PER_PAGE) < total_solo
     next_page = page + 1 if has_more else None
 
@@ -1497,9 +1742,9 @@ async def heatmap(request: Request, period: str = "1D"):
 
     if not getattr(app.state, "market_data_ready", False):
         return HTMLResponse(
-            '<article>'
+            "<article>"
             '<p aria-busy="true">Loading S&P 500 market data (first load takes ~30s)...</p>'
-            '</article>'
+            "</article>"
             '<div hx-get="/api/heatmap" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
         )
 
@@ -1514,15 +1759,20 @@ async def heatmap(request: Request, period: str = "1D"):
     ownership_map = _get_ownership_map()
     super_ticker_counts = {t: len(holders) for t, holders in ownership_map.items()}
 
-    heatmap_data = market_data.build_heatmap_data(mkt, constituents, super_ticker_counts)
+    heatmap_data = market_data.build_heatmap_data(
+        mkt, constituents, super_ticker_counts
+    )
     metadata = mkt.get("_metadata", {})
 
-    return templates.TemplateResponse("partials/heatmap.html", {
-        "request": request,
-        "heatmap_json": json_module.dumps(heatmap_data),
-        "metadata": metadata,
-        "period": period,
-    })
+    return templates.TemplateResponse(
+        "partials/heatmap.html",
+        {
+            "request": request,
+            "heatmap_json": json_module.dumps(heatmap_data),
+            "metadata": metadata,
+            "period": period,
+        },
+    )
 
 
 @app.get("/api/most-added", response_class=HTMLResponse)
@@ -1561,6 +1811,7 @@ async def most_added(request: Request):
             stale_tickers.append(t)
 
     if stale_tickers:
+
         async def _lookup_consensus(t: str) -> tuple[str, dict | None]:
             try:
                 ratings = await asyncio.to_thread(analysts.get_analyst_ratings, t)
@@ -1590,15 +1841,19 @@ async def most_added(request: Request):
             entry["range_low"] = None
             entry["range_high"] = None
 
-    return templates.TemplateResponse("partials/most_added.html", {
-        "request": request,
-        "entries": entries,
-    })
+    return templates.TemplateResponse(
+        "partials/most_added.html",
+        {
+            "request": request,
+            "entries": entries,
+        },
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Authentication pages
 # ═══════════════════════════════════════════════════════════════════════
+
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
@@ -1651,14 +1906,22 @@ async def set_session(request: Request):
 
     response = JSONResponse({"ok": True})
     response.set_cookie(
-        "sb-access-token", access_token,
-        max_age=int(expires_in), path="/",
-        httponly=True, secure=True, samesite="lax",
+        "sb-access-token",
+        access_token,
+        max_age=int(expires_in),
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
     )
     response.set_cookie(
-        "sb-refresh-token", refresh_token,
-        max_age=604800, path="/",
-        httponly=True, secure=True, samesite="lax",
+        "sb-refresh-token",
+        refresh_token,
+        max_age=604800,
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="lax",
     )
     return response
 
@@ -1678,6 +1941,7 @@ async def clear_session(request: Request):
 # ═══════════════════════════════════════════════════════════════════════
 # Infrastructure endpoints
 # ═══════════════════════════════════════════════════════════════════════
+
 
 @app.get("/health")
 async def health_check(request: Request):
@@ -1706,27 +1970,30 @@ async def health_detail(request: Request):
     # Count stale funds for observability
     all_ciks = [si.cik for si in SUPERINVESTORS]
     stale_count = sum(
-        1 for cik in all_ciks
+        1
+        for cik in all_ciks
         if cik not in cache_data or cache.is_fund_stale(cache_data.get(cik, {}))
     )
 
-    return JSONResponse({
-        "status": "ok",
-        "uptime_seconds": uptime,
-        "cache_entries": len(cache_data),
-        "cache_age": cache.get_cache_age_str(cache_data),
-        "total_funds": len(SUPERINVESTORS),
-        "stale_funds": stale_count,
-        "market_data_ready": getattr(app.state, "market_data_ready", False),
-        "supabase_connected": supabase_cache.is_available(),
-        "background_refresh": {
-            "enabled": _ENABLE_BACKGROUND_REFRESH,
-            "status": getattr(app.state, "refresh_status", "unknown"),
-            "progress": getattr(app.state, "refresh_progress", {}),
-            "in_progress_ciks": len(_refresh_in_progress),
-        },
-        "vitals_cache": vitals.get_vitals_cache_info(),
-    })
+    return JSONResponse(
+        {
+            "status": "ok",
+            "uptime_seconds": uptime,
+            "cache_entries": len(cache_data),
+            "cache_age": cache.get_cache_age_str(cache_data),
+            "total_funds": len(SUPERINVESTORS),
+            "stale_funds": stale_count,
+            "market_data_ready": getattr(app.state, "market_data_ready", False),
+            "supabase_connected": supabase_cache.is_available(),
+            "background_refresh": {
+                "enabled": _ENABLE_BACKGROUND_REFRESH,
+                "status": getattr(app.state, "refresh_status", "unknown"),
+                "progress": getattr(app.state, "refresh_progress", {}),
+                "in_progress_ciks": len(_refresh_in_progress),
+            },
+            "vitals_cache": vitals.get_vitals_cache_info(),
+        }
+    )
 
 
 @app.get("/robots.txt")
@@ -1761,7 +2028,8 @@ async def sitemap_xml():
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        + "\n".join(urls) + "\n"
+        + "\n".join(urls)
+        + "\n"
         "</urlset>\n"
     )
     return PlainTextResponse(xml, media_type="application/xml")
@@ -1811,6 +2079,7 @@ if _has_limiter:
 # ═══════════════════════════════════════════════════════════════════════
 # Entry point
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def main():
     """Entry point for `uv run filings-web`."""

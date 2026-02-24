@@ -116,18 +116,52 @@ _CHANNELS: dict[str, dict] = {
 # ── Ticker + Company Name Parsing ────────────────────────────────────
 
 _COMPANY_TO_TICKER: dict[str, str] = {
-    "tesla": "TSLA", "apple": "AAPL", "amazon": "AMZN", "google": "GOOGL",
-    "alphabet": "GOOGL", "microsoft": "MSFT", "nvidia": "NVDA", "meta": "META",
-    "facebook": "META", "netflix": "NFLX", "amd": "AMD", "intel": "INTC",
-    "palantir": "PLTR", "coinbase": "COIN", "sofi": "SOFI", "rivian": "RIVN",
-    "lucid": "LCID", "nio": "NIO", "disney": "DIS", "berkshire": "BRK.B",
-    "boeing": "BA", "walmart": "WMT", "costco": "COST", "jpmorgan": "JPM",
-    "goldman": "GS", "paypal": "PYPL", "shopify": "SHOP", "snowflake": "SNOW",
-    "crowdstrike": "CRWD", "datadog": "DDOG", "robinhood": "HOOD",
-    "gamestop": "GME", "amc": "AMC", "spotify": "SPOT", "uber": "UBER",
-    "airbnb": "ABNB", "block": "SQ", "square": "SQ", "broadcom": "AVGO",
-    "salesforce": "CRM", "roku": "ROKU", "snap": "SNAP", "pinterest": "PINS",
-    "roblox": "RBLX", "draftkings": "DKNG", "affirm": "AFRM",
+    "tesla": "TSLA",
+    "apple": "AAPL",
+    "amazon": "AMZN",
+    "google": "GOOGL",
+    "alphabet": "GOOGL",
+    "microsoft": "MSFT",
+    "nvidia": "NVDA",
+    "meta": "META",
+    "facebook": "META",
+    "netflix": "NFLX",
+    "amd": "AMD",
+    "intel": "INTC",
+    "palantir": "PLTR",
+    "coinbase": "COIN",
+    "sofi": "SOFI",
+    "rivian": "RIVN",
+    "lucid": "LCID",
+    "nio": "NIO",
+    "disney": "DIS",
+    "berkshire": "BRK.B",
+    "boeing": "BA",
+    "walmart": "WMT",
+    "costco": "COST",
+    "jpmorgan": "JPM",
+    "goldman": "GS",
+    "paypal": "PYPL",
+    "shopify": "SHOP",
+    "snowflake": "SNOW",
+    "crowdstrike": "CRWD",
+    "datadog": "DDOG",
+    "robinhood": "HOOD",
+    "gamestop": "GME",
+    "amc": "AMC",
+    "spotify": "SPOT",
+    "uber": "UBER",
+    "airbnb": "ABNB",
+    "block": "SQ",
+    "square": "SQ",
+    "broadcom": "AVGO",
+    "salesforce": "CRM",
+    "roku": "ROKU",
+    "snap": "SNAP",
+    "pinterest": "PINS",
+    "roblox": "RBLX",
+    "draftkings": "DKNG",
+    "affirm": "AFRM",
 }
 
 # Cashtag regex: $TSLA, $aapl (1-5 letters after $)
@@ -162,19 +196,60 @@ def parse_tickers(title: str) -> list[str]:
 # ── Sentiment Classification ─────────────────────────────────────────
 
 _BULLISH_KEYWORDS = [
-    "buy", "buying", "bullish", "moon", "mooning", "rocket",
-    "surge", "surging", "rally", "breakout", "upside", "opportunity",
-    "undervalued", "all-in", "going up", "massive gains", "short squeeze",
-    "to the moon", "long", "accumulate", "bargain", "dip buy",
-    "buy the dip", "price target raised", "upgrade",
+    "buy",
+    "buying",
+    "bullish",
+    "moon",
+    "mooning",
+    "rocket",
+    "surge",
+    "surging",
+    "rally",
+    "breakout",
+    "upside",
+    "opportunity",
+    "undervalued",
+    "all-in",
+    "going up",
+    "massive gains",
+    "short squeeze",
+    "to the moon",
+    "long",
+    "accumulate",
+    "bargain",
+    "dip buy",
+    "buy the dip",
+    "price target raised",
+    "upgrade",
 ]
 
 _BEARISH_KEYWORDS = [
-    "sell", "selling", "bearish", "crash", "crashing", "dump", "dumping",
-    "collapse", "bubble", "overvalued", "short", "shorting", "warning",
-    "danger", "avoid", "panic", "plunge", "plummeting", "downgrade",
-    "price target cut", "going down", "falling", "recession",
-    "bear market", "get out", "liquidate",
+    "sell",
+    "selling",
+    "bearish",
+    "crash",
+    "crashing",
+    "dump",
+    "dumping",
+    "collapse",
+    "bubble",
+    "overvalued",
+    "short",
+    "shorting",
+    "warning",
+    "danger",
+    "avoid",
+    "panic",
+    "plunge",
+    "plummeting",
+    "downgrade",
+    "price target cut",
+    "going down",
+    "falling",
+    "recession",
+    "bear market",
+    "get out",
+    "liquidate",
 ]
 
 
@@ -279,20 +354,22 @@ def _fetch_channel_stats(channel_ids: list[str]) -> dict[str, dict]:
     Returns {channel_id: {subscriber_count, view_count, video_count, thumbnail_url}}.
     """
     result: dict[str, dict] = {}
-    data = _yt_get("channels", {
-        "part": "snippet,statistics",
-        "id": ",".join(channel_ids),
-    })
+    data = _yt_get(
+        "channels",
+        {
+            "part": "snippet,statistics",
+            "id": ",".join(channel_ids),
+        },
+    )
     if data and "items" in data:
         for item in data["items"]:
             cid = item["id"]
             stats = item.get("statistics", {})
             snippet = item.get("snippet", {})
             thumbnails = snippet.get("thumbnails", {})
-            thumb_url = (
-                thumbnails.get("default", {}).get("url", "")
-                or thumbnails.get("medium", {}).get("url", "")
-            )
+            thumb_url = thumbnails.get("default", {}).get("url", "") or thumbnails.get(
+                "medium", {}
+            ).get("url", "")
             result[cid] = {
                 "subscriber_count": int(stats.get("subscriberCount", 0)),
                 "view_count": int(stats.get("viewCount", 0)),
@@ -302,7 +379,9 @@ def _fetch_channel_stats(channel_ids: list[str]) -> dict[str, dict]:
     return result
 
 
-def _fetch_recent_activities(channel_id: str, channel_name: str, days: int = 2) -> list[dict]:
+def _fetch_recent_activities(
+    channel_id: str, channel_name: str, days: int = 2
+) -> list[dict]:
     """Fetch recent uploads via activities.list (1 unit per call).
 
     Returns a list of dicts with video metadata for each upload:
@@ -312,12 +391,15 @@ def _fetch_recent_activities(channel_id: str, channel_name: str, days: int = 2) 
     API structure for upload-type activities.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    data = _yt_get("activities", {
-        "part": "snippet,contentDetails",
-        "channelId": channel_id,
-        "publishedAfter": cutoff,
-        "maxResults": 50,
-    })
+    data = _yt_get(
+        "activities",
+        {
+            "part": "snippet,contentDetails",
+            "channelId": channel_id,
+            "publishedAfter": cutoff,
+            "maxResults": 50,
+        },
+    )
     results: list[dict] = []
     if data and "items" in data:
         for it in data["items"]:
@@ -334,27 +416,32 @@ def _fetch_recent_activities(channel_id: str, channel_name: str, days: int = 2) 
                 or thumbnails.get("medium", {}).get("url")
                 or thumbnails.get("default", {}).get("url", "")
             )
-            results.append({
-                "video_id": video_id,
-                "title": snippet.get("title", ""),
-                "thumbnail_url": thumb_url,
-                "published_at": snippet.get("publishedAt", ""),
-                "channel_id": channel_id,
-                "channel_name": channel_name,
-            })
+            results.append(
+                {
+                    "video_id": video_id,
+                    "title": snippet.get("title", ""),
+                    "thumbnail_url": thumb_url,
+                    "published_at": snippet.get("publishedAt", ""),
+                    "channel_id": channel_id,
+                    "channel_name": channel_name,
+                }
+            )
     return results
 
 
 def _fetch_upcoming_videos(channel_id: str) -> list[dict]:
     """Search for upcoming live streams on a channel (100 units per call)."""
-    data = _yt_get("search", {
-        "part": "snippet",
-        "channelId": channel_id,
-        "type": "video",
-        "eventType": "upcoming",
-        "maxResults": 10,
-        "order": "date",
-    })
+    data = _yt_get(
+        "search",
+        {
+            "part": "snippet",
+            "channelId": channel_id,
+            "type": "video",
+            "eventType": "upcoming",
+            "maxResults": 10,
+            "order": "date",
+        },
+    )
     if data and "items" in data:
         return data["items"]
     return []
@@ -390,10 +477,13 @@ def _fetch_video_details(video_ids: list[str]) -> dict[str, dict]:
     result: dict[str, dict] = {}
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i : i + 50]
-        data = _yt_get("videos", {
-            "part": "contentDetails,liveStreamingDetails,statistics,snippet",
-            "id": ",".join(batch),
-        })
+        data = _yt_get(
+            "videos",
+            {
+                "part": "contentDetails,liveStreamingDetails,statistics,snippet",
+                "id": ",".join(batch),
+            },
+        )
         if data and "items" in data:
             for item in data["items"]:
                 vid = item["id"]
@@ -433,7 +523,9 @@ def sync_youtube_events() -> dict:
 
     # 1. Batch fetch channel stats (1 API unit total)
     channel_stats = _fetch_channel_stats(channel_ids)
-    logger.info("Fetched stats for %d/%d channels", len(channel_stats), len(channel_ids))
+    logger.info(
+        "Fetched stats for %d/%d channels", len(channel_stats), len(channel_ids)
+    )
 
     # Update youtube_channels table
     channel_rows: list[dict] = []
@@ -442,17 +534,19 @@ def sync_youtube_events() -> dict:
         stats = channel_stats.get(cid, {})
         total_views = stats.get("view_count", 0)
         video_count = max(stats.get("video_count", 1), 1)
-        channel_rows.append({
-            "channel_id": cid,
-            "channel_name": info["name"],
-            "handle": info["handle"],
-            "subscriber_count": stats.get("subscriber_count", 0),
-            "avg_views_30d": total_views // video_count,
-            "avg_posts_per_week": info["baseline_posts_per_week"],
-            "thumbnail_url": stats.get("thumbnail_url", ""),
-            "last_polled_at": now_iso,
-            "updated_at": now_iso,
-        })
+        channel_rows.append(
+            {
+                "channel_id": cid,
+                "channel_name": info["name"],
+                "handle": info["handle"],
+                "subscriber_count": stats.get("subscriber_count", 0),
+                "avg_views_30d": total_views // video_count,
+                "avg_posts_per_week": info["baseline_posts_per_week"],
+                "thumbnail_url": stats.get("thumbnail_url", ""),
+                "last_polled_at": now_iso,
+                "updated_at": now_iso,
+            }
+        )
     supabase_cache.upsert_youtube_channels(channel_rows)
 
     # 2. Per-channel: search upcoming + fetch recent activities
@@ -465,26 +559,30 @@ def sync_youtube_events() -> dict:
         upcoming = _fetch_upcoming_videos(cid)
         logger.info(
             "Channel %s (%s): %d upcoming videos",
-            info["name"], cid[:8], len(upcoming),
+            info["name"],
+            cid[:8],
+            len(upcoming),
         )
 
         # 2b. Fetch recent activities for frequency alert + recent uploads (1 unit)
         recent_activities = _fetch_recent_activities(cid, info["name"], days=2)
         recent_count = len(recent_activities)
         freq_alert, freq_detail = check_frequency_alert(
-            recent_count, 2, info["baseline_posts_per_week"],
+            recent_count,
+            2,
+            info["baseline_posts_per_week"],
         )
         if freq_alert:
             logger.info("Frequency alert for %s: %s", info["name"], freq_detail)
 
         # 2c. Collect all video IDs (upcoming + recent uploads) for batch detail fetch
         upcoming_vids = [
-            it["id"]["videoId"]
-            for it in upcoming
-            if "videoId" in it.get("id", {})
+            it["id"]["videoId"] for it in upcoming if "videoId" in it.get("id", {})
         ]
         upload_vids = [act["video_id"] for act in recent_activities]
-        all_vids = list(dict.fromkeys(upcoming_vids + upload_vids))  # dedupe, preserve order
+        all_vids = list(
+            dict.fromkeys(upcoming_vids + upload_vids)
+        )  # dedupe, preserve order
         video_details = _fetch_video_details(all_vids) if all_vids else {}
 
         # 2d. Build event rows (upcoming streams)
@@ -500,10 +598,9 @@ def sync_youtube_events() -> dict:
 
             snippet = item.get("snippet", {})
             title = snippet.get("title", "")
-            thumbnail = (
-                snippet.get("thumbnails", {}).get("high", {}).get("url")
-                or snippet.get("thumbnails", {}).get("default", {}).get("url", "")
-            )
+            thumbnail = snippet.get("thumbnails", {}).get("high", {}).get(
+                "url"
+            ) or snippet.get("thumbnails", {}).get("default", {}).get("url", "")
 
             details = video_details.get(vid, {})
             scheduled_at = details.get("scheduled_at")
@@ -512,26 +609,28 @@ def sync_youtube_events() -> dict:
             sent = classify_sentiment(title)
             impact = compute_impact_score(sub_count, avg_views)
 
-            all_event_rows.append({
-                "video_id": vid,
-                "channel_id": cid,
-                "channel_name": info["name"],
-                "title": title,
-                "scheduled_at": scheduled_at,
-                "event_type": "upcoming",
-                "sentiment": sent,
-                "tickers": tickers,
-                "impact_score": impact,
-                "subscriber_count": sub_count,
-                "avg_views": avg_views,
-                "frequency_alert": freq_alert,
-                "frequency_detail": freq_detail if freq_alert else "",
-                "thumbnail_url": thumbnail,
-                "video_url": f"https://www.youtube.com/watch?v={vid}",
-                "duration": details.get("duration", ""),
-                "content_type": details.get("content_type", "upcoming"),
-                "updated_at": now_iso,
-            })
+            all_event_rows.append(
+                {
+                    "video_id": vid,
+                    "channel_id": cid,
+                    "channel_name": info["name"],
+                    "title": title,
+                    "scheduled_at": scheduled_at,
+                    "event_type": "upcoming",
+                    "sentiment": sent,
+                    "tickers": tickers,
+                    "impact_score": impact,
+                    "subscriber_count": sub_count,
+                    "avg_views": avg_views,
+                    "frequency_alert": freq_alert,
+                    "frequency_detail": freq_detail if freq_alert else "",
+                    "thumbnail_url": thumbnail,
+                    "video_url": f"https://www.youtube.com/watch?v={vid}",
+                    "duration": details.get("duration", ""),
+                    "content_type": details.get("content_type", "upcoming"),
+                    "updated_at": now_iso,
+                }
+            )
             total_videos_found += 1
 
         # 2e. Build recent upload rows (from activities data)
@@ -543,32 +642,38 @@ def sync_youtube_events() -> dict:
             sent = classify_sentiment(title)
             impact = compute_impact_score(sub_count, avg_views)
 
-            all_upload_rows.append({
-                "video_id": vid,
-                "channel_id": cid,
-                "channel_name": info["name"],
-                "title": title,
-                "scheduled_at": act["published_at"],  # reuse column for chronological ordering
-                "event_type": "recent_upload",
-                "sentiment": sent,
-                "tickers": tickers,
-                "impact_score": impact,
-                "subscriber_count": sub_count,
-                "avg_views": avg_views,
-                "frequency_alert": freq_alert,
-                "frequency_detail": freq_detail if freq_alert else "",
-                "thumbnail_url": act["thumbnail_url"],
-                "video_url": f"https://www.youtube.com/watch?v={vid}",
-                "duration": details.get("duration", ""),
-                "content_type": details.get("content_type", "video"),
-                "updated_at": now_iso,
-            })
+            all_upload_rows.append(
+                {
+                    "video_id": vid,
+                    "channel_id": cid,
+                    "channel_name": info["name"],
+                    "title": title,
+                    "scheduled_at": act[
+                        "published_at"
+                    ],  # reuse column for chronological ordering
+                    "event_type": "recent_upload",
+                    "sentiment": sent,
+                    "tickers": tickers,
+                    "impact_score": impact,
+                    "subscriber_count": sub_count,
+                    "avg_views": avg_views,
+                    "frequency_alert": freq_alert,
+                    "frequency_detail": freq_detail if freq_alert else "",
+                    "thumbnail_url": act["thumbnail_url"],
+                    "video_url": f"https://www.youtube.com/watch?v={vid}",
+                    "duration": details.get("duration", ""),
+                    "content_type": details.get("content_type", "video"),
+                    "updated_at": now_iso,
+                }
+            )
 
         time.sleep(_DELAY_BETWEEN_CHANNELS)
 
     # 3. Upsert all events (upcoming + recent uploads)
     combined_rows = all_event_rows + all_upload_rows
-    upserted = supabase_cache.upsert_youtube_events(combined_rows) if combined_rows else 0
+    upserted = (
+        supabase_cache.upsert_youtube_events(combined_rows) if combined_rows else 0
+    )
     total_videos_found += len(all_upload_rows)
 
     errors: list[str] = []
@@ -586,7 +691,10 @@ def sync_youtube_events() -> dict:
     logger.info(
         "YouTube sync complete: %d upcoming + %d recent uploads found, "
         "%d upserted across %d channels",
-        len(all_event_rows), len(all_upload_rows), upserted, len(_CHANNELS),
+        len(all_event_rows),
+        len(all_upload_rows),
+        upserted,
+        len(_CHANNELS),
     )
     return {
         "upcoming_found": len(all_event_rows),
