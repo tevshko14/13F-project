@@ -390,27 +390,37 @@ def get_fund_age_str(fund_data: dict) -> str:
 
 # ── SEC Rate Limiting ────────────────────────────────────────────────
 # Guard against excessive SEC API calls during deploys / background refreshes.
+# Each Gunicorn worker is a separate process with its own copy of this module,
+# so we divide the global session budget by the worker count to avoid all
+# workers collectively exceeding SEC rate limits.
+import threading as _threading
+
+_sec_calls_lock = _threading.Lock()
 _sec_calls_this_session = 0
-_SEC_MAX_CALLS_PER_SESSION = int(os.environ.get("SEC_MAX_CALLS", "200"))
+_WEB_WORKERS = max(1, int(os.environ.get("WEB_WORKERS", "4")))
+_SEC_MAX_CALLS_PER_SESSION = int(os.environ.get("SEC_MAX_CALLS", "200")) // _WEB_WORKERS
 _SEC_BATCH_SIZE = 10  # Pause after every N funds
 _SEC_BATCH_PAUSE = 5  # Seconds to pause between batches
 
 
 def _check_sec_rate_limit() -> bool:
     """Return True if we're OK to make another SEC API call."""
-    if _sec_calls_this_session >= _SEC_MAX_CALLS_PER_SESSION:
-        logger.warning(
-            "SEC session call limit reached (%d) — stopping further requests",
-            _SEC_MAX_CALLS_PER_SESSION,
-        )
-        return False
+    with _sec_calls_lock:
+        if _sec_calls_this_session >= _SEC_MAX_CALLS_PER_SESSION:
+            logger.warning(
+                "SEC session call limit reached (%d per worker, %d workers) — stopping further requests",
+                _SEC_MAX_CALLS_PER_SESSION,
+                _WEB_WORKERS,
+            )
+            return False
     return True
 
 
 def _record_sec_call() -> None:
-    """Record that we made a SEC API call."""
+    """Record that we made a SEC API call (thread-safe)."""
     global _sec_calls_this_session
-    _sec_calls_this_session += 1
+    with _sec_calls_lock:
+        _sec_calls_this_session += 1
 
 
 # ── Refresh Operations ───────────────────────────────────────────────
