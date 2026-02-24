@@ -594,8 +594,6 @@ async def homepage(request: Request):
             "panda_raised": raised_this_month,
             "panda_goal": monthly_goal,
             "panda_pct": progress_pct,
-            "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
-            "stripe_pricing_table_id": _STRIPE_PRICING_TABLE_ID,
         },
     )
 
@@ -1242,10 +1240,14 @@ async def insider_trading_page(request: Request):
 
 # --- Support / Panda Fund ---
 
-# Stripe embeddable components (configured in Stripe Dashboard, no backend SDK needed)
+# Stripe Embedded Checkout (backend SDK creates sessions, frontend mounts overlay)
 _STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
-_STRIPE_BUY_BUTTON_ID = os.environ.get("STRIPE_BUY_BUTTON_ID", "")  # buy_btn_...
-_STRIPE_PRICING_TABLE_ID = os.environ.get("STRIPE_PRICING_TABLE_ID", "")  # prctbl_...
+_STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+# Price IDs for each tier (created in Stripe Dashboard)
+_STRIPE_PRICE_ONETIME = os.environ.get("STRIPE_PRICE_ONETIME", "")
+_STRIPE_PRICE_BAMBOO = os.environ.get("STRIPE_PRICE_BAMBOO", "")  # $5/mo
+_STRIPE_PRICE_PANDA = os.environ.get("STRIPE_PRICE_PANDA", "")  # $15/mo
+_STRIPE_PRICE_GIANT_PANDA = os.environ.get("STRIPE_PRICE_GIANT_PANDA", "")  # $30/mo
 
 # Feedback form link (Tally embed, or any iframe-friendly form URL)
 _FEEDBACK_LINK = os.environ.get(
@@ -1295,8 +1297,11 @@ async def support_page(request: Request):
         {
             "request": request,
             "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
-            "stripe_buy_button_id": _STRIPE_BUY_BUTTON_ID,
-            "stripe_pricing_table_id": _STRIPE_PRICING_TABLE_ID,
+            "stripe_configured": bool(_STRIPE_SECRET_KEY and _STRIPE_PUBLISHABLE_KEY),
+            "price_onetime": _STRIPE_PRICE_ONETIME,
+            "price_bamboo": _STRIPE_PRICE_BAMBOO,
+            "price_panda": _STRIPE_PRICE_PANDA,
+            "price_giant_panda": _STRIPE_PRICE_GIANT_PANDA,
             "feedback_link": _FEEDBACK_LINK,
             "monthly_goal": monthly_goal,
             "raised_this_month": raised_this_month,
@@ -1308,6 +1313,116 @@ async def support_page(request: Request):
             "funding_history_raised": [
                 min(h["raised"], monthly_goal) for h in _PANDA_FUND_HISTORY
             ],
+        },
+    )
+
+
+@app.post("/api/create-checkout-session")
+async def create_checkout_session(request: Request):
+    """Create a Stripe Embedded Checkout session."""
+    import stripe
+
+    if not _STRIPE_SECRET_KEY:
+        return JSONResponse({"error": "Stripe not configured"}, status_code=503)
+
+    stripe.api_key = _STRIPE_SECRET_KEY
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid request"}, status_code=400)
+
+    price_id = body.get("price_id", "")
+    mode = body.get("mode", "payment")
+
+    # Validate price_id format
+    if not price_id or not _re.match(r"^price_[A-Za-z0-9]+$", price_id):
+        return JSONResponse({"error": "Invalid price"}, status_code=400)
+
+    if mode not in ("payment", "subscription"):
+        return JSONResponse({"error": "Invalid mode"}, status_code=400)
+
+    # Build return URL from request base
+    base = str(request.base_url).rstrip("/")
+    return_url = f"{base}/support/thank-you?session_id={{CHECKOUT_SESSION_ID}}"
+
+    try:
+        session = stripe.checkout.Session.create(
+            ui_mode="embedded",
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode=mode,
+            return_url=return_url,
+        )
+    except stripe.StripeError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    return JSONResponse({"clientSecret": session.client_secret})
+
+
+@app.get("/api/session-status")
+async def session_status(session_id: str = ""):
+    """Retrieve Stripe Checkout session status for the return page."""
+    import stripe
+
+    if not _STRIPE_SECRET_KEY or not session_id:
+        return JSONResponse({"error": "Invalid request"}, status_code=400)
+
+    stripe.api_key = _STRIPE_SECRET_KEY
+
+    if not _re.match(r"^cs_(test|live)_[A-Za-z0-9]+$", session_id):
+        return JSONResponse({"error": "Invalid session"}, status_code=400)
+
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except stripe.StripeError:
+        return JSONResponse({"error": "Session not found"}, status_code=404)
+
+    return JSONResponse(
+        {
+            "status": session.status,
+            "customer_email": (
+                session.customer_details.email if session.customer_details else None
+            ),
+        }
+    )
+
+
+@app.get("/support/thank-you", response_class=HTMLResponse)
+async def checkout_return(request: Request):
+    """Post-checkout return page — reuses support.html with thank-you flag."""
+    monthly_goal = _PANDA_FUND_MONTHLY_GOAL
+    raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
+    raised_this_month = min(raw_raised, monthly_goal)
+    progress_pct = (
+        min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
+    )
+
+    from calendar import month_name as _month_names
+
+    current_month_name = _month_names[datetime.now().month]
+
+    return templates.TemplateResponse(
+        "support.html",
+        {
+            "request": request,
+            "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
+            "stripe_configured": bool(_STRIPE_SECRET_KEY and _STRIPE_PUBLISHABLE_KEY),
+            "price_onetime": _STRIPE_PRICE_ONETIME,
+            "price_bamboo": _STRIPE_PRICE_BAMBOO,
+            "price_panda": _STRIPE_PRICE_PANDA,
+            "price_giant_panda": _STRIPE_PRICE_GIANT_PANDA,
+            "feedback_link": _FEEDBACK_LINK,
+            "monthly_goal": monthly_goal,
+            "raised_this_month": raised_this_month,
+            "progress_pct": progress_pct,
+            "goal_reached": raw_raised >= monthly_goal,
+            "current_month_name": current_month_name,
+            "line_items": _PANDA_FUND_LINE_ITEMS,
+            "funding_history_months": [h["month"] for h in _PANDA_FUND_HISTORY],
+            "funding_history_raised": [
+                min(h["raised"], monthly_goal) for h in _PANDA_FUND_HISTORY
+            ],
+            "show_thank_you": True,
         },
     )
 
