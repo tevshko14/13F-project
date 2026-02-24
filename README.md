@@ -41,7 +41,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 - **Ownership** - Detailed holder list with position sizes and portfolio percentages
 - **Analyst Ratings** - Wall Street consensus with firm-level upgrades/downgrades (Finnhub + yfinance)
 - **Sentiment** - Market mood (CNN Fear & Greed), news sentiment (Finnhub), Reddit buzz (ApeWisdom), NLP news (Alpha Vantage)
-- **Vitals** - Employee headcount (People Data Labs), culture ratings (Glassdoor), App Store ratings (Apple iTunes)
+- **Vitals** - Company snapshot: employee count + culture ratings (Glassdoor), App Store ratings (Apple iTunes)
 - **SEC Filings** - Direct links to the company's SEC filings
 - **Insider Trading** - Recent Form 4 insider transactions
 
@@ -74,12 +74,14 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 | Market Data | `yfinance` + NASDAQ Trader (all US listings) |
 | Analyst Data | `yfinance` (free) + `finnhub-python` (optional) |
 | Sentiment | CNN, Finnhub, ApeWisdom, Alpha Vantage |
-| Vitals | People Data Labs, Glassdoor (RapidAPI), Apple iTunes |
+| Vitals | Glassdoor (RapidAPI), Apple iTunes |
 | Insider Data | OpenInsider (scraped) + Supabase `insider_trades` table |
 | YouTube Data | YouTube Data API v3 (activities, videos, search) |
 | Caching | Supabase Postgres (L2, survives deploys) + disk JSON (L3 fallback) + cold storage (Supabase Storage) |
 | Analytics | PostHog (product analytics) |
+| Error Tracking | Sentry (optional, 10% trace sampling) |
 | Hosting | Railway (auto-deploy from main) |
+| CI/CD | GitHub Actions (ruff lint/format + pytest + import smoke) |
 | Domain | [paperpanda.io](https://paperpanda.io) |
 
 ## Quick Start
@@ -102,6 +104,9 @@ uv run filings compare 1067983
 
 The project includes a Dockerfile configured for Railway deployment. Pushes to `main` trigger auto-deploy.
 
+**Web service:** 1 gunicorn worker (uvicorn), `--preload`, 120s health check timeout.
+**Cron workers:** Same Docker image with `START_COMMAND` env var override (e.g. `filings-sync`, `filings-insider-sync`, `filings-youtube-sync`).
+
 ```bash
 # Or manually via Railway CLI:
 railway up
@@ -112,39 +117,46 @@ railway up
 | Variable | Required | Free Tier | Description |
 |----------|----------|-----------|-------------|
 | `PORT` | Auto (Railway) | - | Port for the web server (default: 8000) |
-| `SEC_IDENTITY` | No | - | SEC EDGAR identity string |
+| `SEC_IDENTITY` | No | - | SEC EDGAR identity string (User-Agent for EDGAR API) |
 | `FINNHUB_API_KEY` | No | 60 calls/min | News sentiment + analyst ratings |
 | `ALPHAVANTAGE_API_KEY` | No | 25 calls/day | NLP news sentiment analysis |
-| `GLASSDOOR_RAPIDAPI_KEY` | No | 25 calls/month | Employee culture ratings |
-| `PDL_API_KEY` | No | 100 calls/month | Employee headcount data |
+| `GLASSDOOR_RAPIDAPI_KEY` | No | Plan-dependent | Company snapshot: employee count + culture ratings |
+| `PDL_API_KEY` | No | 100 calls/month | Employee headcount (optional, Glassdoor preferred) |
+| `YOUTUBE_API_KEY` | No | 10,000 units/day | YouTube Data API v3 key (for Calendar tab sync) |
 | `SUPABASE_URL` | No | Free tier | Supabase project URL (persistent cache) |
 | `SUPABASE_SERVICE_KEY` | No | Free tier | Supabase service role JWT |
-| `SUPABASE_DB_PASSWORD` | No | Free tier | Supabase DB password (auto-migration) |
-| `CACHE_DIR` | No | - | Cache directory (default: `~/.13f-cache/`) |
-| `POSTHOG_API_KEY` | No | Free tier | Product analytics |
+| `SUPABASE_ANON_KEY` | No | Free tier | Supabase anonymous key (client-side auth) |
+| `SUPABASE_JWT_SECRET` | No | Free tier | JWT secret for token validation |
+| `SUPABASE_DB_URL` | No | Free tier | Postgres connection string (auto-migration) |
+| `ALLOWED_HOST` | No | - | Production domain for CSRF origin checking (e.g. `paperpanda.io`) |
+| `HEALTH_SECRET` | No | - | Secret for `/health/detail` endpoint (`openssl rand -hex 32`) |
+| `POSTHOG_KEY` | No | Free tier | PostHog product analytics key |
+| `SENTRY_DSN` | No | Free tier | Sentry error tracking DSN |
 | `STRIPE_PUBLISHABLE_KEY` | No | - | Stripe publishable key (for donation embeds) |
 | `STRIPE_BUY_BUTTON_ID` | No | - | Stripe Buy Button ID (one-time donations) |
 | `STRIPE_PRICING_TABLE_ID` | No | - | Stripe Pricing Table ID (recurring subscriptions) |
 | `PANDA_FUND_RAISED` | No | - | Current month's donation total in dollars |
-| `FEEDBACK_LINK` | No | - | URL to feedback form (Notion, Google Form, etc.) |
+| `FEEDBACK_LINK` | No | - | URL to feedback form (default: Tally form) |
 | `ENABLE_BACKGROUND_REFRESH` | No | - | Enable/disable background 13F refresh (default: `true`) |
-| `YOUTUBE_API_KEY` | No | 10,000 units/day | YouTube Data API v3 key (for Calendar tab sync) |
+| `LOG_LEVEL` | No | - | Logging verbosity (default: `INFO`) |
+| `CACHE_DIR` | No | - | Cache directory (default: `~/.13f-cache/`) |
 
 > **Note:** The App Store ratings feature requires no API key (Apple's public iTunes API).
 > Without Supabase env vars, the app works identically using disk-only cache.
 > Without Stripe env vars, the support page shows "coming soon" placeholders gracefully.
+> The `/health` endpoint returns `{"status":"ok"}` publicly; detailed diagnostics are at `/health/detail` behind the `X-Health-Secret` header.
 
 ## Project Structure
 
 ```
 src/filings/
-├── web.py              # FastAPI app (40+ routes, background refresh, Stripe/support)
+├── web.py              # FastAPI app (50+ routes, security middleware, background refresh)
 ├── cli.py              # CLI entry point
 ├── client.py           # SEC EDGAR data access layer
 ├── analysts.py         # Analyst ratings (Finnhub + yfinance)
 ├── market_data.py      # S&P 500 heatmap, most-added, ticker search (~8K listings)
 ├── sentiment.py        # Market sentiment (CNN, Finnhub, ApeWisdom, Alpha Vantage)
-├── vitals.py           # Alternative data (Glassdoor, PDL, App Store) + Supabase persistence
+├── vitals.py           # Alternative data (Glassdoor, App Store) + Supabase persistence
 ├── cache.py            # Cache layer (3-tier: in-memory → Supabase → disk)
 ├── supabase_cache.py   # Supabase L2 persistent cache (survives deploys)
 ├── insider_trading.py  # Form 4 insider transaction data (Supabase-first + scrape fallback)
@@ -153,11 +165,12 @@ src/filings/
 ├── youtube_sync.py     # Cron worker: YouTube Data API → upsert to Supabase (every 6 hours)
 ├── cold_storage.py     # Cold storage layer (Supabase Storage for archived 13F quarters)
 ├── sync_worker.py      # Cron worker: SEC EDGAR 13F sync (every 12h, with cold storage archival)
+├── migrate_cold_storage.py  # One-off migration: move old quarters to cold storage
 ├── models.py           # Dataclasses (data contracts)
 ├── watchlist.py        # Watchlist persistence
 ├── notifications.py    # Filing notification engine + filing season detection
 ├── company_filings.py  # SEC filing links for stock pages
-├── auth.py             # Authentication (sign-in, sessions)
+├── auth.py             # Authentication (sign-in, HttpOnly cookies, JWT validation)
 ├── superinvestors.py   # 84 hardcoded superinvestors
 ├── display.py          # CLI Rich formatters
 └── templates/          # Jinja2 HTML templates
