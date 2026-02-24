@@ -87,7 +87,13 @@ def get_profile(user_id: str) -> dict | None:
         client = _get_client()
         if not client:
             return None
-        resp = client.table("profiles").select("id,tier").eq("id", user_id).single().execute()
+        resp = (
+            client.table("profiles")
+            .select("id,tier")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
         profile = resp.data
     except Exception as exc:
         logger.debug("Profile fetch failed for %s: %s", user_id, exc)
