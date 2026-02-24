@@ -18,7 +18,7 @@ import os
 import re as _re
 import time as time_module
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
@@ -1310,6 +1310,7 @@ async def insider_trading_page(request: Request):
 # Stripe Embedded Checkout (backend SDK creates sessions, frontend mounts overlay)
 _STRIPE_PUBLISHABLE_KEY = os.environ.get("STRIPE_PUBLISHABLE_KEY", "")
 _STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+_STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 # Price IDs for each tier (created in Stripe Dashboard)
 _STRIPE_PRICE_ONETIME = os.environ.get("STRIPE_PRICE_ONETIME", "")
 _STRIPE_PRICE_BAMBOO = os.environ.get("STRIPE_PRICE_BAMBOO", "")  # $5/mo
@@ -1333,55 +1334,64 @@ _PANDA_FUND_LINE_ITEMS = [
     "AI coding assistants",
 ]
 
-# Funding history — will eventually be driven by Supabase/Stripe webhook
-_PANDA_FUND_HISTORY = [
-    {"month": "Feb", "raised": 0},
-    {"month": "Mar", "raised": 0},
-    {"month": "Apr", "raised": 0},
-    {"month": "May", "raised": 0},
-    {"month": "Jun", "raised": 0},
-    {"month": "Jul", "raised": 0},
-]
+async def _support_page_context(request: Request, extra: dict | None = None) -> dict:
+    """Build the shared template context for /support and /support/thank-you.
 
+    Reads the current month's raised total from Supabase (via supporters table)
+    and falls back to the PANDA_FUND_RAISED env var when Supabase is unavailable.
+    """
+    from calendar import month_name as _month_names
 
-@app.get("/support", response_class=HTMLResponse)
-async def support_page(request: Request):
     monthly_goal = _PANDA_FUND_MONTHLY_GOAL
-    # Current month raised — eventually from Stripe webhook / Supabase
-    raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
-    # Cap at goal for display — even if we collect more, show $400 max
+    current_month = datetime.now().strftime("%Y-%m")
+    current_month_name = _month_names[datetime.now().month]
+
+    # Primary: live total from Supabase supporters table
+    raised_cents = await asyncio.to_thread(
+        supabase_cache.get_monthly_raised_cents, current_month
+    )
+    if raised_cents > 0:
+        raw_raised = raised_cents // 100
+    else:
+        # Fallback: manually maintained env var (used before webhook was built,
+        # or when Supabase is unavailable)
+        raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
+
     raised_this_month = min(raw_raised, monthly_goal)
     progress_pct = (
         min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
     )
 
-    from calendar import month_name as _month_names
+    # Funding history from Supabase (last 6 months)
+    history = await asyncio.to_thread(supabase_cache.get_funding_history, 6)
 
-    current_month_name = _month_names[datetime.now().month]
+    ctx: dict = {
+        "request": request,
+        "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
+        "stripe_configured": bool(_STRIPE_SECRET_KEY and _STRIPE_PUBLISHABLE_KEY),
+        "price_onetime": _STRIPE_PRICE_ONETIME,
+        "price_bamboo": _STRIPE_PRICE_BAMBOO,
+        "price_panda": _STRIPE_PRICE_PANDA,
+        "price_giant_panda": _STRIPE_PRICE_GIANT_PANDA,
+        "feedback_link": _FEEDBACK_LINK,
+        "monthly_goal": monthly_goal,
+        "raised_this_month": raised_this_month,
+        "progress_pct": progress_pct,
+        "goal_reached": raw_raised >= monthly_goal,
+        "current_month_name": current_month_name,
+        "line_items": _PANDA_FUND_LINE_ITEMS,
+        "funding_history_months": [h["month"] for h in history],
+        "funding_history_raised": [min(h["raised"], monthly_goal) for h in history],
+    }
+    if extra:
+        ctx.update(extra)
+    return ctx
 
-    return templates.TemplateResponse(
-        "support.html",
-        {
-            "request": request,
-            "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
-            "stripe_configured": bool(_STRIPE_SECRET_KEY and _STRIPE_PUBLISHABLE_KEY),
-            "price_onetime": _STRIPE_PRICE_ONETIME,
-            "price_bamboo": _STRIPE_PRICE_BAMBOO,
-            "price_panda": _STRIPE_PRICE_PANDA,
-            "price_giant_panda": _STRIPE_PRICE_GIANT_PANDA,
-            "feedback_link": _FEEDBACK_LINK,
-            "monthly_goal": monthly_goal,
-            "raised_this_month": raised_this_month,
-            "progress_pct": progress_pct,
-            "goal_reached": raw_raised >= monthly_goal,
-            "current_month_name": current_month_name,
-            "line_items": _PANDA_FUND_LINE_ITEMS,
-            "funding_history_months": [h["month"] for h in _PANDA_FUND_HISTORY],
-            "funding_history_raised": [
-                min(h["raised"], monthly_goal) for h in _PANDA_FUND_HISTORY
-            ],
-        },
-    )
+
+@app.get("/support", response_class=HTMLResponse)
+async def support_page(request: Request):
+    ctx = await _support_page_context(request)
+    return templates.TemplateResponse("support.html", ctx)
 
 
 @app.post("/api/create-checkout-session")
@@ -1457,41 +1467,138 @@ async def session_status(session_id: str = ""):
 @app.get("/support/thank-you", response_class=HTMLResponse)
 async def checkout_return(request: Request):
     """Post-checkout return page — reuses support.html with thank-you flag."""
-    monthly_goal = _PANDA_FUND_MONTHLY_GOAL
-    raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
-    raised_this_month = min(raw_raised, monthly_goal)
-    progress_pct = (
-        min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
-    )
+    ctx = await _support_page_context(request, extra={"show_thank_you": True})
+    return templates.TemplateResponse("support.html", ctx)
 
-    from calendar import month_name as _month_names
 
-    current_month_name = _month_names[datetime.now().month]
+@app.post("/api/stripe-webhook")
+async def stripe_webhook(request: Request):
+    """Receive and verify Stripe webhook events.
 
-    return templates.TemplateResponse(
-        "support.html",
-        {
-            "request": request,
-            "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
-            "stripe_configured": bool(_STRIPE_SECRET_KEY and _STRIPE_PUBLISHABLE_KEY),
-            "price_onetime": _STRIPE_PRICE_ONETIME,
-            "price_bamboo": _STRIPE_PRICE_BAMBOO,
-            "price_panda": _STRIPE_PRICE_PANDA,
-            "price_giant_panda": _STRIPE_PRICE_GIANT_PANDA,
-            "feedback_link": _FEEDBACK_LINK,
-            "monthly_goal": monthly_goal,
-            "raised_this_month": raised_this_month,
-            "progress_pct": progress_pct,
-            "goal_reached": raw_raised >= monthly_goal,
-            "current_month_name": current_month_name,
-            "line_items": _PANDA_FUND_LINE_ITEMS,
-            "funding_history_months": [h["month"] for h in _PANDA_FUND_HISTORY],
-            "funding_history_raised": [
-                min(h["raised"], monthly_goal) for h in _PANDA_FUND_HISTORY
-            ],
-            "show_thank_you": True,
-        },
-    )
+    Listens for:
+    - ``checkout.session.completed``  — one-time payments
+    - ``invoice.payment_succeeded``   — recurring subscription payments
+
+    Both events trigger a row insert into the ``supporters`` Supabase table
+    so the /support page shows a live, accurate raised total.
+
+    Idempotent: the Stripe event ID is used as a unique key, so retried
+    deliveries from Stripe are safely ignored.
+    """
+    import stripe
+
+    if not _STRIPE_SECRET_KEY:
+        return JSONResponse({"error": "Stripe not configured"}, status_code=503)
+
+    stripe.api_key = _STRIPE_SECRET_KEY
+
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    # ── Signature verification ────────────────────────────────────────
+    if _STRIPE_WEBHOOK_SECRET:
+        try:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, _STRIPE_WEBHOOK_SECRET
+            )
+        except stripe.errors.SignatureVerificationError:
+            logger.warning("stripe_webhook: invalid signature — request rejected")
+            return JSONResponse({"error": "Invalid signature"}, status_code=400)
+        except Exception as exc:
+            logger.warning("stripe_webhook: payload parse error: %s", exc)
+            return JSONResponse({"error": "Bad payload"}, status_code=400)
+    else:
+        # No webhook secret configured — accept but log a warning.
+        # Set STRIPE_WEBHOOK_SECRET in Railway env vars to enable verification.
+        logger.warning(
+            "stripe_webhook: STRIPE_WEBHOOK_SECRET not set — skipping signature check"
+        )
+        try:
+            import json as _json
+            event = stripe.Event.construct_from(
+                _json.loads(payload), stripe.api_key
+            )
+        except Exception as exc:
+            logger.warning("stripe_webhook: failed to parse event: %s", exc)
+            return JSONResponse({"error": "Bad payload"}, status_code=400)
+
+    event_type = event["type"]
+    event_id = event["id"]
+    month = datetime.now().strftime("%Y-%m")
+
+    # ── checkout.session.completed — one-time payments ────────────────
+    if event_type == "checkout.session.completed":
+        session = event["data"]["object"]
+        if session.get("payment_status") != "paid":
+            # Async payment (e.g. bank transfer) — wait for payment_intent.succeeded
+            return JSONResponse({"status": "ok"})
+
+        amount_cents = session.get("amount_total") or 0
+        currency = session.get("currency", "usd")
+        mode = session.get("mode", "payment")
+        session_id = session.get("id", "")
+        customer_details = session.get("customer_details") or {}
+        customer_email = customer_details.get("email", "")
+
+        # Use the payment_intent creation time for month attribution if available
+        created = session.get("created")
+        if created:
+            month = datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m")
+
+        await asyncio.to_thread(
+            supabase_cache.record_supporter,
+            event_id,
+            session_id,
+            customer_email,
+            amount_cents,
+            currency,
+            mode,
+            month,
+        )
+        logger.info(
+            "stripe_webhook: recorded checkout.session.completed — %d %s (%s)",
+            amount_cents,
+            currency,
+            mode,
+        )
+
+    # ── invoice.payment_succeeded — subscription renewals ─────────────
+    elif event_type == "invoice.payment_succeeded":
+        invoice = event["data"]["object"]
+        # Skip $0 invoices (e.g. trial start)
+        amount_cents = invoice.get("amount_paid") or 0
+        if amount_cents == 0:
+            return JSONResponse({"status": "ok"})
+
+        currency = invoice.get("currency", "usd")
+        session_id = invoice.get("subscription", "") or invoice.get("id", "")
+        customer_email = invoice.get("customer_email", "")
+
+        created = invoice.get("created")
+        if created:
+            month = datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m")
+
+        await asyncio.to_thread(
+            supabase_cache.record_supporter,
+            event_id,
+            session_id,
+            customer_email,
+            amount_cents,
+            currency,
+            "subscription",
+            month,
+        )
+        logger.info(
+            "stripe_webhook: recorded invoice.payment_succeeded — %d %s",
+            amount_cents,
+            currency,
+        )
+
+    else:
+        # Unhandled event type — acknowledge receipt so Stripe doesn't retry
+        logger.debug("stripe_webhook: unhandled event type %s", event_type)
+
+    return JSONResponse({"status": "ok"})
 
 
 # --- Retail Traders (hidden — no nav link) ---

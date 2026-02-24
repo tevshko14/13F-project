@@ -177,6 +177,25 @@ CREATE TABLE IF NOT EXISTS youtube_channels (
 -- Backfill: add thumbnail_url if table already exists
 ALTER TABLE youtube_channels ADD COLUMN IF NOT EXISTS thumbnail_url TEXT NOT NULL DEFAULT '';
 
+-- ── Panda Fund supporters ──
+-- One row per Stripe payment/subscription event. The web layer aggregates
+-- these to compute the monthly total shown on /support.
+CREATE TABLE IF NOT EXISTS supporters (
+    id              BIGSERIAL PRIMARY KEY,
+    stripe_event_id TEXT NOT NULL UNIQUE,   -- idempotency key (Stripe event.id)
+    session_id      TEXT NOT NULL DEFAULT '', -- Stripe checkout session ID
+    customer_email  TEXT NOT NULL DEFAULT '',
+    amount_cents    INTEGER NOT NULL DEFAULT 0,
+    currency        TEXT NOT NULL DEFAULT 'usd',
+    mode            TEXT NOT NULL DEFAULT 'payment',  -- 'payment' | 'subscription'
+    month           TEXT NOT NULL,           -- 'YYYY-MM' for easy grouping
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_supporters_month
+    ON supporters (month DESC);
+CREATE INDEX IF NOT EXISTS idx_supporters_event
+    ON supporters (stripe_event_id);
+
 -- Backfill: add duration and content_type columns for video metadata
 ALTER TABLE youtube_events ADD COLUMN IF NOT EXISTS duration TEXT NOT NULL DEFAULT '';
 ALTER TABLE youtube_events ADD COLUMN IF NOT EXISTS content_type TEXT NOT NULL DEFAULT 'video';
@@ -1412,3 +1431,122 @@ def run_retention_cleanup() -> dict:
 
     logger.info("Retention cleanup: %s", results)
     return results
+
+
+# ── Panda Fund supporters ─────────────────────────────────────────────────────
+
+def record_supporter(
+    stripe_event_id: str,
+    session_id: str,
+    customer_email: str,
+    amount_cents: int,
+    currency: str,
+    mode: str,
+    month: str,
+) -> bool:
+    """Insert a supporter row for a completed Stripe payment.
+
+    Uses ``stripe_event_id`` as the unique key so the same Stripe webhook
+    event delivered more than once is silently ignored (idempotent).
+
+    Returns True on success, False on error or when Supabase is unavailable.
+    """
+    client = _get_client()
+    if client is None:
+        logger.warning("record_supporter: Supabase unavailable — payment not persisted")
+        return False
+
+    row = {
+        "stripe_event_id": stripe_event_id,
+        "session_id": session_id,
+        "customer_email": customer_email,
+        "amount_cents": amount_cents,
+        "currency": currency,
+        "mode": mode,
+        "month": month,
+    }
+    try:
+        client.table("supporters").upsert(row, on_conflict="stripe_event_id").execute()
+        logger.info(
+            "record_supporter: recorded %s cents (%s) for event %s",
+            amount_cents,
+            mode,
+            stripe_event_id,
+        )
+        return True
+    except Exception as exc:
+        logger.exception("record_supporter: failed to write supporter row: %s", exc)
+        return False
+
+
+def get_monthly_raised_cents(month: str) -> int:
+    """Return total amount raised (in cents) for the given month ('YYYY-MM').
+
+    Returns 0 when Supabase is unavailable or the table is empty.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    try:
+        resp = (
+            client.table("supporters")
+            .select("amount_cents")
+            .eq("month", month)
+            .execute()
+        )
+        return sum(row["amount_cents"] for row in (resp.data or []))
+    except Exception as exc:
+        logger.warning("get_monthly_raised_cents: query failed: %s", exc)
+        return 0
+
+
+def get_funding_history(num_months: int = 6) -> list[dict]:
+    """Return a list of {month, raised} dicts for the last *num_months* months.
+
+    ``month`` is the short month name (e.g. 'Jan'), ``raised`` is in dollars.
+    Returns an empty list when Supabase is unavailable.
+    """
+    from calendar import month_abbr as _abbr
+    from datetime import date
+
+    client = _get_client()
+    history: list[dict] = []
+
+    # Build the list of YYYY-MM strings we want, oldest → newest
+    today = date.today()
+    months: list[str] = []
+    for delta in range(num_months - 1, -1, -1):
+        # step back by delta months
+        year = today.year
+        month = today.month - delta
+        while month <= 0:
+            month += 12
+            year -= 1
+        months.append(f"{year}-{month:02d}")
+
+    if client is None:
+        return [{"month": _abbr[int(m.split("-")[1])], "raised": 0} for m in months]
+
+    try:
+        resp = (
+            client.table("supporters")
+            .select("month, amount_cents")
+            .in_("month", months)
+            .execute()
+        )
+        totals: dict[str, int] = {}
+        for row in resp.data or []:
+            totals[row["month"]] = totals.get(row["month"], 0) + row["amount_cents"]
+
+        for ym in months:
+            mon_idx = int(ym.split("-")[1])
+            history.append({
+                "month": _abbr[mon_idx],
+                "raised": totals.get(ym, 0) // 100,  # cents → dollars
+            })
+    except Exception as exc:
+        logger.warning("get_funding_history: query failed: %s", exc)
+        history = [{"month": _abbr[int(m.split("-")[1])], "raised": 0} for m in months]
+
+    return history
