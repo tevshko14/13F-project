@@ -75,6 +75,10 @@ if _sentry_dsn:
     except ImportError:
         logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
 
+# ── Analytics (optional) ─────────────────────────────────────────────
+# NOTE: Set POSTHOG_KEY in production (Railway) to enable analytics.
+_POSTHOG_KEY = os.environ.get("POSTHOG_KEY", "")
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Rate limiting (optional — graceful fallback if slowapi not installed)
@@ -171,6 +175,7 @@ templates.env.globals["current_year"] = datetime.now().year
 templates.env.globals["supabase_url"] = auth.SUPABASE_URL
 templates.env.globals["supabase_anon_key"] = auth.SUPABASE_ANON_KEY
 templates.env.globals["auth_enabled"] = bool(auth.SUPABASE_ANON_KEY)
+templates.env.globals["posthog_key"] = _POSTHOG_KEY
 
 # Attach rate limiter
 if _has_limiter:
@@ -226,6 +231,58 @@ _CONSENSUS_TTL = 1800  # 30 minutes in seconds
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Security helpers
+# ═══════════════════════════════════════════════════════════════════════
+
+import re as _re
+
+_TICKER_RE = _re.compile(r"^[A-Za-z.]{1,12}$")
+_CIK_RE = _re.compile(r"^[0-9]{1,20}$")
+_CUSIP_RE = _re.compile(r"^[A-Za-z0-9]{6,9}$")
+_ALLOWED_HOST: str = os.environ.get("ALLOWED_HOST", "")   # e.g. "paperpanda.io"
+
+
+def _valid_ticker(ticker: str) -> bool:
+    """Return True if *ticker* looks like a valid stock symbol."""
+    return bool(_TICKER_RE.match(ticker))
+
+
+def _valid_cik(cik: str) -> bool:
+    """Return True if *cik* looks like a valid CIK number."""
+    return bool(_CIK_RE.match(cik))
+
+
+def _valid_cusip(cusip: str) -> bool:
+    """Return True if *cusip* looks like a valid CUSIP identifier."""
+    return bool(_CUSIP_RE.match(cusip))
+
+
+def _check_csrf_origin(request: Request) -> JSONResponse | None:
+    """Reject cross-origin POST requests.
+
+    Returns a 403 JSONResponse if the Origin header doesn't match the
+    app's host; returns ``None`` if the request is safe.
+    """
+    origin = request.headers.get("origin", "")
+    if not origin:
+        # Non-browser clients (curl, Postman) don't send Origin; allow.
+        return None
+    from urllib.parse import urlparse
+    origin_host = urlparse(origin).hostname or ""
+    # Accept localhost/127.0.0.1 for local development
+    if origin_host in ("localhost", "127.0.0.1"):
+        return None
+    # Accept configured production host
+    if _ALLOWED_HOST and origin_host == _ALLOWED_HOST:
+        return None
+    # Accept if the Host header matches the Origin (same-origin)
+    request_host = (request.headers.get("host") or "").split(":")[0]
+    if request_host and origin_host == request_host:
+        return None
+    return JSONResponse({"error": "cross-origin request blocked"}, status_code=403)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Middleware
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -236,9 +293,25 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-        # HSTS only on HTTPS (Railway terminates TLS)
-        if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # HSTS unconditionally — Railway terminates TLS upstream
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # Content-Security-Policy — allow known CDN sources
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' "
+            "https://cdn.jsdelivr.net https://unpkg.com "
+            "https://us.i.posthog.com https://*-assets.i.posthog.com "
+            "https://js.stripe.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data: https: blob:; "
+            "font-src 'self' data:; "
+            "connect-src 'self' "
+            "https://us.i.posthog.com https://*.supabase.co "
+            "https://js.stripe.com; "
+            "frame-src https://js.stripe.com; "
+            "object-src 'none'; "
+            "base-uri 'self'"
+        )
         return response
 
 
@@ -467,6 +540,8 @@ async def superinvestors_page(request: Request):
 async def grand_portfolio_redirect(request: Request):
     """Backward-compat redirect: /grand-portfolio → /funds."""
     view = request.query_params.get("view", "funds")
+    if view not in ("funds", "holdings", "activity"):
+        view = "funds"
     return RedirectResponse(url=f"/funds?view={view}", status_code=301)
 
 
@@ -474,6 +549,8 @@ async def grand_portfolio_redirect(request: Request):
 
 @app.get("/api/fund-row/{cik}", response_class=HTMLResponse)
 async def fund_row(request: Request, cik: str):
+    if not _valid_cik(cik):
+        return PlainTextResponse("Invalid CIK", status_code=400)
     cik_normalized = cik.lstrip("0") or cik
     si = SUPERINVESTORS_BY_CIK.get(cik_normalized) or SUPERINVESTORS_BY_CIK.get(cik)
 
@@ -518,7 +595,9 @@ async def fund_row(request: Request, cik: str):
 # --- Enhanced Holdings page ---
 
 @app.get("/holdings/{cik}", response_class=HTMLResponse)
-async def holdings(request: Request, cik: str, top_n: int = Query(25)):
+async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=200)):
+    if not _valid_cik(cik):
+        return PlainTextResponse("Invalid CIK", status_code=400)
     si = SUPERINVESTORS_BY_CIK.get(cik)
     cache_data = _fund_cache()
     cached = cache_data.get(cik)
@@ -605,13 +684,17 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25)):
 
 @app.get("/compare/{cik}")
 async def compare(request: Request, cik: str):
+    if not _valid_cik(cik):
+        return PlainTextResponse("Invalid CIK", status_code=400)
     return RedirectResponse(url=f"/holdings/{cik}", status_code=302)
 
 
 # --- Compare API (lazy-loaded into investor page Compare tab) ---
 
 @app.get("/api/compare/{cik}", response_class=HTMLResponse)
-async def compare_api(request: Request, cik: str, top_n: int = Query(25)):
+async def compare_api(request: Request, cik: str, top_n: int = Query(25, ge=1, le=200)):
+    if not _valid_cik(cik):
+        return PlainTextResponse("Invalid CIK", status_code=400)
     cache_data = _fund_cache()
     cached = cache_data.get(cik)
 
@@ -655,6 +738,8 @@ async def portfolio_chart_data(request: Request, cik: str):
 
     Used by the ECharts donut on the investor profile page.
     """
+    if not _valid_cik(cik):
+        return JSONResponse({"error": "Invalid CIK"}, status_code=400)
     cache_data = _fund_cache()
     cached = cache_data.get(cik)
 
@@ -850,6 +935,8 @@ async def funds_page(request: Request, view: str = "funds"):
 
 @app.get("/stock/cusip/{cusip}", response_class=HTMLResponse)
 async def stock_detail_by_cusip(request: Request, cusip: str):
+    if not _valid_cusip(cusip):
+        return PlainTextResponse("Invalid CUSIP", status_code=400)
     cache_data = _fund_cache()
 
     # Try to build superinvestor ownership data (may be None)
@@ -884,6 +971,8 @@ async def stock_detail_by_cusip(request: Request, cusip: str):
 
 @app.get("/stock/{ticker}", response_class=HTMLResponse)
 async def stock_detail(request: Request, ticker: str):
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
     cache_data = _fund_cache()
 
     # Try to build superinvestor ownership data (may be None)
@@ -921,6 +1010,8 @@ async def stock_detail(request: Request, ticker: str):
 
 @app.get("/api/analysts/{ticker}", response_class=HTMLResponse)
 async def analyst_ratings(request: Request, ticker: str):
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
     ratings = await asyncio.to_thread(analysts.get_analyst_ratings, ticker)
     consensus = analysts.get_consensus_summary(ratings)
     return templates.TemplateResponse("partials/analyst_ratings.html", {
@@ -933,6 +1024,8 @@ async def analyst_ratings(request: Request, ticker: str):
 
 @app.get("/api/sentiment/{ticker}", response_class=HTMLResponse)
 async def sentiment_data(request: Request, ticker: str):
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
     data = await asyncio.to_thread(sentiment.get_sentiment_data, ticker)
     return templates.TemplateResponse("partials/sentiment.html", {
         "request": request,
@@ -948,6 +1041,8 @@ async def sentiment_data(request: Request, ticker: str):
 
 @app.get("/api/vitals/{ticker}", response_class=HTMLResponse)
 async def vitals_data(request: Request, ticker: str):
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
     # ── Paywall: disabled while auth is not active ──
     # if auth.JWT_SECRET:
     #     user = getattr(request.state, "user", None)
@@ -977,6 +1072,8 @@ async def vitals_data(request: Request, ticker: str):
 
 @app.get("/api/company-filings/{ticker}", response_class=HTMLResponse)
 async def company_filings_tab(request: Request, ticker: str):
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
     filings = await asyncio.to_thread(company_filings.get_company_filings, ticker)
     return templates.TemplateResponse("partials/company_filings.html", {
         "request": request,
@@ -1209,6 +1306,8 @@ async def insider_trades_api(request: Request, filter: str = "all"):
 
 @app.get("/api/insider-trades/{ticker}", response_class=HTMLResponse)
 async def stock_insider_trades_api(request: Request, ticker: str):
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
     trades = await asyncio.to_thread(
         insider_trading.get_ticker_insider_trades, ticker
     )
@@ -1530,12 +1629,77 @@ async def logout(request: Request):
     return response
 
 
+@app.post("/api/auth/set-session")
+async def set_session(request: Request):
+    """Set auth cookies server-side with HttpOnly + Secure flags."""
+    csrf_err = _check_csrf_origin(request)
+    if csrf_err:
+        return csrf_err
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid json"}, status_code=400)
+
+    access_token = body.get("access_token", "")
+    refresh_token = body.get("refresh_token", "")
+    expires_in = body.get("expires_in", 3600)
+
+    if not access_token or not isinstance(access_token, str):
+        return JSONResponse({"error": "missing access_token"}, status_code=400)
+    if not refresh_token or not isinstance(refresh_token, str):
+        return JSONResponse({"error": "missing refresh_token"}, status_code=400)
+
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        "sb-access-token", access_token,
+        max_age=int(expires_in), path="/",
+        httponly=True, secure=True, samesite="lax",
+    )
+    response.set_cookie(
+        "sb-refresh-token", refresh_token,
+        max_age=604800, path="/",
+        httponly=True, secure=True, samesite="lax",
+    )
+    return response
+
+
+@app.post("/api/auth/clear-session")
+async def clear_session(request: Request):
+    """Clear auth cookies server-side."""
+    csrf_err = _check_csrf_origin(request)
+    if csrf_err:
+        return csrf_err
+    response = JSONResponse({"ok": True})
+    response.delete_cookie("sb-access-token", path="/")
+    response.delete_cookie("sb-refresh-token", path="/")
+    return response
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Infrastructure endpoints
 # ═══════════════════════════════════════════════════════════════════════
 
 @app.get("/health")
 async def health_check(request: Request):
+    """Public health probe for Railway readiness checks."""
+    return JSONResponse({"status": "ok"})
+
+
+_HEALTH_SECRET: str = os.environ.get("HEALTH_SECRET", "")
+
+
+@app.get("/health/detail")
+async def health_detail(request: Request):
+    """Detailed health info gated behind a secret header.
+
+    Set ``HEALTH_SECRET`` env var and pass ``X-Health-Secret`` header
+    to access.  Returns 404 when secret is missing or wrong (hides
+    endpoint existence from attackers).
+    """
+    provided = request.headers.get("x-health-secret", "")
+    if not _HEALTH_SECRET or provided != _HEALTH_SECRET:
+        raise StarletteHTTPException(status_code=404)
+
     uptime = round(time_module.time() - _app_start_time)
     cache_data = _fund_cache()
 
@@ -1608,7 +1772,14 @@ async def sitemap_xml():
 # ═══════════════════════════════════════════════════════════════════════
 
 if _has_limiter:
-    # Existing per-ticker endpoints
+    # Page routes (prevent scraping / DoS on expensive full-page renders)
+    homepage = limiter.limit("30/minute")(homepage)
+    funds_page = limiter.limit("20/minute")(funds_page)
+    holdings = limiter.limit("20/minute")(holdings)
+    stock_detail = limiter.limit("30/minute")(stock_detail)
+    stock_detail_by_cusip = limiter.limit("30/minute")(stock_detail_by_cusip)
+    insider_trading_page = limiter.limit("20/minute")(insider_trading_page)
+    # Per-ticker API endpoints
     fund_row = limiter.limit("10/minute")(fund_row)
     analyst_ratings = limiter.limit("30/minute")(analyst_ratings)
     sentiment_data = limiter.limit("30/minute")(sentiment_data)
@@ -1630,6 +1801,11 @@ if _has_limiter:
     login_page = limiter.limit("10/minute")(login_page)
     signup_page = limiter.limit("10/minute")(signup_page)
     reset_password_page = limiter.limit("5/minute")(reset_password_page)
+    # Auth session cookie endpoints
+    set_session = limiter.limit("10/minute")(set_session)
+    clear_session = limiter.limit("10/minute")(clear_session)
+    # Infrastructure monitoring
+    health_detail = limiter.limit("5/minute")(health_detail)
 
 
 # ═══════════════════════════════════════════════════════════════════════
