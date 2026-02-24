@@ -1745,7 +1745,7 @@ async def api_activity_feed(
     # ── Check Supabase cache ──
     sb_cache_key = f"activity_feed:{timeframe}:{ptype}"
     try:
-        cached = supabase_cache.get_cached(sb_cache_key)
+        cached = await asyncio.to_thread(supabase_cache.get_cached, sb_cache_key)
         if cached and isinstance(cached, dict):
             clusters_raw = cached.get("clusters", [])
             solo_raw = cached.get("solo_items", [])
@@ -1823,7 +1823,8 @@ async def api_activity_feed(
                 "stats": stats,
                 "has_prices": has_prices,
             }
-            supabase_cache.set_cached(
+            await asyncio.to_thread(
+                supabase_cache.set_cached,
                 cache_key=sb_cache_key,
                 category="activity_feed",
                 data=serialized,
