@@ -1274,12 +1274,12 @@ _PANDA_FUND_LINE_ITEMS = [
 
 # Funding history — will eventually be driven by Supabase/Stripe webhook
 _PANDA_FUND_HISTORY = [
-    {"month": "Sep", "raised": 0},
-    {"month": "Oct", "raised": 0},
-    {"month": "Nov", "raised": 0},
-    {"month": "Dec", "raised": 0},
-    {"month": "Jan", "raised": 0},
     {"month": "Feb", "raised": 0},
+    {"month": "Mar", "raised": 0},
+    {"month": "Apr", "raised": 0},
+    {"month": "May", "raised": 0},
+    {"month": "Jun", "raised": 0},
+    {"month": "Jul", "raised": 0},
 ]
 
 
