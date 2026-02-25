@@ -1518,7 +1518,7 @@ def get_funding_history(num_months: int = 6) -> list[dict]:
     history: list[dict] = []
 
     # Build the list of YYYY-MM strings from launch → today, oldest → newest
-    launch_year, launch_month = 2025, 2  # February 2025
+    launch_year, launch_month = 2026, 2  # February 2026
     today = date.today()
     months: list[str] = []
     y, m = launch_year, launch_month
