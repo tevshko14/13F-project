@@ -1362,8 +1362,8 @@ async def _support_page_context(request: Request, extra: dict | None = None) -> 
         min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
     )
 
-    # Funding history from Supabase (last 6 months)
-    history = await asyncio.to_thread(supabase_cache.get_funding_history, 6)
+    # Funding history from Supabase (Feb 2025 launch → current month)
+    history = await asyncio.to_thread(supabase_cache.get_funding_history)
 
     ctx: dict = {
         "request": request,

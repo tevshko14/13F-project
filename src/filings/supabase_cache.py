@@ -1502,9 +1502,13 @@ def get_monthly_raised_cents(month: str) -> int:
 
 
 def get_funding_history(num_months: int = 6) -> list[dict]:
-    """Return a list of {month, raised} dicts for the last *num_months* months.
+    """Return a list of {month, raised} dicts from the launch month to today.
 
-    ``month`` is the short month name (e.g. 'Jan'), ``raised`` is in dollars.
+    Always starts from February 2025 (launch month) and runs through the
+    current month, so the chart never shows a sliding window that drops
+    early months.
+
+    ``month`` is the short month name (e.g. 'Feb'), ``raised`` is in dollars.
     Returns an empty list when Supabase is unavailable.
     """
     from calendar import month_abbr as _abbr
@@ -1513,17 +1517,17 @@ def get_funding_history(num_months: int = 6) -> list[dict]:
     client = _get_client()
     history: list[dict] = []
 
-    # Build the list of YYYY-MM strings we want, oldest → newest
+    # Build the list of YYYY-MM strings from launch → today, oldest → newest
+    launch_year, launch_month = 2025, 2  # February 2025
     today = date.today()
     months: list[str] = []
-    for delta in range(num_months - 1, -1, -1):
-        # step back by delta months
-        year = today.year
-        month = today.month - delta
-        while month <= 0:
-            month += 12
-            year -= 1
-        months.append(f"{year}-{month:02d}")
+    y, m = launch_year, launch_month
+    while (y, m) <= (today.year, today.month):
+        months.append(f"{y}-{m:02d}")
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
 
     if client is None:
         return [{"month": _abbr[int(m.split("-")[1])], "raised": 0} for m in months]
