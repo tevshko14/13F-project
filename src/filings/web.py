@@ -1503,7 +1503,7 @@ async def stripe_webhook(request: Request):
             event = stripe.Webhook.construct_event(
                 payload, sig_header, _STRIPE_WEBHOOK_SECRET
             )
-        except stripe.errors.SignatureVerificationError:
+        except stripe.SignatureVerificationError:
             logger.warning("stripe_webhook: invalid signature — request rejected")
             return JSONResponse({"error": "Invalid signature"}, status_code=400)
         except Exception as exc:
@@ -1524,81 +1524,93 @@ async def stripe_webhook(request: Request):
             logger.warning("stripe_webhook: failed to parse event: %s", exc)
             return JSONResponse({"error": "Bad payload"}, status_code=400)
 
-    event_type = event["type"]
-    event_id = event["id"]
+    event_type = event.get("type", "")
+    event_id = event.get("id", "")
     month = datetime.now().strftime("%Y-%m")
 
-    # ── checkout.session.completed — one-time payments ────────────────
-    if event_type == "checkout.session.completed":
-        session = event["data"]["object"]
-        if session.get("payment_status") != "paid":
-            # Async payment (e.g. bank transfer) — wait for payment_intent.succeeded
-            return JSONResponse({"status": "ok"})
+    logger.info("stripe_webhook: received event type=%s id=%s", event_type, event_id)
 
-        amount_cents = session.get("amount_total") or 0
-        currency = session.get("currency", "usd")
-        mode = session.get("mode", "payment")
-        session_id = session.get("id", "")
-        customer_details = session.get("customer_details") or {}
-        customer_email = customer_details.get("email", "")
+    try:
+        # ── checkout.session.completed — one-time payments ────────────────
+        if event_type == "checkout.session.completed":
+            session = event["data"]["object"]
+            if session.get("payment_status") != "paid":
+                # Async payment (e.g. bank transfer) — wait for payment_intent.succeeded
+                return JSONResponse({"status": "ok"})
 
-        # Use the payment_intent creation time for month attribution if available
-        created = session.get("created")
-        if created:
-            month = datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m")
+            amount_cents = session.get("amount_total") or 0
+            currency = session.get("currency", "usd")
+            mode = session.get("mode", "payment")
+            session_id = session.get("id", "")
+            customer_details = session.get("customer_details") or {}
+            customer_email = customer_details.get("email", "")
 
-        await asyncio.to_thread(
-            supabase_cache.record_supporter,
+            created = session.get("created")
+            if created:
+                month = datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m")
+
+            await asyncio.to_thread(
+                supabase_cache.record_supporter,
+                event_id,
+                session_id,
+                customer_email,
+                amount_cents,
+                currency,
+                mode,
+                month,
+            )
+            logger.info(
+                "stripe_webhook: recorded checkout.session.completed — %d %s (%s)",
+                amount_cents,
+                currency,
+                mode,
+            )
+
+        # ── invoice.payment_succeeded / invoice.paid — subscription renewals ─
+        # Stripe uses both names depending on API version; handle both.
+        elif event_type in ("invoice.payment_succeeded", "invoice.paid"):
+            invoice = event["data"]["object"]
+            # Skip $0 invoices (e.g. trial start)
+            amount_cents = invoice.get("amount_paid") or 0
+            if amount_cents == 0:
+                return JSONResponse({"status": "ok"})
+
+            currency = invoice.get("currency", "usd")
+            session_id = invoice.get("subscription", "") or invoice.get("id", "")
+            customer_email = invoice.get("customer_email", "")
+
+            created = invoice.get("created")
+            if created:
+                month = datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m")
+
+            await asyncio.to_thread(
+                supabase_cache.record_supporter,
+                event_id,
+                session_id,
+                customer_email,
+                amount_cents,
+                currency,
+                "subscription",
+                month,
+            )
+            logger.info(
+                "stripe_webhook: recorded invoice payment — %d %s",
+                amount_cents,
+                currency,
+            )
+
+        else:
+            # Unhandled event type — acknowledge receipt so Stripe doesn't retry
+            logger.info("stripe_webhook: unhandled event type %s (ignored)", event_type)
+
+    except Exception:
+        logger.exception(
+            "stripe_webhook: unhandled error processing event type=%s id=%s",
+            event_type,
             event_id,
-            session_id,
-            customer_email,
-            amount_cents,
-            currency,
-            mode,
-            month,
         )
-        logger.info(
-            "stripe_webhook: recorded checkout.session.completed — %d %s (%s)",
-            amount_cents,
-            currency,
-            mode,
-        )
-
-    # ── invoice.payment_succeeded — subscription renewals ─────────────
-    elif event_type == "invoice.payment_succeeded":
-        invoice = event["data"]["object"]
-        # Skip $0 invoices (e.g. trial start)
-        amount_cents = invoice.get("amount_paid") or 0
-        if amount_cents == 0:
-            return JSONResponse({"status": "ok"})
-
-        currency = invoice.get("currency", "usd")
-        session_id = invoice.get("subscription", "") or invoice.get("id", "")
-        customer_email = invoice.get("customer_email", "")
-
-        created = invoice.get("created")
-        if created:
-            month = datetime.fromtimestamp(created, tz=timezone.utc).strftime("%Y-%m")
-
-        await asyncio.to_thread(
-            supabase_cache.record_supporter,
-            event_id,
-            session_id,
-            customer_email,
-            amount_cents,
-            currency,
-            "subscription",
-            month,
-        )
-        logger.info(
-            "stripe_webhook: recorded invoice.payment_succeeded — %d %s",
-            amount_cents,
-            currency,
-        )
-
-    else:
-        # Unhandled event type — acknowledge receipt so Stripe doesn't retry
-        logger.debug("stripe_webhook: unhandled event type %s", event_type)
+        # Still return 200 so Stripe doesn't keep retrying — the error is logged
+        # and can be replayed manually from the Stripe dashboard.
 
     return JSONResponse({"status": "ok"})
 
