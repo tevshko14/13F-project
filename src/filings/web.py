@@ -28,6 +28,7 @@ from fastapi.responses import (
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
+    StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -371,13 +372,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' "
             "https://cdn.jsdelivr.net https://unpkg.com "
-            "https://us.i.posthog.com https://*-assets.i.posthog.com "
             "https://js.stripe.com https://s3.tradingview.com; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "img-src 'self' data: https: blob:; "
             "font-src 'self' data:; "
             "connect-src 'self' "
-            "https://us.i.posthog.com https://*.supabase.co "
+            "https://*.supabase.co "
             "https://js.stripe.com https://*.tradingview.com; "
             "frame-src https://js.stripe.com https://*.tradingview.com https://tally.so; "
             "object-src 'none'; "
@@ -1599,6 +1599,75 @@ async def stripe_webhook(request: Request):
         logger.debug("stripe_webhook: unhandled event type %s", event_type)
 
     return JSONResponse({"status": "ok"})
+
+
+# ── PostHog reverse proxy ─────────────────────────────────────────────────────
+# Proxying PostHog through our own domain bypasses ad blockers that block
+# requests to us.i.posthog.com / us-assets.i.posthog.com directly.
+# The frontend snippet points api_host at /ingest so all PostHog traffic
+# routes through paperpanda.io and is indistinguishable from first-party calls.
+
+_PH_ASSET_HOST = "https://us-assets.i.posthog.com"
+_PH_API_HOST = "https://us.i.posthog.com"
+
+
+@app.api_route("/ingest/static/{path:path}", methods=["GET", "HEAD"])
+async def posthog_asset_proxy(path: str, request: Request):
+    """Proxy PostHog's JS bundle through our domain to defeat ad blockers."""
+    import httpx
+
+    url = f"{_PH_ASSET_HOST}/static/{path}"
+    params = dict(request.query_params)
+    try:
+        async with httpx.AsyncClient(timeout=10) as hc:
+            resp = await hc.get(url, params=params)
+        headers = {
+            k: v for k, v in resp.headers.items()
+            if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
+        }
+        return StreamingResponse(
+            iter([resp.content]),
+            status_code=resp.status_code,
+            headers=headers,
+        )
+    except Exception as exc:
+        logger.warning("posthog_asset_proxy error: %s", exc)
+        return JSONResponse({"error": "proxy error"}, status_code=502)
+
+
+@app.api_route("/ingest/{path:path}", methods=["GET", "POST", "OPTIONS"])
+async def posthog_ingest_proxy(path: str, request: Request):
+    """Proxy PostHog event ingestion through our domain to defeat ad blockers."""
+    import httpx
+
+    url = f"{_PH_API_HOST}/{path}"
+    params = dict(request.query_params)
+    body = await request.body()
+    headers = {
+        k: v for k, v in request.headers.items()
+        if k.lower() not in ("host", "content-length", "transfer-encoding", "connection")
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as hc:
+            resp = await hc.request(
+                method=request.method,
+                url=url,
+                params=params,
+                content=body,
+                headers=headers,
+            )
+        resp_headers = {
+            k: v for k, v in resp.headers.items()
+            if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
+        }
+        return StreamingResponse(
+            iter([resp.content]),
+            status_code=resp.status_code,
+            headers=resp_headers,
+        )
+    except Exception as exc:
+        logger.warning("posthog_ingest_proxy error: %s", exc)
+        return JSONResponse({"error": "proxy error"}, status_code=502)
 
 
 # --- Retail Traders (hidden — no nav link) ---
