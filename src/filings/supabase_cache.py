@@ -207,6 +207,79 @@ CREATE INDEX IF NOT EXISTS idx_api_cache_category_synced
 -- YouTube sync dedup: WHERE created_at >= cutoff
 CREATE INDEX IF NOT EXISTS idx_youtube_events_created_at
     ON youtube_events (created_at DESC);
+
+-- ── Crypto: tracked entities (whale funds / public figures) ──
+CREATE TABLE IF NOT EXISTS crypto_entities (
+    id              BIGSERIAL PRIMARY KEY,
+    name            TEXT NOT NULL UNIQUE,          -- e.g. 'Bitmine Immersion'
+    slug            TEXT NOT NULL UNIQUE,          -- URL-safe, e.g. 'bitmine-immersion'
+    entity_type     TEXT NOT NULL DEFAULT 'fund',  -- 'fund' | 'person' | 'exchange' | 'protocol'
+    description     TEXT NOT NULL DEFAULT '',
+    website         TEXT NOT NULL DEFAULT '',
+    twitter         TEXT NOT NULL DEFAULT '',
+    ticker          TEXT NOT NULL DEFAULT '',      -- stock ticker if public company
+    logo_url        TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_crypto_entities_slug
+    ON crypto_entities (slug);
+CREATE INDEX IF NOT EXISTS idx_crypto_entities_type
+    ON crypto_entities (entity_type);
+
+-- ── Crypto: wallet addresses per entity ──
+-- Note: no auto-increment id; PK is (address, chain).
+CREATE TABLE IF NOT EXISTS crypto_wallets (
+    address         TEXT NOT NULL,
+    chain           TEXT NOT NULL,                 -- 'ethereum' | 'bitcoin' | 'base' | etc.
+    entity_id       BIGINT NOT NULL REFERENCES crypto_entities(id) ON DELETE CASCADE,
+    label           TEXT NOT NULL DEFAULT '',      -- human label, e.g. 'Main treasury'
+    source          TEXT,
+    verified        BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    last_synced_at  TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (address, chain)
+);
+CREATE INDEX IF NOT EXISTS idx_crypto_wallets_entity
+    ON crypto_wallets (entity_id);
+
+-- ── Crypto: point-in-time token holdings snapshot ──
+-- Keyed by entity (not wallet) for simpler queries.
+CREATE TABLE IF NOT EXISTS crypto_holdings (
+    id              BIGSERIAL PRIMARY KEY,
+    entity_id       BIGINT NOT NULL REFERENCES crypto_entities(id) ON DELETE CASCADE,
+    token_symbol    TEXT NOT NULL,
+    token_name      TEXT NOT NULL DEFAULT '',
+    chain           TEXT NOT NULL,
+    amount          NUMERIC(28, 8) NOT NULL DEFAULT 0,
+    usd_value       NUMERIC(20, 2) NOT NULL DEFAULT 0,
+    snapshotted_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (entity_id, token_symbol, chain)
+);
+CREATE INDEX IF NOT EXISTS idx_crypto_holdings_entity
+    ON crypto_holdings (entity_id);
+CREATE INDEX IF NOT EXISTS idx_crypto_holdings_symbol
+    ON crypto_holdings (token_symbol, snapshotted_at DESC);
+
+-- ── Crypto: transfer history ──
+-- Matched to entities via from_address / to_address lookups.
+CREATE TABLE IF NOT EXISTS crypto_transfers (
+    id              BIGSERIAL PRIMARY KEY,
+    tx_hash         TEXT NOT NULL,
+    chain           TEXT NOT NULL,
+    from_address    TEXT NOT NULL DEFAULT '',
+    to_address      TEXT NOT NULL DEFAULT '',
+    token_symbol    TEXT NOT NULL,
+    amount          NUMERIC(28, 8) NOT NULL DEFAULT 0,
+    usd_value       NUMERIC(20, 2) NOT NULL DEFAULT 0,
+    transferred_at  TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_crypto_transfers_addresses
+    ON crypto_transfers (from_address, to_address);
+CREATE INDEX IF NOT EXISTS idx_crypto_transfers_at
+    ON crypto_transfers (transferred_at DESC);
 """
 
 
@@ -1554,3 +1627,262 @@ def get_funding_history(num_months: int = 6) -> list[dict]:
         history = [{"month": _abbr[int(m.split("-")[1])], "raised": 0} for m in months]
 
     return history
+
+
+# ── Crypto helpers ────────────────────────────────────────────────────────────
+
+
+def get_crypto_entities() -> list[dict]:
+    """Return all tracked crypto entities, ordered by name.
+
+    Each item: {id, name, slug, entity_type, description, ticker, logo_url, ...}
+    Returns [] when Supabase is unavailable.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        resp = (
+            client.table("crypto_entities")
+            .select("*")
+            .order("name")
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_crypto_entities: query failed: %s", exc)
+        return []
+
+
+def get_crypto_entity(slug: str) -> dict | None:
+    """Return a single entity by slug, or None if not found."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("crypto_entities")
+            .select("*")
+            .eq("slug", slug)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("get_crypto_entity(%s): query failed: %s", slug, exc)
+        return None
+
+
+def get_crypto_wallets(entity_id: int) -> list[dict]:
+    """Return all active wallets for a given entity_id.
+
+    Each item: {id, entity_id, address, chain, label, last_synced_at, ...}
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        resp = (
+            client.table("crypto_wallets")
+            .select("*")
+            .eq("entity_id", entity_id)
+            .eq("is_active", True)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_crypto_wallets(%s): query failed: %s", entity_id, exc)
+        return []
+
+
+def upsert_crypto_holdings(entity_id: int, holdings: list[dict]) -> bool:
+    """Upsert current holdings snapshot for an entity.
+
+    ``holdings`` is a list of dicts with keys:
+        token_symbol, token_name, chain, amount, usd_value
+
+    Returns True on success, False on failure.
+    """
+    if not holdings:
+        return True
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        # Aggregate by (token_symbol, chain) to avoid duplicate-key conflicts.
+        # Clamp amounts to fit NUMERIC(28,8) — max ~10^20.
+        _MAX_AMOUNT = 9_999_999_999_999_999_999.0  # 10^20 - 1
+        agg: dict[tuple[str, str], dict] = {}
+        for h in holdings:
+            key = (h["token_symbol"], h["chain"])
+            amt = min(float(h.get("amount", 0)), _MAX_AMOUNT)
+            usd = min(float(h.get("usd_value", 0)), _MAX_AMOUNT)
+            if key in agg:
+                agg[key]["amount"] = min(agg[key]["amount"] + amt, _MAX_AMOUNT)
+                agg[key]["usd_value"] = min(agg[key]["usd_value"] + usd, _MAX_AMOUNT)
+            else:
+                agg[key] = {
+                    "entity_id": entity_id,
+                    "token_symbol": h["token_symbol"],
+                    "token_name": h.get("token_name", ""),
+                    "chain": h["chain"],
+                    "amount": amt,
+                    "usd_value": usd,
+                    "snapshotted_at": datetime.now(timezone.utc).isoformat(),
+                }
+        rows = list(agg.values())
+        client.table("crypto_holdings").upsert(
+            rows, on_conflict="entity_id,token_symbol,chain"
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.warning("upsert_crypto_holdings(entity=%s): failed: %s", entity_id, exc)
+        return False
+
+
+def get_crypto_holdings(entity_id: int) -> list[dict]:
+    """Return all current holdings for the given entity.
+
+    Each item: {entity_id, token_symbol, token_name, chain, amount,
+                usd_value, snapshotted_at}
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        resp = (
+            client.table("crypto_holdings")
+            .select(
+                "entity_id, token_symbol, token_name, chain, amount,"
+                "usd_value, snapshotted_at"
+            )
+            .eq("entity_id", entity_id)
+            .order("usd_value", desc=True)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_crypto_holdings(%s): query failed: %s", entity_id, exc)
+        return []
+
+
+def upsert_crypto_transfers(transfers: list[dict], chain: str) -> int:
+    """Insert new transfers, skipping duplicates by tx_hash.
+
+    ``transfers`` is a list of dicts from crypto.get_wallet_transfers():
+        tx_hash, from_address, to_address, token_symbol, chain,
+        amount, usd_value, transferred_at
+
+    Returns count of rows inserted (0 on failure).
+    """
+    if not transfers:
+        return 0
+    client = _get_client()
+    if client is None:
+        return 0
+
+    try:
+        # Check existing tx_hashes to avoid duplicate inserts
+        hashes = [t.get("tx_hash") or t.get("arkham_tx_id", "") for t in transfers]
+        hashes = [h for h in hashes if h]
+        existing: set[str] = set()
+        if hashes:
+            resp = (
+                client.table("crypto_transfers")
+                .select("tx_hash")
+                .in_("tx_hash", hashes)
+                .execute()
+            )
+            existing = {r["tx_hash"] for r in (resp.data or [])}
+
+        rows = []
+        for t in transfers:
+            tx_hash = t.get("tx_hash") or t.get("arkham_tx_id", "")
+            if not tx_hash or tx_hash in existing:
+                continue
+            rows.append({
+                "tx_hash": tx_hash,
+                "chain": t.get("chain", chain),
+                "from_address": t.get("from_address", "").lower(),
+                "to_address": t.get("to_address", "").lower(),
+                "token_symbol": t.get("token_symbol", ""),
+                "amount": float(t.get("amount", 0)),
+                "usd_value": float(t.get("usd_value", 0)),
+                "transferred_at": t.get("transferred_at") or None,
+            })
+
+        if not rows:
+            return 0
+        resp = client.table("crypto_transfers").insert(rows).execute()
+        return len(resp.data or [])
+    except Exception as exc:
+        logger.warning("upsert_crypto_transfers: failed: %s", exc)
+        return 0
+
+
+def get_crypto_transfers(entity_id: int, limit: int = 50) -> list[dict]:
+    """Return recent transfers involving any wallet of the given entity.
+
+    Each item: {tx_hash, chain, from_address, to_address, token_symbol,
+                amount, usd_value, transferred_at}
+    Ordered newest-first.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        # Fetch wallet addresses for this entity
+        w_resp = (
+            client.table("crypto_wallets")
+            .select("address")
+            .eq("entity_id", entity_id)
+            .eq("is_active", True)
+            .execute()
+        )
+        addrs = [r["address"].lower() for r in (w_resp.data or []) if r.get("address")]
+        if not addrs:
+            return []
+
+        # Fetch transfers where from_address or to_address matches
+        resp = (
+            client.table("crypto_transfers")
+            .select(
+                "tx_hash, chain, from_address, to_address, token_symbol,"
+                "amount, usd_value, transferred_at"
+            )
+            .or_(
+                ",".join(
+                    [f"from_address.ilike.{a}" for a in addrs]
+                    + [f"to_address.ilike.{a}" for a in addrs]
+                )
+            )
+            .order("transferred_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        # Tag direction based on which wallet address matched
+        rows = resp.data or []
+        addr_set = set(addrs)
+        for row in rows:
+            if row.get("to_address", "").lower() in addr_set:
+                row["to_wallet_id"] = True  # incoming
+            else:
+                row["to_wallet_id"] = None
+        return rows
+    except Exception as exc:
+        logger.warning("get_crypto_transfers(%s): query failed: %s", entity_id, exc)
+        return []
+
+
+def mark_wallet_synced(address: str, chain: str) -> None:
+    """Update last_synced_at on a crypto_wallet row to now."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        client.table("crypto_wallets").update(
+            {"last_synced_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("address", address).eq("chain", chain).execute()
+    except Exception as exc:
+        logger.warning("mark_wallet_synced(%s/%s): failed: %s", address[:10], chain, exc)

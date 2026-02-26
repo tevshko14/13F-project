@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-24 (Dark mode, dynamic TradingView/Stripe theme sync, dark-mode logo, Supabase startup timeout, automatic retention cleanup)
+> Last updated: 2026-02-25 (Crypto Whale Tracker: on-chain data client, Supabase schema, web routes, background sync loop)
 
 ---
 
@@ -44,6 +44,7 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | Analyst data  | `yfinance` (free) + `finnhub-python` (free tier, optional key) |
 | Sentiment     | CNN Fear & Greed, Finnhub, ApeWisdom, Alpha Vantage |
 | Vitals        | People Data Labs, Glassdoor (RapidAPI), Apple iTunes Search |
+| Crypto data   | Etherscan V2 (EVM chains), Blockchain.com (BTC), Helius (Solana, future) |
 | Caching       | 3-tier: in-memory (L1) → Supabase Postgres (L2) → disk JSON (L3) |
 | Hosting       | Railway (auto-deploy from main) at [paperpanda.io](https://paperpanda.io) |
 | Entry points  | `filings` (CLI), `filings-web` (web, port 8000) |
@@ -214,7 +215,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
-    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache + insider_trades tables)
+    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache + insider_trades + crypto_* tables)
+    ├── crypto.py                     # Multi-chain on-chain data client (Etherscan V2, Blockchain.com, Helius)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification engine: detection, matching, persistence, filing season
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
@@ -243,6 +245,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── activity.html             # Cross-fund activity feed (top 100)
         ├── stock.html                # Stock detail (7 tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
         ├── support.html              # Panda Fund: progress bar, Stripe Buy Button + Pricing Table, cost breakdown, funding history chart
+        ├── crypto.html               # Crypto Whale Tracker: entity grid (cards with type badges)
+        ├── crypto_entity.html        # Crypto entity detail: holdings table + transfers table + stats strip
         ├── notifications.html        # Notification history page
         ├── error.html                # Error page
         └── partials/
@@ -510,7 +514,72 @@ Functions in `notifications.py`:
 - `is_filing_season() -> bool` — True within ±15 days of filing deadlines
 - `get_poll_interval_seconds() -> int` — 2h during season, 12h outside
 
-### 4.5 Dataclasses (models.py)
+### 4.5 Crypto Schema (Supabase — 4 tables)
+
+The Crypto Whale Tracker stores all data in Supabase (no local JSON files).
+Entities and wallets are seeded manually; holdings and transfers are synced
+by a background job every 6 hours.
+
+**`crypto_entities`** — tracked whale funds / public figures:
+```
+id              BIGSERIAL PK
+name            TEXT UNIQUE       -- e.g. 'Bitmine Immersion'
+slug            TEXT UNIQUE       -- URL-safe, e.g. 'bitmine-immersion'
+entity_type     TEXT              -- 'fund' | 'individual' | 'exchange' | 'protocol'
+description     TEXT
+website         TEXT
+twitter         TEXT
+ticker          TEXT              -- stock ticker if public company
+logo_url        TEXT
+created_at      TIMESTAMPTZ
+updated_at      TIMESTAMPTZ
+```
+
+**`crypto_wallets`** — wallet addresses per entity:
+```
+id              BIGSERIAL PK
+entity_id       BIGINT FK → crypto_entities(id) ON DELETE CASCADE
+address         TEXT              -- on-chain address
+chain           TEXT              -- 'ethereum' | 'bitcoin' | 'base' | 'polygon' | 'arbitrum' | etc.
+label           TEXT              -- human label, e.g. 'Main treasury'
+is_active       BOOLEAN
+last_synced_at  TIMESTAMPTZ
+UNIQUE (address, chain)
+```
+
+**`crypto_holdings`** — point-in-time token holdings snapshot:
+```
+id              BIGSERIAL PK
+wallet_id       BIGINT FK → crypto_wallets(id) ON DELETE CASCADE
+token_symbol    TEXT              -- e.g. 'ETH', 'BTC', 'USDC'
+token_name      TEXT
+chain           TEXT
+amount          NUMERIC(28,8)
+usd_value       NUMERIC(20,2)    -- enriched by price oracle (0 until implemented)
+snapshotted_at  TIMESTAMPTZ
+UNIQUE (wallet_id, token_symbol, chain)
+```
+
+**`crypto_transfers`** — transfer history:
+```
+id              BIGSERIAL PK
+tx_hash         TEXT
+chain           TEXT
+from_wallet_id  BIGINT FK → crypto_wallets(id)  -- NULL if external sender
+to_wallet_id    BIGINT FK → crypto_wallets(id)  -- NULL if external receiver
+from_address    TEXT
+to_address      TEXT
+token_symbol    TEXT
+amount          NUMERIC(28,8)
+usd_value       NUMERIC(20,2)
+transferred_at  TIMESTAMPTZ
+UNIQUE (tx_hash, chain, token_symbol)
+```
+
+Tables are auto-created by the `_SCHEMA_SQL` migration in `supabase_cache.py`
+on first Supabase connection (same pattern as `api_cache` and `insider_trades`).
+
+### 4.6 Dataclasses (models.py)
 
 All models are `@dataclass`. No ORM. No database.
 
@@ -531,7 +600,7 @@ All models are `@dataclass`. No ORM. No database.
 | `AnalystRating` | A single firm-level analyst rating | Web analyst tab |
 | `Notification` | A notification about a filing/watchlist match | Notification system |
 
-### 4.6 How a Superinvestor Links to a CIK
+### 4.7 How a Superinvestor Links to a CIK
 
 ```
 superinvestors.py          cache.py / fund_data.json          SEC EDGAR
@@ -970,6 +1039,108 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 - `save_*()` updates in-memory cache first, then writes to disk
 - All subsequent reads are instant (0.1ms for 1000 calls)
 
+### 5.15 Crypto Whale Tracker (`crypto.py` + `supabase_cache.py` crypto helpers)
+
+On-chain data pipeline for tracking crypto whale wallets. Entirely separate from
+the 13F filing system — uses Supabase for all storage (no local JSON files).
+
+**Architecture:**
+
+```
+                     ┌────────────────────────────┐
+                     │     On-Chain Data APIs       │
+                     │  Etherscan V2 (EVM chains)   │
+                     │  Blockchain.com (BTC)         │
+                     │  Helius (Solana, future)       │
+                     └──────────────┬───────────────┘
+                                    │
+                          crypto.py (data fetching)
+                          Fault-tolerant: returns empty, never raises
+                                    │
+                                    ▼
+                     ┌────────────────────────────┐
+                     │ supabase_cache.py            │
+                     │ crypto_* tables (Supabase)   │
+                     │                              │
+                     │ Entities: seeded manually     │
+                     │ Wallets: seeded manually      │
+                     │ Holdings: synced every 6h     │
+                     │ Transfers: synced every 6h    │
+                     └──────────────┬───────────────┘
+                                    │
+                            web.py routes
+                          /crypto, /crypto/{slug}
+```
+
+**Supported chains:**
+
+| Chain | API | Key Required | Native Token |
+|---|---|---|---|
+| Ethereum | Etherscan V2 (`chainid=1`) | Optional (free tier 5 req/s) | ETH |
+| Base | Etherscan V2 (`chainid=8453`) | Optional | ETH |
+| Polygon | Etherscan V2 (`chainid=137`) | Optional | MATIC |
+| Arbitrum | Etherscan V2 (`chainid=42161`) | Optional | ETH |
+| Optimism | Etherscan V2 (`chainid=10`) | Optional | ETH |
+| Bitcoin | Blockchain.com (REST) | None | BTC |
+| Solana | Helius (future) | `HELIUS_API_KEY` | SOL |
+
+**Key functions in `crypto.py`:**
+
+| Function | Description |
+|---|---|
+| `get_wallet_balance(address, chain)` | Unified: native token balance for any chain |
+| `get_wallet_transfers(address, chain, limit)` | Unified: recent transfers for any chain |
+| `get_evm_eth_balance(address, chain)` | ETH/MATIC balance via Etherscan V2 |
+| `get_evm_token_balances(address, chain)` | ERC-20 token balances (tokentx → tokenbalance) |
+| `get_evm_transfers(address, chain)` | Recent ETH transfers via Etherscan V2 |
+| `get_btc_balance(address)` | BTC balance via Blockchain.com |
+| `get_btc_transfers(address, limit)` | BTC transaction history via Blockchain.com |
+| `is_configured()` | Always True (BTC + basic ETH work keyless) |
+
+**Key functions in `supabase_cache.py` (crypto helpers):**
+
+| Function | Description |
+|---|---|
+| `get_crypto_entities()` | All tracked entities, ordered by name |
+| `get_crypto_entity(slug)` | Single entity by URL slug |
+| `get_crypto_wallets(entity_id)` | Active wallets for an entity |
+| `upsert_crypto_holdings(wallet_id, holdings)` | Upsert current balance snapshot |
+| `get_crypto_holdings(entity_id)` | All holdings across entity's wallets (joined) |
+| `upsert_crypto_transfers(wallet_id, transfers, chain)` | Insert transfers, skip duplicates |
+| `get_crypto_transfers(entity_id, limit)` | Recent transfers for entity's wallets |
+| `mark_wallet_synced(wallet_id)` | Update `last_synced_at` timestamp |
+
+**Background sync loop (`_crypto_sync_loop` in `web.py`):**
+
+```
+1. Wait 60s after startup (let the web process settle)
+2. Loop forever:
+   a. Fetch all entities from Supabase
+   b. For each entity → fetch wallets
+   c. For each wallet → _sync_single_wallet():
+      i.   get_wallet_balance() → upsert_crypto_holdings()
+      ii.  get_evm_token_balances() → append to holdings (EVM only)
+      iii. get_wallet_transfers() → upsert_crypto_transfers()
+      iv.  mark_wallet_synced()
+      v.   Sleep 2s between wallets (API rate limiting)
+   d. Sleep 6 hours until next cycle
+```
+
+**Env vars:**
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `ETHERSCAN_API_KEY` | No (higher rate limits with key) | Etherscan.io free tier API key |
+| `HELIUS_API_KEY` | No (Solana not yet implemented) | Helius.dev API key |
+| `ARKHAM_API_KEY` | No (on waitlist) | Arkham Intelligence enrichment (future) |
+
+**Current limitations (not yet implemented):**
+- USD price enrichment: all `usd_value` fields are 0.0 (needs CoinGecko/similar price oracle)
+- Solana chain support (Helius API stubbed but not wired)
+- Arkham Intelligence entity attribution (on API waitlist)
+- No seed data in Supabase tables yet (entities/wallets must be manually inserted)
+- ERC-20 token discovery relies on `tokentx` history (won't find tokens with no transfer history)
+
 ---
 
 ## 6. Web Routes
@@ -1008,6 +1179,8 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/notifications` | `notifications_page` | Notifications JSON | `notifications.html` |
 | POST | `/api/notifications/read/{id}` | `mark_read` | Notifications JSON | Empty HTML |
 | POST | `/api/notifications/read-all` | `mark_all_read` | Notifications JSON | `partials/notification_bell.html` |
+| GET | `/crypto` | `crypto_index` | Supabase crypto_entities | `crypto.html` |
+| GET | `/crypto/{slug}` | `crypto_entity_page` | Supabase crypto_holdings + crypto_transfers | `crypto_entity.html` |
 | GET | `/support` | `support_page` | Env vars (PANDA_FUND_RAISED, Stripe IDs) | `support.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
@@ -1021,6 +1194,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 - Exception handlers detect HTMX requests (`HX-Request` header) and API paths to return inline `data_error.html` partial instead of full error pages.
 - `/support` and homepage widget use Stripe OOTB web components (Buy Button + Pricing Table) -- zero backend Stripe SDK needed.
 - `/health` endpoint includes `stale_funds`, `refresh_status`, `refresh_progress`, and `vitals_cache` diagnostics.
+- Crypto routes (`/crypto`, `/crypto/{slug}`) read from Supabase only — no on-chain API calls during page load. Background sync loop handles data freshness every 6 hours.
 
 ---
 
@@ -1107,7 +1281,7 @@ so in dark mode a CSS `filter: invert(0.85) hue-rotate(180deg)` is applied to th
 ### Template Hierarchy
 
 ```
-base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SSE + sortable tables)
+base.html (nav: Home|Retail|Funds|Insiders|Crypto|Support the Panda + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SSE + sortable tables)
   ├── includes partials/watchlist_sidebar.html (in <aside> via hx-preserve)
   ├── includes partials/notification_bell.html (in <nav>, HTMX-polls every 60s)
   ├── includes partials/ticker_search.html (in <nav>, Fuse.js fuzzy autocomplete)
@@ -1145,6 +1319,12 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + styles + HTMX + C
   │     ├── Cost breakdown (line items, no dollar amounts), funding history ECharts bar chart
   │     ├── YouTube @funofinvesting section + feedback CTA
   │     └── Auto-switches to monthly tab when linked from homepage (#monthly hash)
+  ├── crypto.html (Crypto Whale Tracker: entity card grid with type badges)
+  │     └── Links to /crypto/{slug} for each entity
+  ├── crypto_entity.html (crypto entity detail page)
+  │     ├── Stats strip: portfolio value, token positions, transfer count
+  │     ├── Holdings table: token, chain, amount, USD value
+  │     └── Transfers table: date, direction IN/OUT, from/to addresses, tx hash (explorer links)
   ├── notifications.html (notification history)
   └── error.html
 ```
@@ -1474,6 +1654,18 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Stripe Pricing Table dark mode via CSS `filter: invert` on container
 - [x] Supabase startup cache load wrapped in 30-second timeout (falls back to disk on timeout)
 - [x] Automatic retention cleanup on startup: insider_trades (6 mo), youtube_events (30 d), sync_logs (30 d), api_cache expired entries
+- [x] Crypto Whale Tracker: on-chain data client (`crypto.py`) — Etherscan V2 (5 EVM chains) + Blockchain.com (BTC)
+- [x] Crypto Supabase schema: 4 tables (crypto_entities, crypto_wallets, crypto_holdings, crypto_transfers) with auto-migration
+- [x] Crypto web routes: `/crypto` entity grid + `/crypto/{slug}` detail page with holdings/transfers tables
+- [x] Crypto background sync loop: `_crypto_sync_loop()` syncs all wallets every 6 hours with 2s rate limiting
+- [x] Crypto nav link added to base.html (Home | Retail | Funds | Insiders | Crypto | Support)
+- [ ] Crypto: seed initial entities + wallets in Supabase (manual SQL inserts or admin endpoint)
+- [ ] Crypto: USD price enrichment via CoinGecko or similar free price API (all usd_value fields are currently 0)
+- [ ] Crypto: Solana chain support via Helius API (HELIUS_API_KEY env var ready, logic not wired)
+- [ ] Crypto: Arkham Intelligence entity attribution (on API waitlist, ARKHAM_API_KEY env var ready)
+- [ ] Crypto: portfolio-level aggregation page (total whale crypto AUM across all entities)
+- [ ] Crypto: historical holdings snapshots (currently overwrites on each sync, no time series)
+- [ ] Crypto: notification integration (detect large transfers and alert via existing notification system)
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
@@ -1515,10 +1707,10 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-24 (dark mode, TradingView/Stripe
-> theme sync, dark-mode logo, Supabase startup timeout, automatic retention cleanup,
-> background refresh, vitals persistence, Panda Fund support page, Stripe embed,
-> homepage widget).
+> This file documents the system as of 2026-02-25 (Crypto Whale Tracker: on-chain
+> data client, Supabase schema, web routes, background sync loop, dark mode,
+> TradingView/Stripe theme sync, Supabase startup timeout, automatic retention
+> cleanup, background refresh, vitals persistence, Panda Fund support page).
 > If told "Context is drifting," the first action should be to re-read
 > `/Users/Tevis_1/13F-project/README_DEV.md` and reconcile any discrepancies
 > with the actual code.

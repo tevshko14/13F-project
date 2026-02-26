@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+{% block title %}{{ entity.name }} Crypto Holdings - PaperPanda{% endblock %}
+{% block meta_description %}Track {{ entity.name }}'s on-chain crypto holdings and recent transfers across Ethereum, Bitcoin, and more.{% endblock %}
+
+{% block content %}
+<style>
+    /* ── Page layout ── */
+    .crypto-entity-header {
+        display: flex;
+        align-items: flex-start;
+        gap: 1rem;
+        margin-bottom: 2rem;
+        flex-wrap: wrap;
+    }
+    .entity-logo-lg {
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+        object-fit: contain;
+        background: var(--pp-overlay-05);
+        flex-shrink: 0;
+    }
+    .entity-logo-lg-placeholder {
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #1976d2 0%, #42a5f5 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #fff;
+    }
+    .entity-header-text { flex: 1; min-width: 0; }
+    .entity-header-text h1 { margin: 0 0 0.2rem; font-size: 1.6rem; }
+    .entity-header-meta {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        font-size: 0.82rem;
+        color: var(--pp-text-secondary);
+    }
+    .entity-meta-dot { opacity: 0.4; }
+
+    .entity-type-badge {
+        display: inline-block;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 0.2em 0.6em;
+        border-radius: 999px;
+        background: var(--pp-overlay-10);
+        color: var(--pp-text-secondary);
+    }
+    .entity-type-badge.fund     { background: #e3f2fd; color: #1565c0; }
+    .entity-type-badge.individual   { background: #f3e5f5; color: #6a1b9a; }
+    .entity-type-badge.exchange { background: #e8f5e9; color: #2e7d32; }
+    .entity-type-badge.protocol { background: #fff3e0; color: #e65100; }
+    [data-theme="dark"] .entity-type-badge.fund     { background: #0d2137; color: #90caf9; }
+    [data-theme="dark"] .entity-type-badge.individual   { background: #1e0d37; color: #ce93d8; }
+    [data-theme="dark"] .entity-type-badge.exchange { background: #0d2b0d; color: #81c784; }
+    [data-theme="dark"] .entity-type-badge.protocol { background: #2b1500; color: #ffb74d; }
+
+    /* ── Stats strip ── */
+    .stats-strip {
+        display: flex;
+        gap: 1.5rem;
+        flex-wrap: wrap;
+        margin-bottom: 2rem;
+    }
+    .stat-card {
+        background: var(--card-background-color);
+        border: 1px solid var(--pp-overlay-10);
+        border-radius: 10px;
+        padding: 1rem 1.5rem;
+        min-width: 160px;
+        flex: 1;
+    }
+    .stat-label {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--pp-text-secondary);
+        margin-bottom: 0.3rem;
+    }
+    .stat-value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        line-height: 1.1;
+    }
+    .stat-sub {
+        font-size: 0.78rem;
+        color: var(--pp-text-secondary);
+        margin-top: 0.15rem;
+    }
+
+    /* ── Section headers ── */
+    .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 2rem 0 1rem;
+        border-bottom: 2px solid var(--pp-overlay-10);
+        padding-bottom: 0.5rem;
+    }
+    .section-header h2 {
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin: 0;
+    }
+    .section-header .section-hint {
+        font-size: 0.78rem;
+        color: var(--pp-text-secondary);
+    }
+
+    /* ── Holdings table ── */
+    .holdings-table-wrap { overflow-x: auto; }
+    .holdings-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.875rem;
+    }
+    .holdings-table th {
+        text-align: left;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--pp-text-secondary);
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid var(--pp-overlay-10);
+        white-space: nowrap;
+    }
+    .holdings-table td {
+        padding: 0.65rem 0.75rem;
+        border-bottom: 1px solid var(--pp-overlay-05);
+        vertical-align: middle;
+    }
+    .holdings-table tr:last-child td { border-bottom: none; }
+    .holdings-table tr:hover td { background: var(--pp-overlay-03); }
+
+    .token-symbol {
+        font-weight: 700;
+        font-size: 0.9rem;
+    }
+    .token-name {
+        font-size: 0.75rem;
+        color: var(--pp-text-secondary);
+    }
+    .chain-badge {
+        display: inline-block;
+        font-size: 0.68rem;
+        font-weight: 600;
+        padding: 0.15em 0.5em;
+        border-radius: 4px;
+        background: var(--pp-overlay-08);
+        color: var(--pp-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .amount-cell { text-align: right; font-variant-numeric: tabular-nums; }
+    .usd-cell    { text-align: right; font-variant-numeric: tabular-nums; color: var(--pp-text-secondary); }
+
+    /* ── Transfers table ── */
+    .transfers-table-wrap { overflow-x: auto; }
+    .transfers-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+    }
+    .transfers-table th {
+        text-align: left;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--pp-text-secondary);
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid var(--pp-overlay-10);
+        white-space: nowrap;
+    }
+    .transfers-table td {
+        padding: 0.6rem 0.75rem;
+        border-bottom: 1px solid var(--pp-overlay-05);
+        vertical-align: middle;
+    }
+    .transfers-table tr:last-child td { border-bottom: none; }
+    .transfers-table tr:hover td { background: var(--pp-overlay-03); }
+
+    .addr {
+        font-family: monospace;
+        font-size: 0.75rem;
+        color: var(--pp-text-secondary);
+    }
+    .tx-hash-link {
+        font-family: monospace;
+        font-size: 0.72rem;
+        color: var(--pp-accent, #1976d2);
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .tx-hash-link:hover { text-decoration: underline; }
+
+    .direction-in  { color: #2e7d32; font-weight: 700; }
+    .direction-out { color: #c62828; font-weight: 700; }
+
+    /* ── Empty state ── */
+    .section-empty {
+        text-align: center;
+        padding: 2.5rem 1rem;
+        color: var(--pp-text-secondary);
+        font-size: 0.875rem;
+        background: var(--pp-overlay-03);
+        border-radius: 8px;
+    }
+    .section-empty strong { display: block; margin-bottom: 0.3rem; color: var(--pico-color); }
+
+    /* ── Back link ── */
+    .back-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        font-size: 0.82rem;
+        color: var(--pp-text-secondary);
+        text-decoration: none;
+        margin-bottom: 1.5rem;
+    }
+    .back-link:hover { color: var(--pp-accent, #1976d2); }
+
+    /* ── Sync notice ── */
+    .sync-notice {
+        font-size: 0.75rem;
+        color: var(--pp-text-secondary);
+        text-align: right;
+        margin-top: 0.5rem;
+        opacity: 0.7;
+    }
+</style>
+
+<a href="/crypto" class="back-link">← All entities</a>
+
+{# ── Entity header ── #}
+<div class="crypto-entity-header">
+    {% if entity.logo_url %}
+    <img src="{{ entity.logo_url }}" alt="{{ entity.name }}" class="entity-logo-lg">
+    {% else %}
+    <div class="entity-logo-lg-placeholder">{{ entity.name[0] | upper }}</div>
+    {% endif %}
+
+    <div class="entity-header-text">
+        <h1>{{ entity.name }}</h1>
+        <div class="entity-header-meta">
+            <span class="entity-type-badge {{ entity.entity_type }}">{{ entity.entity_type }}</span>
+            {% if entity.ticker %}
+            <span class="entity-meta-dot">·</span>
+            <span>{{ entity.ticker }}</span>
+            {% endif %}
+            {% if entity.website %}
+            <span class="entity-meta-dot">·</span>
+            <a href="{{ entity.website }}" target="_blank" rel="noopener noreferrer"
+               style="color: var(--pp-accent, #1976d2);">
+                {{ entity.website | replace('https://', '') | replace('http://', '') }}
+            </a>
+            {% endif %}
+        </div>
+        {% if entity.description %}
+        <p style="margin: 0.5rem 0 0; font-size: 0.875rem; color: var(--pp-text-secondary);">
+            {{ entity.description }}
+        </p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Stats strip ── #}
+<div class="stats-strip">
+    <div class="stat-card">
+        <div class="stat-label">Portfolio Value</div>
+        <div class="stat-value">
+            {% if total_usd > 0 %}
+                ${{ "{:,.0f}".format(total_usd) }}
+            {% else %}
+                —
+            {% endif %}
+        </div>
+        <div class="stat-sub">across all tracked wallets</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Token Positions</div>
+        <div class="stat-value">{{ holdings | length }}</div>
+        <div class="stat-sub">unique tokens held</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Recent Transfers</div>
+        <div class="stat-value">{{ transfers | length }}</div>
+        <div class="stat-sub">last 50 on-chain txs</div>
+    </div>
+</div>
+
+{# ── Holdings ── #}
+<div class="section-header">
+    <h2>Holdings</h2>
+    <span class="section-hint">Sorted by value · refreshed periodically</span>
+</div>
+
+{% if holdings %}
+<div class="holdings-table-wrap">
+    <table class="holdings-table">
+        <thead>
+            <tr>
+                <th>Token</th>
+                <th>Chain</th>
+                <th class="amount-cell">Amount</th>
+                <th class="usd-cell">USD Value</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for h in holdings %}
+            <tr>
+                <td>
+                    <div class="token-symbol">{{ h.token_symbol }}</div>
+                    {% if h.token_name and h.token_name != h.token_symbol %}
+                    <div class="token-name">{{ h.token_name }}</div>
+                    {% endif %}
+                </td>
+                <td><span class="chain-badge">{{ h.chain }}</span></td>
+                <td class="amount-cell">
+                    {% set amt = h.amount | float %}
+                    {% if amt >= 1000 %}
+                        {{ "{:,.2f}".format(amt) }}
+                    {% elif amt >= 1 %}
+                        {{ "{:,.4f}".format(amt) }}
+                    {% else %}
+                        {{ "{:.8f}".format(amt) }}
+                    {% endif %}
+                </td>
+                <td class="usd-cell">
+                    {% set usd = h.usd_value | float %}
+                    {% if usd > 0 %}
+                        ${{ "{:,.2f}".format(usd) }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<p class="sync-notice">Holdings are synced on a schedule. Values reflect last sync.</p>
+
+{% else %}
+<div class="section-empty">
+    <strong>No holdings data yet</strong>
+    Wallet sync hasn't run yet — check back shortly.
+</div>
+{% endif %}
+
+{# ── Transfers ── #}
+<div class="section-header">
+    <h2>Recent Transfers</h2>
+    <span class="section-hint">Last 50 transactions</span>
+</div>
+
+{% if transfers %}
+<div class="transfers-table-wrap">
+    <table class="transfers-table">
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Dir</th>
+                <th>Token</th>
+                <th>Chain</th>
+                <th class="amount-cell">Amount</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Tx</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for t in transfers %}
+            {% set is_in = t.to_wallet_id is not none %}
+            <tr>
+                <td style="white-space: nowrap; font-size: 0.78rem; color: var(--pp-text-secondary);">
+                    {% if t.transferred_at %}
+                        {{ t.transferred_at[:10] }}
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+                <td>
+                    {% if is_in %}
+                    <span class="direction-in">IN</span>
+                    {% else %}
+                    <span class="direction-out">OUT</span>
+                    {% endif %}
+                </td>
+                <td><span class="token-symbol" style="font-size: 0.82rem;">{{ t.token_symbol }}</span></td>
+                <td><span class="chain-badge">{{ t.chain }}</span></td>
+                <td class="amount-cell">
+                    {% set amt = t.amount | float %}
+                    {% if amt >= 1000 %}
+                        {{ "{:,.2f}".format(amt) }}
+                    {% elif amt >= 1 %}
+                        {{ "{:,.4f}".format(amt) }}
+                    {% else %}
+                        {{ "{:.6f}".format(amt) }}
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="addr" title="{{ t.from_address }}">
+                        {{ t.from_address[:6] }}…{{ t.from_address[-4:] if t.from_address else '—' }}
+                    </span>
+                </td>
+                <td>
+                    <span class="addr" title="{{ t.to_address }}">
+                        {{ t.to_address[:6] }}…{{ t.to_address[-4:] if t.to_address else '—' }}
+                    </span>
+                </td>
+                <td>
+                    {% if t.tx_hash %}
+                    {% set explorer = 'https://etherscan.io/tx/' if t.chain == 'ethereum' else
+                                      'https://basescan.org/tx/' if t.chain == 'base' else
+                                      'https://polygonscan.com/tx/' if t.chain == 'polygon' else
+                                      'https://arbiscan.io/tx/' if t.chain == 'arbitrum' else
+                                      'https://blockchain.com/btc/tx/' if t.chain == 'bitcoin' else
+                                      'https://etherscan.io/tx/' %}
+                    <a href="{{ explorer }}{{ t.tx_hash }}" target="_blank" rel="noopener noreferrer"
+                       class="tx-hash-link" title="{{ t.tx_hash }}">
+                        {{ t.tx_hash[:8] }}…
+                    </a>
+                    {% else %}
+                    —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+<div class="section-empty">
+    <strong>No transfer data yet</strong>
+    Transfer history will appear after the first wallet sync.
+</div>
+{% endif %}
+
+{% endblock %}

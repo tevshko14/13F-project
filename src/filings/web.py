@@ -48,6 +48,7 @@ from filings import (
     supabase_cache,
     auth,
     youtube,
+    crypto,
 )
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
@@ -207,6 +208,9 @@ async def lifespan(app: FastAPI):
     if _ENABLE_BACKGROUND_REFRESH:
         app.state.refresh_status = "pending"
         asyncio.create_task(_delayed_refresh_sweep(app))
+
+    # Crypto wallet sync loop (runs every 6 hours)
+    asyncio.create_task(_crypto_sync_loop())
 
     yield
 
@@ -610,6 +614,112 @@ async def _delayed_refresh_sweep(app: FastAPI) -> None:
     """Wait for initial startup to settle, then begin background sweep."""
     await asyncio.sleep(30)
     await _background_refresh_sweep(app)
+
+
+# ── Crypto wallet sync ────────────────────────────────────────────────────────
+
+_CRYPTO_SYNC_INTERVAL_HOURS = 6  # Re-sync all wallets every 6 hours
+
+
+async def _sync_entity(entity_id: int, wallets: list[dict]) -> None:
+    """Sync all wallets for one entity: accumulate holdings, write once.
+
+    Fetches balances and token lists from every wallet, sums them up,
+    then upserts a single combined snapshot per entity.  Transfers are
+    written per-wallet (keyed by tx_hash, so no overwrite issue).
+    """
+    entity_holdings: list[dict] = []
+
+    for wallet in wallets:
+        address = wallet["address"]
+        chain = wallet["chain"]
+        label = wallet.get("label", "")
+        logger.info(
+            "Crypto sync: entity %s wallet (%s %s %s)",
+            entity_id, label, chain, address[:10],
+        )
+
+        try:
+            # ── Holdings (accumulated across wallets) ─────────────────────
+            balance = await asyncio.to_thread(
+                crypto.get_wallet_balance, address, chain
+            )
+            if balance and balance.get("amount", 0) > 0:
+                entity_holdings.append(balance)
+
+            # ERC-20 / SPL token balances (EVM chains only for now)
+            if chain not in ("bitcoin",):
+                tokens = await asyncio.to_thread(
+                    crypto.get_evm_token_balances, address, chain
+                )
+                entity_holdings.extend(tokens)
+
+            # ── Transfers (per-wallet, no overwrite issue) ────────────────
+            transfers = await asyncio.to_thread(
+                crypto.get_wallet_transfers, address, chain, 50
+            )
+            if transfers:
+                inserted = await asyncio.to_thread(
+                    supabase_cache.upsert_crypto_transfers, transfers, chain
+                )
+                logger.info(
+                    "Crypto sync: entity %s — %d transfers from %s",
+                    entity_id, inserted, address[:10],
+                )
+
+            # ── Mark wallet synced ────────────────────────────────────────
+            await asyncio.to_thread(
+                supabase_cache.mark_wallet_synced, address, chain
+            )
+
+        except Exception:
+            logger.exception(
+                "Crypto sync: entity %s wallet %s failed",
+                entity_id, address[:10],
+            )
+
+        # Rate limit between wallets
+        await asyncio.sleep(2)
+
+    # ── Write combined holdings once per entity ───────────────────────
+    if entity_holdings:
+        await asyncio.to_thread(
+            supabase_cache.upsert_crypto_holdings, entity_id, entity_holdings
+        )
+        logger.info(
+            "Crypto sync: entity %s — wrote %d holding entries (from %d wallets)",
+            entity_id, len(entity_holdings), len(wallets),
+        )
+
+
+async def _crypto_sync_loop() -> None:
+    """Infinite loop: sync all tracked wallets, sleep, repeat.
+
+    Starts after a 60s delay so the web process is fully up before
+    making any external API calls.  Runs every _CRYPTO_SYNC_INTERVAL_HOURS.
+    """
+    await asyncio.sleep(60)  # Let startup settle first
+
+    while True:
+        try:
+            logger.info("Crypto sync: starting full wallet sweep")
+            entities = await asyncio.to_thread(supabase_cache.get_crypto_entities)
+
+            for entity in entities:
+                wallets = await asyncio.to_thread(
+                    supabase_cache.get_crypto_wallets, entity["id"]
+                )
+                await _sync_entity(entity["id"], wallets)
+
+            logger.info(
+                "Crypto sync: sweep complete — %d entities processed", len(entities)
+            )
+
+        except Exception:
+            logger.exception("Crypto sync: sweep crashed")
+
+        # Sleep until next cycle
+        await asyncio.sleep(_CRYPTO_SYNC_INTERVAL_HOURS * 3600)
 
 
 async def _trigger_single_refresh(app: FastAPI, cik: str) -> None:
@@ -1303,6 +1413,80 @@ async def insider_trading_page(request: Request):
         "insider_trading.html",
         {
             "request": request,
+        },
+    )
+
+
+# --- Crypto Whale Tracker ---
+
+
+@app.get("/crypto", response_class=HTMLResponse)
+async def crypto_index(request: Request):
+    """Index page listing all tracked crypto entities."""
+    entities = await asyncio.to_thread(supabase_cache.get_crypto_entities)
+    return templates.TemplateResponse(
+        "crypto.html",
+        {
+            "request": request,
+            "entities": entities,
+        },
+    )
+
+
+# Known tokens that are never spam — kept even when usd_value is 0.
+_KNOWN_TOKENS: set[str] = {
+    "ETH", "WETH", "BTC", "WBTC", "USDT", "USDC", "DAI", "BUSD", "TUSD",
+    "FRAX", "LUSD", "LINK", "UNI", "AAVE", "MKR", "SNX", "COMP", "CRV",
+    "LDO", "RPL", "MATIC", "ARB", "OP", "STETH", "RETH", "CBETH", "SFRXETH",
+    "SOL", "DOGE", "SHIB", "PEPE", "APE", "GRT", "FIL", "RNDR", "IMX",
+    "ENS", "BLUR", "PENDLE", "ENA", "EIGEN", "ETHFI",
+}
+
+_DEFAULT_MIN_USD = 1.0  # Hide holdings worth less than $1
+
+
+@app.get("/crypto/{slug}", response_class=HTMLResponse)
+async def crypto_entity_page(request: Request, slug: str):
+    """Detail page for a single crypto entity — holdings + recent transfers."""
+    entity = await asyncio.to_thread(supabase_cache.get_crypto_entity, slug)
+    if entity is None:
+        raise StarletteHTTPException(status_code=404, detail="Entity not found")
+
+    entity_id = entity["id"]
+
+    # Fetch holdings and transfers from Supabase (synced by background job)
+    holdings, transfers = await asyncio.gather(
+        asyncio.to_thread(supabase_cache.get_crypto_holdings, entity_id),
+        asyncio.to_thread(supabase_cache.get_crypto_transfers, entity_id, 50),
+    )
+
+    # ── Filter spam tokens ────────────────────────────────────────────
+    # Famous wallets get airdropped thousands of worthless scam tokens.
+    # If USD pricing is available, filter by min value.  Otherwise fall
+    # back to a known-token whitelist so the page isn't cluttered.
+    has_pricing = any(float(h.get("usd_value") or 0) > 0 for h in holdings)
+    if has_pricing:
+        holdings = [
+            h for h in holdings
+            if float(h.get("usd_value") or 0) >= _DEFAULT_MIN_USD
+        ]
+    else:
+        holdings = [
+            h for h in holdings
+            if h.get("token_symbol", "").upper() in _KNOWN_TOKENS
+        ]
+
+    # Total portfolio value (sum of usd_value across all holdings)
+    total_usd = sum(float(h.get("usd_value") or 0) for h in holdings)
+
+    return templates.TemplateResponse(
+        "crypto_entity.html",
+        {
+            "request": request,
+            "entity": entity,
+            "holdings": holdings,
+            "transfers": transfers,
+            "total_usd": total_usd,
         },
     )
 
