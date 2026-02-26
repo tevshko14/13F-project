@@ -1,0 +1,461 @@
+{% extends "base.html" %}
+{% block title %}Capital Deployed — PaperPanda{% endblock %}
+{% block meta_description %}See how much capital superinvestors have deployed in equities vs their total AUM. Track deployment ratios and identify who's sitting on cash.{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>Capital Deployed</h1>
+    <p>How much of each fund's total AUM is deployed in equities (13F holdings). Data from SEC Form ADV &amp; XBRL filings.</p>
+</hgroup>
+
+<div class="cache-info">
+    <small>{{ funds_with_data }} of {{ total_funds }} funds with AUM data</small>
+    <small style="display:inline-block; background:rgba(76,175,80,.12); color:#2e7d32; padding:2px 8px; border-radius:4px; font-size:0.78em; font-weight:500;">Auto-synced</small>
+</div>
+
+{% if not leaderboard %}
+<article style="text-align: center; padding: 3em 1em;">
+    <p style="font-size: 1.1em; color: var(--pp-overlay-50);">No deployment data available yet.</p>
+    <p style="font-size: 0.9em; color: var(--pp-overlay-40);">
+        Deployment data is synced automatically. It will appear after the next sync cycle,
+        or you can trigger a manual sync via the API.
+    </p>
+</article>
+{% else %}
+
+<style>
+    .deploy-bar-bg {
+        width: 100%;
+        height: 22px;
+        background: var(--pp-overlay-5);
+        border-radius: 4px;
+        overflow: hidden;
+        position: relative;
+    }
+    .deploy-bar-fill {
+        height: 100%;
+        border-radius: 4px;
+        transition: width 0.4s ease;
+        min-width: 2px;
+    }
+    .deploy-bar-label {
+        position: absolute;
+        right: 6px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.75em;
+        font-weight: 600;
+        color: var(--pp-text-muted);
+    }
+    .deploy-low { background: linear-gradient(90deg, #ef5350, #ff7043); }
+    .deploy-med { background: linear-gradient(90deg, #ffa726, #ffca28); }
+    .deploy-high { background: linear-gradient(90deg, #66bb6a, #43a047); }
+    .deploy-over { background: linear-gradient(90deg, #42a5f5, #1976d2); }
+
+    .deploy-table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+        font-size: max(14px, 0.875rem);
+    }
+    .deploy-table thead th {
+        padding: 12px 16px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-text-muted);
+        background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border);
+        white-space: nowrap;
+    }
+    .deploy-table tbody td {
+        padding: 12px 16px;
+        vertical-align: middle;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .deploy-table tbody tr:hover {
+        background-color: var(--pp-surface-alt);
+    }
+    .source-badge {
+        display: inline-block;
+        font-size: 0.7em;
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-weight: 500;
+    }
+    .source-adv { background: rgba(33, 150, 243, 0.12); color: #1565c0; }
+    .source-xbrl { background: rgba(76, 175, 80, 0.12); color: #2e7d32; }
+    .source-both { background: rgba(156, 39, 176, 0.12); color: #7b1fa2; }
+
+    /* ── Table overflow: allow tooltips to escape ── */
+    .deploy-table-figure { overflow: visible; margin: 0; }
+    .deploy-table-figure .pp-table-wrap { overflow: visible; }
+    .deploy-table { overflow: visible; }
+
+    /* ── Unified tooltip system ── */
+    .pp-tooltip {
+        position: relative;
+        cursor: help;
+    }
+    .pp-tooltip .pp-tip-box {
+        display: none;
+        position: absolute;
+        bottom: calc(100% + 8px);
+        right: 0;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 8px;
+        padding: 0.65em 0.85em;
+        font-size: 0.82em;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: normal;
+        line-height: 1.55;
+        white-space: normal;
+        max-width: 320px;
+        min-width: 220px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+        z-index: 100;
+        color: var(--pp-text-secondary);
+        pointer-events: none;
+    }
+    .pp-tooltip.pp-tip-left .pp-tip-box { right: auto; left: 0; }
+    .pp-tooltip.pp-tip-center .pp-tip-box { right: auto; left: 50%; transform: translateX(-50%); }
+    /* Header tooltips drop below (no room above at top of table) */
+    thead .pp-tooltip .pp-tip-box { bottom: auto; top: calc(100% + 8px); }
+    .pp-tooltip:hover .pp-tip-box { display: block; }
+    .pp-tip-title {
+        font-weight: 600;
+        color: var(--pp-text);
+        margin-bottom: 0.3em;
+        font-size: 0.95em;
+        display: block;
+    }
+    .pp-tip-label { color: var(--pp-text-muted); font-size: 0.9em; }
+    .pp-tip-note {
+        color: var(--pp-text-muted);
+        font-size: 0.85em;
+        font-style: italic;
+        margin-top: 0.4em;
+        border-top: 1px solid var(--pp-border-light);
+        padding-top: 0.4em;
+        display: block;
+    }
+    .pp-tip-divider { border-top: 1px solid var(--pp-border-light); margin: 0.4em 0; }
+    .pp-tooltip-data { border-bottom: 1px dotted var(--pp-text-muted); }
+    .pp-info-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 13px; height: 13px;
+        border-radius: 50%;
+        border: 1px solid var(--pp-text-muted);
+        font-size: 0.6em;
+        font-weight: 700;
+        font-style: italic;
+        color: var(--pp-text-muted);
+        margin-left: 3px;
+        vertical-align: middle;
+        cursor: help;
+        line-height: 1;
+    }
+</style>
+
+<figure class="deploy-table-figure">
+<div class="pp-table-wrap">
+<table class="deploy-table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th data-sort="text">Investor</th>
+            <th class="text-right pp-tooltip pp-tip-center" data-sort="number">
+                Total AUM <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box">
+                    <span class="pp-tip-title">Total Assets Under Management</span>
+                    Regulatory AUM (RAUM) from SEC Form ADV, Item 5.F(2)(c). This is the total
+                    regulatory assets under management reported annually by registered investment advisers.
+                    <span class="pp-tip-note">When no ADV data exists, the 13F equity value is shown
+                    as a proxy (marked with a "13F" superscript). ADV filings are updated annually;
+                    values may lag by up to 12 months.</span>
+                </span>
+            </th>
+            <th class="text-right pp-tooltip pp-tip-center" data-sort="number">
+                13F Equity <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box">
+                    <span class="pp-tip-title">13F Equity Holdings Value</span>
+                    Sum of all long equity positions reported on the fund's most recent SEC
+                    Form 13F-HR filing. Includes common stock, ETFs, and options on equities.
+                    <span class="pp-tip-note">13F filings are required quarterly for institutional
+                    managers with $100M+ in qualifying assets. Filed within 45 days of quarter-end.</span>
+                </span>
+            </th>
+            <th class="pp-tooltip pp-tip-center" style="min-width: 180px;" data-sort="number">
+                Deployed <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box" style="max-width: 340px;">
+                    <span class="pp-tip-title">Capital Deployment Ratio</span>
+                    Calculated as: 13F Equity Value &divide; Total AUM (Form ADV).
+                    Shows what percentage of the fund's total assets are deployed in
+                    publicly traded equities.
+                    <div class="pp-tip-divider"></div>
+                    <strong>Bar colors:</strong><br>
+                    <span style="color: #ef5350;">&#9632;</span> Red: Under 40% (very defensive)<br>
+                    <span style="color: #ffa726;">&#9632;</span> Yellow: 40–69% (moderate)<br>
+                    <span style="color: #66bb6a;">&#9632;</span> Green: 70–99% (heavily deployed)<br>
+                    <span style="color: #42a5f5;">&#9632;</span> Blue: Over 100% (likely leveraged)
+                    <span class="pp-tip-note">A low ratio means the fund holds significant non-equity
+                    assets: cash, bonds, derivatives, or foreign holdings not reported on 13F.</span>
+                </span>
+            </th>
+            <th class="text-right pp-tooltip" data-sort="number" data-sort-default="desc">
+                Cash (Est.) <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box" style="max-width: 340px;">
+                    <span class="pp-tip-title">Estimated Liquid Assets</span>
+                    Best available estimate of cash and non-equity holdings.
+                    Hover any row value for the full breakdown.
+                    <div class="pp-tip-divider"></div>
+                    <strong>Two sources, in priority order:</strong><br>
+                    1. <strong>XBRL Cash &amp; Equiv.</strong> — Exact cash from
+                    10-K/10-Q filings (GAAP standard). Shown when available.<br>
+                    2. <strong>AUM Gap Estimate</strong> — Total AUM minus 13F equity.
+                    Includes all non-equity assets, not just cash.
+                    <span class="pp-tip-note">XBRL data may understate liquidity (e.g., T-Bills
+                    under company-specific tags). AUM gap overstates cash since it includes
+                    bonds, derivatives, and foreign holdings.</span>
+                </span>
+            </th>
+            <th class="pp-tooltip pp-tip-left">
+                Source <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box">
+                    <span class="pp-tip-title">Data Sources</span>
+                    <span style="color: #1565c0; font-weight: 600;">ADV</span> — SEC Form ADV
+                    (annual regulatory filing, RAUM data).<br>
+                    <span style="color: #2e7d32; font-weight: 600;">XBRL</span> — SEC XBRL
+                    10-K/10-Q filings (quarterly cash balances).<br>
+                    Badges link directly to the SEC source data.
+                </span>
+            </th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in leaderboard %}
+        <tr>
+            <td>{{ loop.index }}</td>
+            <td>
+                <a href="/holdings/{{ entry.cik }}"><strong>{{ entry.display_name }}</strong></a>
+                <div style="font-size: 0.78em; color: var(--pp-text-muted);">{{ entry.fund_name }}</div>
+            </td>
+
+            {# ── Total AUM cell ── #}
+            <td class="text-right">
+                {% if entry.raum %}
+                <span class="pp-tooltip pp-tooltip-data pp-tip-center">
+                    {% if entry.raum >= 1000000000 %}
+                        ${{ "%.1f"|format(entry.raum / 1000000000) }}B
+                    {% else %}
+                        ${{ "%.0f"|format(entry.raum / 1000000) }}M
+                    {% endif %}
+                    <span class="pp-tip-box">
+                        <span class="pp-tip-title">Form ADV Regulatory AUM</span>
+                        Reported on Form ADV, Item 5.F(2)(c) — the total regulatory assets
+                        under management as of the fund's most recent annual SEC filing.
+                        <span class="pp-tip-note">ADV filings are updated annually.
+                        This figure may be up to 12 months old.</span>
+                    </span>
+                </span>
+                {% elif entry.thirteenf_value %}
+                <span class="pp-tooltip pp-tooltip-data pp-tip-center" style="color: var(--pp-text-muted);">
+                    {% if entry.thirteenf_value >= 1000000000 %}
+                        ${{ "%.1f"|format(entry.thirteenf_value / 1000000000) }}B
+                    {% else %}
+                        ${{ "%.0f"|format(entry.thirteenf_value / 1000000) }}M
+                    {% endif %}
+                    <sup style="font-size: 0.65em;">13F</sup>
+                    <span class="pp-tip-box">
+                        <span class="pp-tip-title">13F Value (No ADV Data Available)</span>
+                        This fund does not file Form ADV with the SEC. The 13F equity value
+                        is shown as a proxy — it represents only publicly traded equity
+                        holdings and likely understates total AUM.
+                        <span class="pp-tip-note">Deployment ratio cannot be calculated
+                        without ADV data.</span>
+                    </span>
+                </span>
+                {% else %}
+                    <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+
+            {# ── 13F Equity cell ── #}
+            <td class="text-right">
+                {% if entry.thirteenf_value >= 1000000000 %}
+                    ${{ "%.1f"|format(entry.thirteenf_value / 1000000000) }}B
+                {% elif entry.thirteenf_value >= 1000000 %}
+                    ${{ "%.0f"|format(entry.thirteenf_value / 1000000) }}M
+                {% elif entry.thirteenf_value >= 1000 %}
+                    ${{ "%.0f"|format(entry.thirteenf_value / 1000) }}K
+                {% else %}
+                    &lt;$1K
+                {% endif %}
+            </td>
+
+            {# ── Deployed bar cell ── #}
+            <td>
+                {% if entry.deployment_ratio is not none %}
+                {% set ratio_pct = (entry.deployment_ratio * 100) %}
+                {# Format AUM and 13F for tooltip text #}
+                {% set aum_fmt = "$%.1fB"|format(entry.raum / 1000000000) if entry.raum >= 1000000000 else "$%.0fM"|format(entry.raum / 1000000) %}
+                {% set eq_fmt = "$%.1fB"|format(entry.thirteenf_value / 1000000000) if entry.thirteenf_value >= 1000000000 else "$%.0fM"|format(entry.thirteenf_value / 1000000) %}
+                <span class="pp-tooltip" style="display: block;">
+                    <div class="deploy-bar-bg">
+                        <div class="deploy-bar-fill {% if ratio_pct > 100 %}deploy-over{% elif ratio_pct >= 70 %}deploy-high{% elif ratio_pct >= 40 %}deploy-med{% else %}deploy-low{% endif %}"
+                             style="width: {{ [ratio_pct, 100] | min }}%;"></div>
+                        <span class="deploy-bar-label">{{ "%.0f"|format(ratio_pct) }}%</span>
+                    </div>
+                    <span class="pp-tip-box" style="max-width: 340px;">
+                        {% if ratio_pct > 100 %}
+                        <span class="pp-tip-title">{{ "%.0f"|format(ratio_pct) }}% Capital Deployed (Over 100%)</span>
+                        13F Equity ({{ eq_fmt }}) exceeds Total AUM ({{ aum_fmt }}).
+                        This typically means:<br>
+                        1. The fund uses <strong>leverage</strong> (margin, derivatives) to hold equity positions
+                        larger than its AUM.<br>
+                        2. The Form ADV AUM figure is <strong>stale</strong> — ADV is filed annually and
+                        the fund may have grown since.
+                        <span class="pp-tip-note">This is not an error in our data.</span>
+                        {% else %}
+                        <span class="pp-tip-title">{{ "%.0f"|format(ratio_pct) }}% Capital Deployed</span>
+                        {{ eq_fmt }} (13F Equity) &divide; {{ aum_fmt }} (Total AUM)
+                        {% if ratio_pct < 40 %}
+                        <div class="pp-tip-divider"></div>
+                        Very defensive posture — this fund has a large allocation outside of equities
+                        (cash, bonds, derivatives, or foreign holdings).
+                        {% elif ratio_pct < 70 %}
+                        <div class="pp-tip-divider"></div>
+                        Moderate equity allocation with significant diversification into non-equity assets.
+                        {% else %}
+                        <div class="pp-tip-divider"></div>
+                        Heavily deployed in equities with a relatively small non-equity allocation.
+                        {% endif %}
+                        {% endif %}
+                    </span>
+                </span>
+                {% else %}
+                <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+
+            {# ── Cash (Est.) cell ── #}
+            <td class="text-right">
+                {% set has_est = entry.estimated_non_equity is not none %}
+                {% set has_xbrl = entry.exact_cash is not none %}
+                {% if has_est or has_xbrl %}
+                <span class="pp-tooltip pp-tooltip-data">
+                    {# Primary display value: prefer XBRL if available, else AUM gap #}
+                    {% if has_xbrl %}
+                        {% if entry.exact_cash >= 1000000000 %}
+                            ${{ "%.1f"|format(entry.exact_cash / 1000000000) }}B
+                        {% elif entry.exact_cash >= 1000000 %}
+                            ${{ "%.0f"|format(entry.exact_cash / 1000000) }}M
+                        {% else %}
+                            ${{ "{:,.0f}".format(entry.exact_cash) }}
+                        {% endif %}
+                    {% elif has_est %}
+                        {% if entry.estimated_non_equity >= 1000000000 %}
+                            ${{ "%.1f"|format(entry.estimated_non_equity / 1000000000) }}B
+                        {% elif entry.estimated_non_equity >= 1000000 %}
+                            ${{ "%.0f"|format(entry.estimated_non_equity / 1000000) }}M
+                        {% elif entry.estimated_non_equity < 0 %}
+                            {% if (-entry.estimated_non_equity) >= 1000000000 %}
+                            <span style="color: #42a5f5;">-${{ "%.1f"|format((-entry.estimated_non_equity) / 1000000000) }}B</span>
+                            {% else %}
+                            <span style="color: #42a5f5;">-${{ "%.0f"|format((-entry.estimated_non_equity) / 1000000) }}M</span>
+                            {% endif %}
+                        {% else %}
+                            &lt;$1M
+                        {% endif %}
+                    {% endif %}
+                    <span class="pp-tip-box" style="max-width: 340px;">
+                        <span class="pp-tip-title">Cash &amp; Non-Equity Breakdown</span>
+                        <span class="pp-tip-label">AUM Gap Estimate:</span>
+                        {% if has_est %}
+                            {% if entry.estimated_non_equity >= 1000000000 %}
+                                ${{ "%.1f"|format(entry.estimated_non_equity / 1000000000) }}B
+                            {% elif entry.estimated_non_equity >= 1000000 %}
+                                ${{ "%.0f"|format(entry.estimated_non_equity / 1000000) }}M
+                            {% elif entry.estimated_non_equity < 0 %}
+                                {% if (-entry.estimated_non_equity) >= 1000000000 %}
+                                <span style="color: #42a5f5;">-${{ "%.1f"|format((-entry.estimated_non_equity) / 1000000000) }}B</span>
+                                {% else %}
+                                <span style="color: #42a5f5;">-${{ "%.0f"|format((-entry.estimated_non_equity) / 1000000) }}M</span>
+                                {% endif %}
+                            {% else %}
+                                ${{ "{:,.0f}".format(entry.estimated_non_equity) }}
+                            {% endif %}
+                            <br><span style="font-size: 0.85em; color: var(--pp-text-muted);">(= Total AUM − 13F Equity. Includes bonds, cash, derivatives, foreign holdings)</span>
+                        {% else %}
+                            —
+                        {% endif %}
+                        <br>
+                        <span class="pp-tip-label">XBRL Cash &amp; Equiv:</span>
+                        {% if has_xbrl %}
+                            {% if entry.exact_cash >= 1000000000 %}
+                                ${{ "%.1f"|format(entry.exact_cash / 1000000000) }}B *
+                            {% elif entry.exact_cash >= 1000000 %}
+                                ${{ "%.0f"|format(entry.exact_cash / 1000000) }}M *
+                            {% else %}
+                                ${{ "{:,.0f}".format(entry.exact_cash) }} *
+                            {% endif %}
+                            <br><span style="font-size: 0.85em; color: var(--pp-text-muted);">(From 10-K/10-Q filings. Standard GAAP cash concepts{% if entry.exact_cash_period %}, as of {{ entry.exact_cash_period }}{% endif %})</span>
+                        {% else %}
+                            —
+                        {% endif %}
+                        {% if has_est and entry.estimated_non_equity < 0 %}
+                        <span class="pp-tip-note" style="color: #42a5f5;">
+                            Negative value: 13F equity exceeds total AUM. This typically means
+                            the fund uses leverage, or the ADV AUM figure is stale (filed annually).
+                            This is not an error.
+                        </span>
+                        {% elif has_xbrl %}
+                        <span class="pp-tip-note">* XBRL cash may understate total liquidity.
+                        Some assets (e.g., Treasury Bills) use company-specific XBRL tags
+                        not captured by the standard SEC API.</span>
+                        {% endif %}
+                    </span>
+                </span>
+                {% else %}
+                    <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+
+            {# ── Source cell ── #}
+            <td>
+                {% if entry.data_source == "adv+xbrl" %}
+                    <a href="https://adviserinfo.sec.gov/firm/summary/{{ entry.crd_number }}" target="_blank" rel="noopener" class="source-badge source-adv" style="text-decoration:none;">ADV</a>
+                    <a href="https://data.sec.gov/api/xbrl/companyfacts/CIK{{ entry.cik.zfill(10) }}.json" target="_blank" rel="noopener" class="source-badge source-xbrl" style="text-decoration:none;">XBRL</a>
+                {% elif entry.data_source == "adv" %}
+                    <a href="https://adviserinfo.sec.gov/firm/summary/{{ entry.crd_number }}" target="_blank" rel="noopener" class="source-badge source-adv" style="text-decoration:none;">ADV</a>
+                {% elif entry.data_source == "xbrl" %}
+                    <a href="https://data.sec.gov/api/xbrl/companyfacts/CIK{{ entry.cik.zfill(10) }}.json" target="_blank" rel="noopener" class="source-badge source-xbrl" style="text-decoration:none;">XBRL</a>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+</figure>
+
+<details style="margin-top: 1.5em;">
+    <summary style="cursor: pointer; font-size: 0.9em; color: var(--pp-text-muted);">
+        About this data
+    </summary>
+    <div style="font-size: 0.85em; color: var(--pp-text-muted); padding: 1em; line-height: 1.6;">
+        <p><strong>Capital Deployed</strong> = 13F Equity Value / Total AUM (from Form ADV). Sorted by estimated cash, highest first.</p>
+        <p>A low ratio means the fund has a large portion of its AUM in non-equity assets (cash, bonds, derivatives, foreign holdings). This is a proxy — not all non-equity assets are cash.</p>
+        <p>Ratios above 100% can occur when a fund uses leverage, or when the Form ADV AUM figure is stale (ADV is filed annually).</p>
+        <p><strong>Data sources:</strong> Form ADV regulatory AUM from SEC bulk data (updated monthly). XBRL cash from 10-K/10-Q filings (quarterly).</p>
+        <p><strong>Cash (Est.)</strong> shows the best available estimate of liquid assets. Hover any value to see the breakdown: <em>Est. from AUM gap</em> (= RAUM − 13F equity, when ADV data exists) and <em>XBRL Cash &amp; Equiv</em> (from 10-K/10-Q filings). When both are available, the XBRL figure is shown by default.</p>
+        <p><strong>* XBRL Cash &amp; Equiv</strong> reflects standard GAAP concepts (cash, cash equivalents, and available-for-sale securities). It may <strong>not</strong> include all liquid assets — for example, Berkshire Hathaway's U.S. Treasury Bill holdings are reported under a company-specific tag not captured by the standard XBRL API. Treat as a lower bound.</p>
+    </div>
+</details>
+{% endif %}
+{% endblock %}

@@ -424,6 +424,13 @@
 })();
 </script>
 
+{# ── Fund Deployment Card (lazy-loaded via HTMX) ── #}
+<div id="deployment-card-slot"
+     hx-get="/api/deployment/{{ fund.cik }}"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+</div>
+
 {# ══════════════════════════════════════════════════════════════════ #}
 {# ── Holdings Table: Top 10 Preview with Expand                     #}
 {# ══════════════════════════════════════════════════════════════════ #}

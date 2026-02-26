@@ -759,6 +759,7 @@
             <ul class="nav-right">
                 <li><a href="/">Home</a></li>
                 <li><a href="/funds">Funds</a></li>
+
                 <li><a href="/insider-trading">Insiders</a></li>
                 <li><a href="/retail">Retail</a></li>
                 <li>
@@ -804,10 +805,24 @@
         };
 
         function parseValue(cell, sortType) {
+            /* Use data-sort-value if present (pre-computed raw number) */
+            var sv = cell.getAttribute("data-sort-value");
+            if (sv !== null && sortType === "number") {
+                return sv === "" ? -Infinity : parseFloat(sv) || 0;
+            }
             var text = cell.textContent.trim();
             if (sortType === "number") {
-                var cleaned = text.replace(/[$,%+\s]/g, "").replace(/,/g, "");
-                return (cleaned === "-" || cleaned === "") ? -Infinity : parseFloat(cleaned) || 0;
+                /* Extract first dollar amount, respecting B/M/K suffixes */
+                var match = text.match(/-?\$?[\d,.]+\s*[BMKbmk]?/);
+                if (!match) return (text === "—" || text === "-" || text === "") ? -Infinity : 0;
+                var raw = match[0].replace(/[$,\s]/g, "");
+                var neg = raw.charAt(0) === "-" ? -1 : 1;
+                raw = raw.replace(/^-/, "");
+                var num = parseFloat(raw) || 0;
+                if (/[Bb]$/.test(raw)) num = num * 1e9;
+                else if (/[Mm]$/.test(raw)) num = num * 1e6;
+                else if (/[Kk]$/.test(raw)) num = num * 1e3;
+                return neg * num;
             }
             if (sortType === "activity") {
                 var upper = text.toUpperCase();
