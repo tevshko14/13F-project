@@ -26,6 +26,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import os
 import time
 import zipfile
 from datetime import datetime, timezone
@@ -70,7 +71,9 @@ def _cache_upsert(cache_key: str, category: str, data: dict, ttl_seconds: int | 
 
 
 # ── SEC HTTP config ─────────────────────────────────────────────────
-_IDENTITY = "PaperPanda/1.0 (13f-tool-user user@example.com)"
+_IDENTITY = os.environ.get(
+    "SEC_IDENTITY", "PaperPanda/1.0 (13f-tool contact@paperpanda.io)"
+)
 _HEADERS = {"User-Agent": _IDENTITY, "Accept": "application/json"}
 
 # Conservative rate limiting for SEC APIs
@@ -138,6 +141,17 @@ def _build_adv_zip_url() -> str:
     return f"{_ADV_ZIP_BASE}/ia{date_str}.zip"
 
 
+def _parse_money(val: str) -> int:
+    """Parse '$1,234,567.00' or '1234567.00' → 1234567."""
+    cleaned = val.strip().replace(",", "").replace("$", "")
+    if not cleaned or cleaned == ".00":
+        return 0
+    try:
+        return int(float(cleaned))
+    except (ValueError, OverflowError):
+        return 0
+
+
 def _parse_raum_from_csv(csv_content: str) -> dict[str, dict]:
     """Parse the bulk ADV CSV and extract RAUM data.
 
@@ -194,16 +208,6 @@ def _parse_raum_from_csv(csv_content: str) -> dict[str, dict]:
         crd = row[col_map["crd"]].strip()
         if not crd:
             continue
-
-        def _parse_money(val: str) -> int:
-            """Parse '$1,234,567.00' or '1234567.00' → 1234567."""
-            cleaned = val.strip().replace(",", "").replace("$", "")
-            if not cleaned or cleaned == ".00":
-                return 0
-            try:
-                return int(float(cleaned))
-            except (ValueError, OverflowError):
-                return 0
 
         result[crd] = {
             "crd": crd,
@@ -578,10 +582,8 @@ def sync_all_deployment_data(
     """
     # ── Freshness gate: skip entire sync if cache is still valid ──
     if not force and _deployment_cache_is_fresh():
-        n_cached = len(load_all_deployment_data())
         logger.info(
-            "Deployment cache is fresh (%d entries, TTL %dd) — skipping sync",
-            n_cached,
+            "Deployment cache is fresh (TTL %dd) — skipping sync",
             _TTL_DEPLOYMENT // 86400,
         )
         return {
@@ -663,7 +665,7 @@ def load_all_deployment_data() -> dict[str, dict]:
 
     Returns dict keyed by CIK.
     """
-    rows = supabase_cache.get_all_by_category("deployment", page_size=50)
+    rows = supabase_cache.get_all_by_category("deployment", page_size=100)
     if not rows:
         return {}
 
