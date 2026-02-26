@@ -1480,6 +1480,37 @@ the cache — every CLI command makes live SEC API calls.
 - [ ] Comparison across multiple funds on the same page
 - [ ] Email notification automation (extend notification system with email delivery)
 
+### Shelved: Crypto Whale Tracker (branch: `feature/crypto-whale-tracker`)
+
+Full MVP built and shelved — **not merged to main**. All code lives on the
+`feature/crypto-whale-tracker` branch. See GitHub issue for full pickup context.
+
+**What it does:** Tracks on-chain crypto whale wallets (Vitalik, EF, Galaxy
+Digital, Justin Sun, etc.) via Etherscan V2 + Blockchain.com APIs. Shows
+holdings and transfers on `/crypto` and `/crypto/{slug}` pages. Background
+sync loop refreshes every 6 hours.
+
+**What works:** Live ETH/ERC-20 balance fetching, multi-wallet aggregation
+per entity, spam token filtering, rate limiting with retry, 4 Supabase tables,
+seed script with verified wallet addresses from Etherscan labels + Arkham.
+
+**What's missing for production:**
+- USD price enrichment (all usd_value = 0, needs CoinGecko or similar)
+- Token discovery limited to 100 most recent `tokentx` — misses older staking
+  positions (e.g. Justin Sun's 156K stETH). Needs portfolio API (Moralis/Alchemy)
+- Solana support (Helius API stubbed but not wired)
+- Arkham Intelligence API (on waitlist)
+- Bitmine Immersion wallet coverage (only 1 of many wallets publicly known)
+- MicroStrategy BTC is fully custodial — not trackable on-chain
+
+**Files on the branch (not on main):** `crypto.py`, `crypto.html`,
+`crypto_entity.html`, `seed_crypto.py`, plus modifications to
+`supabase_cache.py`, `web.py`, `base.html`, `.env.example`, `README_DEV.md`.
+
+**Env vars needed:** `ETHERSCAN_API_KEY`, plus existing `SUPABASE_URL` /
+`SUPABASE_SERVICE_KEY`. Supabase tables must be created manually (see
+`_SCHEMA_SQL` in `supabase_cache.py` on the branch).
+
 ### Technical Debt
 
 - [ ] CLI should optionally read from cache instead of always hitting SEC API
