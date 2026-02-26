@@ -654,7 +654,17 @@ async def _trigger_single_refresh(app: FastAPI, cik: str) -> None:
 @app.get("/", response_class=HTMLResponse)
 async def homepage(request: Request):
     monthly_goal = _PANDA_FUND_MONTHLY_GOAL
-    raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
+    current_month = datetime.now().strftime("%Y-%m")
+
+    # Primary: live total from Supabase supporters table (same as /support)
+    raised_cents = await asyncio.to_thread(
+        supabase_cache.get_monthly_raised_cents, current_month
+    )
+    if raised_cents > 0:
+        raw_raised = raised_cents // 100
+    else:
+        raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
+
     raised_this_month = min(raw_raised, monthly_goal)
     progress_pct = (
         min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
