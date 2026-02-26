@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-24 (Dark mode, dynamic TradingView/Stripe theme sync, dark-mode logo, Supabase startup timeout, automatic retention cleanup)
+> Last updated: 2026-02-26 (Capital Deployed feature: AUM/deployment ratio leaderboard, cash estimation, comprehensive tooltips, XBRL + Form ADV data sourcing)
 
 ---
 
@@ -222,6 +222,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── vitals.py                     # Alternative data (Glassdoor, People Data Labs, App Store)
     ├── market_data.py                # S&P 500 heatmap, most-added, ticker search (~8K NYSE/NASDAQ listings)
     ├── company_filings.py            # SEC filing links for stock pages
+    ├── aum_data.py                   # Capital Deployed: AUM (Form ADV), XBRL cash, deployment ratios, leaderboard builder
     ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale)
     ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
     ├── auth.py                       # Authentication (sign-in, sessions)
@@ -243,6 +244,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── activity.html             # Cross-fund activity feed (top 100)
         ├── stock.html                # Stock detail (7 tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
         ├── support.html              # Panda Fund: progress bar, Stripe Buy Button + Pricing Table, cost breakdown, funding history chart
+        ├── deployment.html           # Capital Deployed standalone page (/deployment)
         ├── notifications.html        # Notification history page
         ├── error.html                # Error page
         └── partials/
@@ -264,6 +266,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── stock_insider_trades.html # Insider trading table — per-ticker (lazy-loaded)
             ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded into retail page)
             ├── compare_content.html    # Compare quarters partial (lazy-loaded into investor page)
+            ├── deployment_leaderboard.html # Capital Deployed leaderboard (HTMX partial for /funds Deployment tab)
+            ├── deployment_card.html    # Capital Deployed stat card (HTMX partial for investor page)
             └── data_error.html         # Reusable error partial (rate limit CTA, generic fallback, HTMX-aware)
 ```
 
@@ -283,6 +287,8 @@ SuperinvestorInfo:
     cik: str            # "1067983" (no leading zeros)
     display_name: str   # "Warren Buffett"
     fund_name: str      # "Berkshire Hathaway"
+    crd_number: str     # SEC CRD number for Form ADV lookup (optional, "" if none)
+    is_public_company: bool  # True for Berkshire, Markel, Fairfax (XBRL 10-K/10-Q filers)
 ```
 
 **Lookup dict:** `SUPERINVESTORS_BY_CIK` maps CIK → SuperinvestorInfo.
@@ -852,8 +858,90 @@ the ticker doesn't map to the main consumer app (e.g., GOOG → "Google", META �
 Falls back to yfinance company name search. Picks the result with the most ratings for
 override tickers.
 
-### 5.11 Insider Trading Module (`insider_trading.py` + `insider_sync.py`)
+### 5.11 Capital Deployed Module (`aum_data.py`)
 
+Tracks how much of each superinvestor's total AUM is deployed in public equities.
+Combines three SEC data sources: Form ADV (regulatory AUM), XBRL 10-K/10-Q (exact
+cash balances), and 13F filings (equity holdings).
+
+**Data Sources:**
+
+| Source | Data | Frequency | Access Method |
+|---|---|---|---|
+| SEC Form ADV | Regulatory AUM (RAUM) | Annual | Bulk XML from SEC IAPD |
+| SEC XBRL | Cash & cash equivalents | Quarterly (10-K/10-Q) | SEC Company Facts API |
+| SEC 13F-HR | Equity holdings value | Quarterly | Already cached in fund_data |
+
+**Key functions:**
+
+| Function | Description |
+|---|---|
+| `fetch_adv_bulk_data()` | Downloads SEC Form ADV bulk XML, extracts RAUM for funds with CRD numbers |
+| `fetch_xbrl_cash(cik)` | Queries SEC XBRL Company Facts API for cash & equivalents from 10-K/10-Q |
+| `compute_deployment_metrics(cik, ...)` | Combines ADV + XBRL + 13F into a single metrics dict |
+| `sync_all_deployment_data()` | Syncs all 84 funds, writes results to Supabase `api_cache` (category: `deployment`) |
+| `load_all_deployment_data()` | Loads all deployment entries from Supabase cache |
+| `build_deployment_leaderboard(data)` | Builds sorted list for table display, sorted by cash value descending |
+
+**Deployment metrics dict:**
+
+```python
+{
+    "cik": str,
+    "display_name": str,
+    "fund_name": str,
+    "crd_number": str,
+    "raum": float | None,           # Form ADV regulatory AUM (dollars)
+    "thirteenf_value": float,       # Sum of 13F equity holdings (dollars)
+    "deployment_ratio": float | None,  # 13F / RAUM (0.0–1.0+, None if no RAUM)
+    "non_equity_pct": float | None,    # 1 - deployment_ratio (percentage)
+    "estimated_non_equity": float | None,  # RAUM - 13F value (dollars, can be negative)
+    "exact_cash": float | None,     # XBRL cash & equivalents (dollars)
+    "exact_cash_period": str | None,  # XBRL reporting period (e.g., "2025-09-30")
+    "data_source": str,             # "adv+xbrl" | "adv" | "xbrl" | "13f_only"
+}
+```
+
+**Leaderboard sort:** Sorted by best available cash value descending (highest cash first).
+Uses `exact_cash` (XBRL) if available, else `estimated_non_equity` (AUM gap), else 0.
+
+**CRD numbers:** Each superinvestor can optionally have a `crd_number` in `superinvestors.py`.
+This is the SEC's Central Registration Depository number for investment advisers.
+Funds without a CRD (public companies like Berkshire, or terminated registrations) cannot
+get Form ADV data and fall back to 13F-only metrics.
+
+**XBRL cash limitation:** Standard GAAP concepts (`CashAndCashEquivalentsAtCarryingValue`,
+`CashCashEquivalentsAndShortTermInvestments`) are queried. Company-specific XBRL tags
+(e.g., Berkshire's U.S. Treasury Bill holdings) are not captured. XBRL cash should be
+treated as a lower bound on total liquidity.
+
+**Caching:** Results stored in Supabase `api_cache` with `category="deployment"` and
+cache keys like `deployment:{cik}`. TTL: 30 days. Data is loaded into
+`app.state.deployment_cache` on startup.
+
+**Templates:**
+
+| Template | Route | Description |
+|---|---|---|
+| `deployment.html` | `/deployment` | Standalone Capital Deployed page with sortable table |
+| `partials/deployment_leaderboard.html` | `/api/deployment-leaderboard` | HTMX partial for /funds Deployment tab |
+| `partials/deployment_card.html` | `/api/deployment/{cik}` | Stat card for individual investor pages |
+
+**Tooltip system (`.pp-tooltip`):** All three templates use a unified CSS-only tooltip
+system. Tooltips appear on hover for column headers (with ⓘ info icons) and data cells
+(with dotted underlines). Tooltip variants: `.pp-tip-left` (left-anchored), `.pp-tip-center`
+(center-anchored), `.pp-tooltip-data` (dotted underline on data values). Header tooltips
+drop below via `thead .pp-tooltip .pp-tip-box { bottom: auto; top: calc(...) }`.
+
+**Number formatting tiers:** All monetary values use consistent formatting:
+`$X.XB` (billions) → `$XM` (millions) → `$XK` (thousands) → `<$1K`.
+Negative values (leverage/stale ADV) shown in blue with same B/M tiers.
+
+**13F fallback for AUM:** When a fund has no Form ADV data, the Total AUM column shows
+the 13F equity value in muted text with a `13F` superscript badge. Deployment ratio
+cannot be calculated without ADV data.
+
+### 5.12 Insider Trading Module (`insider_trading.py` + `insider_sync.py`)
 Dedicated insider trading system with its own Supabase table and sync worker.
 
 **Architecture:**
@@ -881,7 +969,7 @@ Dedicated insider trading system with its own Supabase table and sync worker.
 - Deduplicates by `sec_url`, upserts to Supabase in chunks of 50
 - Logs to `sync_logs` table for observability
 
-### 5.12 Panda Fund & Stripe Integration (`web.py` + `support.html`)
+### 5.13 Panda Fund & Stripe Integration (`web.py` + `support.html`)
 
 The Panda Fund is the project's donation/support system, displayed on both the
 `/support` page and the homepage widget.
@@ -927,7 +1015,7 @@ The Panda Fund is the project's donation/support system, displayed on both the
 - 429 errors return `partials/data_error.html` inline instead of full error page
 - Error partial shows "Token-Limit Reached" with link to /support (Panda Fund CTA)
 
-### 5.13 Retail Page (`retail.html`)
+### 5.14 Retail Page (`retail.html`)
 
 The `/retail` page aggregates retail trader sentiment data with 3 sub-tabs.
 
@@ -951,7 +1039,7 @@ JS function (same pattern as grand_portfolio's `.gp-subtab`). URL synced via `hi
 - Green/red badges for rank changes and mention deltas
 - Fear & Greed badge at the top with color-coded mood
 
-### 5.14 Performance Optimizations
+### 5.15 Performance Optimizations
 
 **Problem:** With 84 superinvestors, synchronous file I/O was blocking the async event loop.
 Per-fund TTL now skips fresh funds during background refresh, reducing API calls significantly.
@@ -1009,6 +1097,10 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | POST | `/api/notifications/read/{id}` | `mark_read` | Notifications JSON | Empty HTML |
 | POST | `/api/notifications/read-all` | `mark_all_read` | Notifications JSON | `partials/notification_bell.html` |
 | GET | `/support` | `support_page` | Env vars (PANDA_FUND_RAISED, Stripe IDs) | `support.html` |
+| GET | `/deployment` | `deployment_page` | Deployment cache | `deployment.html` |
+| GET | `/api/deployment-leaderboard` | `deployment_leaderboard_partial` | Deployment cache | `partials/deployment_leaderboard.html` |
+| GET | `/api/deployment/{cik}` | `deployment_card_partial` | Deployment cache | `partials/deployment_card.html` |
+| POST | `/api/deployment/sync` | `trigger_deployment_sync` | ADV + XBRL + 13F (background) | JSON response |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**
@@ -1120,16 +1212,20 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + styles + HTMX + C
   │     ├── Sentiment tab: CNN Fear & Greed gauge + summary cards (server-rendered)
   │     ├── Leaderboard tab: lazy-loads partials/retail_leaderboard.html via fetch(/api/retail/leaderboard)
   │     └── Calendar tab: static YouTuber table (server-rendered)
-  ├── grand_portfolio.html (URL: /funds, sub-tabs: Funds | Holdings | Activity)
+  ├── grand_portfolio.html (URL: /funds, sub-tabs: Funds | Holdings | Activity | Deployment)
   │     ├── Funds tab: HTMX lazy-loads partials/fund_row.html for each of 84 investors
   │     ├── Holdings tab: aggregated cross-fund portfolio
-  │     └── Activity tab: recent buys/sells across all funds
+  │     ├── Activity tab: recent buys/sells across all funds
+  │     └── Deployment tab: lazy-loads partials/deployment_leaderboard.html via HTMX
+  ├── deployment.html (Capital Deployed standalone page)
+  │     └── Sortable table: AUM, 13F equity, deployment bars, cash estimates, sources
   ├── insider_trading.html (global insider trades screener)
   │     └── lazy-loads partials/insider_trades.html via fetch(/api/insider-trades)
   ├── search.html
   ├── investor.html (Tabbed: Holdings + Compare Quarters, lazy-loads compare)
   │     ├── imports partials/ticker_link.html (macro)
-  │     └── lazy-loads partials/compare_content.html via fetch(/api/compare/{cik})
+  │     ├── lazy-loads partials/compare_content.html via fetch(/api/compare/{cik})
+  │     └── lazy-loads partials/deployment_card.html via HTMX (/api/deployment/{cik})
   ├── activity.html
   │     └── imports partials/ticker_link.html (macro)
   ├── stock.html (7 Tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
@@ -1474,6 +1570,10 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Stripe Pricing Table dark mode via CSS `filter: invert` on container
 - [x] Supabase startup cache load wrapped in 30-second timeout (falls back to disk on timeout)
 - [x] Automatic retention cleanup on startup: insider_trades (6 mo), youtube_events (30 d), sync_logs (30 d), api_cache expired entries
+- [x] Capital Deployed feature: AUM from Form ADV, XBRL cash from 10-K/10-Q, deployment ratio leaderboard, cash estimation, comprehensive tooltips
+- [x] Capital Deployed: CRD number cleanup (Appaloosa fix, terminated CRDs cleared for Greenlight/Scion/Omega/Aquamarine)
+- [x] Capital Deployed: 13F equity fallback for AUM column when no Form ADV data exists
+- [x] Capital Deployed: Unified `.pp-tooltip` CSS system with info icons, data cell tooltips, contextual explanations
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
@@ -1546,10 +1646,11 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-24 (dark mode, TradingView/Stripe
-> theme sync, dark-mode logo, Supabase startup timeout, automatic retention cleanup,
-> background refresh, vitals persistence, Panda Fund support page, Stripe embed,
-> homepage widget).
+> This file documents the system as of 2026-02-26 (Capital Deployed feature,
+> AUM/deployment ratio leaderboard, XBRL cash, Form ADV integration, comprehensive
+> tooltips, dark mode, TradingView/Stripe theme sync, Supabase startup timeout,
+> automatic retention cleanup, background refresh, vitals persistence, Panda Fund
+> support page, Stripe embed, homepage widget).
 > If told "Context is drifting," the first action should be to re-read
 > `/Users/Tevis_1/13F-project/README_DEV.md` and reconcile any discrepancies
 > with the actual code.

@@ -48,6 +48,7 @@ from filings import (
     supabase_cache,
     auth,
     youtube,
+    aum_data,
 )
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
@@ -196,6 +197,14 @@ async def lifespan(app: FastAPI):
     # Initialize background refresh state
     app.state.refresh_status = "disabled"
     app.state.refresh_progress = {"total": 0, "done": 0, "failed": 0}
+
+    # Load deployment/AUM data from Supabase (non-blocking)
+    try:
+        app.state.deployment_cache = await asyncio.to_thread(
+            aum_data.load_all_deployment_data
+        )
+    except Exception:
+        app.state.deployment_cache = {}
 
     # Prefetch S&P 500 market data in background (~30-60s on cold start)
     asyncio.create_task(_prefetch_market_data(app))
@@ -680,7 +689,7 @@ async def superinvestors_page(request: Request):
 async def grand_portfolio_redirect(request: Request):
     """Backward-compat redirect: /grand-portfolio → /funds."""
     view = request.query_params.get("view", "funds")
-    if view not in ("funds", "holdings", "activity"):
+    if view not in ("funds", "holdings", "activity", "deployment"):
         view = "funds"
     return RedirectResponse(url=f"/funds?view={view}", status_code=301)
 
@@ -1008,7 +1017,7 @@ async def activity_feed(request: Request):
 
 @app.get("/funds", response_class=HTMLResponse)
 async def funds_page(request: Request, view: str = "funds"):
-    if view not in ("funds", "holdings", "activity"):
+    if view not in ("funds", "holdings", "activity", "deployment"):
         view = "funds"
 
     cache_data = _fund_cache()
@@ -1682,6 +1691,85 @@ async def posthog_ingest_proxy(path: str, request: Request):
     except Exception as exc:
         logger.warning("posthog_ingest_proxy error: %s", exc)
         return JSONResponse({"error": "proxy error"}, status_code=502)
+
+
+# --- Deployment / AUM Tracking ---
+
+
+def _deployment_cache() -> dict:
+    """Return the current deployment cache dict from app.state."""
+    return getattr(app.state, "deployment_cache", {})
+
+
+@app.get("/deployment", response_class=HTMLResponse)
+async def deployment_page(request: Request):
+    """Deployment leaderboard — ranks funds by equity deployment ratio."""
+    deploy_data = _deployment_cache()
+    leaderboard = aum_data.build_deployment_leaderboard(deploy_data)
+
+    return templates.TemplateResponse(
+        "deployment.html",
+        {
+            "request": request,
+            "leaderboard": leaderboard,
+            "total_funds": len(SUPERINVESTORS),
+            "funds_with_data": len(leaderboard),
+            "cache_age": cache.get_cache_age_str(_fund_cache()),
+        },
+    )
+
+
+@app.get("/api/deployment-leaderboard", response_class=HTMLResponse)
+async def deployment_leaderboard_partial(request: Request):
+    """HTMX partial for deployment leaderboard (lazy-loaded on /funds tab)."""
+    deploy_data = _deployment_cache()
+    leaderboard = aum_data.build_deployment_leaderboard(deploy_data)
+
+    return templates.TemplateResponse(
+        "partials/deployment_leaderboard.html",
+        {"request": request, "leaderboard": leaderboard},
+    )
+
+
+@app.get("/api/deployment/{cik}", response_class=HTMLResponse)
+async def deployment_card_partial(request: Request, cik: str):
+    """HTMX partial: deployment card for an individual investor page."""
+    if not _valid_cik(cik):
+        return PlainTextResponse("", status_code=204)
+
+    deploy_data = _deployment_cache()
+    metrics = deploy_data.get(cik)
+
+    if not metrics or not metrics.get("data_source"):
+        return PlainTextResponse("", status_code=204)
+
+    si = SUPERINVESTORS_BY_CIK.get(cik)
+    return templates.TemplateResponse(
+        "partials/deployment_card.html",
+        {"request": request, "metrics": metrics, "si": si},
+    )
+
+
+@app.post("/api/deployment/sync")
+async def trigger_deployment_sync(request: Request):
+    """Trigger a deployment data sync (admin-only, for testing).
+
+    Always forces a fresh sync (bypasses the cache freshness gate).
+    """
+    fund_cache_data = _fund_cache()
+    if not fund_cache_data:
+        return JSONResponse({"error": "No fund cache available"}, status_code=503)
+
+    result = await asyncio.to_thread(
+        aum_data.sync_all_deployment_data, SUPERINVESTORS, fund_cache_data, force=True
+    )
+
+    # Reload deployment cache
+    app.state.deployment_cache = await asyncio.to_thread(
+        aum_data.load_all_deployment_data
+    )
+
+    return JSONResponse(result)
 
 
 # --- Retail Traders (hidden — no nav link) ---

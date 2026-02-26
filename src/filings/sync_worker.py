@@ -160,6 +160,39 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
 # ── Entry point ──────────────────────────────────────────────────────
 
 
+def sync_deployment_data(*, force: bool = False) -> dict:
+    """Sync AUM / deployment data for all superinvestors.
+
+    Separate from the 13F sync because:
+    - ADV data is monthly (vs quarterly for 13F)
+    - XBRL is quarterly but only for ~3 public companies
+    - The ADV bulk download is a single request (no per-fund rate limiting)
+
+    The underlying data changes very infrequently (quarterly at best).
+    ``sync_all_deployment_data`` performs its own freshness check and
+    will skip the entire operation if the cache is still valid —
+    resulting in zero network calls on most sync cycles.
+
+    Pass ``force=True`` to bypass the freshness gate (e.g. when 13F
+    data has just been updated and we want fresh deployment ratios).
+
+    Requires the 13F fund_cache to compute deployment ratios,
+    so this should run AFTER the 13F sync.
+    """
+    from filings import aum_data
+
+    # Load existing 13F cache to get total_value per fund
+    fund_cache = cache.load_cache_from_supabase()
+    if not fund_cache:
+        fund_cache = cache.load_cache()
+
+    if not fund_cache:
+        logger.warning("No fund cache available — skipping deployment sync")
+        return {"updated": 0, "skipped": 0, "failed": 0}
+
+    return aum_data.sync_all_deployment_data(SUPERINVESTORS, fund_cache, force=force)
+
+
 def main() -> None:
     """Entry point for ``uv run filings-sync``."""
     _setup_logging()
@@ -167,7 +200,19 @@ def main() -> None:
     logger.info("=== PaperPanda SEC Sync Worker starting (RSS: %.0f MB) ===", mem_mb)
     start = time.time()
 
+    # ── Pass 1: 13F filing data from SEC EDGAR ──
     result = sync_all_funds()
+
+    # ── Pass 2: AUM / deployment data (Form ADV + XBRL) ──
+    # Force a fresh deployment sync only when 13F data was actually
+    # updated this cycle — otherwise the internal freshness gate in
+    # sync_all_deployment_data() will cheaply skip the entire pass.
+    try:
+        thirteenf_changed = result.get("updated", 0) > 0
+        deploy_result = sync_deployment_data(force=thirteenf_changed)
+        logger.info("Deployment sync: %s", deploy_result)
+    except Exception as e:
+        logger.warning("Deployment sync failed (non-fatal): %s", e)
 
     elapsed = round(time.time() - start)
     mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)

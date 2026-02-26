@@ -181,6 +181,12 @@
                     Activity
                 </button>
             </li>
+            <li>
+                <button class="gp-subtab{% if view == 'deployment' %} active{% endif %}"
+                        data-view="deployment" onclick="switchGPView('deployment')">
+                    Capital Deployed
+                </button>
+            </li>
         </ul>
     </nav>
 </div>
@@ -469,6 +475,20 @@
     })();
     </script>
 </div>{# end panel-activity #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 4: Deployment (lazy-loaded HTMX)                         #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-deployment" class="gp-panel{% if view == 'deployment' %} active{% endif %}">
+    <div id="deployment-leaderboard"
+         hx-get="/api/deployment-leaderboard"
+         hx-trigger="{% if view == 'deployment' %}load{% else %}revealed{% endif %}"
+         hx-swap="innerHTML">
+        <article>
+            <p aria-busy="true"><span class="spinner"></span> Loading deployment data...</p>
+        </article>
+    </div>
+</div>{# end panel-deployment #}
 
 {# ── Tab Switching + URL Sync Script ── #}
 <script>
