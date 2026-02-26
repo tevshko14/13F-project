@@ -312,7 +312,7 @@ def _consensus_cache_set(key: str, value: tuple[float, dict | None]) -> None:
 # ═══════════════════════════════════════════════════════════════════════
 
 _TICKER_RE = _re.compile(r"^[A-Za-z.]{1,12}$")
-_CIK_RE = _re.compile(r"^[0-9]{1,20}$")
+_CIK_RE = _re.compile(r"^[0-9]{1,10}$")
 _CUSIP_RE = _re.compile(r"^[A-Za-z0-9]{6,9}$")
 _ALLOWED_HOST: str = os.environ.get("ALLOWED_HOST", "")  # e.g. "paperpanda.io"
 
@@ -1750,24 +1750,45 @@ async def deployment_card_partial(request: Request, cik: str):
     )
 
 
+_deployment_sync_lock = asyncio.Lock()
+
+
 @app.post("/api/deployment/sync")
 async def trigger_deployment_sync(request: Request):
     """Trigger a deployment data sync (admin-only, for testing).
 
+    Protected: requires CSRF origin check + SYNC_SECRET header.
+    Concurrency-guarded: only one sync can run at a time.
     Always forces a fresh sync (bypasses the cache freshness gate).
     """
-    fund_cache_data = _fund_cache()
-    if not fund_cache_data:
-        return JSONResponse({"error": "No fund cache available"}, status_code=503)
+    # ── Auth: CSRF origin + shared secret ──
+    csrf_err = _check_csrf_origin(request)
+    if csrf_err:
+        return csrf_err
+    expected = os.environ.get("SYNC_SECRET", "")
+    provided = request.headers.get("X-Sync-Secret", "")
+    if not expected or provided != expected:
+        return JSONResponse({"error": "Unauthorized"}, status_code=403)
 
-    result = await asyncio.to_thread(
-        aum_data.sync_all_deployment_data, SUPERINVESTORS, fund_cache_data, force=True
-    )
+    # ── Concurrency guard ──
+    if _deployment_sync_lock.locked():
+        return JSONResponse(
+            {"error": "Sync already in progress"}, status_code=429
+        )
 
-    # Reload deployment cache
-    app.state.deployment_cache = await asyncio.to_thread(
-        aum_data.load_all_deployment_data
-    )
+    async with _deployment_sync_lock:
+        fund_cache_data = _fund_cache()
+        if not fund_cache_data:
+            return JSONResponse({"error": "No fund cache available"}, status_code=503)
+
+        result = await asyncio.to_thread(
+            aum_data.sync_all_deployment_data, SUPERINVESTORS, fund_cache_data, force=True
+        )
+
+        # Reload deployment cache
+        app.state.deployment_cache = await asyncio.to_thread(
+            aum_data.load_all_deployment_data
+        )
 
     return JSONResponse(result)
 
