@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-26 (Capital Deployed feature: AUM/deployment ratio leaderboard, cash estimation, comprehensive tooltips, XBRL + Form ADV data sourcing)
+> Last updated: 2026-02-26 (Notification bell system: Supabase-backed, 3 sources, HTMX bell/dropdown/toast/history, 48h retention, performance optimized)
 
 ---
 
@@ -214,9 +214,9 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
-    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache + insider_trades tables)
+    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications tables)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
-    ├── notifications.py              # Notification engine: detection, matching, persistence, filing season
+    ├── notifications.py              # Notification creators (13F, YouTube, Reddit) + filing season detection
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
     ├── sentiment.py                  # Market sentiment (CNN, Finnhub, ApeWisdom, Alpha Vantage)
     ├── vitals.py                     # Alternative data (Glassdoor, People Data Labs, App Store)
@@ -254,7 +254,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── watchlist_sidebar.html   # Sidebar content: ticker list + remove buttons
             ├── watchlist_star.html      # Star button (filled/outline) for stock pages
             ├── watchlist_response.html  # OOB response: star + sidebar update
-            ├── notification_bell.html   # Navbar bell icon with unread badge
+            ├── notification_bell.html   # Navbar bell icon with red dot indicator (HTMX-polled every 120s)
+            ├── notification_dropdown.html # Notification dropdown (latest 8, "View all" footer)
             ├── heatmap.html            # S&P 500 ECharts treemap (lazy-loaded via HTMX)
             ├── most_added.html         # Most-added-by-superinvestors table (lazy-loaded)
             ├── ticker_search.html      # Nav autocomplete search input (Fuse.js fuzzy search)
@@ -479,42 +480,46 @@ Functions in `watchlist.py`:
 - `remove_from_watchlist(ticker) -> list[dict]`
 - `is_in_watchlist(ticker) -> bool`
 
-### 4.4 Notifications State (`~/.13f-cache/notifications.json`)
+### 4.4 Notifications (Supabase `notifications` table)
 
-Stores seen filing dates (for detection) and notification history.
+Global notifications visible to all visitors. No per-user storage — dismiss state
+is tracked client-side via `localStorage('pp-notifications-last-seen')`.
 
-```json
-{
-  "initialized_at": "2026-02-16T10:00:00",
-  "seen_filing_dates": { "1067983": "2025-11-14", "1336528": "2025-11-12" },
-  "notifications": [
-    {
-      "id": "1067983-2025-11-14-037833100",
-      "timestamp": "2026-02-16T10:30:00",
-      "type": "watchlist_match",
-      "fund_cik": "1067983",
-      "fund_name": "Warren Buffett",
-      "ticker": "AAPL",
-      "cusip": "037833100",
-      "issuer_name": "APPLE INC",
-      "action": "ADD",
-      "pct_of_portfolio": 10.5,
-      "filing_date": "2025-11-14",
-      "read": false,
-      "link": "/stock/AAPL"
-    }
-  ]
-}
+**Schema:**
+
+```sql
+CREATE TABLE notifications (
+    id          TEXT PRIMARY KEY,      -- deterministic: "{source}-{unique_key}"
+    type        TEXT NOT NULL,         -- "13f_change" | "youtube" | "reddit_velocity"
+    title       TEXT NOT NULL,         -- e.g. "Buffett: NEW BUY — AAPL"
+    message     TEXT NOT NULL,         -- e.g. "Apple Inc added to portfolio (5.5% weight)"
+    icon        TEXT DEFAULT '🔔',
+    toast_type  TEXT DEFAULT 'alert',  -- "bullish" | "bearish" | "alert"
+    link        TEXT,                  -- URL to navigate on click
+    metadata    JSONB DEFAULT '{}',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 ```
 
-Functions in `notifications.py`:
-- `initialize_if_needed(cache_data)` — first-run: marks all current filings as "seen"
-- `is_new_filing(cik, new_filing_date) -> bool` — compare against seen dates
-- `check_watchlist_matches(cik, name, fund_data, watchlist) -> list[dict]` — match changes vs tickers
-- `add_notification(notif)` — persist (deduplicates by id, caps at 200)
-- `get_unread_count() -> int`, `mark_all_read()`, `mark_notification_read(id)`
+**Deterministic IDs (deduplication via PRIMARY KEY):**
+- 13F: `13f-{cik}-{filing_date}-{cusip}`
+- YouTube: `yt-{video_id}`
+- Reddit: `reddit-{ticker}-{date}`
+
+**Retention:** 48 hours. `cleanup_old_notifications(days=2)` runs at start of each sync cycle.
+
+**Functions in `notifications.py`:**
+- `detect_13f_changes(cik, fund_name, current, previous)` — compare holdings, return notification dicts
+- `create_youtube_notification(event)` — notification dict for high-impact video
+- `create_reddit_notification(ticker, velocity_pct, mentions, name)` — notification dict for velocity spike
 - `is_filing_season() -> bool` — True within ±15 days of filing deadlines
 - `get_poll_interval_seconds() -> int` — 2h during season, 12h outside
+
+**Functions in `supabase_cache.py`:**
+- `upsert_notifications(rows)` — batch upsert with `ignore_duplicates=True`, chunked at 50
+- `get_recent_notifications(limit, types, offset)` — paginated fetch, optional type filter
+- `get_bell_state(since_iso) -> (count, latest)` — single query for bell poll (count + newest row)
+- `cleanup_old_notifications(days=2) -> int` — delete old rows
 
 ### 4.5 Dataclasses (models.py)
 
@@ -535,7 +540,7 @@ All models are `@dataclass`. No ORM. No database.
 | `StockQuarterEntry` | One fund's activity on a stock in one quarter | Web stock history |
 | `StockQuarter` | All activity on a stock in one quarter | Web stock history |
 | `AnalystRating` | A single firm-level analyst rating | Web analyst tab |
-| `Notification` | A notification about a filing/watchlist match | Notification system |
+| `Notification` | A notification dict (13F/YouTube/Reddit) — stored in Supabase | Notification system |
 
 ### 4.6 How a Superinvestor Links to a CIK
 
@@ -1047,16 +1052,14 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | Optimization | Before | After |
 |---|---|---|
 | Cache saves during refresh | Save entire JSON to disk after EVERY fund (84×) | Batch: save every 10 funds, via `asyncio.to_thread` |
-| Notification state reads | Read `notifications.json` from disk on every request | In-memory cache (`_state_cache`), disk reads only on cold start |
+| Notification bell polls | Direct DB query on every poll (every tab, every user) | 15-second in-memory `_bell_cache` collapses identical polls; single DB query returns count + latest |
 | Watchlist reads | Read `watchlist.json` from disk on every request | In-memory cache (`_watchlist_cache`), disk reads only on cold start |
 | HTMX lazy-load (cold start) | All 84 rows fire simultaneously on page load | Staggered: 3 rows per second (`delay:{{ loop.index0 // 3 }}s`) |
 | Fund row disk save | Synchronous `save_cache()` blocking response | `asyncio.create_task(asyncio.to_thread(...))` — fire-and-forget |
 
-**In-memory caching pattern** (used by `notifications.py` and `watchlist.py`):
-- Module-level `_state_cache` / `_watchlist_cache` variable
-- `load_*()` returns cache on hit, reads disk on miss (cold start only)
-- `save_*()` updates in-memory cache first, then writes to disk
-- All subsequent reads are instant (0.1ms for 1000 calls)
+**In-memory caching pattern** (used by `watchlist.py` and notification bell):
+- Watchlist: module-level `_watchlist_cache`, reads disk on cold start only
+- Bell: `_bell_cache` dict keyed by `since` timestamp, 15-second TTL, auto-evicts stale keys
 
 ---
 
@@ -1091,11 +1094,10 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | POST | `/api/watchlist/{ticker}` | `watchlist_add` | Watchlist JSON | `partials/watchlist_response.html` |
 | DELETE | `/api/watchlist/{ticker}` | `watchlist_remove` | Watchlist JSON + Cache | `partials/watchlist_response.html` or `partials/watchlist_sidebar.html` |
 | GET | `/api/watchlist-sidebar` | `watchlist_sidebar_refresh` | Watchlist JSON | `partials/watchlist_sidebar.html` |
-| GET | `/api/notifications/stream` | `notification_stream` | SSE (real-time) | StreamingResponse (text/event-stream) |
-| GET | `/api/notifications/bell` | `notification_bell` | Notifications JSON | `partials/notification_bell.html` |
-| GET | `/notifications` | `notifications_page` | Notifications JSON | `notifications.html` |
-| POST | `/api/notifications/read/{id}` | `mark_read` | Notifications JSON | Empty HTML |
-| POST | `/api/notifications/read-all` | `mark_all_read` | Notifications JSON | `partials/notification_bell.html` |
+| GET | `/api/notifications/bell` | `notification_bell` | Supabase `notifications` | `partials/notification_bell.html` |
+| GET | `/api/notifications/recent` | `notification_recent` | Supabase `notifications` | `partials/notification_dropdown.html` |
+| GET | `/api/notifications/count` | `notification_count` | Supabase `notifications` | JSON `{"count": N}` |
+| GET | `/notifications` | `notifications_page` | Supabase `notifications` | `notifications.html` |
 | GET | `/support` | `support_page` | Env vars (PANDA_FUND_RAISED, Stripe IDs) | `support.html` |
 | GET | `/deployment` | `deployment_page` | Deployment cache | `deployment.html` |
 | GET | `/api/deployment-leaderboard` | `deployment_leaderboard_partial` | Deployment cache | `partials/deployment_leaderboard.html` |
@@ -1188,20 +1190,28 @@ so in dark mode a CSS `filter: invert(0.85) hue-rotate(180deg)` is applied to th
 | `.watchlist-remove` | Red × button, 50% opacity → 100% on hover |
 | `.star-btn` | Star toggle button (border, gray) |
 | `.star-btn.starred` | Filled gold star (★) |
-| `.notif-badge` | Red circle badge on notification bell (absolute positioned) |
-| `.notification-toast` | Slide-in toast card (fixed bottom-right, auto-dismiss 10s) |
-| `.notification-unread` | Left border highlight on unread notification cards |
-| `.notification-card` | Clickable notification entry in history page |
-| `@keyframes slideIn` | Toast entrance animation (translateX 100% → 0) |
+| `.pp-bell-btn` | Notification bell button in navbar (relative positioned) |
+| `.pp-bell-dot` | 8px red circle indicator on bell (absolute positioned) |
+| `.pp-notif-dropdown` | Dropdown container (absolute, 340px wide, max-height 480px) |
+| `.pp-notif-item` | Clickable notification entry in dropdown |
+| `.pp-notif-new` | Left border highlight on new (unseen) notification items |
+| `.pp-notif-footer` | "View all notifications →" link at bottom of dropdown |
+| `.pp-toast` | Slide-in toast card (fixed bottom-right, auto-dismiss 8s, max 2 visible) |
+| `.pp-toast-icon` / `.pp-toast-title` / `.pp-toast-msg` | Toast content elements (textContent, XSS-safe) |
+| `@keyframes ppToastIn` / `ppToastOut` | Toast entrance/exit animations |
+| `.notif-chip` | Filter pill on /notifications page (All, 13F, YouTube, Reddit) |
+| `.notif-chip--active` | Active filter chip (colored background) |
+| `.notif-page-item` | Clickable notification entry on full history page |
 | `th[data-sort]` | Sortable column header (cursor:pointer, hover highlight) |
 | `.sort-indicator` | Sort direction arrow (▲/▼/▴) appended to sortable headers |
 
 ### Template Hierarchy
 
 ```
-base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + SSE + sortable tables)
+base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + styles + HTMX + Chart.js + ECharts + Fuse.js CDN + sidebar + sortable tables + toast system)
   ├── includes partials/watchlist_sidebar.html (in <aside> via hx-preserve)
-  ├── includes partials/notification_bell.html (in <nav>, HTMX-polls every 60s)
+  ├── includes partials/notification_bell.html (in <nav>, HTMX-polls every 120s)
+  ├── includes partials/notification_dropdown.html (loaded on bell click via HTMX)
   ├── includes partials/ticker_search.html (in <nav>, Fuse.js fuzzy autocomplete)
   ├── home.html (homepage)
   │     ├── lazy-loads partials/heatmap.html via HTMX (/api/heatmap)
@@ -1355,116 +1365,66 @@ Sidebar × button click:
 
 ### Notification System
 
-**Persistence:** `~/.13f-cache/notifications.json` (seen filing dates + notification history)
+**Persistence:** Supabase `notifications` table (global, no per-user rows).
+Dismiss state tracked client-side via `localStorage('pp-notifications-last-seen')`.
 
-The notification system detects new 13F filings via polling, matches changes against
-the user's watchlist, and delivers in-app notifications (toasts + bell badge + history page).
-No browser push notifications — everything is server-rendered with SSE for real-time delivery.
+The notification system creates global notifications from three sources (13F filing
+changes, YouTube uploads, Reddit velocity spikes) and delivers them via a bell icon
+in the navbar with a dropdown preview and toast popups. No login required, no SSE,
+no browser push notifications.
 
 **Architecture:**
 
 | Component | Implementation |
 |---|---|
-| Detection | Poll SEC via `_background_refresh`, compare `filing_date` against `seen_filing_dates` |
-| Matching | `check_watchlist_matches()` — scan `changes` for CUSIPs/tickers in watchlist |
-| Persistence | `notifications.py` — JSON file, atomic writes, capped at 200 notifications |
-| Deduplication | Deterministic IDs: `{cik}-{filing_date}-{cusip}` — same notification never stored twice |
-| Real-time delivery | SSE via FastAPI `StreamingResponse` (`/api/notifications/stream`) |
-| Bell badge | `notification_bell.html` — HTMX polls every 60s, red badge with unread count |
-| Toast popups | JavaScript `EventSource` listener in `base.html`, auto-dismiss after 10s |
-| History page | `notifications.html` — full list with action badges, mark-read, mark-all-read |
-| Scheduling | `_notification_poll_loop` — adaptive: 2h during filing season, 12h outside |
-| First-run safety | `initialize_if_needed()` — marks all current filings as "seen" to prevent flood |
-| Template global | `get_unread_count()` registered as Jinja2 global |
+| 13F Detection | `sync_worker.py` — after each fund refresh, compare old vs new holdings → `detect_13f_changes()` |
+| YouTube Detection | `youtube_sync.py` — after upserting events, create notifications for impact_score ≥ 7 |
+| Reddit Detection | `web.py` background task — every 30 min, scan `reddit_sentiment` for velocity > 100% |
+| Persistence | Supabase `notifications` table, `upsert` with `ignore_duplicates=True` |
+| Deduplication | Deterministic IDs via PRIMARY KEY: `13f-{cik}-{date}-{cusip}`, `yt-{video_id}`, `reddit-{ticker}-{date}` |
+| Bell indicator | `notification_bell.html` — HTMX polls every 120s, red dot (on/off) |
+| Dropdown | `notification_dropdown.html` — latest 8 notifications, loaded on bell click via HTMX |
+| Toast popups | `ppToast()` in `base.html` — triggered by `HX-Trigger` header, max 2 visible, auto-dismiss 8s |
+| History page | `notifications.html` — paginated (30/page), type filter chips (All/13F/YouTube/Reddit) |
+| Retention | 48 hours — `cleanup_old_notifications(days=2)` runs at start of each sync cycle |
+| First-visit | `first_visit=1` query param → always show red dot so new users discover the bell |
+| Server-side cache | `_bell_cache` — 15-second TTL in-memory cache for bell state, collapses identical polls |
+| Input sanitization | `_sanitize()` strips HTML tags from all external text; link URLs restricted to relative paths or `https://` |
+| Rate limiting | Bell: 120/min, Dropdown: 60/min, Count: 120/min, History: 30/min |
 
-**Polling algorithm:**
+**Notification sources:**
 
-```
-_notification_poll_loop (runs as asyncio task):
-  Loop forever:
-    1. interval = get_poll_interval_seconds()
-       - is_filing_season()? → 7,200s (2 hours)
-       - otherwise → 43,200s (12 hours)
-    2. await asyncio.sleep(interval)
-    3. If not already refreshing → trigger _background_refresh()
-```
+| Source | Hook Location | Trigger | Max per Cycle | Link |
+|---|---|---|---|---|
+| 13F changes | `sync_worker.py` after fund refresh | New/changed filing detected | 5 per fund (top by weight) | `/stock/{ticker}` |
+| YouTube | `youtube_sync.py` after event upsert | `impact_score >= 7` | 1 per video | YouTube video URL |
+| Reddit | `web.py` background task (every 30 min) | `velocity_pct > 100` | 1 per ticker per day | `/retail?view=leaderboard` |
 
-Filing season is defined as ±15 days around SEC 13F deadlines:
-Feb 14, May 15, Aug 14, Nov 14.
-
-**New filing detection flow:**
+**Client-side flow:**
 
 ```
-_background_refresh (enhanced):
-  For each superinvestor:
-    1. Fetch fresh data via get_fund_summary(cik)
-    2. Compare filing_date against seen_filing_dates[cik]
-    3. If new filing detected:
-       a. Load watchlist
-       b. check_watchlist_matches() — scan changes for watchlist tickers/CUSIPs
-       c. For each match: add_notification() + broadcast via SSE
-       d. mark_filing_seen(cik, filing_date)
+On page load:
+  1. Read lastSeen from localStorage (or '2000-01-01' if first visit)
+  2. HTMX polls /api/notifications/bell?since={lastSeen} every 120s
+  3. Server returns bell icon + red dot (if count > 0)
+  4. If new notifications, server sends HX-Trigger header → ppToast() fires
+
+On bell click:
+  1. HTMX loads /api/notifications/recent?since={lastSeen} into dropdown
+  2. localStorage updated to now() → red dot clears on next poll
+  3. Dropdown shows latest 8 + "View all notifications →" footer if more exist
 ```
-
-**Watchlist matching algorithm** (`check_watchlist_matches`):
-
-```
-1. Build cusip_set and ticker_set from watchlist items
-2. Build ticker_by_cusip and pct_by_cusip lookup dicts from all_holdings
-3. Iterate fund_data["changes"]:
-   - If change cusip in cusip_set OR change issuer ticker in ticker_set → match
-4. For each match:
-   - Map status → action (NEW→"NEW BUY", INCREASED→"ADD", DECREASED→"REDUCE", CLOSED→"SOLD")
-   - Look up pct_of_portfolio from all_holdings
-   - Generate deterministic ID: {cik}-{filing_date}-{cusip}
-   - Build notification dict with link to /stock/{ticker} or /stock/cusip/{cusip}
-```
-
-**SSE (Server-Sent Events) architecture:**
-
-```
-Server side:
-  app.state.sse_clients: list[asyncio.Queue]
-
-  /api/notifications/stream endpoint:
-    1. Create asyncio.Queue for this client
-    2. Add to sse_clients list
-    3. StreamingResponse generator:
-       - Await queue.get() indefinitely
-       - Yield: "event: notification\ndata: {json}\n\n"
-    4. On disconnect: remove queue from sse_clients
-
-  _broadcast_sse(app, notif):
-    For each queue in sse_clients:
-      await queue.put(notif)
-
-Client side (base.html inline JS):
-  const evtSource = new EventSource("/api/notifications/stream");
-  evtSource.addEventListener("notification", (e) => {
-    const notif = JSON.parse(e.data);
-    showToast(notif);           // Slide-in card, auto-dismiss 10s
-    htmx.ajax("GET", ...);     // Refresh bell badge
-  });
-```
-
-**Toast notification format:**
-```
-"Warren Buffett just disclosed a NEW BUY in $AAPL.
- It now makes up 22.7% of their portfolio."
-```
-- Green border for adds (NEW BUY, ADD)
-- Red border for reduces (REDUCE, SOLD)
-- Clickable → navigates to stock page
 
 **Key design decisions:**
-- SSE instead of WebSockets — simpler, no new dependencies, auto-reconnect built into `EventSource`
-- HTMX bell poll (60s) as fallback if SSE events are missed or disconnected
-- One `asyncio.Queue` per SSE client — no shared state, clean disconnect handling
-- 200-notification cap prevents unbounded growth of JSON file
-- `initialize_if_needed()` runs once on first startup to avoid flooding with historical notifications
-- Adaptive polling (2h vs 12h) balances freshness with SEC rate limit courtesy
-- Deterministic notification IDs prevent duplicates even if the same data is polled twice
-- No browser push notifications (no Service Worker, no VAPID keys) — keeps architecture simple
+- HTMX polling (120s) over SSE — simpler, no WebSocket infrastructure, sufficient for data that updates every 30 min+
+- Global notifications (no per-user rows) — all visitors see the same notifications
+- Client-side dismiss via `localStorage` — no auth needed, no server-side read tracking
+- 15-second in-memory cache on bell state — collapses hundreds of identical polls into one DB query
+- Single DB query for bell (`get_bell_state`) — returns count + latest in one call
+- Deterministic IDs + `ignore_duplicates=True` — no pre-fetch dedup needed, DB handles via PRIMARY KEY
+- SQL-level pagination — only the current page is fetched from DB (not all prior pages)
+- Input sanitization on all notification text — HTML tags stripped, links validated
+- Toast cap of 2 prevents notification overload
 
 ---
 
@@ -1537,7 +1497,7 @@ the cache — every CLI command makes live SEC API calls.
 
 - [x] Interactive chart on stock pages (Chart.js stacked bar, simple/detailed toggle)
 - [x] Watchlist sidebar (star tickers, persistent JSON, HTMX OOB swaps)
-- [x] In-app notification system (SEC poller + watchlist matching + SSE toasts + bell badge)
+- [x] In-app notification system (Supabase-backed, 3 sources: 13F/YouTube/Reddit, HTMX bell + dropdown + toast + history page)
 - [x] Clickable investor names in stock history (links to `/holdings/{cik}`)
 - [x] Analyst ratings tab on stock pages (Finnhub + yfinance, firm-level, lazy-loaded)
 - [x] Sortable tables across all pages (vanilla JS, `data-sort` attributes)
@@ -1646,11 +1606,13 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-26 (Capital Deployed feature,
-> AUM/deployment ratio leaderboard, XBRL cash, Form ADV integration, comprehensive
-> tooltips, dark mode, TradingView/Stripe theme sync, Supabase startup timeout,
-> automatic retention cleanup, background refresh, vitals persistence, Panda Fund
-> support page, Stripe embed, homepage widget).
+> This file documents the system as of 2026-02-26 (Notification bell system:
+> Supabase-backed, 3 sources (13F/YouTube/Reddit), HTMX bell + dropdown + toast +
+> history page, 48h retention, 15s server cache, SQL pagination; Capital Deployed
+> feature, AUM/deployment ratio leaderboard, XBRL cash, Form ADV integration,
+> comprehensive tooltips, dark mode, TradingView/Stripe theme sync, Supabase
+> startup timeout, automatic retention cleanup, background refresh, vitals
+> persistence, Panda Fund support page, Stripe embed, homepage widget).
 > If told "Context is drifting," the first action should be to re-read
 > `/Users/Tevis_1/13F-project/README_DEV.md` and reconcile any discrepancies
 > with the actual code.

@@ -1,15 +1,34 @@
-"""Notification engine — detects new 13F filings and matches against watchlist.
+"""Notification engine for PaperPanda.
 
-Persistence lives at ~/.13f-cache/notifications.json (same directory as cache/watchlist).
-Detection works by comparing filing_date in fresh data vs. seen_filing_dates.
+Detects new 13F filings, YouTube events, and Reddit velocity spikes —
+then creates notification rows for the Supabase ``notifications`` table.
+
+The notifications table is *global* (no per-user rows).  Dismiss state
+is tracked client-side via ``localStorage('pp-notifications-last-seen')``.
+
+Notification IDs are deterministic for deduplication:
+  - 13F changes:   ``13f-{cik}-{filing_date}-{cusip}``
+  - YouTube:        ``yt-{video_id}``
+  - Reddit spikes:  ``reddit-{ticker}-{YYYY-MM-DD}``
 """
 
-import json
-from datetime import date, datetime
+from __future__ import annotations
 
-from filings.cache import CACHE_DIR
+import logging
+import re
+from datetime import date, datetime, timezone
 
-NOTIFICATIONS_FILE = CACHE_DIR / "notifications.json"
+logger = logging.getLogger(__name__)
+
+_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _sanitize(text: str, max_len: int = 300) -> str:
+    """Strip HTML tags and clamp length — prevents XSS in toast/templates."""
+    if not text:
+        return ""
+    return _TAG_RE.sub("", str(text))[:max_len]
+
 
 # Status codes from _compare_two_filings() → user-facing action labels
 STATUS_TO_ACTION = {
@@ -19,224 +38,7 @@ STATUS_TO_ACTION = {
     "CLOSED": "SOLD",
 }
 
-# ── In-memory cache (avoids reading JSON from disk on every request) ──
-_state_cache: dict | None = None
-
-
-# ── Persistence ──────────────────────────────────────────────────────
-
-
-def load_notification_state() -> dict:
-    """Read notification state, using in-memory cache when available."""
-    global _state_cache
-    if _state_cache is not None:
-        return _state_cache
-    if not NOTIFICATIONS_FILE.exists():
-        return {}
-    try:
-        _state_cache = json.loads(NOTIFICATIONS_FILE.read_text())
-        return _state_cache
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
-def save_notification_state(data: dict) -> None:
-    """Atomic write of notification state to disk + update in-memory cache."""
-    global _state_cache
-    _state_cache = data
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = NOTIFICATIONS_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2))
-    tmp.replace(NOTIFICATIONS_FILE)
-
-
-def initialize_if_needed(cache_data: dict) -> None:
-    """First-run setup: record all current filing_dates as 'already seen'.
-
-    This prevents a flood of notifications when the feature is first activated.
-    If notifications.json already exists, this is a no-op.
-    """
-    state = load_notification_state()
-    if state.get("initialized_at"):
-        return  # Already initialized
-
-    seen = {}
-    for cik, fund_data in cache_data.items():
-        filing_date = fund_data.get("filing_date", "")
-        if filing_date:
-            seen[cik] = filing_date
-
-    state = {
-        "initialized_at": datetime.now().isoformat(timespec="seconds"),
-        "seen_filing_dates": seen,
-        "notifications": [],
-    }
-    save_notification_state(state)
-
-
-# ── Detection ────────────────────────────────────────────────────────
-
-
-def get_seen_filing_dates() -> dict[str, str]:
-    """Return {CIK: filing_date} map of already-processed filings."""
-    state = load_notification_state()
-    return state.get("seen_filing_dates", {})
-
-
-def is_new_filing(cik: str, new_filing_date: str) -> bool:
-    """Check if this filing_date is different from what we've already seen."""
-    if not new_filing_date:
-        return False
-    seen = get_seen_filing_dates()
-    old_date = seen.get(cik)
-    return new_filing_date != old_date
-
-
-def mark_filing_seen(cik: str, filing_date: str) -> None:
-    """Record that we've processed this filing (prevents re-notification)."""
-    state = load_notification_state()
-    if "seen_filing_dates" not in state:
-        state["seen_filing_dates"] = {}
-    state["seen_filing_dates"][cik] = filing_date
-    save_notification_state(state)
-
-
-# ── Watchlist Matching ───────────────────────────────────────────────
-
-
-def check_watchlist_matches(
-    cik: str,
-    fund_display_name: str,
-    fund_data: dict,
-    watchlist_items: list[dict],
-) -> list[dict]:
-    """Check if any changes in this filing match watchlist tickers.
-
-    Args:
-        cik: Fund's CIK number
-        fund_display_name: e.g. "Warren Buffett"
-        fund_data: Full dict from get_fund_summary()
-        watchlist_items: List of watchlist entry dicts
-
-    Returns:
-        List of notification dicts ready to persist.
-    """
-    if not watchlist_items or not fund_data.get("changes"):
-        return []
-
-    # Build lookup sets from watchlist
-    cusip_set = set()
-    ticker_set = set()
-    for item in watchlist_items:
-        if item.get("cusip"):
-            cusip_set.add(item["cusip"].upper())
-        if item.get("ticker"):
-            ticker_set.add(item["ticker"].upper())
-
-    # Build ticker-by-cusip and pct-by-cusip from fund's current holdings
-    ticker_by_cusip: dict[str, str | None] = {}
-    pct_by_cusip: dict[str, float] = {}
-    for h in fund_data.get("all_holdings", []):
-        cusip = h.get("cusip", "").upper()
-        ticker_by_cusip[cusip] = h.get("ticker")
-        pct_by_cusip[cusip] = h.get("pct", 0.0)
-
-    filing_date = fund_data.get("filing_date", "")
-    results = []
-
-    for change in fund_data.get("changes", []):
-        status = change.get("status", "")
-        if status not in STATUS_TO_ACTION:
-            continue
-
-        cusip = change.get("cusip", "").upper()
-        ticker = ticker_by_cusip.get(cusip)
-
-        # Match against watchlist by cusip OR ticker
-        matched = cusip in cusip_set
-        if not matched and ticker and ticker.upper() in ticker_set:
-            matched = True
-
-        if not matched:
-            continue
-
-        action = STATUS_TO_ACTION[status]
-        link = f"/stock/{ticker}" if ticker else f"/stock/cusip/{cusip}"
-
-        notif = {
-            "id": f"{cik}-{filing_date}-{cusip}",
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "type": "watchlist_match",
-            "fund_cik": cik,
-            "fund_name": fund_display_name,
-            "ticker": ticker,
-            "cusip": cusip,
-            "issuer_name": change.get("issuer", "Unknown"),
-            "action": action,
-            "pct_of_portfolio": pct_by_cusip.get(cusip, 0.0),
-            "filing_date": filing_date,
-            "read": False,
-            "link": link,
-        }
-        results.append(notif)
-
-    return results
-
-
-# ── Notification CRUD ────────────────────────────────────────────────
-
-
-def add_notification(notif: dict) -> None:
-    """Append a notification (deduplicates by id). Newest first."""
-    state = load_notification_state()
-    if "notifications" not in state:
-        state["notifications"] = []
-
-    # Deduplicate: skip if id already exists
-    existing_ids = {n["id"] for n in state["notifications"]}
-    if notif["id"] in existing_ids:
-        return
-
-    # Insert at the beginning (newest first)
-    state["notifications"].insert(0, notif)
-
-    # Cap at 200 notifications to prevent unbounded growth
-    state["notifications"] = state["notifications"][:200]
-
-    save_notification_state(state)
-
-
-def get_all_notifications(limit: int = 50) -> list[dict]:
-    """Return notifications (newest first), capped at limit."""
-    state = load_notification_state()
-    return state.get("notifications", [])[:limit]
-
-
-def get_unread_count() -> int:
-    """Return count of unread notifications."""
-    state = load_notification_state()
-    return sum(1 for n in state.get("notifications", []) if not n.get("read"))
-
-
-def mark_notification_read(notification_id: str) -> None:
-    """Mark a single notification as read."""
-    state = load_notification_state()
-    for n in state.get("notifications", []):
-        if n["id"] == notification_id:
-            n["read"] = True
-            break
-    save_notification_state(state)
-
-
-def mark_all_read() -> None:
-    """Mark all notifications as read."""
-    state = load_notification_state()
-    for n in state.get("notifications", []):
-        n["read"] = True
-    save_notification_state(state)
-
-
-# ── Scheduling ───────────────────────────────────────────────────────
+# ── Filing season helpers ────────────────────────────────────────────
 
 
 def is_filing_season() -> bool:
@@ -270,3 +72,224 @@ def get_poll_interval_seconds() -> int:
     if is_filing_season():
         return 2 * 3600  # 2 hours
     return 12 * 3600  # 12 hours
+
+
+# ── 13F Filing Change Detection ─────────────────────────────────────
+
+
+def detect_13f_changes(
+    cik: str,
+    fund_name: str,
+    new_data: dict,
+    old_data: dict | None,
+    *,
+    max_notifications: int = 5,
+) -> list[dict]:
+    """Compare new vs old 13F data and return notification rows.
+
+    Detects NEW BUY, ADD, REDUCE, SOLD actions from the ``changes``
+    list in the fund data.  Returns at most *max_notifications* rows
+    (sorted by portfolio weight change, descending).
+
+    Args:
+        cik:       Fund CIK number
+        fund_name: Display name (e.g. "Warren Buffett")
+        new_data:  Fresh fund_summary dict from SEC EDGAR
+        old_data:  Previous fund_summary (from cache) — or None on first sync
+        max_notifications: Cap per fund per filing cycle
+
+    Returns:
+        List of notification dicts matching the Supabase ``notifications``
+        schema (id, type, title, message, icon, toast_type, link, metadata).
+    """
+    if not new_data:
+        return []
+
+    # Compare filing dates to detect a genuinely new filing
+    new_filing_date = new_data.get("filing_date", "")
+    if not new_filing_date:
+        return []
+
+    if old_data:
+        old_filing_date = old_data.get("filing_date", "")
+        if new_filing_date == old_filing_date:
+            return []  # Same filing — no changes
+
+    changes = new_data.get("changes", [])
+    if not changes:
+        return []
+
+    # Build ticker + pct lookup from current holdings
+    ticker_by_cusip: dict[str, str | None] = {}
+    pct_by_cusip: dict[str, float] = {}
+    for h in new_data.get("all_holdings", []):
+        cusip = h.get("cusip", "").upper()
+        ticker_by_cusip[cusip] = h.get("ticker")
+        pct_by_cusip[cusip] = h.get("pct", 0.0)
+
+    # Build notification rows
+    notifs: list[dict] = []
+    for change in changes:
+        status = change.get("status", "")
+        if status not in STATUS_TO_ACTION:
+            continue
+
+        cusip = change.get("cusip", "").upper()
+        ticker = ticker_by_cusip.get(cusip) or change.get("ticker")
+        action = STATUS_TO_ACTION[status]
+        issuer = change.get("issuer", "Unknown")
+        pct = pct_by_cusip.get(cusip, 0.0)
+
+        is_buy = action in ("NEW BUY", "ADD")
+        icon = "📈" if is_buy else "📉"
+        toast_type = "bullish" if is_buy else "bearish"
+        link = f"/stock/{ticker}" if ticker else ""
+
+        title = f"{_sanitize(fund_name)}: {action}"
+        if ticker:
+            title += f" — {ticker}"
+
+        pct_str = f" ({pct:.1f}% of portfolio)" if pct > 0 else ""
+        message = f"{_sanitize(issuer)} {action.lower()}{pct_str}"
+
+        notifs.append(
+            {
+                "id": f"13f-{cik}-{new_filing_date}-{cusip}",
+                "type": "13f_change",
+                "title": title,
+                "message": message,
+                "icon": icon,
+                "toast_type": toast_type,
+                "link": link,
+                "metadata": {
+                    "cik": cik,
+                    "fund_name": fund_name,
+                    "ticker": ticker,
+                    "cusip": cusip,
+                    "action": action,
+                    "pct_of_portfolio": round(pct, 2),
+                    "filing_date": new_filing_date,
+                },
+                "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            }
+        )
+
+    # Sort by portfolio weight (biggest movers first) and cap
+    notifs.sort(key=lambda n: n["metadata"].get("pct_of_portfolio", 0), reverse=True)
+    return notifs[:max_notifications]
+
+
+# ── YouTube Notification Creator ─────────────────────────────────────
+
+
+def create_youtube_notification(event: dict) -> dict | None:
+    """Create a notification dict for a high-impact YouTube event.
+
+    Returns ``None`` if the event doesn't qualify (impact_score < 7).
+
+    Args:
+        event: A youtube_events row dict (from youtube_sync).
+
+    Returns:
+        A notification dict matching the Supabase schema, or None.
+    """
+    impact = event.get("impact_score", 0)
+    if impact < 7:
+        return None
+
+    video_id = event.get("video_id", "")
+    if not video_id:
+        return None
+
+    channel_name = event.get("channel_name", "Unknown Channel")
+    title_text = event.get("title", "New Video")
+    sentiment = event.get("sentiment", "neutral")
+    video_url = event.get("video_url", "")
+
+    # Map sentiment to toast type
+    toast_map = {"bullish": "bullish", "bearish": "bearish"}
+    toast_type = toast_map.get(sentiment, "alert")
+
+    # Truncate long titles
+    display_title = title_text[:100] + ("…" if len(title_text) > 100 else "")
+
+    tickers = event.get("tickers", [])
+    ticker_str = ", ".join(f"${t}" for t in tickers[:5]) if tickers else ""
+
+    notif_title = f"{_sanitize(channel_name)}: New Video"
+    message = _sanitize(display_title)
+    if ticker_str:
+        message += f" [{ticker_str}]"
+
+    # Only allow YouTube URLs for the link
+    safe_link = ""
+    if video_url and video_url.startswith("https://"):
+        safe_link = video_url
+    elif video_id:
+        safe_link = f"https://youtube.com/watch?v={video_id}"
+
+    return {
+        "id": f"yt-{video_id}",
+        "type": "youtube",
+        "title": notif_title,
+        "message": message,
+        "icon": "🎬",
+        "toast_type": toast_type,
+        "link": safe_link,
+        "metadata": {
+            "video_id": video_id,
+            "channel_name": channel_name,
+            "sentiment": sentiment,
+            "impact_score": impact,
+            "tickers": tickers[:10] if tickers else [],
+        },
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
+# ── Reddit Velocity Notification Creator ─────────────────────────────
+
+
+def create_reddit_notification(
+    ticker: str,
+    name: str,
+    velocity_pct: float,
+    mentions: int,
+) -> dict | None:
+    """Create a notification dict for a Reddit velocity spike.
+
+    Returns ``None`` if velocity_pct < 100 (mentions didn't double).
+
+    Args:
+        ticker:       Stock ticker (e.g. "TSLA")
+        name:         Company name (e.g. "Tesla Inc")
+        velocity_pct: 24h mention velocity percentage
+        mentions:     Current mention count
+
+    Returns:
+        A notification dict matching the Supabase schema, or None.
+    """
+    if velocity_pct < 100:
+        return None
+
+    today_str = date.today().isoformat()
+
+    sign = "+" if velocity_pct >= 0 else ""
+    message = f"{_sanitize(name)} — mentions {sign}{velocity_pct:.0f}% in 24h ({mentions} total)"
+
+    return {
+        "id": f"reddit-{ticker}-{today_str}",
+        "type": "reddit_velocity",
+        "title": f"${ticker} trending on Reddit",
+        "message": message,
+        "icon": "🔥",
+        "toast_type": "alert",
+        "link": "/retail?view=leaderboard",
+        "metadata": {
+            "ticker": ticker,
+            "name": name,
+            "velocity_pct": round(velocity_pct, 1),
+            "mentions": mentions,
+        },
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }

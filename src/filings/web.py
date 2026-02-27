@@ -41,6 +41,7 @@ from filings import (
     cache,
     analysts,
     market_data,
+    notifications,
     sentiment,
     vitals,
     company_filings,
@@ -216,6 +217,9 @@ async def lifespan(app: FastAPI):
     if _ENABLE_BACKGROUND_REFRESH:
         app.state.refresh_status = "pending"
         asyncio.create_task(_delayed_refresh_sweep(app))
+
+    # Reddit velocity notification scanner (runs every 30 min)
+    asyncio.create_task(_reddit_velocity_scanner())
 
     yield
 
@@ -642,6 +646,51 @@ async def _trigger_single_refresh(app: FastAPI, cik: str) -> None:
         logger.debug("On-demand refresh timed out for CIK %s", cik)
     except Exception:
         logger.debug("On-demand refresh failed for CIK %s", cik)
+
+
+# ── Reddit velocity notification scanner ──────────────────────────────
+
+_REDDIT_SCAN_INTERVAL = 30 * 60  # 30 minutes
+
+
+async def _reddit_velocity_scanner() -> None:
+    """Periodically check ApeWisdom for velocity spikes and create notifications."""
+    await asyncio.sleep(60)  # let startup settle
+    while True:
+        try:
+            apewisdom = await asyncio.to_thread(sentiment._get_apewisdom_all)
+            if apewisdom:
+                notif_rows: list[dict] = []
+                for item in apewisdom:
+                    ticker = (item.get("ticker") or "").upper()
+                    if not ticker:
+                        continue
+                    mentions = int(item.get("mentions") or 0)
+                    mentions_24h = int(item.get("mentions_24h_ago") or 0)
+                    if mentions_24h > 0:
+                        velocity_pct = ((mentions - mentions_24h) / mentions_24h) * 100
+                    else:
+                        velocity_pct = 0.0
+                    notif = notifications.create_reddit_notification(
+                        ticker=ticker,
+                        name=item.get("name", ticker),
+                        velocity_pct=velocity_pct,
+                        mentions=mentions,
+                    )
+                    if notif is not None:
+                        notif_rows.append(notif)
+
+                if notif_rows:
+                    # Dedup handled by deterministic IDs (reddit-{ticker}-{date})
+                    n = await asyncio.to_thread(
+                        supabase_cache.upsert_notifications, notif_rows
+                    )
+                    if n:
+                        logger.info("Created %d Reddit velocity notifications", n)
+        except Exception as exc:
+            logger.error("Reddit velocity scan failed: %s", exc)
+
+        await asyncio.sleep(_REDDIT_SCAN_INTERVAL)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1803,6 +1852,180 @@ async def trigger_deployment_sync(request: Request):
     return JSONResponse(result)
 
 
+# --- Notifications ---
+
+_SAFE_SINCE_DEFAULT = "2000-01-01T00:00:00Z"
+
+
+def _validated_since(since: str) -> str:
+    """Return *since* if it's a valid ISO 8601 timestamp, else the safe default."""
+    try:
+        if len(since) > 40:  # Prevent oversized params
+            return _SAFE_SINCE_DEFAULT
+        datetime.fromisoformat(since.replace("Z", "+00:00"))
+        return since
+    except Exception:
+        return _SAFE_SINCE_DEFAULT
+
+
+def _time_ago(iso_str: str) -> str:
+    """Convert an ISO 8601 timestamp to a human-readable 'time ago' string."""
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        diff = datetime.now(timezone.utc) - dt
+        seconds = int(diff.total_seconds())
+        if seconds < 60:
+            return "just now"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes}m ago"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours}h ago"
+        days = hours // 24
+        if days < 7:
+            return f"{days}d ago"
+        return f"{days // 7}w ago"
+    except Exception:
+        return ""
+
+
+# ── In-memory cache for bell state (global notifications, short TTL) ──
+_bell_cache: dict[str, tuple[float, int, dict | None]] = {}
+_BELL_CACHE_TTL = 15  # seconds — collapses identical polls across users
+
+
+def _get_cached_bell_state(since: str) -> tuple[int, dict | None]:
+    """Return (count, latest) from cache or DB.  15-second TTL."""
+    now = time_module.monotonic()
+    cached = _bell_cache.get(since)
+    if cached and (now - cached[0]) < _BELL_CACHE_TTL:
+        return cached[1], cached[2]
+    count, latest = supabase_cache.get_bell_state(since)
+    _bell_cache[since] = (now, count, latest)
+    # Evict stale keys (keep cache dict small)
+    if len(_bell_cache) > 50:
+        stale = [k for k, v in _bell_cache.items() if (now - v[0]) > _BELL_CACHE_TTL]
+        for k in stale:
+            _bell_cache.pop(k, None)
+    return count, latest
+
+
+@app.get("/api/notifications/bell", response_class=HTMLResponse)
+async def notification_bell(
+    request: Request,
+    since: str = "2000-01-01T00:00:00Z",
+    first_visit: int = 0,
+):
+    """Return bell icon + dot indicator as an HTML partial.
+
+    ``since`` is the client's last-seen timestamp from localStorage.
+    ``first_visit`` — if 1, always show the dot so new users discover the bell.
+    """
+    since = _validated_since(since)
+    count, latest = await asyncio.to_thread(_get_cached_bell_state, since)
+
+    # First-time visitors always see the red dot as a discovery prompt
+    if first_visit in (1,) and count == 0:
+        count = 1
+
+    # If new notifications appeared, send toast data via HX-Trigger
+    headers = {}
+    if count > 0 and latest:
+        trigger_data = {
+            "ppNewNotification": {
+                "type": latest.get("toast_type", "alert"),
+                "title": latest.get("title", ""),
+                "message": latest.get("message", ""),
+                "icon": latest.get("icon", "🔔"),
+                "link": latest.get("link", ""),
+            }
+        }
+        headers["HX-Trigger"] = json_module.dumps(trigger_data)
+
+    return templates.TemplateResponse(
+        "partials/notification_bell.html",
+        {"request": request, "count": count},
+        headers=headers,
+    )
+
+
+@app.get("/api/notifications/recent", response_class=HTMLResponse)
+async def notification_recent(request: Request, since: str = "2000-01-01T00:00:00Z"):
+    """Return dropdown content with the 8 most recent notifications."""
+    since = _validated_since(since)
+    # Fetch 9 to detect if more exist — avoids a separate count query
+    all_notifs = await asyncio.to_thread(
+        supabase_cache.get_recent_notifications, 9
+    )
+
+    has_more = len(all_notifs) > 8
+    display_notifs = all_notifs[:8]
+
+    for n in display_notifs:
+        n["time_ago"] = _time_ago(n.get("created_at", ""))
+        n["is_new"] = n.get("created_at", "") > since
+
+    return templates.TemplateResponse(
+        "partials/notification_dropdown.html",
+        {
+            "request": request,
+            "notifications": display_notifs,
+            "has_more": has_more,
+        },
+    )
+
+
+@app.get("/api/notifications/count")
+async def notification_count(request: Request, since: str = "2000-01-01T00:00:00Z"):
+    """Return notification count as JSON."""
+    since = _validated_since(since)
+    count, _ = await asyncio.to_thread(_get_cached_bell_state, since)
+    return JSONResponse({"count": count})
+
+
+_NOTIF_TYPES = ["13f_change", "youtube", "reddit_velocity"]
+
+
+@app.get("/notifications", response_class=HTMLResponse)
+async def notifications_page(
+    request: Request,
+    page: int = Query(1, ge=1, le=100),
+    types: str = Query("", description="Comma-separated notification types to show"),
+):
+    """Full notification history page (last 48 hours), with optional type filter."""
+    # Parse type filter from query string
+    active_types: list[str] = []
+    if types.strip():
+        active_types = [t.strip() for t in types.split(",") if t.strip() in _NOTIF_TYPES]
+    filter_types = active_types or None  # None = show all
+
+    per_page = 30
+    offset = (page - 1) * per_page
+    # Fetch 1 extra row to detect next page — pagination is pushed to SQL
+    page_notifs = await asyncio.to_thread(
+        supabase_cache.get_recent_notifications,
+        per_page + 1, filter_types, offset,
+    )
+    has_next = len(page_notifs) > per_page
+    page_notifs = page_notifs[:per_page]
+
+    for n in page_notifs:
+        n["time_ago"] = _time_ago(n.get("created_at", ""))
+
+    return templates.TemplateResponse(
+        "notifications.html",
+        {
+            "request": request,
+            "notifications": page_notifs,
+            "page": page,
+            "has_next": has_next,
+            "all_types": _NOTIF_TYPES,
+            "active_types": active_types,
+        },
+    )
+
+
 # --- Retail Traders (hidden — no nav link) ---
 
 _FINANCE_YOUTUBERS = [
@@ -2577,6 +2800,11 @@ if _has_limiter:
     clear_session = limiter.limit("10/minute")(clear_session)
     # Infrastructure monitoring
     health_detail = limiter.limit("5/minute")(health_detail)
+    # Notification endpoints (polled frequently — generous limits)
+    notification_bell = limiter.limit("120/minute")(notification_bell)
+    notification_recent = limiter.limit("60/minute")(notification_recent)
+    notification_count = limiter.limit("120/minute")(notification_count)
+    notifications_page = limiter.limit("30/minute")(notifications_page)
 
 
 # ═══════════════════════════════════════════════════════════════════════

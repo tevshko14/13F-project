@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block title %}Notifications - PaperPanda{% endblock %}
+{% block content %}
+<style>
+  .notif-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5em;
+  }
+  .notif-page-header h1 {
+    margin: 0;
+    font-size: 1.6em;
+  }
+  .notif-page-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .notif-page-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8em;
+    padding: 1em 0.8em;
+    border-bottom: 1px solid var(--pico-muted-border-color);
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s;
+  }
+  .notif-page-item:hover {
+    background: var(--pico-card-background-color);
+    border-radius: 6px;
+  }
+  .notif-page-icon {
+    font-size: 1.5em;
+    flex-shrink: 0;
+    width: 2em;
+    text-align: center;
+  }
+  .notif-page-body {
+    flex: 1;
+    min-width: 0;
+  }
+  .notif-page-title {
+    font-weight: 600;
+    font-size: 0.95em;
+    margin-bottom: 0.15em;
+  }
+  .notif-page-msg {
+    color: var(--pico-muted-color);
+    font-size: 0.85em;
+    margin-bottom: 0.2em;
+  }
+  .notif-page-meta {
+    display: flex;
+    gap: 1em;
+    font-size: 0.75em;
+    color: var(--pico-muted-color);
+    opacity: 0.8;
+  }
+  .notif-page-type {
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+  .notif-page-type--13f { color: #2563eb; }
+  .notif-page-type--youtube { color: #dc2626; }
+  .notif-page-type--reddit { color: #f97316; }
+  .notif-empty {
+    text-align: center;
+    padding: 3em 1em;
+    color: var(--pico-muted-color);
+  }
+  .notif-empty svg {
+    opacity: 0.3;
+    margin-bottom: 0.5em;
+  }
+  .notif-pagination {
+    display: flex;
+    justify-content: center;
+    gap: 1em;
+    margin-top: 2em;
+    padding-bottom: 2em;
+  }
+
+  /* ── Type filter chips ── */
+  .notif-filters {
+    display: flex;
+    gap: 0.5em;
+    margin-bottom: 1.5em;
+    flex-wrap: wrap;
+  }
+  .notif-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    padding: 0.35em 0.85em;
+    border-radius: 999px;
+    font-size: 0.8em;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1.5px solid var(--pico-muted-border-color);
+    color: var(--pico-muted-color);
+    background: transparent;
+    transition: all 0.15s;
+    cursor: pointer;
+  }
+  .notif-chip:hover {
+    border-color: var(--pico-primary);
+    color: var(--pico-primary);
+  }
+  .notif-chip--active {
+    border-color: var(--chip-color, var(--pico-primary));
+    background: var(--chip-color, var(--pico-primary));
+    color: #fff;
+  }
+  .notif-chip--active:hover {
+    opacity: 0.85;
+    color: #fff;
+  }
+  .notif-chip--13f { --chip-color: #2563eb; }
+  .notif-chip--youtube { --chip-color: #dc2626; }
+  .notif-chip--reddit { --chip-color: #f97316; }
+</style>
+
+<div class="notif-page-header">
+  <h1>Notifications</h1>
+  <small style="color: var(--pico-muted-color);">Last 48 hours</small>
+</div>
+
+<div class="notif-filters">
+  {% set type_labels = {"13f_change": "📊 13F Filings", "youtube": "🎬 YouTube", "reddit_velocity": "🔥 Reddit"} %}
+  {% set type_css = {"13f_change": "13f", "youtube": "youtube", "reddit_velocity": "reddit"} %}
+  <a href="/notifications"
+     class="notif-chip{% if not active_types %} notif-chip--active{% endif %}">
+    All
+  </a>
+  {% for t in all_types %}
+    <a href="/notifications?types={{ t }}"
+       class="notif-chip notif-chip--{{ type_css[t] }}{% if active_types and t in active_types %} notif-chip--active{% endif %}">
+      {{ type_labels.get(t, t) }}
+    </a>
+  {% endfor %}
+</div>
+
+{% if notifications %}
+<div class="notif-page-list">
+  {% for n in notifications %}
+  <a href="{{ n.link or '#' }}" class="notif-page-item">
+    <span class="notif-page-icon">{{ n.icon }}</span>
+    <div class="notif-page-body">
+      <div class="notif-page-title">{{ n.title }}</div>
+      <div class="notif-page-msg">{{ n.message }}</div>
+      <div class="notif-page-meta">
+        {% if n.type == '13f_change' %}
+          <span class="notif-page-type notif-page-type--13f">13F</span>
+        {% elif n.type == 'youtube' %}
+          <span class="notif-page-type notif-page-type--youtube">YouTube</span>
+        {% elif n.type == 'reddit_velocity' %}
+          <span class="notif-page-type notif-page-type--reddit">Reddit</span>
+        {% else %}
+          <span class="notif-page-type">{{ n.type }}</span>
+        {% endif %}
+        <span>{{ n.time_ago }}</span>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+<div class="notif-pagination">
+  {% set type_param = "&types=" ~ active_types | join(",") if active_types else "" %}
+  {% if page > 1 %}
+    <a href="/notifications?page={{ page - 1 }}{{ type_param }}" role="button" class="outline">Previous</a>
+  {% endif %}
+  {% if has_next %}
+    <a href="/notifications?page={{ page + 1 }}{{ type_param }}" role="button" class="outline">Next</a>
+  {% endif %}
+</div>
+
+{% else %}
+<div class="notif-empty">
+  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+  </svg>
+  <p>No notifications in the last 48 hours.</p>
+  <p><small>Notifications are created when 13F filings change, high-impact YouTube videos are posted, or Reddit tickers spike.</small></p>
+</div>
+{% endif %}
+
+{% endblock %}

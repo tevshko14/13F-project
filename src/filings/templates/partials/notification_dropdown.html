@@ -1,0 +1,22 @@
+{# Notification dropdown — loaded by HTMX on bell click #}
+<div class="pp-notif-list">
+  {% if notifications %}
+    {% for n in notifications %}
+    <a href="{{ n.link or '#' }}" class="pp-notif-item{% if n.is_new %} pp-notif-new{% endif %}">
+      <span class="pp-notif-icon">{{ n.icon }}</span>
+      <div class="pp-notif-content">
+        <div class="pp-notif-title">{{ n.title }}</div>
+        <div class="pp-notif-msg">{{ n.message }}</div>
+        <div class="pp-notif-time">{{ n.time_ago }}</div>
+      </div>
+    </a>
+    {% endfor %}
+    {% if has_more %}
+    <a href="/notifications" class="pp-notif-footer">
+      View all notifications &rarr;
+    </a>
+    {% endif %}
+  {% else %}
+    <div class="pp-notif-empty">No notifications yet</div>
+  {% endif %}
+</div>
