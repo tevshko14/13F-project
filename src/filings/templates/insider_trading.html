@@ -100,11 +100,15 @@
     </footer>
 </article>
 
-{# -- Trade table (lazy-loaded) -- #}
+{# -- Trade table (server-rendered for SEO, JS refreshes on tab switch) -- #}
 <div id="insider-trades-content">
+    {% if trades %}
+    {% include "partials/insider_trades.html" %}
+    {% else %}
     <p aria-busy="true" style="text-align: center; padding: 2em 0;">
         Loading insider trades...
     </p>
+    {% endif %}
 </div>
 
 <script>
@@ -478,7 +482,15 @@
 
     /* Wait for DOMContentLoaded so deferred Chart.js is ready */
     document.addEventListener('DOMContentLoaded', function() {
-        loadTrades('all');
+        /* If server already rendered data (SSR for SEO), seed the cache and render chart */
+        if (typeof __chartData !== 'undefined' && __chartData.length > 0) {
+            cache['all'] = document.getElementById('insider-trades-content').innerHTML;
+            chartDataCache['all'] = __chartData;
+            renderChart(__chartData);
+            if (window.initSortableTables) window.initSortableTables();
+        } else {
+            loadTrades('all');
+        }
     });
 })();
 </script>
