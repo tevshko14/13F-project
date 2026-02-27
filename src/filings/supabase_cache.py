@@ -1611,7 +1611,8 @@ def run_retention_cleanup() -> dict:
     """Run all retention policies -- delete old data to keep DB small.
 
     Policies:
-      1. insider_trades: delete rows with trade_date older than 30 days
+      1. insider_trades: delete rows with trade_date older than 4 years
+         (kept long for forward-return analysis: 90d/180d/365d windows)
       2. sync_logs: delete rows with started_at older than 30 days
       3. youtube_events: delete rows with scheduled_at older than 30 days
       4. api_cache: physically delete expired rows (excluding 13f which
@@ -1627,14 +1628,15 @@ def run_retention_cleanup() -> dict:
     now = datetime.now(timezone.utc)
     results: dict[str, int] = {}
 
-    # 1. Insider trades: delete > 30 days
-    # Use count="exact" + minimal select to avoid returning full deleted rows (saves egress)
-    cutoff_30d = (now - timedelta(days=30)).strftime("%Y-%m-%d")
+    # 1. Insider trades: keep 4 years of history for forward-return analysis.
+    # The insights feature needs deep historical purchase data (90d/180d/365d
+    # forward returns), so we retain trades for 1461 days (~4 years).
+    cutoff_insider = (now - timedelta(days=1461)).strftime("%Y-%m-%d")
     try:
         resp = (
             client.table("insider_trades")
             .delete(count="exact")
-            .lt("trade_date", cutoff_30d)
+            .lt("trade_date", cutoff_insider)
             .execute()
         )
         results["insider_trades_deleted"] = resp.count if resp.count is not None else 0
