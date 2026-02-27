@@ -12,6 +12,7 @@ import os as _os
 _os.environ.setdefault("EDGAR_RATE_LIMIT_PER_SEC", "5")
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json as json_module
 import logging
 import os
@@ -178,6 +179,14 @@ async def lifespan(app: FastAPI):
     funds in the background so users never see outdated data even if the
     cron job fails.
     """
+    # ── Expand the default thread pool ──────────────────────────────────
+    # Python defaults to min(32, cpu+4) ≈ 8 threads.  This app has 50+
+    # asyncio.to_thread call sites plus background tasks that make slow
+    # HTTP calls (SEC EDGAR, yfinance, ApeWisdom).  A larger pool prevents
+    # user requests from queuing behind background work.
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=32))
+
     # ── Try Supabase first (persists across Railway deploys) ──
     # Timeout after 30s so workers don't get killed by gunicorn if Supabase is slow
     try:
