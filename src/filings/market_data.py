@@ -177,7 +177,7 @@ def _ensure_close_df():
     try:
         import yfinance as yf
 
-        df = yf.download(tickers, period="1mo", threads=True, progress=False)
+        df = yf.download(tickers, period="1mo", threads=False, progress=False)
 
         if df.empty:
             logger.warning("yfinance returned empty DataFrame for S&P 500")
@@ -303,7 +303,7 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
         constituents = get_sp500_constituents()
         all_tickers = [c["ticker"] for c in constituents]
 
-        df = yf.download(all_tickers, period="1y", threads=True, progress=False)
+        df = yf.download(all_tickers, period="1y", threads=False, progress=False)
 
         if df.empty:
             return {}
@@ -397,7 +397,7 @@ def get_current_prices_batch(tickers: list[str]) -> dict[str, float]:
 
             # Limit batch to avoid huge downloads
             batch = missing[:80]
-            df = yf.download(batch, period="1d", threads=True, progress=False)
+            df = yf.download(batch, period="1d", threads=False, progress=False)
             if not df.empty:
                 close = df.get("Close")
                 if close is not None:
