@@ -12,15 +12,47 @@
         document.documentElement.setAttribute('data-theme', theme);
     })();
     </script>
-    <title>{% block title %}PaperPanda - Superinvestor 13F Tracker{% endblock %}</title>
-    <meta name="description" content="{% block meta_description %}Track superinvestor 13F filings - see what Buffett, Ackman, and other top investors are buying and selling.{% endblock %}">
-    <meta property="og:title" content="{% block og_title %}PaperPanda - Superinvestor 13F Tracker{% endblock %}">
-    <meta property="og:description" content="Track superinvestor portfolios, insider trading, analyst ratings, and market news - all in one place.">
+    <title>{% block title %}PaperPanda — Superinvestor 13F Portfolio Tracker{% endblock %}</title>
+    <meta name="description" content="{% block meta_description %}Track superinvestor 13F filings — see what Buffett, Ackman, and other top investors are buying and selling.{% endblock %}">
+    {# ── Canonical URL ── #}
+    <link rel="canonical" href="{% block canonical_url %}https://paperpanda.io{{ request.url.path }}{% endblock %}">
+    {# ── Open Graph ── #}
+    <meta property="og:title" content="{% block og_title %}PaperPanda — Superinvestor 13F Portfolio Tracker{% endblock %}">
+    <meta property="og:description" content="{% block og_description %}Track superinvestor portfolios, insider trading, analyst ratings, and market news — all in one place.{% endblock %}">
     <meta property="og:type" content="website">
-    <meta property="og:image" content="/static/logo-nav.png">
+    <meta property="og:image" content="https://paperpanda.io/static/logo-nav.png">
+    <meta property="og:url" content="{% block og_url %}https://paperpanda.io{{ request.url.path }}{% endblock %}">
+    <meta property="og:site_name" content="PaperPanda">
+    {# ── Twitter Card ── #}
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="PaperPanda - Superinvestor 13F Tracker">
-    <meta name="twitter:description" content="Track superinvestor portfolios, insider trading, analyst ratings, and market news - all in one place.">
+    <meta name="twitter:title" content="{% block twitter_title %}PaperPanda — Superinvestor 13F Portfolio Tracker{% endblock %}">
+    <meta name="twitter:description" content="{% block twitter_description %}Track superinvestor portfolios, insider trading, analyst ratings, and market news — all in one place.{% endblock %}">
+    {# ── JSON-LD Structured Data ── #}
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "PaperPanda",
+        "url": "https://paperpanda.io",
+        "description": "Track superinvestor 13F filings, insider trading, analyst ratings, and market news.",
+        "potentialAction": {
+            "@type": "SearchAction",
+            "target": "https://paperpanda.io/stock/{search_term_string}",
+            "query-input": "required name=search_term_string"
+        }
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "PaperPanda",
+        "url": "https://paperpanda.io",
+        "logo": "https://paperpanda.io/static/logo-nav.png",
+        "description": "Free, open-source superinvestor portfolio tracker powered by SEC EDGAR 13F filings."
+    }
+    </script>
+    {% block json_ld_extra %}{% endblock %}
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="stylesheet"

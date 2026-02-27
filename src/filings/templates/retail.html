@@ -1,12 +1,29 @@
 {% extends "base.html" %}
-{% block title %}Retail Sentiment - PaperPanda{% endblock %}
+{% block title %}Retail Sentiment & Reddit Trending Stocks | PaperPanda{% endblock %}
+{% block meta_description %}Monitor retail trader sentiment — Reddit trending tickers, market fear and greed index, and finance YouTuber schedules. See what retail investors are buzzing about.{% endblock %}
+{% block og_title %}Retail Sentiment & Reddit Trending Stocks | PaperPanda{% endblock %}
+{% block og_description %}Monitor retail trader sentiment — Reddit trending tickers, fear and greed index, and finance YouTuber schedules.{% endblock %}
+{% block twitter_title %}Retail Sentiment & Reddit Trending Stocks | PaperPanda{% endblock %}
+{% block twitter_description %}Reddit trending tickers, fear & greed index, and finance YouTuber schedules.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Retail Sentiment"}
+    ]
+}
+</script>
+{% endblock %}
 {% block extra_head_scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
 {% endblock %}
 {% block content %}
 <hgroup>
-    <h1>Retail Traders</h1>
-    <p>Reddit sentiment, trending tickers, and finance YouTuber schedules.</p>
+    <h1>Retail Sentiment & Trending Stocks</h1>
+    <p>Reddit sentiment, trending tickers, market fear &amp; greed index, and finance YouTuber schedules.</p>
 </hgroup>
 
 {# ── Sub-tab CSS (same pattern as grand_portfolio.html) ── #}

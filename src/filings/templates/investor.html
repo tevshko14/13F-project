@@ -1,5 +1,23 @@
 {% extends "base.html" %}
-{% block title %}{{ fund.name }} - PaperPanda{% endblock %}
+{% block title %}{{ investor_name or fund.name }} Portfolio — {{ fund.name }} 13F Holdings | PaperPanda{% endblock %}
+{% block meta_description %}Track {{ investor_name or fund.name }}'s latest 13F portfolio holdings filed with the SEC. See current positions, quarterly changes, and top conviction picks from {{ fund.name }}.{% endblock %}
+{% block og_title %}{{ investor_name or fund.name }} Portfolio — 13F Holdings | PaperPanda{% endblock %}
+{% block og_description %}Track {{ investor_name or fund.name }}'s latest 13F portfolio holdings. See positions, quarterly changes, and conviction picks from {{ fund.name }}.{% endblock %}
+{% block twitter_title %}{{ investor_name or fund.name }} Portfolio — 13F Holdings | PaperPanda{% endblock %}
+{% block twitter_description %}Track {{ investor_name or fund.name }}'s latest 13F portfolio. Current positions, quarterly changes & top picks.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Funds", "item": "https://paperpanda.io/funds"},
+        {"@type": "ListItem", "position": 3, "name": "{{ investor_name or fund.name }}"}
+    ]
+}
+</script>
+{% endblock %}
 {% block content %}
 {% from "partials/ticker_link.html" import ticker_link %}
 <hgroup>
