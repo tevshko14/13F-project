@@ -47,6 +47,7 @@ from filings import (
     vitals,
     company_filings,
     insider_trading,
+    insider_insights,
     supabase_cache,
     auth,
     youtube,
@@ -324,7 +325,7 @@ def _consensus_cache_set(key: str, value: tuple[float, dict | None]) -> None:
 # Security helpers
 # ═══════════════════════════════════════════════════════════════════════
 
-_TICKER_RE = _re.compile(r"^[A-Za-z.]{1,12}$")
+_TICKER_RE = _re.compile(r"^[A-Za-z][A-Za-z0-9.]{0,11}$")
 _CIK_RE = _re.compile(r"^[0-9]{1,10}$")
 _CUSIP_RE = _re.compile(r"^[A-Za-z0-9]{6,9}$")
 _ALLOWED_HOST: str = os.environ.get("ALLOWED_HOST", "")  # e.g. "paperpanda.io"
@@ -2303,6 +2304,93 @@ async def stock_insider_trades_api(request: Request, ticker: str):
     )
 
 
+# ── Insider insights: response cache + yfinance helper ────────────
+_insights_cache: "OrderedDict[str, tuple[float, str]]"
+try:
+    _insights_cache = _OrderedDict()
+except Exception:
+    _insights_cache = {}  # type: ignore[assignment]
+_INSIGHTS_TTL = 900     # 15 min — insights change at most daily
+_INSIGHTS_MAX = 100     # cap entries to bound memory (~0.4 MB at 4 KB/entry)
+
+
+def _insights_cache_set(key: str, html: str) -> None:
+    """LRU-capped cache setter for rendered insights HTML."""
+    _insights_cache[key] = (time_module.time(), html)
+    if hasattr(_insights_cache, "move_to_end"):
+        _insights_cache.move_to_end(key)
+    while len(_insights_cache) > _INSIGHTS_MAX:
+        if hasattr(_insights_cache, "popitem"):
+            _insights_cache.popitem(last=False)  # evict oldest
+        else:
+            oldest = next(iter(_insights_cache))
+            _insights_cache.pop(oldest, None)
+
+
+def _get_current_price_yf(ticker: str) -> float | None:
+    """Fetch current stock price via yfinance (single Ticker object).
+
+    Hard 8-second timeout prevents thread pool starvation when Yahoo
+    Finance is slow or unresponsive.  Returns None on any failure.
+    """
+    import concurrent.futures
+
+    def _fetch():
+        import yfinance as yf
+        info = yf.Ticker(ticker).info
+        p = info.get("currentPrice") or info.get("regularMarketPrice")
+        if p and isinstance(p, (int, float)) and p > 0:
+            return float(p)
+        return None
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_fetch)
+            return future.result(timeout=8)
+    except (concurrent.futures.TimeoutError, Exception):
+        return None
+
+
+@app.get("/api/insider-insights/{ticker}", response_class=HTMLResponse)
+async def insider_insights_api(request: Request, ticker: str):
+    """Return insider purchase insights HTML partial for a stock."""
+    if not _valid_ticker(ticker):
+        return HTMLResponse("")
+
+    key = ticker.upper()
+
+    # ── L1: in-memory HTML cache (15 min TTL, LRU-capped) ──
+    cached = _insights_cache.get(key)
+    if cached and (time_module.time() - cached[0]) < _INSIGHTS_TTL:
+        return HTMLResponse(cached[1])
+
+    purchases = await asyncio.to_thread(
+        supabase_cache.get_insider_purchases, key
+    )
+    if not purchases or len(purchases) < 2:
+        return HTMLResponse("")  # Not enough data for insights
+
+    # Single yfinance call (best-effort, non-blocking, 8s hard timeout)
+    current_price = await asyncio.to_thread(_get_current_price_yf, key)
+
+    insights_data = insider_insights.compute_insider_insights(
+        ticker, purchases, current_price
+    )
+    if not insights_data:
+        return HTMLResponse("")
+
+    response = templates.TemplateResponse(
+        "partials/insider_insights.html",
+        {"request": request, "insights": insights_data},
+    )
+
+    # Cache the rendered HTML (LRU-capped)
+    html_body = response.body.decode("utf-8")
+    _insights_cache_set(key, html_body)
+
+    return response
+
+
 # --- Market Data API (heatmap, most-added, ticker search) ---
 
 
@@ -2841,7 +2929,9 @@ if _has_limiter:
     company_filings_tab = limiter.limit("30/minute")(company_filings_tab)
     insider_trades_api = limiter.limit("20/minute")(insider_trades_api)
     stock_insider_trades_api = limiter.limit("30/minute")(stock_insider_trades_api)
+    insider_insights_api = limiter.limit("30/minute")(insider_insights_api)
     # Expensive aggregate / external-API endpoints
+    ticker_search_index = limiter.limit("20/minute")(ticker_search_index)
     retail_leaderboard_api = limiter.limit("15/minute")(retail_leaderboard_api)
     retail_leaderboard_data = limiter.limit("15/minute")(retail_leaderboard_data)
     retail_calendar_api = limiter.limit("15/minute")(retail_calendar_api)

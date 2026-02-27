@@ -47,6 +47,12 @@ _INSIDER_COLS = (
     "value_fmt,sec_url"
 )
 
+# Lean projection for chart aggregation — only the 6 columns needed
+# by aggregate_top_tickers().  ~40% less network transfer vs _INSIDER_COLS.
+_CHART_COLS = (
+    "ticker,company_name,value_fmt,trade_date,trade_type,insider_name"
+)
+
 _YOUTUBE_EVENT_COLS = (
     "video_id,channel_id,channel_name,title,scheduled_at,"
     "event_type,sentiment,tickers,impact_score,subscriber_count,"
@@ -228,6 +234,19 @@ CREATE INDEX IF NOT EXISTS idx_api_cache_category_synced
 -- YouTube sync dedup: WHERE created_at >= cutoff
 CREATE INDEX IF NOT EXISTS idx_youtube_events_created_at
     ON youtube_events (created_at DESC);
+
+-- ── Insider Insights: forward-return columns on insider_trades ──
+ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS close_on_trade   NUMERIC(12,4);
+ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS close_at_30d     NUMERIC(12,4);
+ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS close_at_90d     NUMERIC(12,4);
+ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS close_at_180d    NUMERIC(12,4);
+ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS close_at_365d    NUMERIC(12,4);
+ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS returns_updated  TIMESTAMPTZ;
+
+-- Partial index: purchases still needing forward-return computation
+CREATE INDEX IF NOT EXISTS idx_insider_purchases_pending
+    ON insider_trades (ticker, trade_date)
+    WHERE trade_type = 'Purchase' AND returns_updated IS NULL;
 """
 
 
@@ -918,7 +937,7 @@ def get_insider_trades_for_chart(
 
         buys = (
             client.table("insider_trades")
-            .select(_INSIDER_COLS)
+            .select(_CHART_COLS)
             .eq("trade_type", "Purchase")
             .gte("trade_date", cutoff)
             .order("trade_date", desc=True)
@@ -928,7 +947,7 @@ def get_insider_trades_for_chart(
 
         sells = (
             client.table("insider_trades")
-            .select(_INSIDER_COLS)
+            .select(_CHART_COLS)
             .in_("trade_type", ["Sale", "Sale+OE"])
             .gte("trade_date", cutoff)
             .order("trade_date", desc=True)
@@ -1001,6 +1020,12 @@ def upsert_insider_trades(rows: list[dict]) -> int:
     them out to avoid re-uploading identical rows.  Only genuinely new
     trades are sent to Supabase, saving egress.
 
+    Deduplicates by sec_url within each batch to avoid Postgres
+    ``ON CONFLICT DO UPDATE cannot affect row a second time`` errors
+    (a single Form 4 filing can contain multiple transactions that
+    share the same sec_url).  When duplicates exist, purchases are
+    preferred over sales/other types.
+
     Uses ``ON CONFLICT (sec_url) DO UPDATE`` for deduplication safety.
     Returns the number of rows upserted, or 0 on failure.
     """
@@ -1016,17 +1041,41 @@ def upsert_insider_trades(rows: list[dict]) -> int:
         logger.info("All %d insider trades already exist — skipping upsert", len(rows))
         return len(rows)  # All accounted for
 
+    # Deduplicate by sec_url within the batch — a single Form 4 filing
+    # can contain multiple transactions (e.g. purchase + sale) sharing
+    # the same URL.  Prefer purchases over other trade types.
+    seen: dict[str, dict] = {}
+    for row in new_rows:
+        url = row.get("sec_url", "")
+        if not url:
+            continue
+        if url not in seen:
+            seen[url] = row
+        else:
+            # Keep the purchase if one of the duplicates is a purchase
+            existing_type = seen[url].get("trade_type", "")
+            new_type = row.get("trade_type", "")
+            if "Purchase" in new_type and "Purchase" not in existing_type:
+                seen[url] = row
+    deduped = list(seen.values())
+
+    if len(deduped) < len(new_rows):
+        logger.info(
+            "Deduplicated %d → %d rows (removed %d duplicate sec_urls)",
+            len(new_rows), len(deduped), len(new_rows) - len(deduped),
+        )
+
     logger.info(
         "Insider trades: %d new out of %d total (skipping %d existing)",
-        len(new_rows),
+        len(deduped),
         len(rows),
-        len(rows) - len(new_rows),
+        len(rows) - len(deduped),
     )
 
     upserted = 0
     CHUNK = 50
-    for i in range(0, len(new_rows), CHUNK):
-        chunk = new_rows[i : i + CHUNK]
+    for i in range(0, len(deduped), CHUNK):
+        chunk = deduped[i : i + CHUNK]
         try:
             client.table("insider_trades").upsert(
                 chunk, on_conflict="sec_url"
@@ -1036,6 +1085,191 @@ def upsert_insider_trades(rows: list[dict]) -> int:
             logger.warning("upsert_insider_trades chunk %d failed: %s", i, exc)
 
     return upserted
+
+
+# ── Insider Insights: forward-return queries ─────────────────────
+
+_INSIGHT_COLS = (
+    "sec_url,trade_date,ticker,insider_name,title,price,value,"
+    "close_on_trade,close_at_30d,close_at_90d,close_at_180d,close_at_365d,"
+    "returns_updated"
+)
+
+
+def get_insider_purchases(ticker: str, limit: int = 500) -> list[dict] | None:
+    """Get open market purchases for a ticker (for insights computation).
+
+    Returns numeric columns needed for analysis, ordered by trade_date DESC.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("insider_trades")
+            .select(_INSIGHT_COLS)
+            .eq("ticker", ticker.upper())
+            .eq("trade_type", "Purchase")
+            .order("trade_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data if resp.data else None
+    except Exception as exc:
+        logger.warning("get_insider_purchases(%s) failed: %s", ticker, exc)
+        return None
+
+
+def get_purchases_pending_returns(limit: int = 2000) -> list[dict] | None:
+    """Get purchases where returns have not yet been computed.
+
+    Returns rows with returns_updated IS NULL, ordered by ticker then trade_date.
+    Used by the insider_returns.py background job.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("insider_trades")
+            .select("sec_url,trade_date,ticker,price")
+            .eq("trade_type", "Purchase")
+            .is_("returns_updated", "null")
+            .order("ticker")
+            .order("trade_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data if resp.data else None
+    except Exception as exc:
+        logger.warning("get_purchases_pending_returns failed: %s", exc)
+        return None
+
+
+def get_purchases_with_open_windows() -> list[dict] | None:
+    """Get purchases where a forward window has closed but price is still NULL.
+
+    For example, a trade from 100 days ago should have close_at_90d filled in,
+    but it may still be NULL if it was processed before the 90-day mark.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        cutoff_90 = (datetime.now(timezone.utc) - timedelta(days=95)).strftime("%Y-%m-%d")
+        cutoff_180 = (datetime.now(timezone.utc) - timedelta(days=185)).strftime("%Y-%m-%d")
+        cutoff_365 = (datetime.now(timezone.utc) - timedelta(days=370)).strftime("%Y-%m-%d")
+
+        # Trades old enough for 90d but missing it
+        rows_90 = (
+            client.table("insider_trades")
+            .select("sec_url,trade_date,ticker")
+            .eq("trade_type", "Purchase")
+            .is_("close_at_90d", "null")
+            .lte("trade_date", cutoff_90)
+            .not_.is_("returns_updated", "null")  # already processed once
+            .limit(500)
+            .execute()
+        ).data or []
+
+        rows_180 = (
+            client.table("insider_trades")
+            .select("sec_url,trade_date,ticker")
+            .eq("trade_type", "Purchase")
+            .is_("close_at_180d", "null")
+            .lte("trade_date", cutoff_180)
+            .not_.is_("returns_updated", "null")
+            .limit(500)
+            .execute()
+        ).data or []
+
+        rows_365 = (
+            client.table("insider_trades")
+            .select("sec_url,trade_date,ticker")
+            .eq("trade_type", "Purchase")
+            .is_("close_at_365d", "null")
+            .lte("trade_date", cutoff_365)
+            .not_.is_("returns_updated", "null")
+            .limit(500)
+            .execute()
+        ).data or []
+
+        # Deduplicate by sec_url
+        seen: set[str] = set()
+        result: list[dict] = []
+        for row in rows_90 + rows_180 + rows_365:
+            if row["sec_url"] not in seen:
+                seen.add(row["sec_url"])
+                result.append(row)
+        return result if result else None
+    except Exception as exc:
+        logger.warning("get_purchases_with_open_windows failed: %s", exc)
+        return None
+
+
+def bulk_update_forward_returns(updates: list[dict]) -> int:
+    """Batch update forward-return columns on insider_trades.
+
+    Each dict in ``updates`` must have ``sec_url`` plus any of:
+    close_on_trade, close_at_30d, close_at_90d, close_at_180d,
+    close_at_365d, returns_updated.
+
+    Uses individual UPDATE (not upsert) to avoid NOT NULL constraint
+    violations on columns like filing_date.
+
+    Returns count of rows updated.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    updated = 0
+    for row in updates:
+        sec_url = row.get("sec_url")
+        if not sec_url:
+            continue
+        # Build update payload without sec_url (it's the filter key)
+        payload = {k: v for k, v in row.items() if k != "sec_url"}
+        if not payload:
+            continue
+        try:
+            client.table("insider_trades").update(payload).eq(
+                "sec_url", sec_url
+            ).execute()
+            updated += 1
+        except Exception as exc:
+            logger.warning(
+                "bulk_update_forward_returns failed for %s: %s", sec_url, exc
+            )
+
+    return updated
+
+
+def get_distinct_insider_tickers() -> list[str]:
+    """Return sorted list of unique tickers in insider_trades.
+
+    Used by the per-ticker backfill to know which tickers to scrape
+    historical data for from OpenInsider.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        # Fetch all unique tickers — Supabase doesn't support DISTINCT,
+        # so we select ticker column and deduplicate in Python.
+        resp = (
+            client.table("insider_trades")
+            .select("ticker")
+            .limit(10000)
+            .execute()
+        )
+        if not resp.data:
+            return []
+        tickers = sorted({row["ticker"] for row in resp.data if row.get("ticker")})
+        return tickers
+    except Exception as exc:
+        logger.warning("get_distinct_insider_tickers failed: %s", exc)
+        return []
 
 
 # ── Sync worker helpers ──────────────────────────────────────────

@@ -869,6 +869,7 @@
 
 {# ── Insider Trading Tab ── #}
 <div id="tab-insider" class="tab-content">
+    <div id="insider-insights-container"></div>
     <div id="insider-content">
         <p aria-busy="true" style="text-align: center; padding: 2em 0;">
             Loading insider trading data...
@@ -1061,11 +1062,25 @@ window.toggleHolders = function(btn) {
             insiderLoaded = true;
             {% if stock_info.ticker %}
             var insiderUrl = '/api/insider-trades/{{ stock_info.ticker }}';
+            var insightsUrl = '/api/insider-insights/{{ stock_info.ticker }}';
             {% else %}
             var insiderUrl = null;
+            var insightsUrl = null;
             {% endif %}
 
             if (insiderUrl) {
+                // Fetch insights in parallel (non-blocking — empty response is fine)
+                if (insightsUrl) {
+                    fetch(insightsUrl)
+                        .then(function(resp) { return resp.ok ? resp.text() : ''; })
+                        .then(function(html) {
+                            if (html && html.trim()) {
+                                document.getElementById('insider-insights-container').innerHTML = html;
+                            }
+                        })
+                        .catch(function() {});  // Silent fail — insights are optional
+                }
+
                 var insiderRetried = false;
                 function fetchInsider() {
                     fetch(insiderUrl)

@@ -1513,7 +1513,7 @@
             toasts = container.querySelectorAll('.pp-toast');
         }
 
-        var duration = opts.duration || 8000;
+        var duration = opts.duration || 5000;
         setTimeout(function() {
             toast.style.animation = 'ppToastOut 0.3s ease-in forwards';
             setTimeout(function() { toast.remove(); }, 300);
