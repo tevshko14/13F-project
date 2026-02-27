@@ -1,6 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Capital Deployed — PaperPanda{% endblock %}
+{% block title %}Capital Deployed by Superinvestors — AUM vs 13F Holdings | PaperPanda{% endblock %}
 {% block meta_description %}See how much capital superinvestors have deployed in equities vs their total AUM. Track deployment ratios and identify who's sitting on cash.{% endblock %}
+{% block og_title %}Capital Deployed by Superinvestors | PaperPanda{% endblock %}
+{% block og_description %}See how much capital superinvestors have deployed in equities vs their total AUM.{% endblock %}
+{% block twitter_title %}Capital Deployed by Superinvestors | PaperPanda{% endblock %}
+{% block twitter_description %}Track superinvestor deployment ratios — AUM vs 13F equity holdings.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Capital Deployed"}
+    ]
+}
+</script>
+{% endblock %}
 {% block content %}
 <hgroup>
     <h1>Capital Deployed</h1>

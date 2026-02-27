@@ -1,12 +1,29 @@
 {% extends "base.html" %}
-{% block title %}Insider Trading Screener - PaperPanda{% endblock %}
+{% block title %}Insider Trading Screener — SEC Form 4 Filings | PaperPanda{% endblock %}
+{% block meta_description %}Track real-time SEC Form 4 insider buys and sells across all public companies. See which executives, directors, and major shareholders are trading their own stock.{% endblock %}
+{% block og_title %}Insider Trading Screener — SEC Form 4 Filings | PaperPanda{% endblock %}
+{% block og_description %}Track real-time SEC Form 4 insider buys and sells. See which executives and directors are trading their own stock.{% endblock %}
+{% block twitter_title %}Insider Trading Screener — SEC Form 4 Filings | PaperPanda{% endblock %}
+{% block twitter_description %}Track real-time SEC Form 4 insider buys and sells across all public companies.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Insider Trading"}
+    ]
+}
+</script>
+{% endblock %}
 {% block extra_head_scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
 {% endblock %}
 {% block content %}
 <hgroup>
-    <h1>Insider Trading</h1>
-    <p>Real-time SEC Form 4 filings -- insider buys and sells across all public companies.</p>
+    <h1>Insider Trading Screener</h1>
+    <p>Real-time SEC Form 4 filings — insider buys and sells across all public companies.</p>
 </hgroup>
 
 {# -- Sub-tabs: Latest / Purchases / Sales -- #}

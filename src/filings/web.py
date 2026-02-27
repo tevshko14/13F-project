@@ -2761,20 +2761,40 @@ async def robots_txt():
 
 @app.get("/sitemap.xml")
 async def sitemap_xml():
+    """Dynamic sitemap: static pages + all superinvestor holdings + stock pages."""
     base_url = "https://paperpanda.io"
+
+    # ── Static pages (no redirects — only real destination URLs) ──
     urls = [
         f"  <url><loc>{base_url}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>",
-        f"  <url><loc>{base_url}/superinvestors</loc><changefreq>daily</changefreq><priority>0.9</priority></url>",
-        f"  <url><loc>{base_url}/activity</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
-        f"  <url><loc>{base_url}/funds</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/funds</loc><changefreq>daily</changefreq><priority>0.9</priority></url>",
         f"  <url><loc>{base_url}/insider-trading</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
-        f"  <url><loc>{base_url}/support</loc><changefreq>monthly</changefreq><priority>0.6</priority></url>",
+        f"  <url><loc>{base_url}/retail</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/deployment</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>",
+        f"  <url><loc>{base_url}/support</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>",
+        f"  <url><loc>{base_url}/notifications</loc><changefreq>daily</changefreq><priority>0.4</priority></url>",
     ]
+
+    # ── Superinvestor fund pages ──
     for si in SUPERINVESTORS:
         urls.append(
             f"  <url><loc>{base_url}/holdings/{si.cik}</loc>"
             f"<changefreq>weekly</changefreq><priority>0.7</priority></url>"
         )
+
+    # ── Stock pages (all unique tickers held by superinvestors) ──
+    cache_data = _fund_cache()
+    seen_tickers: set[str] = set()
+    if cache_data:
+        for cik, fund_data in cache_data.items():
+            for h in fund_data.get("all_holdings", []):
+                ticker = h.get("ticker")
+                if ticker and ticker not in seen_tickers:
+                    seen_tickers.add(ticker)
+                    urls.append(
+                        f"  <url><loc>{base_url}/stock/{ticker}</loc>"
+                        f"<changefreq>weekly</changefreq><priority>0.6</priority></url>"
+                    )
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'

@@ -1,5 +1,23 @@
 {% extends "base.html" %}
-{% block title %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} - Stock Detail - PaperPanda{% endblock %}
+{% block title %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} Superinvestor Holdings & 13F Activity | PaperPanda{% endblock %}
+{% block meta_description %}See which superinvestors hold {{ stock_info.ticker or stock_info.cusip or "this stock" }}{% if stock_info.issuer_name %} ({{ stock_info.issuer_name }}){% endif %}. Track 13F filings, analyst ratings, insider trades, and quarterly activity.{% endblock %}
+{% block og_title %}{{ stock_info.ticker or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} | PaperPanda{% endblock %}
+{% block og_description %}See which superinvestors hold {{ stock_info.ticker or "this stock" }}{% if stock_info.issuer_name %} ({{ stock_info.issuer_name }}){% endif %}. Track 13F filings, analyst ratings, insider trades, and quarterly activity.{% endblock %}
+{% block twitter_title %}{{ stock_info.ticker or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} | PaperPanda{% endblock %}
+{% block twitter_description %}See which superinvestors hold {{ stock_info.ticker or "this stock" }}{% if stock_info.issuer_name %} ({{ stock_info.issuer_name }}){% endif %}. 13F filings, analyst ratings & insider trades.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Stocks", "item": "https://paperpanda.io/funds"},
+        {"@type": "ListItem", "position": 3, "name": "{{ stock_info.ticker or stock_info.cusip or 'Stock' }}"}
+    ]
+}
+</script>
+{% endblock %}
 {% block content %}
 <hgroup>
     <h1 style="display: flex; align-items: center; gap: 0.5em;">

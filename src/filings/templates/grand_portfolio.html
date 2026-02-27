@@ -1,11 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Top Funds - PaperPanda{% endblock %}
-{% block meta_description %}Track 13F holdings of top superinvestors like Warren Buffett, Bill Ackman, and more. See portfolio values, top holdings, and recent changes.{% endblock %}
+{% block title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
+{% block meta_description %}Track 13F holdings of 84 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more. See portfolio values, top holdings, and recent buys and sells.{% endblock %}
+{% block og_title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
+{% block og_description %}Track 13F holdings of 84 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more.{% endblock %}
+{% block twitter_title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
+{% block twitter_description %}Track 13F holdings of 84 superinvestors. See portfolio values, top holdings & recent changes.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Top Funds"}
+    ]
+}
+</script>
+{% endblock %}
 {% block content %}
 {% from "partials/ticker_link.html" import ticker_link %}
 <hgroup>
-    <h1>Top Funds</h1>
-    <p>Aggregated holdings across all tracked superinvestors, powered by SEC EDGAR data.</p>
+    <h1>Top Superinvestor Funds</h1>
+    <p>13F portfolio holdings across 84 tracked superinvestors, powered by SEC EDGAR data.</p>
 </hgroup>
 
 {# ── Subtab Navigation ── #}
