@@ -151,6 +151,10 @@ class InsiderTrade:
 _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; 13f-insider-screener/1.0)"}
 _OI_BASE = "http://openinsider.com"
 
+import re as _re
+
+_SAFE_TICKER_RE = _re.compile(r"^[A-Za-z][A-Za-z0-9.]{0,11}$")
+
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, list[InsiderTrade]]] = {}
 _GLOBAL_TTL = 300  # 5 min for global screener
@@ -470,6 +474,9 @@ def _scrape_openinsider_global(
 
 def _scrape_openinsider_ticker(ticker: str) -> list[InsiderTrade]:
     """Direct scrape of OpenInsider per-ticker page (fallback path)."""
+    if not _SAFE_TICKER_RE.match(ticker):
+        logger.warning("Invalid ticker rejected by scraper: %s", ticker)
+        return []
     try:
         resp = httpx.get(
             f"{_OI_BASE}/{ticker}", headers=_HEADERS, timeout=15, follow_redirects=True
@@ -631,6 +638,10 @@ def _fetch_historical_from_efts(
 
     Falls back to empty list on any error.
     """
+    if not _SAFE_TICKER_RE.match(ticker):
+        logger.warning("Invalid ticker rejected by EFTS query: %s", ticker)
+        return []
+
     import os
     import re
 

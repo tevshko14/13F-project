@@ -1,0 +1,161 @@
+{# Insider Insights cards — rendered above the trade table on stock pages #}
+{% if insights %}
+<article class="insider-insights" style="margin-bottom: 1.5em;">
+    <header style="margin-bottom: 0.75em;">
+        <strong>Insider Purchase Insights</strong>
+        <span class="text-muted text-small" style="margin-left: 0.5em;">
+            Based on {{ insights.total_purchases }} open market purchases
+            ({{ insights.date_range_start }} – {{ insights.date_range_end }})
+        </span>
+    </header>
+
+    <div class="insights-grid">
+        {# ── Card 1: Buy Activity ── #}
+        <div class="insight-card">
+            <div class="insight-label">Buy Activity</div>
+            <div class="insight-value">
+                {{ insights.purchases_12m }}
+                <span class="insight-unit">in last 12mo</span>
+            </div>
+            <div class="insight-detail">
+                {% if insights.frequency_label == "Elevated" %}
+                <span class="badge badge-add" style="font-size: 0.75em;">● Elevated</span>
+                {% elif insights.frequency_label == "Quiet" %}
+                <span class="badge badge-reduce" style="font-size: 0.75em;">● Quiet</span>
+                {% else %}
+                <span class="badge" style="font-size: 0.75em; background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">● Normal</span>
+                {% endif %}
+                <span class="text-muted text-small">vs {{ insights.avg_annual_purchases }}/yr avg</span>
+            </div>
+        </div>
+
+        {# ── Card 2: Insider Buying Zone ── #}
+        <div class="insight-card">
+            <div class="insight-label">Insider Buying Zone</div>
+            <div class="insight-value">
+                ${{ "%.2f"|format(insights.avg_buy_price) }}
+                <span class="insight-unit">avg price</span>
+            </div>
+            <div class="insight-detail text-small">
+                <span class="text-muted">
+                    Range: ${{ "%.2f"|format(insights.min_buy_price) }} – ${{ "%.2f"|format(insights.max_buy_price) }}
+                </span>
+                {% if insights.current_price and insights.vs_avg_buy_pct is not none %}
+                <br>
+                <span>
+                    Now: ${{ "%.2f"|format(insights.current_price) }}
+                    {% if insights.vs_avg_buy_pct >= 0 %}
+                    <span style="color: var(--pp-gain);">(+{{ insights.vs_avg_buy_pct }}% above avg)</span>
+                    {% else %}
+                    <span style="color: var(--pp-loss);">({{ insights.vs_avg_buy_pct }}% below avg)</span>
+                    {% endif %}
+                </span>
+                {% endif %}
+            </div>
+        </div>
+
+        {# ── Card 3: Win Rate ── #}
+        <div class="insight-card">
+            <div class="insight-label">Purchase Win Rate</div>
+            {% if insights.win_rate_pct is not none %}
+            <div class="insight-value">
+                {{ insights.win_rate_pct }}%
+                <span class="insight-unit">profitable</span>
+            </div>
+            <div class="insight-detail text-small">
+                <span style="color: var(--pp-gain);">{{ insights.wins }}W</span>
+                /
+                <span style="color: var(--pp-loss);">{{ insights.losses }}L</span>
+                {% if insights.pending > 0 %}
+                <span class="text-muted">({{ insights.pending }} pending)</span>
+                {% endif %}
+                <br>
+                <span class="text-muted">
+                    Avg return:
+                    {% if insights.avg_return_pct >= 0 %}
+                    <span style="color: var(--pp-gain);">+{{ insights.avg_return_pct }}%</span>
+                    {% else %}
+                    <span style="color: var(--pp-loss);">{{ insights.avg_return_pct }}%</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% else %}
+            <div class="insight-value text-muted">—</div>
+            <div class="insight-detail text-small text-muted">Computing...</div>
+            {% endif %}
+        </div>
+
+        {# ── Card 4: Forward 90-Day Return ── #}
+        <div class="insight-card">
+            <div class="insight-label">After Insider Buys (90d)</div>
+            {% if insights.fwd_90d_median_return is not none %}
+            <div class="insight-value">
+                {% if insights.fwd_90d_median_return >= 0 %}
+                <span style="color: var(--pp-gain);">+{{ insights.fwd_90d_median_return }}%</span>
+                {% else %}
+                <span style="color: var(--pp-loss);">{{ insights.fwd_90d_median_return }}%</span>
+                {% endif %}
+                <span class="insight-unit">median</span>
+            </div>
+            <div class="insight-detail text-small">
+                <span class="text-muted">
+                    {{ insights.fwd_90d_win_rate }}% positive
+                    (n={{ insights.fwd_90d_count }})
+                </span>
+            </div>
+            {% else %}
+            <div class="insight-value text-muted">—</div>
+            <div class="insight-detail text-small text-muted">
+                {% if insights.total_purchases >= 3 %}
+                Computing forward returns...
+                {% else %}
+                Not enough data
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</article>
+
+<style>
+.insights-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1em;
+}
+@media (max-width: 768px) {
+    .insights-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+    .insights-grid { grid-template-columns: 1fr; }
+}
+.insight-card {
+    padding: 1em;
+    border-radius: 8px;
+    background: var(--pp-surface-alt, #f8f9fa);
+    border: 1px solid var(--pp-border, #e5e7eb);
+}
+.insight-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pp-text-muted);
+    margin-bottom: 0.4em;
+}
+.insight-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+    margin-bottom: 0.3em;
+}
+.insight-unit {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--pp-text-muted);
+}
+.insight-detail {
+    line-height: 1.4;
+}
+</style>
+{% endif %}
