@@ -481,16 +481,26 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def generic_exception_handler(request: Request, exc: Exception):
     logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
 
-    # HTMX partial requests get inline error fragments
+    # HTMX partial requests get inline error fragments with one auto-retry.
+    # The retry handles transient errors during the startup cache-warming
+    # window (fund cache, market data, etc. load in the background).
     is_htmx = request.headers.get("HX-Request") == "true"
     if is_htmx or request.url.path.startswith("/api/"):
-        return templates.TemplateResponse(
-            "partials/data_error.html",
-            {
-                "request": request,
-                "error_type": "generic",
-                "message": "Unable to load data right now. Please try again later.",
-            },
+        # Only auto-retry once (check if this is already a retry)
+        retry_count = int(request.headers.get("X-PP-Retry", "0"))
+        retry_div = ""
+        if retry_count < 1:
+            retry_url = request.url.path
+            if request.url.query:
+                retry_url += f"?{request.url.query}"
+            retry_div = (
+                f'<div hx-get="{retry_url}" hx-trigger="load delay:4s" '
+                f'hx-swap="outerHTML" hx-headers=\'{{"X-PP-Retry": "1"}}\'></div>'
+            )
+        return HTMLResponse(
+            '<div class="data-error" style="text-align:center;padding:2em 1em;color:var(--pp-text-muted);">'
+            '<p aria-busy="true" style="font-size:0.92em;">Loading...</p>'
+            '</div>' + retry_div,
             status_code=500,
         )
 
@@ -2484,7 +2494,10 @@ async def heatmap(request: Request, period: str = "1D"):
     )
     if not mkt or "_metadata" not in mkt:
         return HTMLResponse(
-            '<article><p class="text-muted">Market data unavailable.</p></article>'
+            '<article>'
+            '<p class="text-muted" aria-busy="true">Market data loading...</p>'
+            '</article>'
+            f'<div hx-get="/api/heatmap?period={period}" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
         )
 
     ownership_map = _get_ownership_map()
@@ -2511,7 +2524,10 @@ async def most_added(request: Request):
     cache_data = _fund_cache()
     if not cache_data:
         return HTMLResponse(
-            '<article><p class="text-muted">No data available yet.</p></article>'
+            '<article>'
+            '<p class="text-muted" aria-busy="true">Loading fund data...</p>'
+            '</article>'
+            '<div hx-get="/api/most-added" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
         )
 
     entries = await asyncio.to_thread(
