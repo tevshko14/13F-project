@@ -1386,10 +1386,25 @@ async def company_filings_tab(request: Request, ticker: str):
 
 @app.get("/insider-trading", response_class=HTMLResponse)
 async def insider_trading_page(request: Request):
+    # Pre-fetch initial trade data so Googlebot sees real content (not just a loading spinner).
+    # The JS client will still fetch via /api/insider-trades for tab switching & caching.
+    trades: list = []
+    chart_data_json: str = "[]"
+    try:
+        _trades, _chart = await asyncio.gather(
+            asyncio.to_thread(insider_trading.get_latest_insider_trades, ""),
+            asyncio.to_thread(insider_trading.get_insider_chart_data, 10, ""),
+        )
+        trades = _trades or []
+        chart_data_json = json_module.dumps(_chart or [])
+    except Exception:
+        pass  # Graceful fallback — JS will retry via fetch()
     return templates.TemplateResponse(
         "insider_trading.html",
         {
             "request": request,
+            "trades": trades,
+            "chart_data_json": chart_data_json,
         },
     )
 
