@@ -29,8 +29,8 @@ import resource
 import time
 import uuid
 
-from filings import cache, supabase_cache
-from filings.superinvestors import SUPERINVESTORS
+from filings import cache, notifications, supabase_cache
+from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -100,6 +100,10 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
 
         try:
             logger.info("[%d/%d] Fetching CIK %s ...", idx + 1, len(ciks_to_sync), cik)
+
+            # Snapshot old data for change detection (notifications)
+            old_data = supabase_cache.get_cached(cache_key)
+
             data = cache.refresh_single_fund(cik)
 
             if data is not None:
@@ -112,6 +116,21 @@ def sync_all_funds(max_age_hours: int = 24, delay_between: float = 2.0) -> dict:
                     cik,
                     data.get("name", ""),
                 )
+
+                # ── Create 13F change notifications ──
+                try:
+                    si = SUPERINVESTORS_BY_CIK.get(cik)
+                    fund_name = si.display_name if si else data.get("name", cik)
+                    notif_rows = notifications.detect_13f_changes(
+                        cik, fund_name, data, old_data
+                    )
+                    if notif_rows:
+                        n_inserted = supabase_cache.upsert_notifications(notif_rows)
+                        logger.info(
+                            "Created %d notifications for CIK %s", n_inserted, cik
+                        )
+                except Exception as notif_exc:
+                    logger.debug("Notification creation failed for CIK %s: %s", cik, notif_exc)
             else:
                 # refresh_single_fund returned None (rate limit or SEC error)
                 supabase_cache.update_sync_status(cache_key, "failed")
@@ -199,6 +218,12 @@ def main() -> None:
     mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
     logger.info("=== PaperPanda SEC Sync Worker starting (RSS: %.0f MB) ===", mem_mb)
     start = time.time()
+
+    # ── Housekeeping: clean up old notifications (>2 days) ──
+    try:
+        supabase_cache.cleanup_old_notifications(days=2)
+    except Exception:
+        pass  # non-fatal
 
     # ── Pass 1: 13F filing data from SEC EDGAR ──
     result = sync_all_funds()

@@ -59,6 +59,10 @@ _YOUTUBE_CHANNEL_COLS = (
     "avg_views_30d,avg_posts_per_week,thumbnail_url"
 )
 
+_NOTIFICATION_COLS = (
+    "id,type,title,message,icon,toast_type,link,metadata,created_at"
+)
+
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS api_cache (
     cache_key     TEXT PRIMARY KEY,
@@ -195,6 +199,23 @@ CREATE INDEX IF NOT EXISTS idx_supporters_month
     ON supporters (month DESC);
 CREATE INDEX IF NOT EXISTS idx_supporters_event
     ON supporters (stripe_event_id);
+
+-- ── Notifications table (global, server-generated) ──
+CREATE TABLE IF NOT EXISTS notifications (
+    id              TEXT PRIMARY KEY,
+    type            TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    message         TEXT NOT NULL DEFAULT '',
+    icon            TEXT NOT NULL DEFAULT '🔔',
+    toast_type      TEXT NOT NULL DEFAULT 'alert',
+    link            TEXT NOT NULL DEFAULT '',
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_created
+    ON notifications (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_type_created
+    ON notifications (type, created_at DESC);
 
 -- Backfill: add duration and content_type columns for video metadata
 ALTER TABLE youtube_events ADD COLUMN IF NOT EXISTS duration TEXT NOT NULL DEFAULT '';
@@ -1554,3 +1575,128 @@ def get_funding_history(num_months: int = 6) -> list[dict]:
         history = [{"month": _abbr[int(m.split("-")[1])], "raised": 0} for m in months]
 
     return history
+
+
+# ── Notifications ────────────────────────────────────────────────
+
+
+def upsert_notifications(rows: list[dict]) -> int:
+    """Batch upsert notification rows, skipping existing IDs.
+
+    Uses deterministic ``id`` for deduplication — the database PRIMARY KEY
+    constraint handles conflicts (``ON CONFLICT DO NOTHING`` via
+    ``ignore_duplicates=True``).  No pre-fetch needed.
+
+    Returns the number of rows sent, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None or not rows:
+        return 0
+
+    inserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("notifications").upsert(
+                chunk, on_conflict="id", ignore_duplicates=True
+            ).execute()
+            inserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_notifications chunk %d failed: %s", i, exc)
+
+    if inserted:
+        logger.info("Upserted %d notifications (dupes skipped by DB)", inserted)
+    return inserted
+
+
+def get_recent_notifications(
+    limit: int = 20,
+    types: list[str] | None = None,
+    offset: int = 0,
+) -> list[dict]:
+    """Fetch the most recent notifications, newest first.
+
+    *types* — optional list of notification type strings to include
+    (e.g. ``["13f_change", "youtube"]``).  ``None`` means all types.
+    *offset* — number of rows to skip (for pagination).
+
+    Returns a list of notification dicts, or [] on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+
+    try:
+        q = (
+            client.table("notifications")
+            .select(_NOTIFICATION_COLS)
+        )
+        if types:
+            q = q.in_("type", types)
+        q = q.order("created_at", desc=True)
+        if offset > 0:
+            q = q.range(offset, offset + limit - 1)
+        else:
+            q = q.limit(limit)
+        resp = q.execute()
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_recent_notifications failed: %s", exc)
+        return []
+
+
+def get_bell_state(since_iso: str) -> tuple[int, dict | None]:
+    """Return (count, latest_notification) for notifications after *since_iso*.
+
+    Performs a single database query that returns both the count (via
+    ``count="exact"``) and the most recent notification row.  This
+    replaces the old ``get_notification_count_since`` + ``get_latest_notification``
+    pair, halving the number of round-trips for the bell poll.
+    """
+    client = _get_client()
+    if client is None:
+        return 0, None
+
+    try:
+        resp = (
+            client.table("notifications")
+            .select(_NOTIFICATION_COLS, count="exact")
+            .gt("created_at", since_iso)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        count = resp.count or 0
+        latest = resp.data[0] if resp.data else None
+        return count, latest
+    except Exception as exc:
+        logger.warning("get_bell_state failed: %s", exc)
+        return 0, None
+
+
+def cleanup_old_notifications(days: int = 2) -> int:
+    """Delete notifications older than *days* days.
+
+    Called at the start of each sync cycle to keep the table small.
+    Returns the number of rows deleted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        resp = (
+            client.table("notifications")
+            .delete(count="exact")
+            .lt("created_at", cutoff)
+            .execute()
+        )
+        deleted = resp.count or 0
+        if deleted:
+            logger.info("Cleaned up %d old notifications (>%dd)", deleted, days)
+        return deleted
+    except Exception as exc:
+        logger.warning("cleanup_old_notifications failed: %s", exc)
+        return 0

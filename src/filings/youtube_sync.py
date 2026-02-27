@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-from filings import supabase_cache
+from filings import notifications, supabase_cache
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -675,6 +675,21 @@ def sync_youtube_events() -> dict:
         supabase_cache.upsert_youtube_events(combined_rows) if combined_rows else 0
     )
     total_videos_found += len(all_upload_rows)
+
+    # ── Create notifications for high-impact new events ──
+    try:
+        notif_rows: list[dict] = []
+        for row in combined_rows:
+            notif = notifications.create_youtube_notification(row)
+            if notif is not None:
+                notif_rows.append(notif)
+        if notif_rows:
+            # upsert_notifications handles dedup via deterministic IDs
+            n_inserted = supabase_cache.upsert_notifications(notif_rows)
+            if n_inserted:
+                logger.info("Created %d YouTube notifications", n_inserted)
+    except Exception as notif_exc:
+        logger.debug("YouTube notification creation failed: %s", notif_exc)
 
     errors: list[str] = []
     if total_videos_found > 0 and upserted == 0:

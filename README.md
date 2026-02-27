@@ -11,7 +11,7 @@ A web dashboard for tracking SEC 13F institutional holdings filings from 84 supe
 - **Support Widget** - Panda Fund progress bar with Stripe Pricing Table embed for direct monthly subscriptions
 
 ### Navigation
-Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda**
+Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda** | **🔔 Notification Bell**
 
 ### Retail Page (`/retail`)
 - **Sentiment Tab** - CNN Fear & Greed gauge, summary cards (Most Mentioned, Biggest Rank Mover, Top 5 Trending)
@@ -51,7 +51,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 
 ### Cross-Site Features
 - **Watchlist** - Star tickers from any stock page, persistent sidebar on all pages
-- **Notifications** - SSE-powered real-time alerts when new filings match your watchlist
+- **Notification Bell** - Red dot indicator in the navbar with dropdown preview (latest 8) and full history page (`/notifications`). Three notification sources: 13F filing changes (new buys/sells from superinvestors), YouTube uploads from tracked finance channels, and Reddit ticker velocity spikes. Toast popups for new alerts (max 2 visible). Client-side dismiss state via `localStorage`, 120-second HTMX polling with 15-second server-side cache. Global notifications stored in Supabase with 48-hour retention.
 - **Sortable Tables** - Click any column header to sort across all pages
 - **Background Refresh** - Self-healing, request-triggered refresh for stale 13F data with per-fund TTL
 - **Graceful Error Handling** - HTMX-aware inline error partials with Panda Fund CTA on rate limits
@@ -149,7 +149,9 @@ src/filings/
 ├── insider_sync.py     # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
 ├── models.py           # Dataclasses (data contracts)
 ├── watchlist.py        # Watchlist persistence
-├── notifications.py    # Filing notification engine + filing season detection
+├── notifications.py    # Notification creators (13F, YouTube, Reddit) + filing season detection
+├── sync_worker.py      # Cron worker: refresh 13F data + create notifications
+├── youtube_sync.py     # Cron worker: sync YouTube events + create notifications
 ├── company_filings.py  # SEC filing links for stock pages
 ├── auth.py             # Authentication (sign-in, sessions)
 ├── superinvestors.py   # 84 hardcoded superinvestors
@@ -245,6 +247,7 @@ On every deploy, the app runs a background cleanup to stay within the Supabase f
 | `insider_trades` | 6 months |
 | `youtube_events` | 30 days |
 | `sync_logs` | 30 days |
+| `notifications` | 48 hours |
 | `api_cache` | Expired entries only (by `expires_at`) |
 
 ## License

@@ -548,6 +548,136 @@
             color: var(--pico-primary, #1a73e8);
         }
 
+        /* ── Notification bell ── */
+        .pp-notif-wrap {
+            position: relative;
+        }
+        .pp-bell-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.4em;
+            color: inherit;
+            position: relative;
+            display: flex;
+            align-items: center;
+            transition: color 0.2s;
+        }
+        .pp-bell-btn:hover {
+            color: var(--pico-primary, #1a73e8);
+        }
+        .pp-bell-svg {
+            display: block;
+        }
+        .pp-bell-dot {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 8px;
+            height: 8px;
+            background: #ef4444;
+            border-radius: 50%;
+            pointer-events: none;
+        }
+
+        /* ── Notification dropdown ── */
+        .pp-notif-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            width: 340px;
+            max-height: 420px;
+            overflow-y: auto;
+            background: var(--pico-card-background-color, #fff);
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: 10px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+            z-index: 1000;
+        }
+        .pp-notif-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.7em 1em;
+            border-bottom: 1px solid var(--pico-muted-border-color);
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        .pp-notif-header a {
+            font-weight: 400;
+            font-size: 0.9em;
+            color: var(--pico-primary);
+        }
+        .pp-notif-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.6em;
+            padding: 0.6em 1em;
+            border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+            text-decoration: none;
+            color: inherit;
+            font-size: 0.82em;
+            transition: background 0.15s;
+        }
+        .pp-notif-item:hover {
+            background: var(--pico-secondary-background, #f5f5f5);
+        }
+        .pp-notif-item:last-child {
+            border-bottom: none;
+        }
+        .pp-notif-new {
+            background: rgba(59, 130, 246, 0.06);
+        }
+        .pp-notif-icon {
+            font-size: 1.25em;
+            flex-shrink: 0;
+        }
+        .pp-notif-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .pp-notif-title {
+            font-weight: 600;
+            font-size: 0.92em;
+            margin-bottom: 0.1em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pp-notif-msg {
+            color: var(--pico-muted-color);
+            font-size: 0.85em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .pp-notif-time {
+            color: var(--pico-muted-color);
+            font-size: 0.75em;
+            opacity: 0.7;
+            margin-top: 0.15em;
+        }
+        .pp-notif-empty {
+            text-align: center;
+            padding: 2em 1em;
+            color: var(--pico-muted-color);
+            font-size: 0.85em;
+        }
+        .pp-notif-footer {
+            display: block;
+            text-align: center;
+            padding: 0.7em 1em;
+            font-size: 0.8em;
+            font-weight: 600;
+            color: var(--pico-primary);
+            text-decoration: none;
+            border-top: 1px solid var(--pico-muted-border-color);
+            transition: background 0.15s;
+        }
+        .pp-notif-footer:hover {
+            background: var(--pico-card-background-color);
+        }
+
         /* Sortable table headers */
         th[data-sort] { cursor: pointer; user-select: none; }
         th[data-sort]:hover { background: var(--pp-surface-hover); }
@@ -769,6 +899,27 @@
                             <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                         </span>
                     </button>
+                </li>
+                {# ── Notification Bell ── #}
+                <li class="nav-notif-li">
+                    <div class="pp-notif-wrap">
+                        <div id="pp-notif-bell"
+                             hx-get="/api/notifications/bell"
+                             hx-trigger="load, every 120s"
+                             hx-swap="innerHTML">
+                        </div>
+                        <div id="pp-notif-dropdown" class="pp-notif-dropdown" style="display:none;">
+                            <div class="pp-notif-header">
+                                <span>Notifications</span>
+                                <a href="/notifications">View All</a>
+                            </div>
+                            <div id="pp-notif-dropdown-content"
+                                 hx-trigger="none"
+                                 hx-get="/api/notifications/recent"
+                                 hx-swap="innerHTML">
+                            </div>
+                        </div>
+                    </div>
                 </li>
                 <li>
                     <a href="/support" class="nav-support-btn" role="button">Support the Panda</a>
@@ -1288,15 +1439,32 @@
         var toast = document.createElement('div');
         toast.className = 'pp-toast';
         toast.style.borderLeft = '4px solid ' + borderColor;
-        toast.innerHTML =
-            '<span class="pp-toast-icon">' + (opts.icon || '&#x1F514;') + '</span>' +
-            '<div class="pp-toast-body">' +
-                '<div class="pp-toast-title">' + (opts.title || '') + '</div>' +
-                '<div class="pp-toast-msg">' + (opts.message || '') + '</div>' +
-            '</div>' +
-            '<button class="pp-toast-close" onclick="event.stopPropagation();this.parentElement.remove()">&times;</button>';
 
-        if (opts.link) {
+        var icon = document.createElement('span');
+        icon.className = 'pp-toast-icon';
+        icon.textContent = opts.icon || '\uD83D\uDD14';
+        toast.appendChild(icon);
+
+        var body = document.createElement('div');
+        body.className = 'pp-toast-body';
+        var titleEl = document.createElement('div');
+        titleEl.className = 'pp-toast-title';
+        titleEl.textContent = opts.title || '';
+        body.appendChild(titleEl);
+        var msgEl = document.createElement('div');
+        msgEl.className = 'pp-toast-msg';
+        msgEl.textContent = opts.message || '';
+        body.appendChild(msgEl);
+        toast.appendChild(body);
+
+        var closeBtn = document.createElement('button');
+        closeBtn.className = 'pp-toast-close';
+        closeBtn.textContent = '\u00d7';
+        closeBtn.addEventListener('click', function(e) { e.stopPropagation(); toast.remove(); });
+        toast.appendChild(closeBtn);
+
+        if (opts.link && /^\/[^\/]/.test(opts.link)) {
+            toast.style.cursor = 'pointer';
             toast.addEventListener('click', function(e) {
                 if (!e.target.classList.contains('pp-toast-close')) {
                     window.location.href = opts.link;
@@ -1306,12 +1474,90 @@
 
         container.appendChild(toast);
 
+        // Cap visible toasts at 2 — remove oldest first
+        var toasts = container.querySelectorAll('.pp-toast');
+        while (toasts.length > 2) {
+            toasts[0].remove();
+            toasts = container.querySelectorAll('.pp-toast');
+        }
+
         var duration = opts.duration || 8000;
         setTimeout(function() {
             toast.style.animation = 'ppToastOut 0.3s ease-in forwards';
             setTimeout(function() { toast.remove(); }, 300);
         }, duration);
     };
+    </script>
+
+    {# ── Notification Bell Logic ── #}
+    <script>
+    (function() {
+        // Read last-seen timestamp from localStorage (validated)
+        var lastSeen = localStorage.getItem('pp-notifications-last-seen');
+        var isFirstVisit = !lastSeen;
+        var isoRe = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+        if (!lastSeen || !isoRe.test(lastSeen) || lastSeen.length > 40) {
+            lastSeen = '2000-01-01T00:00:00Z';
+        }
+
+        // Set the since param on the bell HTMX element
+        var bell = document.getElementById('pp-notif-bell');
+        if (bell) {
+            var bellUrl = '/api/notifications/bell?since=' + encodeURIComponent(lastSeen);
+            if (isFirstVisit) bellUrl += '&first_visit=1';
+            bell.setAttribute('hx-get', bellUrl);
+            // Re-process so HTMX picks up the updated attribute
+            if (window.htmx) htmx.process(bell);
+        }
+
+        // Toggle dropdown on bell click
+        window.ppToggleNotifDropdown = function() {
+            var dropdown = document.getElementById('pp-notif-dropdown');
+            if (!dropdown) return;
+
+            var isVisible = dropdown.style.display !== 'none';
+            if (isVisible) {
+                dropdown.style.display = 'none';
+                return;
+            }
+
+            // Show dropdown
+            dropdown.style.display = 'block';
+
+            // Update last-seen to NOW
+            var now = new Date().toISOString();
+            localStorage.setItem('pp-notifications-last-seen', now);
+
+            // Load dropdown content via HTMX
+            var content = document.getElementById('pp-notif-dropdown-content');
+            if (content && window.htmx) {
+                var since = lastSeen;  // Use the PREVIOUS last-seen for "is_new" marking
+                htmx.ajax('GET', '/api/notifications/recent?since=' + encodeURIComponent(since), {target: '#pp-notif-dropdown-content', swap: 'innerHTML'});
+            }
+
+            // Update the bell's since param for next poll (will clear the badge)
+            lastSeen = now;
+            if (bell) {
+                bell.setAttribute('hx-get', '/api/notifications/bell?since=' + encodeURIComponent(now));
+            }
+        };
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            var wrap = document.querySelector('.pp-notif-wrap');
+            var dropdown = document.getElementById('pp-notif-dropdown');
+            if (wrap && dropdown && !wrap.contains(e.target)) {
+                dropdown.style.display = 'none';
+            }
+        });
+
+        // Listen for HX-Trigger toast events from the bell poll
+        document.body.addEventListener('ppNewNotification', function(e) {
+            if (e.detail && window.ppToast) {
+                window.ppToast(e.detail);
+            }
+        });
+    })();
     </script>
 
     {# ── Theme Toggle Logic ── #}
