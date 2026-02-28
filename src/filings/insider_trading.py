@@ -517,20 +517,63 @@ def _scrape_openinsider_global(
         return []
 
 
-def _scrape_openinsider_ticker(ticker: str) -> list[InsiderTrade]:
-    """Direct scrape of OpenInsider per-ticker page (fallback path)."""
+def _scrape_openinsider_ticker(ticker: str, max_pages: int = 3) -> list[InsiderTrade]:
+    """Scrape OpenInsider screener for a specific ticker (all-time history).
+
+    Uses the screener endpoint with ``fd=0`` (all filing dates) and
+    ``td=0`` (all trade dates) to fetch the full history, not just the
+    ~40 most recent trades shown on the default per-ticker page.
+    Paginates up to *max_pages* (100 trades each) for a max of 300 trades.
+    """
     if not _SAFE_TICKER_RE.match(ticker):
         logger.warning("Invalid ticker rejected by scraper: %s", ticker)
         return []
-    try:
-        resp = httpx.get(
-            f"{_OI_BASE}/{ticker}", headers=_HEADERS, timeout=15, follow_redirects=True
-        )
-        resp.raise_for_status()
-        return _parse_table(resp.text, has_company_col=False)
-    except Exception:
-        logger.exception("Fallback scrape of OpenInsider for %s failed", ticker)
-        return []
+
+    all_trades: list[InsiderTrade] = []
+    seen_urls: set[str] = set()
+
+    for page in range(1, max_pages + 1):
+        try:
+            resp = httpx.get(
+                f"{_OI_BASE}/screener",
+                params={
+                    "s": ticker,
+                    "o": "",
+                    "pl": "",
+                    "ph": "",
+                    "st": "0",
+                    "tc": "1",
+                    "fd": "0",   # all filing dates
+                    "td": "0",   # all trade dates
+                    "t": "",     # all trade types
+                    "vf": "",
+                    "o2d": "",
+                    "sortcol": "0",
+                    "cnt": "100",
+                    "page": str(page),
+                },
+                headers=_HEADERS,
+                timeout=20,
+                follow_redirects=True,
+            )
+            resp.raise_for_status()
+            trades = _parse_table(resp.text, has_company_col=False)
+            if not trades:
+                break  # no more pages
+            for t in trades:
+                if t.sec_url and t.sec_url not in seen_urls:
+                    seen_urls.add(t.sec_url)
+                    all_trades.append(t)
+            if len(trades) < 100:
+                break  # last page
+        except Exception:
+            logger.exception("OpenInsider screener scrape for %s page %d failed", ticker, page)
+            break
+        if page < max_pages:
+            time.sleep(2)  # rate-limit between pages
+
+    logger.info("Scraped %d trades for %s from OpenInsider screener (%d pages)", len(all_trades), ticker, page)
+    return all_trades
 
 
 def _scrape_and_backfill_ticker(ticker: str) -> list[InsiderTrade]:
