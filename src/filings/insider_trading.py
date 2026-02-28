@@ -887,26 +887,35 @@ def _format_compact_value(val: float) -> str:
 def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
     """Structure trades for the redesigned per-ticker display.
 
-    Returns a dict with three keys:
+    Returns a dict with four keys:
 
     - ``insiders``: list of dicts sorted by total value (descending), each with
       ``name``, ``title``, ``buys``, ``sells``, ``total_buy_value``,
       ``total_sell_value``, ``buy_value_fmt``, ``sell_value_fmt``,
-      ``last_trade_date``.
+      ``last_trade_date``, ``quarterly_breakdown`` (list of per-quarter dicts).
     - ``quarters``: list of dicts sorted newest-first, each with ``label``,
       ``key``, ``trades`` (list of InsiderTrade), ``buy_count``, ``sell_count``,
       ``total_value_fmt``.
     - ``chart``: dict with ``labels`` (quarter labels), ``buy_values`` (list of
       floats), ``sell_values`` (list of floats) — chronological order for
       Chart.js.
+    - ``per_insider_chart``: dict mapping insider name (and ``'__all__'``) to
+      chart dicts, for the per-insider dropdown filter.
     """
+    empty_chart: dict = {"labels": [], "buy_values": [], "sell_values": []}
     if not trades:
-        return {"insiders": [], "quarters": [], "chart": {"labels": [], "buy_values": [], "sell_values": []}}
+        return {"insiders": [], "quarters": [], "chart": empty_chart, "per_insider_chart": {"__all__": empty_chart}}
 
-    # ── Group by insider ──
+    # ── Group by insider (+ per-insider-per-quarter tracking) ──
     insider_map: dict[str, dict] = {}
+    # iqdata[name][quarter_key] = {"buys": 0, "sells": 0, "buy_val": 0, "sell_val": 0,
+    #                               "qty_sold": 0, "owned_last": 0}
+    iqdata: dict[str, dict[str, dict]] = {}
+
     for t in trades:
         name = t.insider_name or "Unknown"
+        qk = _quarter_key(t.trade_date)
+
         if name not in insider_map:
             insider_map[name] = {
                 "name": name,
@@ -933,6 +942,30 @@ def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
         if t.trade_date > rec["last_trade_date"]:
             rec["last_trade_date"] = t.trade_date
 
+        # Track per-insider per-quarter data for tooltip breakdown
+        if name not in iqdata:
+            iqdata[name] = {}
+        if qk not in iqdata[name]:
+            iqdata[name][qk] = {
+                "buys": 0, "sells": 0,
+                "buy_val": 0.0, "sell_val": 0.0,
+                "qty_sold": 0, "owned_last": 0,
+            }
+        iq = iqdata[name][qk]
+        if is_buy:
+            iq["buys"] += 1
+            iq["buy_val"] += val
+        elif is_sell:
+            iq["sells"] += 1
+            iq["sell_val"] += val
+            qty_parsed = _parse_qty(t.qty)
+            if qty_parsed is not None:
+                iq["qty_sold"] += abs(qty_parsed)
+        # Track owned-after from the most recent trade in this quarter
+        owned_parsed = _parse_owned(t.owned)
+        if owned_parsed is not None and owned_parsed > 0:
+            iq["owned_last"] = owned_parsed
+
     insiders = sorted(
         insider_map.values(),
         key=lambda r: r["total_buy_value"] + r["total_sell_value"],
@@ -941,6 +974,28 @@ def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
     for ins in insiders:
         ins["buy_value_fmt"] = _format_compact_value(ins["total_buy_value"])
         ins["sell_value_fmt"] = _format_compact_value(ins["total_sell_value"])
+
+        # Build quarterly breakdown for hover tooltip
+        name = ins["name"]
+        breakdown = []
+        if name in iqdata:
+            for qk in sorted(iqdata[name].keys(), reverse=True):
+                iq = iqdata[name][qk]
+                # Position % = qty_sold / (owned_after + qty_sold) * 100
+                pct_sold = ""
+                if iq["qty_sold"] > 0 and iq["owned_last"] > 0:
+                    pre_trade = iq["owned_last"] + iq["qty_sold"]
+                    pct = round(iq["qty_sold"] / pre_trade * 100, 1)
+                    pct_sold = f"{pct}%"
+                breakdown.append({
+                    "label": _quarter_label(qk),
+                    "buys": iq["buys"],
+                    "sells": iq["sells"],
+                    "buy_value_fmt": _format_compact_value(iq["buy_val"]),
+                    "sell_value_fmt": _format_compact_value(iq["sell_val"]),
+                    "pct_sold": pct_sold,
+                })
+        ins["quarterly_breakdown"] = breakdown
 
     # ── Group by quarter ──
     quarter_map: dict[str, list[InsiderTrade]] = {}
@@ -984,4 +1039,23 @@ def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
         "sell_values": chart_sell_values,
     }
 
-    return {"insiders": insiders, "quarters": quarters, "chart": chart}
+    # ── Per-insider chart data (for dropdown filter) ──
+    per_insider_chart: dict[str, dict] = {"__all__": chart}
+    for ins in insiders:
+        name = ins["name"]
+        ibv = []
+        isv = []
+        for qk in chart_keys:
+            if name in iqdata and qk in iqdata[name]:
+                ibv.append(round(iqdata[name][qk]["buy_val"], 2))
+                isv.append(round(iqdata[name][qk]["sell_val"], 2))
+            else:
+                ibv.append(0)
+                isv.append(0)
+        per_insider_chart[name] = {
+            "labels": chart_labels,
+            "buy_values": ibv,
+            "sell_values": isv,
+        }
+
+    return {"insiders": insiders, "quarters": quarters, "chart": chart, "per_insider_chart": per_insider_chart}

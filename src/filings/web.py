@@ -2304,6 +2304,7 @@ async def stock_insider_trades_api(request: Request, ticker: str):
             "insiders": display["insiders"],
             "quarters": display["quarters"],
             "chart_json": json_module.dumps(display["chart"]),
+            "per_insider_chart_json": json_module.dumps(display["per_insider_chart"]),
         },
     )
 

@@ -26,6 +26,54 @@
                 {% endif %}
             </div>
             <div class="insider-card-date text-muted text-small">Last: {{ ins.last_trade_date }}</div>
+
+            {# ── Hover tooltip: quarterly breakdown ── #}
+            {% if ins.quarterly_breakdown %}
+            <div class="insider-tooltip">
+                <div class="insider-tooltip-title">{{ ins.name }} — Quarterly Breakdown</div>
+                <table class="insider-tooltip-table">
+                    <thead>
+                        <tr>
+                            <th>Quarter</th>
+                            <th class="text-right">Buys</th>
+                            <th class="text-right">Sells</th>
+                            <th class="text-right">Value</th>
+                            <th class="text-right">% Pos.</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for qb in ins.quarterly_breakdown %}
+                        <tr>
+                            <td style="white-space: nowrap;">{{ qb.label }}</td>
+                            <td class="text-right">
+                                {% if qb.buys > 0 %}
+                                <span style="color: var(--pp-gain, #16a34a);">{{ qb.buys }}</span>
+                                {% else %}<span class="text-muted">-</span>{% endif %}
+                            </td>
+                            <td class="text-right">
+                                {% if qb.sells > 0 %}
+                                <span style="color: var(--pp-loss, #dc2626);">{{ qb.sells }}</span>
+                                {% else %}<span class="text-muted">-</span>{% endif %}
+                            </td>
+                            <td class="text-right" style="white-space: nowrap;">
+                                {% if qb.sells > 0 %}
+                                <span style="color: var(--pp-loss, #dc2626);">{{ qb.sell_value_fmt }}</span>
+                                {% endif %}
+                                {% if qb.buys > 0 %}
+                                <span style="color: var(--pp-gain, #16a34a);">{{ qb.buy_value_fmt }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-right">
+                                {% if qb.pct_sold %}
+                                <span style="color: var(--pp-loss, #dc2626);">{{ qb.pct_sold }}</span>
+                                {% else %}<span class="text-muted">-</span>{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
         </div>
         {% endfor %}
     </div>
@@ -38,8 +86,8 @@
     </div>
     {% endif %}
 
-    {# ── Buy/Sell filter ── #}
-    <div style="display: flex; gap: 0.5em; flex-wrap: wrap; margin-bottom: 1em;">
+    {# ── Filters: Buy/Sell buttons + Insider dropdown ── #}
+    <div style="display: flex; gap: 0.5em; flex-wrap: wrap; margin-bottom: 1em; align-items: center;">
         <button class="insider-filter active" onclick="filterInsiderTrades('all', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
             All
         </button>
@@ -49,6 +97,15 @@
         <button class="insider-filter" onclick="filterInsiderTrades('sell', this)" style="font-size: 0.8em; padding: 0.25em 0.7em; margin: 0;">
             Sells
         </button>
+
+        {% if insiders and insiders | length > 1 %}
+        <select id="insider-person-filter" onchange="filterByInsider(this.value)" class="insider-person-select">
+            <option value="__all__">All Insiders</option>
+            {% for ins in insiders %}
+            <option value="{{ ins.name }}">{{ ins.name }}</option>
+            {% endfor %}
+        </select>
+        {% endif %}
     </div>
 
     {# ── Section C: Quarterly-Grouped Trade Tables ── #}
@@ -85,7 +142,7 @@
             </thead>
             <tbody>
                 {% for t in q.trades %}
-                <tr data-insider-type="{% if 'Purchase' in t.trade_type %}buy{% elif 'Sale' in t.trade_type %}sell{% else %}other{% endif %}">
+                <tr data-insider-type="{% if 'Purchase' in t.trade_type %}buy{% elif 'Sale' in t.trade_type %}sell{% else %}other{% endif %}" data-insider-name="{{ t.insider_name }}">
                     <td><strong>{{ t.insider_name }}</strong></td>
                     <td class="text-small text-muted">{{ t.title }}</td>
                     <td style="white-space: nowrap;">{{ t.trade_date }}</td>
@@ -142,6 +199,7 @@
         border-radius: 8px;
         background: var(--pp-surface-alt, #f8f9fa);
         border: 1px solid var(--pp-border, #e5e7eb);
+        position: relative;
     }
     .insider-card-name {
         font-weight: 700;
@@ -175,6 +233,51 @@
     .insider-card-date {
         margin-top: 0.4em;
         font-size: 0.7rem;
+    }
+
+    /* Hover tooltip — positioned fixed via JS to avoid overflow clipping */
+    .insider-tooltip {
+        display: none;
+        position: fixed;
+        z-index: 100;
+        min-width: 300px;
+        max-width: 380px;
+        padding: 0.75em;
+        border-radius: 8px;
+        background: var(--pp-surface, #1a1a2e);
+        border: 1px solid var(--pp-border, #e5e7eb);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+        pointer-events: none;
+    }
+    .insider-tooltip.visible {
+        display: block;
+    }
+    .insider-tooltip-title {
+        font-weight: 700;
+        font-size: 0.8rem;
+        margin-bottom: 0.5em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .insider-tooltip-table {
+        width: 100%;
+        font-size: 0.75rem;
+        border-collapse: collapse;
+        margin: 0;
+    }
+    .insider-tooltip-table th {
+        font-size: 0.65rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--pp-text-muted);
+        padding: 0.2em 0.4em;
+        border-bottom: 1px solid var(--pp-border, #e5e7eb);
+    }
+    .insider-tooltip-table td {
+        padding: 0.25em 0.4em;
+        border-bottom: 1px solid var(--pp-overlay-5, rgba(0,0,0,0.05));
     }
 
     /* Quarter sections */
@@ -220,13 +323,33 @@
         color: #fff;
         border-color: #1976d2;
     }
+
+    /* Insider dropdown */
+    .insider-person-select {
+        font-size: 0.8em;
+        padding: 0.25em 0.5em;
+        margin: 0;
+        margin-left: 0.5em;
+        border: 1px solid var(--pp-overlay-10);
+        border-radius: 4px;
+        background: var(--pp-surface-alt, #f8f9fa);
+        color: var(--pp-text-secondary, #333);
+        font-weight: 600;
+        cursor: pointer;
+        max-width: 200px;
+    }
+    .insider-person-select:focus {
+        outline: 2px solid #1976d2;
+        outline-offset: 1px;
+    }
 </style>
 
-{# ── Chart + Filter JS ── #}
+{# ── Chart + Dual-Filter JS ── #}
 <script>
 (function() {
     // ── Chart.js timeline ──
     var chartData = {{ chart_json | safe }};
+    var perInsiderChart = {{ per_insider_chart_json | safe }};
     var canvas = document.getElementById('insider-timeline-chart');
     var insiderChart = null;
 
@@ -239,7 +362,7 @@
                 datasets: [
                     {
                         label: 'Purchases',
-                        data: chartData.buy_values,
+                        data: chartData.buy_values.slice(),
                         backgroundColor: 'rgba(22, 163, 74, 0.7)',
                         borderColor: 'rgba(22, 163, 74, 1)',
                         borderWidth: 1,
@@ -247,7 +370,7 @@
                     },
                     {
                         label: 'Sales',
-                        data: chartData.sell_values,
+                        data: chartData.sell_values.slice(),
                         backgroundColor: 'rgba(220, 38, 38, 0.7)',
                         borderColor: 'rgba(220, 38, 38, 1)',
                         borderWidth: 1,
@@ -298,27 +421,47 @@
         });
     }
 
-    // ── Filter logic ──
-    window.filterInsiderTrades = function(type, btn) {
-        // Update button states
-        document.querySelectorAll('.insider-filter').forEach(function(b) {
-            b.classList.remove('active');
-        });
-        btn.classList.add('active');
+    // ── Tooltip positioning (fixed, avoids overflow clipping) ──
+    document.querySelectorAll('.insider-card').forEach(function(card) {
+        var tooltip = card.querySelector('.insider-tooltip');
+        if (!tooltip) return;
 
-        // Filter table rows in all quarter sections
+        card.addEventListener('mouseenter', function() {
+            var rect = card.getBoundingClientRect();
+            tooltip.style.left = rect.left + 'px';
+            tooltip.style.top = (rect.bottom + 6) + 'px';
+            // Flip up if tooltip would go below viewport
+            tooltip.classList.add('visible');
+            var tRect = tooltip.getBoundingClientRect();
+            if (tRect.bottom > window.innerHeight) {
+                tooltip.style.top = (rect.top - tRect.height - 6) + 'px';
+            }
+            // Prevent horizontal overflow
+            if (tRect.right > window.innerWidth) {
+                tooltip.style.left = (window.innerWidth - tRect.width - 8) + 'px';
+            }
+        });
+
+        card.addEventListener('mouseleave', function() {
+            tooltip.classList.remove('visible');
+        });
+    });
+
+    // ── Dual-filter state ──
+    var currentTypeFilter = 'all';
+    var currentInsiderFilter = '__all__';
+
+    function applyFilters() {
+        // 1. Filter table rows by BOTH type and insider name
         document.querySelectorAll('.quarter-section').forEach(function(section) {
             var rows = section.querySelectorAll('tbody tr');
             var visibleCount = 0;
             rows.forEach(function(row) {
-                if (type === 'all') {
-                    row.style.display = '';
-                    visibleCount++;
-                } else {
-                    var match = row.dataset.insiderType === type;
-                    row.style.display = match ? '' : 'none';
-                    if (match) visibleCount++;
-                }
+                var typeMatch = (currentTypeFilter === 'all') || (row.dataset.insiderType === currentTypeFilter);
+                var nameMatch = (currentInsiderFilter === '__all__') || (row.dataset.insiderName === currentInsiderFilter);
+                var show = typeMatch && nameMatch;
+                row.style.display = show ? '' : 'none';
+                if (show) visibleCount++;
             });
 
             // Update quarter header count
@@ -329,12 +472,29 @@
             section.style.display = visibleCount > 0 ? '' : 'none';
         });
 
-        // Update chart visibility
-        if (insiderChart) {
-            insiderChart.data.datasets[0].hidden = (type === 'sell');
-            insiderChart.data.datasets[1].hidden = (type === 'buy');
+        // 2. Update chart: swap to per-insider data, then hide datasets by type
+        if (insiderChart && perInsiderChart) {
+            var cdata = perInsiderChart[currentInsiderFilter] || perInsiderChart['__all__'];
+            insiderChart.data.datasets[0].data = cdata.buy_values.slice();
+            insiderChart.data.datasets[1].data = cdata.sell_values.slice();
+            insiderChart.data.datasets[0].hidden = (currentTypeFilter === 'sell');
+            insiderChart.data.datasets[1].hidden = (currentTypeFilter === 'buy');
             insiderChart.update();
         }
+    }
+
+    window.filterInsiderTrades = function(type, btn) {
+        currentTypeFilter = type;
+        document.querySelectorAll('.insider-filter').forEach(function(b) {
+            b.classList.remove('active');
+        });
+        btn.classList.add('active');
+        applyFilters();
+    };
+
+    window.filterByInsider = function(name) {
+        currentInsiderFilter = name;
+        applyFilters();
     };
 })();
 </script>
