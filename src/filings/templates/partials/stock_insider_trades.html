@@ -3,9 +3,40 @@
     <header>
         <strong>Insider Trading</strong>
         <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            {{ trades | length }} recent Form 4 filing{{ "s" if trades | length != 1 else "" }} for {{ ticker }}
+            {{ trades | length }} Form 4 filing{{ "s" if trades | length != 1 else "" }} for {{ ticker }}
         </span>
     </header>
+
+    {# ── Section A: Insider Summary Cards ── #}
+    {% if insiders %}
+    <div class="insider-cards-row">
+        {% for ins in insiders %}
+        <div class="insider-card">
+            <div class="insider-card-name">{{ ins.name }}</div>
+            <div class="insider-card-title text-muted">{{ ins.title }}</div>
+            <div class="insider-card-stats">
+                {% if ins.buys > 0 %}
+                <span class="insider-stat-buy">{{ ins.buys }} buy{{ "s" if ins.buys != 1 else "" }} · {{ ins.buy_value_fmt }}</span>
+                {% endif %}
+                {% if ins.sells > 0 %}
+                <span class="insider-stat-sell">{{ ins.sells }} sell{{ "s" if ins.sells != 1 else "" }} · {{ ins.sell_value_fmt }}</span>
+                {% endif %}
+                {% if ins.buys == 0 and ins.sells == 0 %}
+                <span class="text-muted text-small">No buys/sells</span>
+                {% endif %}
+            </div>
+            <div class="insider-card-date text-muted text-small">Last: {{ ins.last_trade_date }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# ── Section B: Activity Timeline Chart ── #}
+    {% if chart_json %}
+    <div style="margin: 1.5em 0; position: relative; height: 220px;">
+        <canvas id="insider-timeline-chart"></canvas>
+    </div>
+    {% endif %}
 
     {# ── Buy/Sell filter ── #}
     <div style="display: flex; gap: 0.5em; flex-wrap: wrap; margin-bottom: 1em;">
@@ -20,60 +51,160 @@
         </button>
     </div>
 
-    <figure>
-    <table>
-        <thead>
-            <tr>
-                <th data-sort="text">Insider</th>
-                <th>Title</th>
-                <th data-sort="date">Trade Date</th>
-                <th>Type</th>
-                <th class="text-right">Price</th>
-                <th class="text-right" data-sort="number">Qty</th>
-                <th class="text-right" data-sort="number">Value</th>
-                <th class="text-right">Owned After</th>
-                <th style="text-align: center;">Filing</th>
-            </tr>
-        </thead>
-        <tbody id="stock-insider-tbody">
-            {% for t in trades %}
-            <tr data-insider-type="{% if 'Purchase' in t.trade_type %}buy{% elif 'Sale' in t.trade_type %}sell{% else %}other{% endif %}">
-                <td><strong>{{ t.insider_name }}</strong></td>
-                <td class="text-small text-muted">{{ t.title }}</td>
-                <td style="white-space: nowrap;">{{ t.trade_date }}</td>
-                <td>
-                    {% if "Purchase" in t.trade_type %}
-                        <span class="badge badge-add">{{ t.trade_type }}</span>
-                    {% elif "Sale" in t.trade_type %}
-                        <span class="badge badge-reduce">{{ t.trade_type }}</span>
-                    {% else %}
-                        <span class="badge" style="background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">{{ t.trade_type }}</span>
-                    {% endif %}
-                </td>
-                <td class="text-right">{{ t.price }}</td>
-                <td class="text-right">{{ t.qty }}</td>
-                <td class="text-right">{{ t.value }}</td>
-                <td class="text-right text-small">{{ t.owned }}{% if t.delta_own %} <span class="text-muted">({{ t.delta_own }})</span>{% endif %}</td>
-                <td style="text-align: center;">
-                    {% if t.sec_url %}
-                    <a href="{{ t.sec_url }}" target="_blank" rel="noopener" title="View SEC Form 4">&#128279;</a>
-                    {% else %}
-                    <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    </figure>
+    {# ── Section C: Quarterly-Grouped Trade Tables ── #}
+    {% for q in quarters %}
+    <details class="quarter-section" {{ "open" if loop.first else "" }} data-quarter-key="{{ q.key }}">
+        <summary class="quarter-header">
+            <strong>{{ q.label }}</strong>
+            <span class="quarter-meta text-muted text-small">
+                <span class="quarter-trade-count">{{ q.trades | length }}</span> trade{{ "s" if q.trades | length != 1 else "" }}
+                · {{ q.total_value_fmt }}
+            </span>
+            {% if q.buy_count > 0 %}
+            <span class="badge badge-add" style="font-size: 0.7em; margin-left: 0.3em;">{{ q.buy_count }} buy{{ "s" if q.buy_count != 1 else "" }}</span>
+            {% endif %}
+            {% if q.sell_count > 0 %}
+            <span class="badge badge-reduce" style="font-size: 0.7em; margin-left: 0.3em;">{{ q.sell_count }} sell{{ "s" if q.sell_count != 1 else "" }}</span>
+            {% endif %}
+        </summary>
 
-    <footer class="text-muted text-small" style="text-align: center;">
+        <figure style="margin-top: 0.5em;">
+        <table>
+            <thead>
+                <tr>
+                    <th data-sort="text">Insider</th>
+                    <th>Title</th>
+                    <th data-sort="date">Trade Date</th>
+                    <th>Type</th>
+                    <th class="text-right">Price</th>
+                    <th class="text-right" data-sort="number">Qty</th>
+                    <th class="text-right" data-sort="number">Value</th>
+                    <th class="text-right">Owned After</th>
+                    <th style="text-align: center;">Filing</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in q.trades %}
+                <tr data-insider-type="{% if 'Purchase' in t.trade_type %}buy{% elif 'Sale' in t.trade_type %}sell{% else %}other{% endif %}">
+                    <td><strong>{{ t.insider_name }}</strong></td>
+                    <td class="text-small text-muted">{{ t.title }}</td>
+                    <td style="white-space: nowrap;">{{ t.trade_date }}</td>
+                    <td>
+                        {% if "Purchase" in t.trade_type %}
+                            <span class="badge badge-add">{{ t.trade_type }}</span>
+                        {% elif "Sale" in t.trade_type %}
+                            <span class="badge badge-reduce">{{ t.trade_type }}</span>
+                        {% else %}
+                            <span class="badge" style="background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">{{ t.trade_type }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">{{ t.price }}</td>
+                    <td class="text-right">{{ t.qty }}</td>
+                    <td class="text-right">{{ t.value }}</td>
+                    <td class="text-right text-small">{{ t.owned }}{% if t.delta_own %} <span class="text-muted">({{ t.delta_own }})</span>{% endif %}</td>
+                    <td style="text-align: center;">
+                        {% if t.sec_url %}
+                        <a href="{{ t.sec_url }}" target="_blank" rel="noopener" title="View SEC Form 4">&#128279;</a>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </figure>
+    </details>
+    {% endfor %}
+
+    <footer class="text-muted text-small" style="text-align: center; margin-top: 1em;">
         Data sourced from <a href="http://openinsider.com/{{ ticker }}" target="_blank" rel="noopener">OpenInsider</a>
         (SEC Form 4 filings).
     </footer>
 </article>
 
+{# ── Styles ── #}
 <style>
+    /* Insider summary cards */
+    .insider-cards-row {
+        display: flex;
+        gap: 0.75em;
+        overflow-x: auto;
+        padding-bottom: 0.5em;
+        margin-bottom: 1em;
+        -webkit-overflow-scrolling: touch;
+    }
+    .insider-card {
+        min-width: 160px;
+        max-width: 200px;
+        flex-shrink: 0;
+        padding: 0.75em 1em;
+        border-radius: 8px;
+        background: var(--pp-surface-alt, #f8f9fa);
+        border: 1px solid var(--pp-border, #e5e7eb);
+    }
+    .insider-card-name {
+        font-weight: 700;
+        font-size: 0.9rem;
+        line-height: 1.3;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .insider-card-title {
+        font-size: 0.75rem;
+        margin-bottom: 0.5em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .insider-card-stats {
+        font-size: 0.8rem;
+        line-height: 1.5;
+    }
+    .insider-stat-buy {
+        display: block;
+        color: var(--pp-gain, #16a34a);
+        font-weight: 600;
+    }
+    .insider-stat-sell {
+        display: block;
+        color: var(--pp-loss, #dc2626);
+        font-weight: 600;
+    }
+    .insider-card-date {
+        margin-top: 0.4em;
+        font-size: 0.7rem;
+    }
+
+    /* Quarter sections */
+    .quarter-section {
+        margin-bottom: 0.5em;
+        border: 1px solid var(--pp-border, #e5e7eb);
+        border-radius: 6px;
+        overflow: hidden;
+    }
+    .quarter-header {
+        padding: 0.6em 1em;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
+        flex-wrap: wrap;
+        background: var(--pp-surface-alt, #f8f9fa);
+    }
+    .quarter-header:hover {
+        background: var(--pp-overlay-5, rgba(0,0,0,0.03));
+    }
+    .quarter-section figure {
+        margin: 0;
+        padding: 0 0.5em 0.5em;
+    }
+    .quarter-section table {
+        margin-bottom: 0;
+    }
+
+    /* Filter buttons */
     button.insider-filter {
         background: none;
         border: 1px solid var(--pp-overlay-10);
@@ -91,21 +222,121 @@
     }
 </style>
 
+{# ── Chart + Filter JS ── #}
 <script>
-window.filterInsiderTrades = function(type, btn) {
-    document.querySelectorAll('.insider-filter').forEach(function(b) {
-        b.classList.remove('active');
-    });
-    btn.classList.add('active');
+(function() {
+    // ── Chart.js timeline ──
+    var chartData = {{ chart_json | safe }};
+    var canvas = document.getElementById('insider-timeline-chart');
+    var insiderChart = null;
 
-    document.querySelectorAll('#stock-insider-tbody tr').forEach(function(row) {
-        if (type === 'all') {
-            row.style.display = '';
-        } else {
-            row.style.display = row.dataset.insiderType === type ? '' : 'none';
+    if (canvas && chartData && chartData.labels && chartData.labels.length > 0 && typeof Chart !== 'undefined') {
+        var ctx = canvas.getContext('2d');
+        insiderChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: chartData.labels,
+                datasets: [
+                    {
+                        label: 'Purchases',
+                        data: chartData.buy_values,
+                        backgroundColor: 'rgba(22, 163, 74, 0.7)',
+                        borderColor: 'rgba(22, 163, 74, 1)',
+                        borderWidth: 1,
+                        borderRadius: 3,
+                    },
+                    {
+                        label: 'Sales',
+                        data: chartData.sell_values,
+                        backgroundColor: 'rgba(220, 38, 38, 0.7)',
+                        borderColor: 'rgba(220, 38, 38, 1)',
+                        borderWidth: 1,
+                        borderRadius: 3,
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: { boxWidth: 12, padding: 12, font: { size: 11 } }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                var val = ctx.parsed.y || 0;
+                                if (val >= 1000000) return ctx.dataset.label + ': $' + (val / 1000000).toFixed(1) + 'M';
+                                if (val >= 1000) return ctx.dataset.label + ': $' + (val / 1000).toFixed(0) + 'K';
+                                return ctx.dataset.label + ': $' + val.toFixed(0);
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        stacked: true,
+                        grid: { display: false },
+                        ticks: { font: { size: 10 }, maxRotation: 45, minRotation: 0 }
+                    },
+                    y: {
+                        stacked: true,
+                        grid: { color: 'rgba(0,0,0,0.06)' },
+                        ticks: {
+                            font: { size: 10 },
+                            callback: function(val) {
+                                if (val >= 1000000) return '$' + (val / 1000000).toFixed(1) + 'M';
+                                if (val >= 1000) return '$' + (val / 1000).toFixed(0) + 'K';
+                                return '$' + val;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // ── Filter logic ──
+    window.filterInsiderTrades = function(type, btn) {
+        // Update button states
+        document.querySelectorAll('.insider-filter').forEach(function(b) {
+            b.classList.remove('active');
+        });
+        btn.classList.add('active');
+
+        // Filter table rows in all quarter sections
+        document.querySelectorAll('.quarter-section').forEach(function(section) {
+            var rows = section.querySelectorAll('tbody tr');
+            var visibleCount = 0;
+            rows.forEach(function(row) {
+                if (type === 'all') {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    var match = row.dataset.insiderType === type;
+                    row.style.display = match ? '' : 'none';
+                    if (match) visibleCount++;
+                }
+            });
+
+            // Update quarter header count
+            var countEl = section.querySelector('.quarter-trade-count');
+            if (countEl) countEl.textContent = visibleCount;
+
+            // Hide entire quarter section if no matching trades
+            section.style.display = visibleCount > 0 ? '' : 'none';
+        });
+
+        // Update chart visibility
+        if (insiderChart) {
+            insiderChart.data.datasets[0].hidden = (type === 'sell');
+            insiderChart.data.datasets[1].hidden = (type === 'buy');
+            insiderChart.update();
         }
-    });
-};
+    };
+})();
 </script>
 
 {% else %}
