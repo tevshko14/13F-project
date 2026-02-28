@@ -2,7 +2,9 @@
 
 Designed to run as a Railway Cron Job every 30 minutes.
 Scrapes the global screener (all / purchases / sales), upserts
-into the dedicated ``insider_trades`` table, and logs to ``sync_logs``.
+into the dedicated ``insider_trades`` table (hot, 30-day retention),
+and bridges purchases into ``insider_purchases_history`` (cold,
+permanent, delete-protected) so insights stay up to date automatically.
 
 Usage:
     uv run filings-insider-sync
@@ -120,9 +122,21 @@ def sync_insider_trades() -> dict:
         supabase_cache.complete_sync_log(run_id, 0, 1, 0, ["No trades scraped"])
         return {"scraped": 0, "upserted": 0, "errors": 1}
 
-    # Build row dicts and upsert
+    # Build row dicts and upsert to hot table
     rows = [t.to_db_row() for t in trades if t.sec_url]
     upserted = supabase_cache.upsert_insider_trades(rows)
+
+    # Bridge: also populate cold history table with purchases so
+    # insights stay current without requiring manual backfill runs.
+    # ON CONFLICT DO NOTHING means existing rows are harmlessly skipped.
+    purchase_trades = [t for t in trades if t.sec_url and "Purchase" in t.trade_type]
+    if purchase_trades:
+        history_rows = [t.to_history_row() for t in purchase_trades]
+        history_upserted = supabase_cache.upsert_history_purchases(history_rows)
+        logger.info(
+            "Cold table bridge: %d purchases → %d upserted",
+            len(history_rows), history_upserted,
+        )
 
     errors: list[str] = []
     if upserted == 0:
