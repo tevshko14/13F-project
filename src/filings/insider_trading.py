@@ -927,6 +927,133 @@ def _format_compact_value(val: float) -> str:
     return "$0"
 
 
+# ── Title resolution (fix "See Remarks") ────────────────────────────
+
+_title_cache: dict[tuple[str, str], str] = {}
+
+# Longest-first so "Chief Information Security Officer" matches before
+# "Chief Information Officer".
+_TITLE_ABBREVS: list[tuple[str, str]] = [
+    ("Chief Executive Officer", "CEO"),
+    ("Chief Financial Officer", "CFO"),
+    ("Chief Technology Officer", "CTO"),
+    ("Chief Operating Officer", "COO"),
+    ("Chief Revenue Officer", "CRO"),
+    ("Chief Legal Officer", "CLO"),
+    ("Chief Accounting Officer", "CAO"),
+    ("Chief Information Security Officer", "CISO"),
+    ("Chief Information Officer", "CIO"),
+    ("Chief Marketing Officer", "CMO"),
+    ("Chief Product Officer", "CPO"),
+    ("Chief Business Officer", "CBO"),
+    ("Chief People Officer", "CPO"),
+    ("Chief Strategy Officer", "CSO"),
+    ("Chief Administrative Officer", "CAO"),
+    ("Executive Vice President", "EVP"),
+    ("Senior Vice President", "SVP"),
+    ("Vice President", "VP"),
+    ("General Counsel", "GC"),
+    ("Treasurer", "Treas."),
+    ("Secretary", "Sec."),
+    ("President", "Pres."),
+]
+
+
+def _shorten_title(title: str) -> str:
+    """Abbreviate verbose officer titles for compact display.
+
+    ``'Chief Executive Officer'`` → ``'CEO'``
+    ``'Chief Revenue Officer and Chief Legal Officer'`` → ``'CRO, CLO'``
+    """
+    result = title
+    for long_form, short_form in _TITLE_ABBREVS:
+        result = result.replace(long_form, short_form)
+    # Normalise connectors: "CEO and CFO" → "CEO, CFO"
+    result = result.replace(" and ", ", ")
+    return result.strip()
+
+
+def _resolve_see_remarks_titles(trades: list[InsiderTrade]) -> None:
+    """Resolve *See Remarks* titles via SEC Form 4 XML.
+
+    Many filers put ``See Remarks`` in the officer-title field and write
+    the real title (e.g. *Chief Executive Officer*) in the ``<remarks>``
+    element of the XML filing.  This function fetches the raw XML for
+    one filing per unique insider, extracts the real title, abbreviates
+    it, and updates **all** matching trades in-place.
+
+    Results are cached in ``_title_cache`` so repeat calls for the same
+    ticker are effectively free.
+    """
+    if not trades:
+        return
+
+    # ── Phase 1: apply cached resolutions & collect unknowns ──
+    needs_fetch: dict[str, str] = {}  # insider_name → sec_url
+    ticker = ""
+    for t in trades:
+        if not ticker and t.ticker:
+            ticker = t.ticker.upper()
+        if "see" not in t.title.lower() or "remark" not in t.title.lower():
+            continue
+        cache_key = (t.insider_name, ticker)
+        if cache_key in _title_cache:
+            t.title = _title_cache[cache_key]
+        elif t.insider_name not in needs_fetch and t.sec_url:
+            needs_fetch[t.insider_name] = t.sec_url
+
+    if not needs_fetch:
+        return
+
+    # ── Phase 2: fetch SEC XML and extract real titles ──
+    sec_headers = {"User-Agent": "13f-tool user@example.com"}
+    resolved: dict[str, str] = {}
+
+    for name, sec_url in list(needs_fetch.items())[:10]:
+        # Strip the XSLT rendering prefix to get raw XML
+        raw_url = sec_url.replace("/xslF345X03/", "/")
+        try:
+            resp = httpx.get(
+                raw_url, headers=sec_headers, timeout=10, follow_redirects=True,
+            )
+            if resp.status_code != 200:
+                continue
+            remarks_match = _re.search(
+                r"<remarks>(.*?)</remarks>", resp.text,
+                _re.DOTALL | _re.IGNORECASE,
+            )
+            if not remarks_match:
+                continue
+            remarks = remarks_match.group(1).strip()
+            # Common pattern: "Officer title: Chief Executive Officer."
+            title_match = _re.search(
+                r"[Oo]fficer\s+[Tt]itle:\s*(.+?)\.",
+                remarks,
+            )
+            if title_match:
+                real_title = _shorten_title(title_match.group(1).strip())
+                resolved[name] = real_title
+        except Exception:
+            logger.debug("Title resolution failed for %s", name)
+        time.sleep(0.15)  # SEC rate-limiting
+
+    if not resolved:
+        return
+
+    # ── Phase 3: apply resolved titles to trades & populate cache ──
+    for t in trades:
+        if t.insider_name in resolved and "see" in t.title.lower():
+            t.title = resolved[t.insider_name]
+
+    for name, title in resolved.items():
+        _title_cache[(name, ticker)] = title
+
+    logger.info(
+        "Resolved %d 'See Remarks' titles for %s via SEC Form 4 XML",
+        len(resolved), ticker,
+    )
+
+
 def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
     """Structure trades for the redesigned per-ticker display.
 
@@ -948,6 +1075,9 @@ def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
     empty_chart: dict = {"labels": [], "buy_values": [], "sell_values": []}
     if not trades:
         return {"insiders": [], "quarters": [], "chart": empty_chart, "per_insider_chart": {"__all__": empty_chart}}
+
+    # ── Resolve "See Remarks" titles from SEC Form 4 XML ──
+    _resolve_see_remarks_titles(trades)
 
     # ── Group by insider (+ per-insider-per-quarter tracking) ──
     insider_map: dict[str, dict] = {}
