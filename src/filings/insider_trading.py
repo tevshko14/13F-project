@@ -766,14 +766,16 @@ def _fetch_historical_from_efts(
 
 
 def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
-    """Fetch insider trades for a specific ticker -- Supabase-first.
+    """Fetch insider trades for a specific ticker -- Supabase + OpenInsider.
 
     Data flow:
       1. L1 in-memory cache (10 min TTL)
       2. Query ``insider_trades`` table by ticker (hot 30-day window)
-      3. Merge historical purchases from ``insider_purchases_history`` (cold)
-      4. Supplement with SEC EDGAR EFTS for non-purchase filings (cold)
-      5. Fallback: scrape OpenInsider + backfill to Supabase
+      3. Scrape OpenInsider per-ticker page for full history (all trade
+         types with real prices/qty/values)
+      4. Merge historical purchases from ``insider_purchases_history`` (cold)
+         to fill any gaps OpenInsider might miss
+      5. Fallback: scrape + backfill to Supabase
       6. Last resort: return stale L1 data (never show empty/error)
     """
     key = ticker.upper()
@@ -791,9 +793,25 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
         hot_trades = [InsiderTrade.from_db_row(r) for r in rows]
         seen_urls = {t.sec_url for t in hot_trades if t.sec_url}
 
-        # ── L2.5: Merge historical purchases from cold table ──
-        # The cold table has full purchase history with real prices/quantities,
-        # far richer than EFTS metadata.  Deduplicate by sec_url.
+        # ── L2.5: Scrape OpenInsider for full history (all trade types) ──
+        # Returns real prices/qty/values — much richer than SEC EFTS metadata.
+        try:
+            oi_trades = _scrape_openinsider_ticker(key)
+            if oi_trades:
+                oi_unique = [
+                    t for t in oi_trades
+                    if t.sec_url and t.sec_url not in seen_urls
+                ]
+                seen_urls.update(t.sec_url for t in oi_unique if t.sec_url)
+            else:
+                oi_unique = []
+        except Exception:
+            logger.debug("OpenInsider scrape failed for %s", key)
+            oi_unique = []
+
+        # ── L2.6: Fill gaps from cold table (purchases only) ──
+        # In case OpenInsider is down or missing older data, the cold table
+        # has a permanent copy of all historical purchases.
         try:
             history_rows = supabase_cache.get_history_purchases_by_ticker(key)
             if history_rows:
@@ -802,27 +820,13 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
                     for r in history_rows
                     if r.get("sec_url") and r["sec_url"] not in seen_urls
                 ]
-                seen_urls.update(t.sec_url for t in cold_purchases if t.sec_url)
             else:
                 cold_purchases = []
         except Exception:
             logger.debug("Cold table supplement failed for %s", key)
             cold_purchases = []
 
-        # ── L2.6: Supplement with EFTS for non-purchase filings ──
-        try:
-            historical = _fetch_historical_from_efts(key)
-            if historical:
-                efts_unique = [
-                    t for t in historical if t.sec_url and t.sec_url not in seen_urls
-                ]
-            else:
-                efts_unique = []
-        except Exception:
-            logger.debug("EFTS supplement failed for %s", key)
-            efts_unique = []
-
-        combined = hot_trades + cold_purchases + efts_unique
+        combined = hot_trades + oi_unique + cold_purchases
         _set_cached(cache_key, combined)
         return combined
 
