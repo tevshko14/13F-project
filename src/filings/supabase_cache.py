@@ -1324,6 +1324,42 @@ def bulk_update_forward_returns(updates: list[dict]) -> int:
     return updated
 
 
+def admin_force_update_returns(sec_url: str, updates: dict) -> bool:
+    """Force-update forward return values (admin override of write-once).
+
+    DANGER: Bypasses the write-once trigger by NULLing ``returns_updated``
+    first, then re-applying the corrected values.  Use only for data
+    corrections (e.g., stock-split adjustments, bad price data).
+
+    ``updates`` should contain only forward-return columns, e.g.::
+
+        {"close_at_90d": 123.45, "close_at_180d": 130.00}
+
+    Returns True on success, False on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        # Step 1: NULL out returns_updated to unlock the row
+        # (the write-once trigger allows all changes when returns_updated IS NULL)
+        client.table("insider_purchases_history").update(
+            {"returns_updated": None}
+        ).eq("sec_url", sec_url).execute()
+
+        # Step 2: Apply corrected values + re-set returns_updated
+        updates["returns_updated"] = datetime.now(timezone.utc).isoformat()
+        client.table("insider_purchases_history").update(
+            updates
+        ).eq("sec_url", sec_url).execute()
+
+        logger.info("admin_force_update_returns: corrected %s", sec_url)
+        return True
+    except Exception as exc:
+        logger.warning("admin_force_update_returns failed for %s: %s", sec_url, exc)
+        return False
+
+
 def get_distinct_insider_tickers() -> list[str]:
     """Return sorted list of unique tickers in ``insider_purchases_history``.
 
