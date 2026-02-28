@@ -47,6 +47,14 @@ _INSIDER_COLS = (
     "value_fmt,sec_url"
 )
 
+# Lean projection for the cold history table (purchases only, no _fmt cols)
+_HISTORY_COLS = (
+    "sec_url,filing_date,trade_date,ticker,company_name,"
+    "insider_name,title,price,qty,value,"
+    "close_on_trade,close_at_30d,close_at_90d,close_at_180d,close_at_365d,"
+    "returns_updated"
+)
+
 # Lean projection for chart aggregation — only the 6 columns needed
 # by aggregate_top_tickers().  ~40% less network transfer vs _INSIDER_COLS.
 _CHART_COLS = (
@@ -247,6 +255,33 @@ ALTER TABLE insider_trades ADD COLUMN IF NOT EXISTS returns_updated  TIMESTAMPTZ
 CREATE INDEX IF NOT EXISTS idx_insider_purchases_pending
     ON insider_trades (ticker, trade_date)
     WHERE trade_type = 'Purchase' AND returns_updated IS NULL;
+
+-- ── Cold history table: delete-protected, purchases only ──
+CREATE TABLE IF NOT EXISTS insider_purchases_history (
+    id              BIGSERIAL PRIMARY KEY,
+    sec_url         TEXT NOT NULL UNIQUE,
+    filing_date     DATE NOT NULL,
+    trade_date      DATE NOT NULL,
+    ticker          TEXT NOT NULL,
+    company_name    TEXT NOT NULL DEFAULT '',
+    insider_name    TEXT NOT NULL,
+    title           TEXT NOT NULL DEFAULT '',
+    price           NUMERIC(12,4),
+    qty             INTEGER,
+    value           NUMERIC(16,2),
+    close_on_trade  NUMERIC(12,4),
+    close_at_30d    NUMERIC(12,4),
+    close_at_90d    NUMERIC(12,4),
+    close_at_180d   NUMERIC(12,4),
+    close_at_365d   NUMERIC(12,4),
+    returns_updated TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_iph_ticker_trade_date
+    ON insider_purchases_history (ticker, trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_iph_pending_returns
+    ON insider_purchases_history (ticker, trade_date)
+    WHERE returns_updated IS NULL;
 """
 
 
@@ -1087,6 +1122,50 @@ def upsert_insider_trades(rows: list[dict]) -> int:
     return upserted
 
 
+def upsert_history_purchases(rows: list[dict]) -> int:
+    """Insert rows into ``insider_purchases_history`` (cold, write-once).
+
+    Uses ``ON CONFLICT (sec_url) DO NOTHING`` — existing rows are never
+    overwritten.  Only purchases should be passed in; caller is responsible
+    for filtering.
+
+    Deduplicates by sec_url within the batch before inserting.
+    Returns the number of rows inserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    # Deduplicate by sec_url within the batch
+    seen: dict[str, dict] = {}
+    for row in rows:
+        url = row.get("sec_url", "")
+        if url and url not in seen:
+            seen[url] = row
+    deduped = list(seen.values())
+
+    if not deduped:
+        return 0
+
+    inserted = 0
+    CHUNK = 50
+    for i in range(0, len(deduped), CHUNK):
+        chunk = deduped[i : i + CHUNK]
+        try:
+            # DO NOTHING on conflict — write-once semantics
+            client.table("insider_purchases_history").upsert(
+                chunk, on_conflict="sec_url", default_to_null=False
+            ).execute()
+            inserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_history_purchases chunk %d failed: %s", i, exc)
+
+    logger.info(
+        "History purchases: %d inserted out of %d provided", inserted, len(rows)
+    )
+    return inserted
+
+
 # ── Insider Insights: forward-return queries ─────────────────────
 
 _INSIGHT_COLS = (
@@ -1099,6 +1178,8 @@ _INSIGHT_COLS = (
 def get_insider_purchases(ticker: str, limit: int = 500) -> list[dict] | None:
     """Get open market purchases for a ticker (for insights computation).
 
+    Reads from ``insider_purchases_history`` (cold, delete-protected table).
+    All rows are purchases — no trade_type filter needed.
     Returns numeric columns needed for analysis, ordered by trade_date DESC.
     """
     client = _get_client()
@@ -1106,10 +1187,9 @@ def get_insider_purchases(ticker: str, limit: int = 500) -> list[dict] | None:
         return None
     try:
         resp = (
-            client.table("insider_trades")
+            client.table("insider_purchases_history")
             .select(_INSIGHT_COLS)
             .eq("ticker", ticker.upper())
-            .eq("trade_type", "Purchase")
             .order("trade_date", desc=True)
             .limit(limit)
             .execute()
@@ -1123,6 +1203,7 @@ def get_insider_purchases(ticker: str, limit: int = 500) -> list[dict] | None:
 def get_purchases_pending_returns(limit: int = 2000) -> list[dict] | None:
     """Get purchases where returns have not yet been computed.
 
+    Reads from ``insider_purchases_history`` (cold table).
     Returns rows with returns_updated IS NULL, ordered by ticker then trade_date.
     Used by the insider_returns.py background job.
     """
@@ -1131,9 +1212,8 @@ def get_purchases_pending_returns(limit: int = 2000) -> list[dict] | None:
         return None
     try:
         resp = (
-            client.table("insider_trades")
+            client.table("insider_purchases_history")
             .select("sec_url,trade_date,ticker,price")
-            .eq("trade_type", "Purchase")
             .is_("returns_updated", "null")
             .order("ticker")
             .order("trade_date", desc=True)
@@ -1149,6 +1229,7 @@ def get_purchases_pending_returns(limit: int = 2000) -> list[dict] | None:
 def get_purchases_with_open_windows() -> list[dict] | None:
     """Get purchases where a forward window has closed but price is still NULL.
 
+    Reads from ``insider_purchases_history`` (cold table).
     For example, a trade from 100 days ago should have close_at_90d filled in,
     but it may still be NULL if it was processed before the 90-day mark.
     """
@@ -1162,9 +1243,8 @@ def get_purchases_with_open_windows() -> list[dict] | None:
 
         # Trades old enough for 90d but missing it
         rows_90 = (
-            client.table("insider_trades")
+            client.table("insider_purchases_history")
             .select("sec_url,trade_date,ticker")
-            .eq("trade_type", "Purchase")
             .is_("close_at_90d", "null")
             .lte("trade_date", cutoff_90)
             .not_.is_("returns_updated", "null")  # already processed once
@@ -1173,9 +1253,8 @@ def get_purchases_with_open_windows() -> list[dict] | None:
         ).data or []
 
         rows_180 = (
-            client.table("insider_trades")
+            client.table("insider_purchases_history")
             .select("sec_url,trade_date,ticker")
-            .eq("trade_type", "Purchase")
             .is_("close_at_180d", "null")
             .lte("trade_date", cutoff_180)
             .not_.is_("returns_updated", "null")
@@ -1184,9 +1263,8 @@ def get_purchases_with_open_windows() -> list[dict] | None:
         ).data or []
 
         rows_365 = (
-            client.table("insider_trades")
+            client.table("insider_purchases_history")
             .select("sec_url,trade_date,ticker")
-            .eq("trade_type", "Purchase")
             .is_("close_at_365d", "null")
             .lte("trade_date", cutoff_365)
             .not_.is_("returns_updated", "null")
@@ -1208,14 +1286,15 @@ def get_purchases_with_open_windows() -> list[dict] | None:
 
 
 def bulk_update_forward_returns(updates: list[dict]) -> int:
-    """Batch update forward-return columns on insider_trades.
+    """Batch update forward-return columns on ``insider_purchases_history``.
 
     Each dict in ``updates`` must have ``sec_url`` plus any of:
     close_on_trade, close_at_30d, close_at_90d, close_at_180d,
     close_at_365d, returns_updated.
 
     Uses individual UPDATE (not upsert) to avoid NOT NULL constraint
-    violations on columns like filing_date.
+    violations on columns like filing_date.  The write-once trigger on
+    the history table silently preserves existing non-NULL return values.
 
     Returns count of rows updated.
     """
@@ -1233,7 +1312,7 @@ def bulk_update_forward_returns(updates: list[dict]) -> int:
         if not payload:
             continue
         try:
-            client.table("insider_trades").update(payload).eq(
+            client.table("insider_purchases_history").update(payload).eq(
                 "sec_url", sec_url
             ).execute()
             updated += 1
@@ -1246,7 +1325,7 @@ def bulk_update_forward_returns(updates: list[dict]) -> int:
 
 
 def get_distinct_insider_tickers() -> list[str]:
-    """Return sorted list of unique tickers in insider_trades.
+    """Return sorted list of unique tickers in ``insider_purchases_history``.
 
     Used by the per-ticker backfill to know which tickers to scrape
     historical data for from OpenInsider.
@@ -1258,7 +1337,7 @@ def get_distinct_insider_tickers() -> list[str]:
         # Fetch all unique tickers — Supabase doesn't support DISTINCT,
         # so we select ticker column and deduplicate in Python.
         resp = (
-            client.table("insider_trades")
+            client.table("insider_purchases_history")
             .select("ticker")
             .limit(10000)
             .execute()
@@ -1611,8 +1690,9 @@ def run_retention_cleanup() -> dict:
     """Run all retention policies -- delete old data to keep DB small.
 
     Policies:
-      1. insider_trades: delete rows with trade_date older than 4 years
-         (kept long for forward-return analysis: 90d/180d/365d windows)
+      1. insider_trades: delete rows with trade_date older than 30 days
+         (hot table only — historical purchases live in delete-protected
+         insider_purchases_history cold table)
       2. sync_logs: delete rows with started_at older than 30 days
       3. youtube_events: delete rows with scheduled_at older than 30 days
       4. api_cache: physically delete expired rows (excluding 13f which
@@ -1628,10 +1708,10 @@ def run_retention_cleanup() -> dict:
     now = datetime.now(timezone.utc)
     results: dict[str, int] = {}
 
-    # 1. Insider trades: keep 4 years of history for forward-return analysis.
-    # The insights feature needs deep historical purchase data (90d/180d/365d
-    # forward returns), so we retain trades for 1461 days (~4 years).
-    cutoff_insider = (now - timedelta(days=1461)).strftime("%Y-%m-%d")
+    # 1. Insider trades (hot table): keep 30 days of recent data.
+    # Historical purchases live in insider_purchases_history (cold table,
+    # delete-protected) — so this hot table can be aggressively cleaned.
+    cutoff_insider = (now - timedelta(days=30)).strftime("%Y-%m-%d")
     try:
         resp = (
             client.table("insider_trades")

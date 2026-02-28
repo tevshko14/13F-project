@@ -129,9 +129,9 @@ def backfill_insider_purchases(
             logger.info("Page %d: empty — stopping", page_num)
             break
 
-        rows = [t.to_db_row() for t in trades if t.sec_url]
+        rows = [t.to_history_row() for t in trades if t.sec_url]
         if rows:
-            upserted = supabase_cache.upsert_insider_trades(rows)
+            upserted = supabase_cache.upsert_history_purchases(rows)
             total_upserted += upserted
             logger.info(
                 "Page %d: %d purchases scraped, %d upserted",
@@ -229,9 +229,9 @@ def backfill_per_ticker(
             if purchases_only:
                 trades = [t for t in trades if "Purchase" in t.trade_type]
 
-            rows = [t.to_db_row() for t in trades if t.sec_url]
+            rows = [t.to_history_row() for t in trades if t.sec_url]
             if rows:
-                upserted = supabase_cache.upsert_insider_trades(rows)
+                upserted = supabase_cache.upsert_history_purchases(rows)
                 total_upserted += upserted
                 # Count purchases specifically for logging
                 purchases = sum(1 for t in trades if "Purchase" in t.trade_type)

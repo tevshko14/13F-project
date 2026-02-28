@@ -137,12 +137,12 @@ def migrate_13f_to_cold_storage() -> dict:
     return stats
 
 
-def cleanup_old_insider_trades(days: int = 1461) -> int:
-    """Delete insider_trades rows with trade_date older than N days.
+def cleanup_old_insider_trades(days: int = 30) -> int:
+    """Delete insider_trades (hot table) rows with trade_date older than N days.
 
-    Default is 1461 days (~4 years) to preserve historical data needed
-    for the Insider Insights forward-return analysis (90d/180d/365d).
-    Must stay in sync with run_retention_cleanup() in supabase_cache.py.
+    Default is 30 days — the hot table only holds recent transient data.
+    Historical purchases live in ``insider_purchases_history`` (cold table,
+    delete-protected) and are never cleaned by this function.
 
     Returns count of deleted rows, or 0 on failure.
     """
@@ -212,9 +212,9 @@ def main() -> None:
     stats_13f = migrate_13f_to_cold_storage()
     logger.info("13F migration: %s", stats_13f)
 
-    # Step 2: Clean up old insider trades (>4 years)
-    logger.info("--- Step 2: Cleaning up old insider trades (>4 years) ---")
-    insider_deleted = cleanup_old_insider_trades(days=1461)
+    # Step 2: Clean up old insider trades (>30 days from hot table)
+    logger.info("--- Step 2: Cleaning up old insider trades (>30 days, hot table only) ---")
+    insider_deleted = cleanup_old_insider_trades(days=30)
 
     # Step 3: Clean up expired cache rows
     logger.info("--- Step 3: Cleaning up expired api_cache rows ---")

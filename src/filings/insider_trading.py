@@ -126,6 +126,25 @@ class InsiderTrade:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    def to_history_row(self) -> dict:
+        """Convert to a lean dict for ``insider_purchases_history`` (cold table).
+
+        Excludes: trade_type (always Purchase), owned, delta_own_pct,
+        all ``_fmt`` display columns, and updated_at (write-once table).
+        """
+        return {
+            "sec_url": self.sec_url,
+            "filing_date": self.filing_date,
+            "trade_date": self.trade_date,
+            "ticker": self.ticker.upper(),
+            "company_name": self.company_name,
+            "insider_name": self.insider_name,
+            "title": self.title,
+            "price": _parse_price(self.price),
+            "qty": _parse_qty(self.qty),
+            "value": parse_dollar_value(self.value),
+        }
+
     @classmethod
     def from_db_row(cls, row: dict) -> InsiderTrade:
         """Reconstruct an ``InsiderTrade`` from a Supabase row dict."""
