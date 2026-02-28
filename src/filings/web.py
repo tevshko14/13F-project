@@ -2294,12 +2294,16 @@ async def stock_insider_trades_api(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
     trades = await asyncio.to_thread(insider_trading.get_ticker_insider_trades, ticker)
+    display = insider_trading.prepare_ticker_display(trades)
     return templates.TemplateResponse(
         "partials/stock_insider_trades.html",
         {
             "request": request,
             "trades": trades,
             "ticker": ticker.upper(),
+            "insiders": display["insiders"],
+            "quarters": display["quarters"],
+            "chart_json": json_module.dumps(display["chart"]),
         },
     )
 

@@ -847,3 +847,141 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
         return stale_data
 
     return []
+
+
+# ── Per-ticker display helpers ──────────────────────────────────────
+
+
+def _quarter_key(date_str: str) -> str:
+    """``'2025-11-15'`` → ``'2025-Q4'``.  Returns ``'????-Q?'`` on bad input."""
+    try:
+        parts = date_str.split("-")
+        year = parts[0]
+        month = int(parts[1])
+        q = (month - 1) // 3 + 1
+        return f"{year}-Q{q}"
+    except Exception:
+        return "????-Q?"
+
+
+def _quarter_label(key: str) -> str:
+    """``'2025-Q4'`` → ``'Q4 2025'``."""
+    try:
+        year, qpart = key.split("-")
+        return f"{qpart} {year}"
+    except Exception:
+        return key
+
+
+def _format_compact_value(val: float) -> str:
+    """``1234567.0`` → ``'$1.2M'``, ``45000.0`` → ``'$45K'``."""
+    if val >= 1_000_000:
+        return f"${val / 1_000_000:.1f}M"
+    if val >= 1_000:
+        return f"${val / 1_000:.0f}K"
+    if val > 0:
+        return f"${val:,.0f}"
+    return "$0"
+
+
+def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
+    """Structure trades for the redesigned per-ticker display.
+
+    Returns a dict with three keys:
+
+    - ``insiders``: list of dicts sorted by total value (descending), each with
+      ``name``, ``title``, ``buys``, ``sells``, ``total_buy_value``,
+      ``total_sell_value``, ``buy_value_fmt``, ``sell_value_fmt``,
+      ``last_trade_date``.
+    - ``quarters``: list of dicts sorted newest-first, each with ``label``,
+      ``key``, ``trades`` (list of InsiderTrade), ``buy_count``, ``sell_count``,
+      ``total_value_fmt``.
+    - ``chart``: dict with ``labels`` (quarter labels), ``buy_values`` (list of
+      floats), ``sell_values`` (list of floats) — chronological order for
+      Chart.js.
+    """
+    if not trades:
+        return {"insiders": [], "quarters": [], "chart": {"labels": [], "buy_values": [], "sell_values": []}}
+
+    # ── Group by insider ──
+    insider_map: dict[str, dict] = {}
+    for t in trades:
+        name = t.insider_name or "Unknown"
+        if name not in insider_map:
+            insider_map[name] = {
+                "name": name,
+                "title": t.title or "",
+                "buys": 0,
+                "sells": 0,
+                "total_buy_value": 0.0,
+                "total_sell_value": 0.0,
+                "last_trade_date": t.trade_date,
+            }
+        rec = insider_map[name]
+        val = abs(parse_dollar_value(t.value))
+        is_buy = "Purchase" in t.trade_type
+        is_sell = "Sale" in t.trade_type
+
+        if is_buy:
+            rec["buys"] += 1
+            rec["total_buy_value"] += val
+        elif is_sell:
+            rec["sells"] += 1
+            rec["total_sell_value"] += val
+
+        # Keep the most recent trade date
+        if t.trade_date > rec["last_trade_date"]:
+            rec["last_trade_date"] = t.trade_date
+
+    insiders = sorted(
+        insider_map.values(),
+        key=lambda r: r["total_buy_value"] + r["total_sell_value"],
+        reverse=True,
+    )
+    for ins in insiders:
+        ins["buy_value_fmt"] = _format_compact_value(ins["total_buy_value"])
+        ins["sell_value_fmt"] = _format_compact_value(ins["total_sell_value"])
+
+    # ── Group by quarter ──
+    quarter_map: dict[str, list[InsiderTrade]] = {}
+    for t in trades:
+        qk = _quarter_key(t.trade_date)
+        quarter_map.setdefault(qk, []).append(t)
+
+    # Sort keys newest-first
+    sorted_keys = sorted(quarter_map.keys(), reverse=True)
+
+    quarters = []
+    for qk in sorted_keys:
+        qtrades = quarter_map[qk]
+        buy_count = sum(1 for t in qtrades if "Purchase" in t.trade_type)
+        sell_count = sum(1 for t in qtrades if "Sale" in t.trade_type)
+        total_val = sum(abs(parse_dollar_value(t.value)) for t in qtrades)
+        quarters.append({
+            "label": _quarter_label(qk),
+            "key": qk,
+            "trades": qtrades,
+            "buy_count": buy_count,
+            "sell_count": sell_count,
+            "total_value_fmt": _format_compact_value(total_val),
+        })
+
+    # ── Chart data (chronological order) ──
+    chart_keys = sorted(quarter_map.keys())  # oldest-first for chart
+    chart_labels = [_quarter_label(k) for k in chart_keys]
+    chart_buy_values = []
+    chart_sell_values = []
+    for qk in chart_keys:
+        qtrades = quarter_map[qk]
+        bv = sum(abs(parse_dollar_value(t.value)) for t in qtrades if "Purchase" in t.trade_type)
+        sv = sum(abs(parse_dollar_value(t.value)) for t in qtrades if "Sale" in t.trade_type)
+        chart_buy_values.append(round(bv, 2))
+        chart_sell_values.append(round(sv, 2))
+
+    chart = {
+        "labels": chart_labels,
+        "buy_values": chart_buy_values,
+        "sell_values": chart_sell_values,
+    }
+
+    return {"insiders": insiders, "quarters": quarters, "chart": chart}
