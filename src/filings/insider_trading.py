@@ -164,6 +164,32 @@ class InsiderTrade:
             sec_url=row.get("sec_url", ""),
         )
 
+    @classmethod
+    def from_history_row(cls, row: dict) -> InsiderTrade:
+        """Reconstruct from ``insider_purchases_history`` (cold table).
+
+        The cold table stores raw numeric values instead of ``_fmt``
+        display strings, so we format them here for display.
+        """
+        price = row.get("price")
+        qty = row.get("qty")
+        value = row.get("value")
+        return cls(
+            filing_date=str(row.get("filing_date", "")),
+            trade_date=str(row.get("trade_date", "")),
+            ticker=row.get("ticker", ""),
+            company_name=row.get("company_name", ""),
+            insider_name=row.get("insider_name", ""),
+            title=row.get("title", ""),
+            trade_type="Purchase",
+            price=f"${price:,.2f}" if price is not None else "",
+            qty=f"{qty:,}" if qty is not None else "",
+            owned="",
+            delta_own="",
+            value=f"${value:,.0f}" if value is not None else "",
+            sec_url=row.get("sec_url", ""),
+        )
+
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -745,9 +771,10 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
     Data flow:
       1. L1 in-memory cache (10 min TTL)
       2. Query ``insider_trades`` table by ticker (hot 30-day window)
-      3. Supplement with SEC EDGAR EFTS historical data (cold)
-      4. Fallback: scrape OpenInsider + backfill to Supabase
-      5. Last resort: return stale L1 data (never show empty/error)
+      3. Merge historical purchases from ``insider_purchases_history`` (cold)
+      4. Supplement with SEC EDGAR EFTS for non-purchase filings (cold)
+      5. Fallback: scrape OpenInsider + backfill to Supabase
+      6. Last resort: return stale L1 data (never show empty/error)
     """
     key = ticker.upper()
     cache_key = f"ticker:{key}"
@@ -762,22 +789,40 @@ def get_ticker_insider_trades(ticker: str) -> list[InsiderTrade]:
 
     if rows:
         hot_trades = [InsiderTrade.from_db_row(r) for r in rows]
+        seen_urls = {t.sec_url for t in hot_trades if t.sec_url}
 
-        # ── L2.5: Supplement with EFTS historical data (cold) ──
+        # ── L2.5: Merge historical purchases from cold table ──
+        # The cold table has full purchase history with real prices/quantities,
+        # far richer than EFTS metadata.  Deduplicate by sec_url.
+        try:
+            history_rows = supabase_cache.get_history_purchases_by_ticker(key)
+            if history_rows:
+                cold_purchases = [
+                    InsiderTrade.from_history_row(r)
+                    for r in history_rows
+                    if r.get("sec_url") and r["sec_url"] not in seen_urls
+                ]
+                seen_urls.update(t.sec_url for t in cold_purchases if t.sec_url)
+            else:
+                cold_purchases = []
+        except Exception:
+            logger.debug("Cold table supplement failed for %s", key)
+            cold_purchases = []
+
+        # ── L2.6: Supplement with EFTS for non-purchase filings ──
         try:
             historical = _fetch_historical_from_efts(key)
             if historical:
-                seen_urls = {t.sec_url for t in hot_trades if t.sec_url}
-                cold_unique = [
+                efts_unique = [
                     t for t in historical if t.sec_url and t.sec_url not in seen_urls
                 ]
-                combined = hot_trades + cold_unique
             else:
-                combined = hot_trades
+                efts_unique = []
         except Exception:
-            logger.debug("EFTS supplement failed for %s -- using hot data only", key)
-            combined = hot_trades
+            logger.debug("EFTS supplement failed for %s", key)
+            efts_unique = []
 
+        combined = hot_trades + cold_purchases + efts_unique
         _set_cached(cache_key, combined)
         return combined
 

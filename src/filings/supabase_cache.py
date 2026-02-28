@@ -1024,6 +1024,37 @@ def get_insider_trades_by_ticker(
         return None
 
 
+def get_history_purchases_by_ticker(
+    ticker: str,
+    limit: int = 500,
+) -> list[dict] | None:
+    """Query ``insider_purchases_history`` for a specific ticker (display use).
+
+    Returns cold-table rows with raw numeric columns (price, qty, value).
+    Caller should use ``InsiderTrade.from_history_row()`` to format for display.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+
+    try:
+        resp = (
+            client.table("insider_purchases_history")
+            .select(
+                "sec_url,filing_date,trade_date,ticker,company_name,"
+                "insider_name,title,price,qty,value"
+            )
+            .eq("ticker", ticker.upper())
+            .order("trade_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_history_purchases_by_ticker(%s) failed: %s", ticker, exc)
+        return None
+
+
 def _get_existing_insider_urls(days: int = 7) -> set[str]:
     """Fetch sec_url values from recent insider_trades (lightweight).
 
