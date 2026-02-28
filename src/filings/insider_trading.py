@@ -1018,20 +1018,44 @@ def _resolve_see_remarks_titles(trades: list[InsiderTrade]) -> None:
             )
             if resp.status_code != 200:
                 continue
+            xml = resp.text
+
+            # Try extracting title from <remarks> first
+            real_title = ""
             remarks_match = _re.search(
-                r"<remarks>(.*?)</remarks>", resp.text,
+                r"<remarks>(.*?)</remarks>", xml,
                 _re.DOTALL | _re.IGNORECASE,
             )
-            if not remarks_match:
-                continue
-            remarks = remarks_match.group(1).strip()
-            # Common pattern: "Officer title: Chief Executive Officer."
-            title_match = _re.search(
-                r"[Oo]fficer\s+[Tt]itle:\s*(.+?)\.",
-                remarks,
-            )
-            if title_match:
-                real_title = _shorten_title(title_match.group(1).strip())
+            if remarks_match:
+                remarks = remarks_match.group(1).strip()
+                # Common pattern: "Officer title: Chief Executive Officer."
+                title_match = _re.search(
+                    r"[Oo]fficer\s+[Tt]itle:\s*(.+?)\.",
+                    remarks,
+                )
+                if title_match:
+                    real_title = _shorten_title(title_match.group(1).strip())
+
+            # Fallback: infer from XML relationship flags
+            if not real_title:
+                is_dir = _re.search(r"<isDirector>1</isDirector>", xml)
+                is_off = _re.search(r"<isOfficer>1</isOfficer>", xml)
+                is_ten = _re.search(r"<isTenPercentOwner>1</isTenPercentOwner>", xml)
+                # Also check <officerTitle> directly (some use it properly)
+                ot_match = _re.search(
+                    r"<officerTitle>(.*?)</officerTitle>", xml, _re.IGNORECASE,
+                )
+                ot_val = ot_match.group(1).strip() if ot_match else ""
+                if ot_val and "see" not in ot_val.lower():
+                    real_title = _shorten_title(ot_val)
+                elif is_dir:
+                    real_title = "Dir"
+                elif is_ten:
+                    real_title = "10% Owner"
+                elif is_off:
+                    real_title = "Officer"
+
+            if real_title:
                 resolved[name] = real_title
         except Exception:
             logger.debug("Title resolution failed for %s", name)
