@@ -25,7 +25,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 
 ### Insider Trading Page (`/insider-trading`)
 - **Global Screener** - Latest insider buys/sells across all stocks with top-tickers chart
-- **Per-Ticker View** - Insider trades for individual companies
+- **Per-Ticker View** - Full insider trade history (back to IPO) with quarterly grouping, insider summary cards, stacked bar chart, hover tooltips with quarterly breakdowns, and per-insider dropdown filter
 
 ### Support Page (`/support`)
 - **Panda Fund Dashboard** - Transparency page showing monthly funding progress, cost breakdown, and funding history chart (ECharts)
@@ -43,7 +43,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 - **Sentiment** - Market mood (CNN Fear & Greed), news sentiment (Finnhub), Reddit buzz (ApeWisdom), NLP news (Alpha Vantage)
 - **Vitals** - Employee headcount (People Data Labs), culture ratings (Glassdoor), App Store ratings (Apple iTunes)
 - **SEC Filings** - Direct links to the company's SEC filings
-- **Insider Trading** - Recent Form 4 insider transactions
+- **Insider Trading** - Full insider trade history with quarterly groups, insider cards with hover tooltips, buy/sell timeline chart, per-insider filter, and SEC-resolved officer titles (CEO, CFO, etc.)
 
 ### Investor Pages
 - **Holdings Tab** - Full portfolio with activity badges and percentage allocations
@@ -76,7 +76,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 | Analyst Data | `yfinance` (free) + `finnhub-python` (optional) |
 | Sentiment | CNN, Finnhub, ApeWisdom, Alpha Vantage |
 | Vitals | People Data Labs, Glassdoor (RapidAPI), Apple iTunes |
-| Insider Data | OpenInsider (scraped) + Supabase `insider_trades` table |
+| Insider Data | OpenInsider (scraped, full history) + SEC Form 4 XML (title resolution) + Supabase `insider_trades` table |
 | Caching | Supabase Postgres (L2, survives deploys) + disk JSON (L3 fallback) |
 | Hosting | Railway (auto-deploy from main) |
 | Domain | [paperpanda.io](https://paperpanda.io) |
@@ -198,16 +198,18 @@ All endpoints are **cache-first** — data is always served from cache, and exte
 
 On startup, L1 is hydrated from Supabase (one query for all ~100 funds) with a **30-second timeout** — if Supabase is slow or unavailable, the app falls back to disk rather than hanging. If Supabase is unavailable, falls back to disk. Every successful API fetch writes through to all tiers. Expired L2 data is returned as stale fallback (never dropped on TTL expiry).
 
-#### Insider Trades (4-tier with stale fallback)
+#### Insider Trades (hot/cold architecture with 4-tier stale fallback)
 
 | Tier | Storage | Description |
 |------|---------|-------------|
 | L1 | In-memory dict (5-10 min TTL) | Fast path, sub-ms |
-| L2 | Supabase `insider_trades` table | Dedicated typed table, no TTL |
-| L3 | OpenInsider scrape | Fallback when DB is empty/down |
+| L2 | Supabase `insider_trades` table (hot, 30-day window) | Dedicated typed table, synced every 30 min |
+| L2.5 | OpenInsider screener scrape (full history, paginated) | All-time history via `fd=0`/`td=0` params, up to 300 trades |
+| L2.6 | Supabase `insider_purchases_history` table (cold, permanent) | Historical purchases, never deleted |
+| L3 | OpenInsider scrape + backfill | Fallback when DB is empty/down |
 | L4 | Stale L1 data | Last resort — never show errors to users |
 
-The `insider_sync` cron worker scrapes OpenInsider every 30 minutes and upserts to Supabase. If all upstream sources fail, stale L1 data is returned instead of empty results.
+Per-ticker data merges hot table → OpenInsider scrape → cold table, deduplicated by `sec_url`. The `insider_sync` cron worker scrapes OpenInsider every 30 minutes and upserts to Supabase. Title resolution fetches raw SEC Form 4 XML to replace "See Remarks" with real officer titles (CEO, CFO, etc.).
 
 ### What gets cached in Supabase
 

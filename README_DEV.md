@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-26 (Notification bell system: Supabase-backed, 3 sources, HTMX bell/dropdown/toast/history, 48h retention, performance optimized)
+> Last updated: 2026-02-27 (Insider trading UX overhaul: quarterly groups, insider cards with hover tooltips, timeline chart, per-insider dropdown filter, full trade history via screener pagination, SEC Form 4 XML title resolution)
 
 ---
 
@@ -223,7 +223,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── market_data.py                # S&P 500 heatmap, most-added, ticker search (~8K NYSE/NASDAQ listings)
     ├── company_filings.py            # SEC filing links for stock pages
     ├── aum_data.py                   # Capital Deployed: AUM (Form ADV), XBRL cash, deployment ratios, leaderboard builder
-    ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale)
+    ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale) + display helpers (quarterly groups, insider cards, chart data, title resolution via SEC XML)
     ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
@@ -751,21 +751,31 @@ HTMX lazy-load:
     Both miss → fetches from SEC, writes through to L1 + L2 + L3
 ```
 
-#### Insider Trades (4-tier stale-while-revalidate)
+#### Insider Trades (hot/cold with 6-tier stale-while-revalidate)
 
 ```
-Cache Tiers:
-  L1: in-memory dict with 5-10 min TTL (sub-ms)
-  L2: Supabase insider_trades dedicated table (no TTL, typed columns)
-  L3: OpenInsider scrape (fallback when DB empty/unavailable)
-  L4: Stale L1 data (last resort — never show empty/error to users)
+Cache Tiers (per-ticker):
+  L1:   in-memory dict with 10 min TTL (sub-ms)
+  L2:   Supabase insider_trades table (hot, 30-day rolling window)
+  L2.5: OpenInsider screener scrape (full history: fd=0, td=0, paginated up to 300 trades)
+  L2.6: Supabase insider_purchases_history table (cold, permanent purchases archive)
+  L3:   OpenInsider scrape + backfill to Supabase (when L2 is empty)
+  L4:   Stale L1 data (last resort — never show empty/error to users)
 
-Data flow (insider_trading.py):
+Data flow (insider_trading.py → get_ticker_insider_trades):
   _get_cached_with_stale(key, ttl) → returns (data, is_fresh) tuple
   - Fresh L1 hit → return immediately
-  - L1 expired → try L2 Supabase query
-  - L2 fails → try L3 OpenInsider scrape
-  - All fail → return stale L1 data (L4) instead of empty list
+  - L1 expired → L2 hot table query (by ticker)
+  - Merge L2.5 OpenInsider screener (all-time history, dedup by sec_url)
+  - Merge L2.6 cold table purchases (fill gaps OpenInsider might miss)
+  - All fail → L3 scrape + backfill → L4 stale L1
+
+Display pipeline (prepare_ticker_display):
+  1. Resolve "See Remarks" titles via SEC Form 4 XML (cached in memory)
+  2. Group by insider → cards with quarterly breakdown tooltips
+  3. Group by quarter → collapsible <details> sections
+  4. Build Chart.js data → stacked bar chart (buy/sell per quarter)
+  5. Pre-compute per-insider chart data → instant dropdown filter switching
 
 Sync worker (insider_sync.py, Railway cron every 30 min):
   1. Scrape 3 OpenInsider pages (all, purchases, sales)
@@ -947,26 +957,48 @@ the 13F equity value in muted text with a `13F` superscript badge. Deployment ra
 cannot be calculated without ADV data.
 
 ### 5.12 Insider Trading Module (`insider_trading.py` + `insider_sync.py`)
-Dedicated insider trading system with its own Supabase table and sync worker.
+Dedicated insider trading system with its own Supabase tables, sync worker, and rich per-ticker display pipeline.
 
 **Architecture:**
-- `insider_trades` table in Supabase (dedicated, typed columns — NOT the `api_cache` JSONB table)
+- **Hot table** (`insider_trades`): 30-day rolling window, synced every 30 min from OpenInsider
+- **Cold table** (`insider_purchases_history`): permanent record of all historical purchases, never deleted
 - `insider_sync.py` cron worker scrapes OpenInsider every 30 min, upserts via `ON CONFLICT (sec_url) DO UPDATE`
 - `insider_trading.py` serves data with 4-tier stale-while-revalidate fallback
+- Per-ticker data merges: hot table → OpenInsider screener (full history) → cold table, deduplicated by `sec_url`
 
 **Data model (`InsiderTrade` dataclass):**
 - `filing_date`, `trade_date`, `ticker`, `company_name`, `insider_name`, `title`
 - `trade_type` (Purchase, Sale, Sale+OE), `price`, `qty`, `owned`, `delta_own`, `value`
 - `sec_url` (unique key, link to SEC Form 4 filing)
+- `to_db_row()` for hot table, `to_history_row()` for cold table, `from_db_row()` / `from_history_row()` class methods
 
 **Key functions:**
 | Function | Description |
 |---|---|
 | `get_latest_insider_trades(trade_type, count)` | Global screener: L1→L2→L3→L4 stale fallback |
-| `get_ticker_insider_trades(ticker)` | Per-ticker: L1→L2→L3 scrape+backfill→L4 stale |
-| `aggregate_top_tickers(trades, limit)` | Aggregate by ticker for chart (net flow, insider details) |
+| `get_ticker_insider_trades(ticker)` | Per-ticker: L1→L2 hot→L2.5 OI screener→L2.6 cold→L3→L4 stale |
+| `aggregate_top_tickers(trades, limit, mixed)` | Aggregate by ticker for chart (net flow, insider details) |
+| `prepare_ticker_display(trades)` | Builds structured display data: insiders, quarters, chart, per_insider_chart |
+| `_resolve_see_remarks_titles(trades)` | Fetches raw SEC Form 4 XML, extracts real titles from `<remarks>`, abbreviates (CEO, CFO, etc.), caches in memory |
+| `_scrape_openinsider_ticker(ticker, max_pages)` | Screener endpoint with `fd=0`/`td=0` for full history, paginated (up to 300 trades) |
 | `_scrape_openinsider_global(trade_type, count)` | L3 fallback: direct scrape of OpenInsider |
 | `_scrape_and_backfill_ticker(ticker)` | L3 fallback: scrape + upsert back to Supabase |
+| `_shorten_title(title)` | Abbreviates verbose officer titles: "Chief Executive Officer" → "CEO" |
+
+**Per-ticker display pipeline (`prepare_ticker_display`):**
+1. **Title resolution**: fetches SEC Form 4 XML for "See Remarks" insiders, extracts real title from `<remarks>`, falls back to `<isDirector>`/`<isOfficer>` flags
+2. **Insider grouping**: aggregates trades by insider name with buy/sell counts, total values, and per-quarter breakdown (for hover tooltip)
+3. **Quarterly grouping**: groups trades by quarter (newest-first) with buy/sell counts and total value
+4. **Chart data**: builds Chart.js stacked bar data (chronological) with buy/sell values per quarter
+5. **Per-insider chart**: pre-computes per-insider-per-quarter values for the dropdown filter to swap chart datasets instantly
+
+**Title resolution (`_resolve_see_remarks_titles`):**
+- Strips `/xslF345X03/` XSLT prefix from sec_url to get raw XML
+- Primary: extracts title from `<remarks>` via regex `r"Officer title:\s*(.+?)\."`
+- Fallback: checks `<officerTitle>` (if not "See Remarks"), then `<isDirector>` → "Dir", `<isTenPercentOwner>` → "10% Owner"
+- Abbreviates via `_TITLE_ABBREVS` mapping (20+ C-suite abbreviations)
+- Cached in `_title_cache` dict (keyed by insider name + ticker) — zero SEC requests on repeat views
+- Rate-limited to 0.15s between SEC requests, capped at 10 insiders per call
 
 **Sync worker (`insider_sync.py`):**
 - Entry point: `uv run filings-insider-sync`
@@ -1086,7 +1118,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/api/vitals/{ticker}` | `vitals_data` | Glassdoor, PDL, Apple iTunes | `partials/vitals.html` |
 | GET | `/api/company-filings/{ticker}` | `company_filings_tab` | SEC EDGAR | `partials/company_filings.html` |
 | GET | `/api/insider-trades` | `insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/insider_trades.html` |
-| GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/stock_insider_trades.html` |
+| GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | Hot→OI screener→Cold→stale L1 + title resolution | `partials/stock_insider_trades.html` |
 | GET | `/api/retail/leaderboard` | `retail_leaderboard_api` | ApeWisdom + CNN Fear & Greed | `partials/retail_leaderboard.html` |
 | GET | `/api/ticker-search-index` | `ticker_search_index` | NASDAQ Trader + S&P 500 + cache | JSON response |
 | GET | `/api/heatmap` | `heatmap` | yfinance (30-min cache) + Wikipedia | `partials/heatmap.html` |
@@ -1245,6 +1277,10 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   │     ├── lazy-loads partials/vitals.html via fetch(/api/vitals/{ticker})
   │     ├── lazy-loads partials/company_filings.html via fetch(/api/company-filings/{ticker})
   │     └── lazy-loads partials/stock_insider_trades.html via fetch(/api/insider-trades/{ticker})
+  │           ├── Insider summary cards row (scrollable, with hover tooltip showing quarterly breakdown)
+  │           ├── Chart.js stacked bar chart (buy/sell values per quarter, chronological)
+  │           ├── Filter bar: All|Buys|Sells buttons + per-insider dropdown select
+  │           └── Quarterly <details> sections (collapsible, newest-first, trade tables with data-insider-name/type attrs)
   ├── support.html (Panda Fund transparency dashboard)
   │     ├── Progress bar with goal-reached badge ($400 monthly goal, capped on frontend)
   │     ├── Stripe Buy Button (one-time) + Pricing Table (recurring) with tab toggle
@@ -1534,6 +1570,12 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Capital Deployed: CRD number cleanup (Appaloosa fix, terminated CRDs cleared for Greenlight/Scion/Omega/Aquamarine)
 - [x] Capital Deployed: 13F equity fallback for AUM column when no Form ADV data exists
 - [x] Capital Deployed: Unified `.pp-tooltip` CSS system with info icons, data cell tooltips, contextual explanations
+- [x] Insider trading UX overhaul: quarterly groups, insider summary cards, stacked bar timeline chart, buy/sell/all filters, collapsible `<details>` sections
+- [x] Insider card hover tooltips: quarterly breakdown with buys, sells, dollar values, and % of position sold
+- [x] Per-insider dropdown filter: filters chart AND quarterly accordions by individual insider (dual-filter AND logic with type filter)
+- [x] Full trade history: switched from per-ticker URL (~40 trades) to screener endpoint with `fd=0`/`td=0` for all-time history (paginated, up to 300 trades)
+- [x] Hot/cold table architecture: `insider_trades` (30-day rolling) + `insider_purchases_history` (permanent), merged with OpenInsider scrape
+- [x] SEC Form 4 XML title resolution: "See Remarks" → real officer titles (CEO, CFO, CTO, etc.) via `<remarks>` parsing + `<isDirector>`/`<isOfficer>` fallback
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
