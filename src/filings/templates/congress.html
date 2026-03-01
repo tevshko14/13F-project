@@ -727,12 +727,20 @@
 
             momChart.setOption({
                 grid: { left: 40, right: 16, top: 30, bottom: 60 },
-                legend: { data: ['Buys', 'Sells'], top: 0 },
+                legend: {
+                    data: ['Buys', 'Sells'], top: 0, textStyle: { color: axisColor },
+                    formatter: function(name) {
+                        if (momSelected && momSelected[name] === false) {
+                            return name.split('').join('\u0336') + '\u0336';
+                        }
+                        return name;
+                    }
+                },
                 xAxis: {
                     type: 'category', data: mTickers,
-                    axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }
+                    axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor }
                 },
-                yAxis: { type: 'value', name: 'Trades' },
+                yAxis: { type: 'value', name: 'Trades', nameTextStyle: { color: axisColor }, axisLabel: { color: axisColor } },
                 tooltip: {
                     trigger: 'axis', axisPointer: { type: 'shadow' },
                     formatter: function(params) {
@@ -763,6 +771,11 @@
                         barMaxWidth: 36
                     }
                 ]
+            });
+            var momSelected = { 'Buys': true, 'Sells': true };
+            momChart.on('legendselectchanged', function(params) {
+                momSelected = params.selected;
+                momChart.setOption({ legend: {} });  // triggers formatter re-eval
             });
             momChart.on('click', function(params) { var d = momentumData[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
             if (!window._cgCharts) window._cgCharts = {};

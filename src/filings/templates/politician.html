@@ -181,17 +181,20 @@
     }
     .pol-chart-wrapper {
         display: flex;
-        gap: 1.5em;
         align-items: center;
+        justify-content: center;
+        gap: 2em;
+        flex-wrap: wrap;
+        overflow: visible;
     }
     .pol-chart-container {
-        width: 280px;
-        height: 280px;
+        width: 480px;
+        height: 480px;
         flex-shrink: 0;
+        overflow: visible;
     }
     .pol-chart-legend {
-        flex: 1;
-        min-width: 0;
+        min-width: 180px;
     }
     .pol-legend-item {
         display: flex;
@@ -231,7 +234,7 @@
 
     @media (max-width: 768px) {
         .pol-chart-wrapper { flex-direction: column; }
-        .pol-chart-container { width: 100%; max-width: 280px; margin: 0 auto; }
+        .pol-chart-container { width: 100%; max-width: 480px; }
     }
 
     /* ── Responsive ── */
@@ -412,7 +415,7 @@
             },
             series: [{
                 type: 'pie',
-                radius: ['45%', '78%'],
+                radius: ['32%', '55%'],
                 center: ['50%', '50%'],
                 avoidLabelOverlap: true,
                 padAngle: 2,
