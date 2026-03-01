@@ -1,0 +1,872 @@
+{% extends "base.html" %}
+{% block title %}Congress Trading — STOCK Act Disclosures | PaperPanda{% endblock %}
+{% block meta_description %}Track congressional stock trading. See what House and Senate members are buying and selling — powered by STOCK Act disclosures.{% endblock %}
+{% block og_title %}Congress Trading — STOCK Act Disclosures | PaperPanda{% endblock %}
+{% block og_description %}Track what Congress is buying and selling. House & Senate stock trading from STOCK Act disclosures.{% endblock %}
+{% block twitter_title %}Congress Trading — STOCK Act Disclosures | PaperPanda{% endblock %}
+{% block twitter_description %}Track congressional stock trading. See what House and Senate members are buying and selling.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Congress Trading"}
+    ]
+}
+</script>
+{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>Congress Trading</h1>
+    <p>STOCK Act disclosures — track what the House &amp; Senate are buying and selling</p>
+</hgroup>
+
+{# ── Subtab Navigation ── #}
+<style>
+    .cg-subtab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: var(--pp-overlay-50);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .cg-subtab:hover { color: var(--pp-text-secondary); }
+    .cg-subtab.active {
+        color: #1976d2;
+        border-bottom-color: #1976d2;
+    }
+    .cg-panel { display: none; opacity: 0; transition: opacity 0.25s ease; }
+    .cg-panel.active { display: block; opacity: 1; }
+
+    /* ── Stats bar ── */
+    .cg-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.5em;
+        margin-bottom: 2em;
+        padding: 1em 1.5em;
+        background: var(--pp-surface-alt);
+        border-radius: 12px;
+        border: 1px solid var(--pp-overlay-8);
+    }
+    .cg-stat {
+        text-align: center;
+    }
+    .cg-stat-value {
+        font-size: 1.5em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .cg-stat-label {
+        font-size: 0.78em;
+        color: var(--pp-overlay-50);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+
+    /* ── Chamber visualization section ── */
+    .cg-chamber-section {
+        margin-bottom: 2em;
+    }
+    .cg-chamber-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.8em;
+    }
+    .cg-chamber-title {
+        font-size: 1.15em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .cg-party-legend {
+        display: flex;
+        gap: 1em;
+        font-size: 0.82em;
+        color: var(--pp-overlay-50);
+    }
+    .cg-legend-dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        margin-right: 4px;
+        vertical-align: middle;
+    }
+
+    /* ── Dashboard Cards (reuse from grand_portfolio) ── */
+    .cg-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 12px;
+        padding: 1.5em;
+        background: var(--pp-surface);
+        box-shadow: var(--pp-card-shadow-sm);
+        margin-bottom: 2em;
+    }
+    .cg-card-header {
+        font-size: 1.05em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .cg-card-sub {
+        font-size: 0.82em;
+        color: var(--pp-overlay-50);
+        margin-bottom: 1em;
+    }
+
+    /* ── Table styling ── */
+    .cg-table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+        font-size: max(14px, 0.875rem);
+    }
+    .cg-table thead th {
+        padding: 12px 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-text-muted);
+        background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border);
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    .cg-table tbody td {
+        padding: 14px 20px;
+        vertical-align: middle;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+        line-height: 1.5;
+        white-space: normal;
+    }
+    .cg-table tbody tr {
+        transition: background-color 0.15s ease;
+    }
+    .cg-table tbody tr:hover {
+        background-color: var(--pp-surface-alt);
+    }
+    .cg-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    /* ── Party badges ── */
+    .cg-party-badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.78em;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .cg-party-badge--d { background: rgba(37, 99, 235, 0.12); color: #2563eb; }
+    .cg-party-badge--r { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
+    .cg-party-badge--i { background: rgba(107, 114, 128, 0.12); color: #6b7280; }
+
+    /* ── Action chips ── */
+    .cg-action {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.78em;
+        font-weight: 600;
+    }
+    .cg-action--buy { background: rgba(16, 185, 129, 0.12); color: #059669; }
+    .cg-action--sell { background: rgba(239, 68, 68, 0.12); color: #dc2626; }
+    .cg-action--exchange { background: rgba(107, 114, 128, 0.12); color: #6b7280; }
+
+    /* ── Holdings overflow ── */
+    .cg-overflow { display: none; }
+    .cg-fade { position: relative; }
+    .cg-fade::after {
+        content: '';
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        height: 60px;
+        background: var(--pp-gradient-fade);
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+    }
+    .cg-fade.expanded::after { opacity: 0; height: 0; }
+
+    @media (max-width: 768px) {
+        .cg-stats { gap: 1em; padding: 0.8em; }
+        .cg-stat-value { font-size: 1.2em; }
+        .cg-table thead th, .cg-table tbody td {
+            padding: 10px 12px; font-size: 13px;
+        }
+    }
+</style>
+
+<div style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
+            <li>
+                <button class="cg-subtab{% if view == 'congress' %} active{% endif %}"
+                        data-view="congress" onclick="switchCongressView('congress')">
+                    Congress
+                </button>
+            </li>
+            <li>
+                <button class="cg-subtab{% if view == 'holdings' %} active{% endif %}"
+                        data-view="holdings" onclick="switchCongressView('holdings')">
+                    Holdings
+                </button>
+            </li>
+            <li>
+                <button class="cg-subtab{% if view == 'activity' %} active{% endif %}"
+                        data-view="activity" onclick="switchCongressView('activity')">
+                    Activity
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 1: Congress — Chamber Dot Visualization                  #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-congress" class="cg-panel{% if view == 'congress' %} active{% endif %}">
+
+{# ── Stats Bar ── #}
+<div class="cg-stats">
+    <div class="cg-stat">
+        <div class="cg-stat-value">{{ stats.total_members }}</div>
+        <div class="cg-stat-label">Politicians</div>
+    </div>
+    <div class="cg-stat">
+        <div class="cg-stat-value">{{ "{:,}".format(stats.total_trades) }}</div>
+        <div class="cg-stat-label">Trades</div>
+    </div>
+    <div class="cg-stat">
+        <div class="cg-stat-value">{{ "{:,}".format(stats.unique_tickers) }}</div>
+        <div class="cg-stat-label">Stocks</div>
+    </div>
+    <div class="cg-stat">
+        <div class="cg-stat-value">{{ stats.house_count }}</div>
+        <div class="cg-stat-label">House</div>
+    </div>
+    <div class="cg-stat">
+        <div class="cg-stat-value">{{ stats.senate_count }}</div>
+        <div class="cg-stat-label">Senate</div>
+    </div>
+    <div class="cg-stat">
+        <div class="cg-stat-value">{{ stats.date_range_start[:4] if stats.date_range_start else '—' }}–{{ stats.date_range_end[:4] if stats.date_range_end else '—' }}</div>
+        <div class="cg-stat-label">Date Range</div>
+    </div>
+</div>
+
+{# ── Senate Dot Visualization ── #}
+<div class="cg-chamber-section">
+    <div class="cg-chamber-header">
+        <div class="cg-chamber-title">🏛️ Senate ({{ chamber_viz.senate.total }} members)</div>
+        <div class="cg-party-legend">
+            <span><span class="cg-legend-dot" style="background:#2563eb;"></span> Democrat {{ chamber_viz.senate.democrat }}</span>
+            <span><span class="cg-legend-dot" style="background:#dc2626;"></span> Republican {{ chamber_viz.senate.republican }}</span>
+            {% if chamber_viz.senate.independent > 0 %}
+            <span><span class="cg-legend-dot" style="background:#6b7280;"></span> Independent {{ chamber_viz.senate.independent }}</span>
+            {% endif %}
+        </div>
+    </div>
+    <div id="senate-chart" style="width: 100%; height: {{ (chamber_viz.senate.rows * 38 + 60) | int }}px; min-height: 180px;"></div>
+</div>
+
+{# ── House Dot Visualization ── #}
+<div class="cg-chamber-section">
+    <div class="cg-chamber-header">
+        <div class="cg-chamber-title">🏛️ House ({{ chamber_viz.house.total }} members)</div>
+        <div class="cg-party-legend">
+            <span><span class="cg-legend-dot" style="background:#2563eb;"></span> Democrat {{ chamber_viz.house.democrat }}</span>
+            <span><span class="cg-legend-dot" style="background:#dc2626;"></span> Republican {{ chamber_viz.house.republican }}</span>
+            {% if chamber_viz.house.independent > 0 %}
+            <span><span class="cg-legend-dot" style="background:#6b7280;"></span> Independent {{ chamber_viz.house.independent }}</span>
+            {% endif %}
+        </div>
+    </div>
+    <div id="house-chart" style="width: 100%; height: {{ (chamber_viz.house.rows * 38 + 60) | int }}px; min-height: 250px;"></div>
+</div>
+
+{# ── Chamber Charts Script ── #}
+<script>
+(function() {
+    var senateData = {{ chamber_viz.senate.data | tojson }};
+    var houseData = {{ chamber_viz.house.data | tojson }};
+
+    function initChamberChart(containerId, data, cols) {
+        var el = document.getElementById(containerId);
+        if (!el || !data || data.length === 0) return;
+
+        window.requireECharts(function(err) {
+            if (err) {
+                el.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>';
+                return;
+            }
+
+            var chart = echarts.init(el);
+
+            chart.setOption({
+                grid: { left: 10, right: 10, top: 10, bottom: 10, containLabel: false },
+                xAxis: { type: 'value', show: false, min: -0.5, max: cols - 0.5 },
+                yAxis: { type: 'value', show: false, inverse: true, min: -0.5 },
+                tooltip: {
+                    trigger: 'item',
+                    formatter: function(params) {
+                        var d = params.data;
+                        if (!d) return '';
+                        var esc = window.escHtml || function(s){ return s; };
+                        var partyColor = d.color || '#6b7280';
+                        var html = '<div style="min-width: 180px;">';
+                        html += '<strong style="font-size:1.1em;">' + esc(d.name) + '</strong>';
+                        html += '<br/><span style="color:' + partyColor + ';font-weight:600;">'
+                             + esc(d.party) + '</span> — ' + esc(d.chamber) + ', ' + esc(d.state);
+                        html += '<br/><br/>Trades: <strong>' + d.total_trades + '</strong>';
+                        if (d.last_trade) html += '<br/>Last trade: ' + esc(d.last_trade);
+                        if (d.top_holdings && d.top_holdings.length > 0) {
+                            html += '<br/><br/><span style="opacity:0.6;">Top Holdings:</span>';
+                            for (var i = 0; i < d.top_holdings.length; i++) {
+                                var h = d.top_holdings[i];
+                                html += '<br/>&nbsp;&nbsp;<strong>' + esc(h.ticker) + '</strong>';
+                                if (h.est_value) html += ' — ' + esc(h.est_value);
+                            }
+                        }
+                        html += '</div>';
+                        return html;
+                    }
+                },
+                series: [{
+                    type: 'scatter',
+                    symbolSize: 28,
+                    data: data.map(function(d) {
+                        return {
+                            value: [d.x, d.y],
+                            name: d.name,
+                            member_id: d.member_id,
+                            party: d.party,
+                            party_short: d.party_short,
+                            state: d.state,
+                            chamber: d.chamber,
+                            total_trades: d.total_trades,
+                            last_trade: d.last_trade,
+                            top_holdings: d.top_holdings,
+                            color: d.color,
+                            itemStyle: { color: d.color }
+                        };
+                    }),
+                    label: {
+                        show: true,
+                        formatter: function(params) { return params.data.state || ''; },
+                        fontSize: 8,
+                        fontWeight: 'bold',
+                        fontFamily: 'monospace',
+                        color: '#fff',
+                        textBorderColor: 'transparent',
+                        position: 'inside'
+                    },
+                    emphasis: {
+                        scale: 1.5,
+                        label: { fontSize: 10 },
+                        itemStyle: { shadowBlur: 8, shadowColor: 'rgba(0,0,0,0.3)' }
+                    }
+                }]
+            });
+
+            chart.on('click', function(params) {
+                if (params.data && params.data.member_id) {
+                    window.location.href = '/politician/' + params.data.member_id;
+                }
+            });
+
+            // Store for resize
+            if (!window._cgCharts) window._cgCharts = {};
+            window._cgCharts[containerId] = chart;
+        });
+    }
+
+    initChamberChart('senate-chart', senateData, {{ chamber_viz.senate.cols }});
+    initChamberChart('house-chart', houseData, {{ chamber_viz.house.cols }});
+})();
+</script>
+
+{# ── Trade Frequency — Most Active Traders (Past 12 Months) ── #}
+{% if trade_frequency %}
+<div class="cg-card" style="margin-top: 1em;">
+    <div class="cg-card-header">Trade Frequency</div>
+    <div class="cg-card-sub">Most active congressional traders in the past 12 months — bars colored by party affiliation</div>
+    <div id="cg-frequency-chart" style="width: 100%; height: 700px;"></div>
+</div>
+<script>
+(function() {
+    var freqData = {{ trade_frequency | tojson }};
+    var el = document.getElementById('cg-frequency-chart');
+    if (!el || !freqData || freqData.length === 0) return;
+
+    window.requireECharts(function(err) {
+        if (err) { el.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+
+        var chart = echarts.init(el);
+        var esc = window.escHtml || function(s){ return s; };
+
+        var cs = getComputedStyle(document.documentElement);
+        var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+        var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
+        /* Reverse data so highest count is at top of horizontal chart */
+        var reversed = freqData.slice().reverse();
+
+        var labels = reversed.map(function(d) {
+            var parts = (d.name || '').split(' ');
+            var lastName = parts.length > 1 ? parts[parts.length - 1] : d.name;
+            return lastName + ' (' + d.state + ')';
+        });
+        var counts = reversed.map(function(d) { return d.trade_count; });
+        var colors = reversed.map(function(d) { return d.color; });
+
+        chart.setOption({
+            grid: { left: 130, right: 50, top: 10, bottom: 10 },
+            yAxis: {
+                type: 'category',
+                data: labels,
+                inverse: false,
+                axisLabel: {
+                    fontSize: 11, fontWeight: 'bold',
+                    color: function(value, index) { return reversed[index] ? reversed[index].color : axisColor; }
+                },
+                axisLine: { lineStyle: { color: gridColor } },
+                axisTick: { alignWithLabel: true, lineStyle: { color: gridColor } }
+            },
+            xAxis: {
+                type: 'value', name: 'Trades', nameTextStyle: { fontSize: 10, color: axisColor },
+                nameLocation: 'end',
+                minInterval: 1,
+                axisLabel: { color: axisColor },
+                splitLine: { lineStyle: { color: gridColor } }
+            },
+            tooltip: {
+                trigger: 'axis', axisPointer: { type: 'shadow' },
+                formatter: function(params) {
+                    if (!params || params.length === 0) return '';
+                    var d = reversed[params[0].dataIndex]; if (!d) return '';
+                    var html = '<div style="min-width: 200px;">';
+                    html += '<strong style="font-size:1.1em;">' + esc(d.name) + '</strong>';
+                    html += '<br/><span style="color:' + d.color + ';font-weight:600;">'
+                         + esc(d.party) + '</span> — ' + esc(d.chamber) + ', ' + esc(d.state);
+                    html += '<br/><br/>Trades (12 mo): <strong>' + d.trade_count + '</strong>';
+                    if (d.top_holdings && d.top_holdings.length > 0) {
+                        html += '<br/><br/><span style="opacity:0.6;">Top Holdings:</span>';
+                        for (var i = 0; i < d.top_holdings.length; i++) {
+                            var h = d.top_holdings[i];
+                            html += '<br/>&nbsp;&nbsp;<strong>' + esc(h.ticker) + '</strong> — ' + esc(h.name);
+                        }
+                    }
+                    if (d.recent_buys && d.recent_buys.length > 0) {
+                        html += '<br/><br/><span style="opacity:0.6;">Recent Buys:</span>';
+                        html += '<br/>&nbsp;&nbsp;';
+                        for (var j = 0; j < d.recent_buys.length; j++) {
+                            if (j > 0) html += ', ';
+                            html += '<strong style="color:#4ade80;">' + esc(d.recent_buys[j]) + '</strong>';
+                        }
+                    }
+                    html += '</div>';
+                    return html;
+                }
+            },
+            series: [{
+                type: 'bar', data: counts,
+                itemStyle: {
+                    color: function(params) { return colors[params.dataIndex] || '#6b7280'; },
+                    borderRadius: [0, 4, 4, 0]
+                },
+                barMaxWidth: 20,
+                label: {
+                    show: true, position: 'right', fontSize: 10,
+                    fontWeight: 'bold', color: 'rgba(255,255,255,0.5)',
+                    formatter: '{c}'
+                }
+            }]
+        });
+
+        chart.on('click', function(params) {
+            var d = reversed[params.dataIndex];
+            if (d && d.member_id) window.location.href = '/politician/' + d.member_id;
+        });
+
+        if (!window._cgCharts) window._cgCharts = {};
+        window._cgCharts['frequency'] = chart;
+    });
+})();
+</script>
+{% endif %}
+
+</div>{# end panel-congress #}
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 2: Holdings — Trending, Consensus, Momentum, Table      #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-holdings" class="cg-panel{% if view == 'holdings' %} active{% endif %}">
+
+{# ── Trending with Congress ── #}
+<div class="cg-card">
+    <div class="cg-card-header">Trending with Congress</div>
+    <div class="cg-card-sub">Top stocks bought by Congress members in the last 6 months — by unique buyers</div>
+    {% if trending %}
+    <div id="cg-trending-chart" style="width: 100%; height: 300px;"></div>
+    {% else %}
+    <p class="text-muted">No recent congressional purchases found.</p>
+    {% endif %}
+</div>
+
+{# ── Consensus Leaders ── #}
+<div class="cg-card">
+    <div class="cg-card-header">Consensus Leaders</div>
+    <div class="cg-card-sub">Top stocks by total congressional ownership — the most widely held names</div>
+    {% if consensus %}
+    <div id="cg-consensus-chart" style="width: 100%; height: 360px;"></div>
+    {% else %}
+    <p class="text-muted">No consensus data available.</p>
+    {% endif %}
+</div>
+
+{# ── Recent Momentum ── #}
+<div class="cg-card">
+    <div class="cg-card-header">Recent Momentum</div>
+    <div class="cg-card-sub">Most actively bought stocks by Congress in the last 90 days</div>
+    {% if momentum %}
+    <div id="cg-momentum-chart" style="width: 100%; height: 320px;"></div>
+    {% else %}
+    <p class="text-muted">No recent momentum data available.</p>
+    {% endif %}
+</div>
+
+{# ── All Holdings Table ── #}
+{% if consensus %}
+<div class="cg-card">
+    <div class="cg-card-header">All Congressional Holdings</div>
+    <div class="cg-card-sub">Stocks held by Congress members — ranked by number of holders</div>
+    <div class="pp-table-wrap cg-fade" id="cg-holdings-wrap">
+    <table class="cg-table sortable">
+        <thead>
+            <tr>
+                <th>Ticker</th>
+                <th>Company</th>
+                <th># Members</th>
+                <th>Est. Value</th>
+                <th>Top Holders</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in consensus %}
+            <tr{% if loop.index > 15 %} class="cg-overflow"{% endif %}>
+                <td><a href="{{ item.link }}"><strong style="font-family: monospace;">{{ item.ticker }}</strong></a></td>
+                <td class="text-small">{{ item.issuer[:40] }}</td>
+                <td><strong>{{ item.holders }}</strong></td>
+                <td class="text-small">{{ item.combined_value_fmt }}</td>
+                <td class="text-small">
+                    {% for h in item.top_holders[:3] %}
+                    {{ h }}{% if not loop.last %}, {% endif %}
+                    {% endfor %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    {% if consensus | length > 15 %}
+    <div style="text-align: center; margin-top: 1em;">
+        <button class="outline secondary" style="font-size: 0.85em; padding: 0.4em 1.5em;"
+                onclick="toggleCongressHoldings(this)">
+            <span>View All {{ consensus | length }} Stocks</span>
+            <span class="cg-expand-arrow" style="display:inline-block;transition:transform 0.3s;">▼</span>
+        </button>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{# ── Holdings Charts Script ── #}
+{% if trending or consensus or momentum %}
+<script>
+(function() {
+    window.requireECharts(function(err) {
+        if (err) return;
+
+        {% if trending %}
+        // ── Trending bar chart ──
+        var trendingData = {{ trending | tojson }};
+        var trendEl = document.getElementById('cg-trending-chart');
+        if (trendEl && trendingData.length > 0) {
+            var trendChart = echarts.init(trendEl);
+            var tTickers = trendingData.map(function(d) { return d.ticker; });
+            var tCounts = trendingData.map(function(d) { return d.add_count; });
+
+            var cs = getComputedStyle(document.documentElement);
+            var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+            var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
+            trendChart.setOption({
+                grid: { left: 40, right: 16, top: 10, bottom: 60 },
+                xAxis: {
+                    type: 'category', data: tTickers,
+                    axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor },
+                    axisLine: { lineStyle: { color: gridColor } },
+                    axisTick: { alignWithLabel: true }
+                },
+                yAxis: {
+                    type: 'value', name: 'Buyers', nameTextStyle: { fontSize: 10 },
+                    minInterval: 1,
+                    axisLabel: { color: axisColor },
+                    splitLine: { lineStyle: { color: gridColor } }
+                },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'shadow' },
+                    formatter: function(params) {
+                        if (!params || params.length === 0) return '';
+                        var d = trendingData[params[0].dataIndex];
+                        if (!d) return '';
+                        var esc = window.escHtml || function(s){ return s; };
+                        var html = '<strong style="font-size:1.15em;">' + esc(d.ticker) + '</strong>';
+                        html += '<br/><span style="opacity:0.7;">' + esc(d.name) + '</span>';
+                        html += '<br/><br/>Unique buyers: <strong>' + d.add_count + '</strong>';
+                        html += '<br/><span style="color:#2563eb;">D: ' + d.democrat + '</span>';
+                        html += ' &nbsp; <span style="color:#dc2626;">R: ' + d.republican + '</span>';
+                        if (d.top_traders && d.top_traders.length > 0) {
+                            html += '<br/><br/><span style="opacity:0.5;">Top Buyers:</span>';
+                            for (var i = 0; i < d.top_traders.length; i++) {
+                                html += '<br/>&nbsp;&nbsp;' + esc(d.top_traders[i]);
+                            }
+                        }
+                        return html;
+                    }
+                },
+                series: [{
+                    type: 'bar', data: tCounts,
+                    itemStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: '#059669' }, { offset: 1, color: '#34d399' }
+                        ]),
+                        borderRadius: [4, 4, 0, 0]
+                    },
+                    barMaxWidth: 36,
+                    label: { show: true, position: 'top', fontSize: 11, fontWeight: 'bold', color: 'rgba(0,0,0,0.5)' }
+                }]
+            });
+            trendChart.on('click', function(params) { var d = trendingData[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
+            if (!window._cgCharts) window._cgCharts = {};
+            window._cgCharts.trending = trendChart;
+        }
+        {% endif %}
+
+        {% if consensus %}
+        // ── Consensus Leaders horizontal bar chart ──
+        var consensusData = {{ consensus | tojson }};
+        var consEl = document.getElementById('cg-consensus-chart');
+        if (consEl && consensusData.length > 0) {
+            var consChart = echarts.init(consEl);
+            var cTickers = consensusData.map(function(d) { return d.ticker; }).reverse();
+            var cCounts = consensusData.map(function(d) { return d.holders; }).reverse();
+            var cDataRev = consensusData.slice().reverse();
+
+            consChart.setOption({
+                grid: { left: 80, right: 30, top: 10, bottom: 20 },
+                xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10 }, minInterval: 1 },
+                yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' } },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'shadow' },
+                    formatter: function(params) {
+                        if (!params || params.length === 0) return '';
+                        var d = cDataRev[params[0].dataIndex]; if (!d) return '';
+                        var esc = window.escHtml || function(s){ return s; };
+                        var html = '<strong style="font-size:1.15em;">' + esc(d.ticker) + '</strong>';
+                        html += '<br/><span style="opacity:0.7;">' + esc(d.issuer) + '</span>';
+                        html += '<br/><br/>Held by <strong>' + d.holders + '</strong> Congress member' + (d.holders > 1 ? 's' : '');
+                        html += '<br/>Est. value: <strong>' + esc(d.combined_value_fmt) + '</strong>';
+                        if (d.top_holders && d.top_holders.length > 0) {
+                            html += '<br/><br/><span style="opacity:0.5;">Top Holders:</span>';
+                            for (var i = 0; i < d.top_holders.length; i++) html += '<br/>&nbsp;&nbsp;' + esc(d.top_holders[i]);
+                        }
+                        return html;
+                    }
+                },
+                series: [{
+                    type: 'bar', data: cCounts,
+                    itemStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                            { offset: 0, color: '#1976d2' }, { offset: 1, color: '#42a5f5' }
+                        ]),
+                        borderRadius: [0, 4, 4, 0]
+                    },
+                    barMaxWidth: 28,
+                    label: { show: true, position: 'right', fontSize: 11, fontWeight: 'bold', color: 'rgba(0,0,0,0.5)', formatter: '{c}' }
+                }]
+            });
+            consChart.on('click', function(params) { var d = cDataRev[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
+            if (!window._cgCharts) window._cgCharts = {};
+            window._cgCharts.consensus = consChart;
+        }
+        {% endif %}
+
+        {% if momentum %}
+        // ── Momentum vertical bar chart ──
+        var momentumData = {{ momentum | tojson }};
+        var momEl = document.getElementById('cg-momentum-chart');
+        if (momEl && momentumData.length > 0) {
+            var momChart = echarts.init(momEl);
+            var mTickers = momentumData.map(function(d) { return d.ticker; });
+            var mBuys = momentumData.map(function(d) { return d.buys; });
+            var mSells = momentumData.map(function(d) { return -d.sells; });
+
+            momChart.setOption({
+                grid: { left: 40, right: 16, top: 30, bottom: 60 },
+                legend: { data: ['Buys', 'Sells'], top: 0 },
+                xAxis: {
+                    type: 'category', data: mTickers,
+                    axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }
+                },
+                yAxis: { type: 'value', name: 'Trades' },
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'shadow' },
+                    formatter: function(params) {
+                        if (!params || params.length === 0) return '';
+                        var d = momentumData[params[0].dataIndex]; if (!d) return '';
+                        var esc = window.escHtml || function(s){ return s; };
+                        var html = '<strong style="font-size:1.15em;">' + esc(d.ticker) + '</strong>';
+                        html += '<br/><span style="opacity:0.7;">' + esc(d.name) + '</span>';
+                        html += '<br/><br/><span style="color:#059669;">Buys: ' + d.buys + '</span>';
+                        html += ' &nbsp; <span style="color:#dc2626;">Sells: ' + d.sells + '</span>';
+                        html += '<br/>Net: <strong style="color:' + (d.net >= 0 ? '#059669' : '#dc2626') + ';">' + (d.net >= 0 ? '+' : '') + d.net + '</strong>';
+                        if (d.traders && d.traders.length > 0) {
+                            html += '<br/><br/><span style="opacity:0.5;">Active traders:</span>';
+                            for (var i = 0; i < d.traders.length; i++) html += '<br/>&nbsp;&nbsp;' + esc(d.traders[i]);
+                        }
+                        return html;
+                    }
+                },
+                series: [
+                    {
+                        name: 'Buys', type: 'bar', stack: 'total', data: mBuys,
+                        itemStyle: { color: '#059669', borderRadius: [4, 4, 0, 0] },
+                        barMaxWidth: 36
+                    },
+                    {
+                        name: 'Sells', type: 'bar', stack: 'total', data: mSells,
+                        itemStyle: { color: '#dc2626', borderRadius: [0, 0, 4, 4] },
+                        barMaxWidth: 36
+                    }
+                ]
+            });
+            momChart.on('click', function(params) { var d = momentumData[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
+            if (!window._cgCharts) window._cgCharts = {};
+            window._cgCharts.momentum = momChart;
+        }
+        {% endif %}
+    });
+})();
+</script>
+{% endif %}
+
+</div>{# end panel-holdings #}
+
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 3: Activity — Recent Trade Feed                          #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-activity" class="cg-panel{% if view == 'activity' %} active{% endif %}">
+    <div id="cg-activity-dashboard"
+         hx-get="/api/congress-activity?timeframe=ALL&amp;chamber=all&amp;party=all"
+         hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
+         hx-swap="innerHTML">
+        <article>
+            <p aria-busy="true"><span class="spinner"></span> Loading congressional activity intelligence...</p>
+        </article>
+    </div>
+</div>{# end panel-activity #}
+
+
+{# ── Tab Switching + URL Sync Script ── #}
+<script>
+(function() {
+    window.switchCongressView = function(view) {
+        document.querySelectorAll('.cg-subtab').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.view === view);
+        });
+        document.querySelectorAll('.cg-panel').forEach(function(panel) {
+            panel.classList.remove('active');
+        });
+        var target = document.getElementById('panel-' + view);
+        if (target) target.classList.add('active');
+
+        // Resize charts when switching to holdings
+        if (view === 'holdings' && window._cgCharts) {
+            setTimeout(function() {
+                for (var key in window._cgCharts) {
+                    if (window._cgCharts[key] && window._cgCharts[key].resize) {
+                        window._cgCharts[key].resize();
+                    }
+                }
+            }, 50);
+        }
+
+        // Resize chamber charts when switching to congress
+        if (view === 'congress' && window._cgCharts) {
+            setTimeout(function() {
+                if (window._cgCharts['senate-chart']) window._cgCharts['senate-chart'].resize();
+                if (window._cgCharts['house-chart']) window._cgCharts['house-chart'].resize();
+            }, 50);
+        }
+
+        if (window.initSortableTables) window.initSortableTables();
+
+        var url = new URL(window.location);
+        url.searchParams.set('view', view);
+        history.replaceState(null, '', url.toString());
+    };
+
+    window.addEventListener('popstate', function() {
+        var params = new URLSearchParams(window.location.search);
+        var view = params.get('view') || 'congress';
+        switchCongressView(view);
+    });
+
+    // Debounced window resize handler — keeps all charts responsive
+    var _cgResizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(_cgResizeTimer);
+        _cgResizeTimer = setTimeout(function() {
+            if (!window._cgCharts) return;
+            for (var key in window._cgCharts) {
+                if (window._cgCharts[key] && window._cgCharts[key].resize) {
+                    window._cgCharts[key].resize();
+                }
+            }
+        }, 200);
+    });
+
+    window.toggleCongressHoldings = function(btn) {
+        var rows = document.querySelectorAll('.cg-overflow');
+        var wrap = document.getElementById('cg-holdings-wrap');
+        var label = btn.querySelector('span:first-child');
+        var arrow = btn.querySelector('.cg-expand-arrow');
+        var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+        rows.forEach(function(row) { row.style.display = expanded ? 'none' : ''; });
+        if (wrap) wrap.classList.toggle('expanded', !expanded);
+        if (arrow) arrow.style.transform = expanded ? '' : 'rotate(180deg)';
+        if (label) label.textContent = expanded
+            ? 'View All ' + (rows.length + 15) + ' Stocks'
+            : 'Show Top 15';
+        if (window.initSortableTables) window.initSortableTables();
+    };
+})();
+</script>
+
+{% endblock %}

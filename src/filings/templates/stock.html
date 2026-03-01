@@ -98,6 +98,13 @@
                     Insider Trading
                 </button>
             </li>
+            <li>
+                <button id="tab-congress-btn"
+                        class="stock-tab"
+                        onclick="switchTab('congress')">
+                    Congress
+                </button>
+            </li>
         </ul>
     </nav>
 </div>
@@ -877,6 +884,15 @@
     </div>
 </div>
 
+{# ── Congress Tab ── #}
+<div id="tab-congress" class="tab-content">
+    <div id="congress-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading congressional trading data...
+        </p>
+    </div>
+</div>
+
 {# ── Quarter Tab Switching ── #}
 <script>
 window.switchQuarterTab = function(idx) {
@@ -922,6 +938,7 @@ window.toggleHolders = function(btn) {
     var vitalsLoaded = false;
     var filingsLoaded = false;
     var insiderLoaded = false;
+    var congressLoaded = false;
 
     var _tabBtns = document.querySelectorAll('.stock-tab');
     var _tabPanels = document.querySelectorAll('.tab-content');
@@ -1110,6 +1127,39 @@ window.toggleHolders = function(btn) {
                 document.getElementById('insider-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                     'Insider trading data requires a ticker symbol.</p>';
+            }
+        }
+
+        // Lazy-load congressional trading on first click
+        if (tab === 'congress' && !congressLoaded) {
+            congressLoaded = true;
+            {% if stock_info.ticker %}
+            var congressUrl = '/api/stock/{{ stock_info.ticker }}/congress';
+            {% else %}
+            var congressUrl = null;
+            {% endif %}
+
+            if (congressUrl) {
+                fetch(congressUrl)
+                    .then(function(resp) {
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                        return resp.text();
+                    })
+                    .then(function(html) {
+                        var el = document.getElementById('congress-content');
+                        el.innerHTML = html;
+                        activateScripts(el);
+                        if (window.initSortableTables) window.initSortableTables();
+                    })
+                    .catch(function() {
+                        document.getElementById('congress-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load congressional trading data. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('congress-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Congressional trading data requires a ticker symbol.</p>';
             }
         }
     };

@@ -1,0 +1,355 @@
+{# Congress Activity Dashboard — mirrors Funds activity feed UI #}
+{# Loaded via HTMX into #cg-activity-dashboard #}
+
+{# ── Sticky Stats Bar ── #}
+{% if stats %}
+<div class="activity-stats-bar">
+    <div class="stat">
+        <span class="stat-label">$Value Sentiment</span>
+        <span class="stat-value">
+            <span class="badge badge-{{ stats.value_sentiment|lower }}">{{ stats.value_sentiment }}</span>
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Net Dollar Flow</span>
+        <span class="stat-value {% if stats.net_dollar_flow > 0 %}bullish{% elif stats.net_dollar_flow < 0 %}bearish{% endif %}">
+            {% if stats.net_dollar_flow >= 1e9 or stats.net_dollar_flow <= -1e9 %}
+                {% if stats.net_dollar_flow >= 0 %}+{% endif %}${{ "%.1f"|format(stats.net_dollar_flow / 1e9) }}B
+            {% elif stats.net_dollar_flow >= 1e6 or stats.net_dollar_flow <= -1e6 %}
+                {% if stats.net_dollar_flow >= 0 %}+{% endif %}${{ "%.0f"|format(stats.net_dollar_flow / 1e6) }}M
+            {% else %}
+                {% if stats.net_dollar_flow >= 0 %}+{% endif %}${{ "{:,.0f}".format(stats.net_dollar_flow|int) }}
+            {% endif %}
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Buying</span>
+        <span class="stat-value bullish">
+            {{ stats.total_buys }} trades
+            {% if stats.total_buy_value >= 1e9 %}
+                · ${{ "%.1f"|format(stats.total_buy_value / 1e9) }}B
+            {% elif stats.total_buy_value >= 1e6 %}
+                · ${{ "%.0f"|format(stats.total_buy_value / 1e6) }}M
+            {% elif stats.total_buy_value >= 1e3 %}
+                · ${{ "%.0f"|format(stats.total_buy_value / 1e3) }}K
+            {% endif %}
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Selling</span>
+        <span class="stat-value bearish">
+            {{ stats.total_sells }} trades
+            {% if stats.total_sell_value >= 1e9 %}
+                · ${{ "%.1f"|format(stats.total_sell_value / 1e9) }}B
+            {% elif stats.total_sell_value >= 1e6 %}
+                · ${{ "%.0f"|format(stats.total_sell_value / 1e6) }}M
+            {% elif stats.total_sell_value >= 1e3 %}
+                · ${{ "%.0f"|format(stats.total_sell_value / 1e3) }}K
+            {% endif %}
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Most Traded</span>
+        <span class="stat-value">
+            {% if stats.most_traded_ticker %}
+            <a href="/stock/{{ stats.most_traded_ticker }}" style="color: inherit; text-decoration: none; font-weight: 600;">{{ stats.most_traded_ticker }}</a>
+            {% else %}—{% endif %}
+        </span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Bipartisan Moves</span>
+        <span class="stat-value">{{ stats.bipartisan_count }}</span>
+    </div>
+    <div class="stat">
+        <span class="stat-label">Total Activities</span>
+        <span class="stat-value">{{ stats.total_activities }}</span>
+    </div>
+</div>
+{% endif %}
+
+{# ── Controls Bar: Chamber + Timeframe + Party Filters ── #}
+<div class="activity-controls">
+    {# Chamber Toggle #}
+    <div class="ptype-toggle" id="cg-chamber-toggle">
+        <button class="ptype-pill{% if chamber == 'all' %} active{% endif %}"
+                hx-get="/api/congress-activity?timeframe={{ timeframe }}&amp;chamber=all&amp;party={{ party }}"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">All</button>
+        <button class="ptype-pill{% if chamber == 'house' %} active{% endif %}"
+                hx-get="/api/congress-activity?timeframe={{ timeframe }}&amp;chamber=house&amp;party={{ party }}"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">House</button>
+        <button class="ptype-pill{% if chamber == 'senate' %} active{% endif %}"
+                hx-get="/api/congress-activity?timeframe={{ timeframe }}&amp;chamber=senate&amp;party={{ party }}"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">Senate</button>
+    </div>
+
+    {# Timeframe Toggle #}
+    <div class="activity-toggle" id="cg-timeframe-toggle">
+        <button class="activity-pill{% if timeframe == '1W' %} active{% endif %}"
+                hx-get="/api/congress-activity?timeframe=1W&amp;chamber={{ chamber }}&amp;party={{ party }}"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">1W</button>
+        <button class="activity-pill{% if timeframe == '1M' %} active{% endif %}"
+                hx-get="/api/congress-activity?timeframe=1M&amp;chamber={{ chamber }}&amp;party={{ party }}"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">1M</button>
+        <button class="activity-pill{% if timeframe == '3M' %} active{% endif %}"
+                hx-get="/api/congress-activity?timeframe=3M&amp;chamber={{ chamber }}&amp;party={{ party }}"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">3M</button>
+        <button class="activity-pill{% if timeframe == 'ALL' %} active{% endif %}"
+                hx-get="/api/congress-activity?timeframe=ALL&amp;chamber={{ chamber }}&amp;party={{ party }}"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">ALL</button>
+    </div>
+
+    {# Party Filter #}
+    <div class="activity-toggle" id="cg-party-toggle">
+        <button class="activity-pill{% if party == 'all' %} active{% endif %}"
+                hx-get="/api/congress-activity?timeframe={{ timeframe }}&amp;chamber={{ chamber }}&amp;party=all"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">All Parties</button>
+        <button class="activity-pill{% if party == 'democrat' %} active{% endif %}"
+                style="{% if party == 'democrat' %}background: #2563eb; color: #fff;{% endif %}"
+                hx-get="/api/congress-activity?timeframe={{ timeframe }}&amp;chamber={{ chamber }}&amp;party=democrat"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">Democrat</button>
+        <button class="activity-pill{% if party == 'republican' %} active{% endif %}"
+                style="{% if party == 'republican' %}background: #dc2626; color: #fff;{% endif %}"
+                hx-get="/api/congress-activity?timeframe={{ timeframe }}&amp;chamber={{ chamber }}&amp;party=republican"
+                hx-target="#cg-activity-dashboard"
+                hx-swap="innerHTML">Republican</button>
+    </div>
+</div>
+
+{# ── Consensus Moves (3+ Members on Same Stock) ── #}
+{% if clusters and clusters|length > 0 %}
+<h4 class="section-label">Consensus Moves ({{ clusters|length }})</h4>
+<div class="consensus-fade{% if clusters|length <= 10 %} expanded{% endif %}" id="cg-consensus-wrap">
+{% for c in clusters %}
+<div class="activity-cluster{% if loop.index > 10 %} consensus-overflow{% endif %}">
+    <div class="cluster-header" onclick="toggleCluster(this)">
+        <span class="cluster-ticker">
+            <a href="/stock/{{ c.ticker }}" style="color: inherit;">{{ c.ticker }}</a>
+        </span>
+        <span class="cluster-name">{{ c.issuer_name[:40] }}</span>
+        <span class="cluster-sentiment-wrap">
+            <span class="badge badge-{{ c.net_sentiment|lower }}"
+                  title="{{ c.action_summary }}. Net: {% if c.net_flow >= 0 %}+{% endif %}${{ '{:,.0f}'.format(c.net_flow|int) }}">
+                {{ c.net_sentiment }}
+            </span>
+            {% if c.bipartisan %}
+            <span class="badge" style="background: #7c3aed22; color: #a78bfa; margin-left: 4px; font-size: 0.72em;">BIPARTISAN</span>
+            {% endif %}
+        </span>
+        <span class="cluster-summary">{{ c.member_count }} members · {{ c.action_summary }}</span>
+        <span class="cluster-flow {% if c.net_flow > 0 %}bullish{% elif c.net_flow < 0 %}bearish{% endif %}">
+            {% if c.net_flow >= 1e6 or c.net_flow <= -1e6 %}
+                {% if c.net_flow >= 0 %}+{% endif %}${{ "%.0f"|format(c.net_flow / 1e6) }}M
+            {% elif c.net_flow >= 1e3 or c.net_flow <= -1e3 %}
+                {% if c.net_flow >= 0 %}+{% endif %}${{ "%.0f"|format(c.net_flow / 1e3) }}K
+            {% else %}
+                {% if c.net_flow >= 0 %}+{% endif %}${{ "{:,.0f}".format(c.net_flow|int) }}
+            {% endif %}
+        </span>
+        <span class="cluster-expand">&#9656;</span>
+    </div>
+    <div class="cluster-detail" style="display:none">
+        <table class="cluster-table">
+            {% for item in c.trades %}
+            <tr>
+                <td>
+                    <a href="/politician/{{ item.member_id }}">{{ item.politician_name }}</a>
+                    <small class="fund-aum">
+                        {% if item.party_short == 'D' %}<span style="color:#2563eb;">Democrat</span>{% elif item.party_short == 'R' %}<span style="color:#dc2626;">Republican</span>{% else %}Independent{% endif %}
+                        · {{ item.chamber }}, {{ item.state }}
+                    </small>
+                </td>
+                <td>
+                    {% if item.trade_type == 'buy' %}
+                    <span class="badge badge-add">BUY</span>
+                    {% elif item.trade_type == 'sell' %}
+                    <span class="badge badge-reduce">SELL</span>
+                    {% else %}
+                    <span class="badge badge-neutral">{{ item.trade_type|upper }}</span>
+                    {% endif %}
+                </td>
+                <td class="text-right text-small">{{ item.amount_compact }}</td>
+                <td class="text-small">{{ item.trade_date }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</div>
+{% endfor %}
+</div>
+
+{# Consensus accordion expand button #}
+{% if clusters|length > 10 %}
+<button class="gp-expand-btn" onclick="toggleCgConsensusAccordion(this)" style="margin-bottom: 1em;">
+    <span>View All Consensus Moves ({{ clusters|length }} total)</span>
+    <span class="gp-expand-arrow">&#9660;</span>
+</button>
+{% endif %}
+{% endif %}
+
+{# ── Individual Moves Table ── #}
+{% if solo_items and solo_items|length > 0 %}
+<h4 class="section-label">Individual Moves ({{ total_solo }})</h4>
+<div class="activity-fade{% if solo_items|length <= 12 %} expanded{% endif %}" id="cg-activity-table-wrap">
+<div class="pp-table-wrap">
+<table class="gp-table activity-table" id="cg-activity-solo-table">
+    <thead>
+        <tr>
+            <th data-sort="text">Politician</th>
+            <th>Party</th>
+            <th data-sort="activity">Action</th>
+            <th data-sort="text">Ticker</th>
+            <th data-sort="text">Stock</th>
+            <th class="text-right" data-sort="text">Amount</th>
+            <th data-sort="date">Trade Date</th>
+            <th data-sort="date" data-sort-default="desc">Filed</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in solo_items %}
+        <tr{% if loop.index > 12 %} class="activity-overflow"{% endif %}>
+            <td>
+                <a href="/politician/{{ item.member_id }}">
+                    <strong>{{ item.politician_name }}</strong>
+                </a>
+                <small class="fund-aum">{{ item.chamber }} · {{ item.state }}</small>
+            </td>
+            <td>
+                {% if item.party_short == 'D' %}
+                <span class="cg-party-badge cg-party-badge--d">D</span>
+                {% elif item.party_short == 'R' %}
+                <span class="cg-party-badge cg-party-badge--r">R</span>
+                {% else %}
+                <span class="cg-party-badge cg-party-badge--i">I</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if item.trade_type == 'buy' %}
+                <span class="badge badge-add">BUY</span>
+                {% elif item.trade_type == 'sell' %}
+                <span class="badge badge-reduce">SELL</span>
+                {% else %}
+                <span class="badge badge-neutral">{{ item.trade_type|upper }}</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if item.ticker %}
+                <a href="/stock/{{ item.ticker }}"><strong style="font-family: monospace;">{{ item.ticker }}</strong></a>
+                {% else %}<span class="text-muted">—</span>{% endif %}
+            </td>
+            <td class="text-small">{{ item.asset_name[:30] }}</td>
+            <td class="text-right text-small">{{ item.amount_compact }}</td>
+            <td class="text-small" style="white-space: nowrap;">{{ item.trade_date }}</td>
+            <td class="text-small" style="white-space: nowrap;">
+                {{ item.filing_date }}
+                {% if item.days_ago is defined and item.days_ago <= 7 %}
+                <span style="color: #059669; font-weight: 600; font-size: 0.75em; margin-left: 4px;">NEW</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+</div>
+
+{# Individual moves accordion expand button #}
+{% if solo_items|length > 12 %}
+<button class="gp-expand-btn" onclick="toggleCgActivityAccordion(this)">
+    <span>Expand All Activity ({{ total_solo }} total)</span>
+    <span class="gp-expand-arrow">&#9660;</span>
+</button>
+{% endif %}
+{% elif not clusters or clusters|length == 0 %}
+<article>
+    <p class="text-muted" style="text-align: center; padding: 2em 0;">
+        No congressional trading activity found for the selected filters.
+    </p>
+</article>
+{% endif %}
+
+{# ── JavaScript ── #}
+<script>
+(function() {
+    /* Cluster expand/collapse */
+    window.toggleCluster = function(header) {
+        var detail = header.nextElementSibling;
+        header.classList.toggle('open');
+        detail.style.display = detail.style.display === 'none' ? '' : 'none';
+    };
+
+    /* Consensus accordion (10-row preview) */
+    window.toggleCgConsensusAccordion = function(btn) {
+        var rows = document.querySelectorAll('.consensus-overflow');
+        var wrap = document.getElementById('cg-consensus-wrap');
+        var arrow = btn.querySelector('.gp-expand-arrow');
+        var label = btn.querySelector('span:first-child');
+        var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+        rows.forEach(function(row) {
+            row.style.display = expanded ? 'none' : '';
+        });
+        if (wrap) wrap.classList.toggle('expanded', !expanded);
+        if (arrow) arrow.classList.toggle('expanded', !expanded);
+
+        if (label) {
+            label.textContent = expanded
+                ? 'View All Consensus Moves ({{ clusters|length }} total)'
+                : 'Collapse';
+        }
+    };
+
+    /* Individual moves accordion (12-row preview) */
+    window.toggleCgActivityAccordion = function(btn) {
+        var rows = document.querySelectorAll('.activity-overflow');
+        var wrap = document.getElementById('cg-activity-table-wrap');
+        var arrow = btn.querySelector('.gp-expand-arrow');
+        var label = btn.querySelector('span:first-child');
+        var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+        rows.forEach(function(row) {
+            row.style.display = expanded ? 'none' : '';
+        });
+        if (wrap) wrap.classList.toggle('expanded', !expanded);
+        if (arrow) arrow.classList.toggle('expanded', !expanded);
+
+        /* Toggle sticky thead */
+        var thead = document.querySelector('#cg-activity-solo-table thead');
+        if (thead) thead.classList.toggle('sticky-head', !expanded);
+
+        if (label) {
+            label.textContent = expanded
+                ? 'Expand All Activity ({{ total_solo }} total)'
+                : 'Collapse';
+        }
+
+        if (window.initSortableTables) window.initSortableTables();
+    };
+
+    /* Pill toggle active state helpers */
+    ['cg-chamber-toggle', 'cg-timeframe-toggle', 'cg-party-toggle'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('click', function(e) {
+                var btn = e.target.closest('.ptype-pill, .activity-pill');
+                if (!btn) return;
+                el.querySelectorAll('.ptype-pill, .activity-pill').forEach(function(b) {
+                    b.classList.remove('active');
+                });
+                btn.classList.add('active');
+            });
+        }
+    });
+
+    /* Init sortable tables if function exists */
+    if (window.initSortableTables) window.initSortableTables();
+})();
+</script>

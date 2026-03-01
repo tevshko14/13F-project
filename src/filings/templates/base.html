@@ -923,6 +923,7 @@
                 <li><a href="/funds">Funds</a></li>
 
                 <li><a href="/insider-trading">Insiders</a></li>
+                <li><a href="/congress">Congress</a></li>
                 <li><a href="/retail">Retail</a></li>
                 <li>
                     <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">
@@ -1164,13 +1165,18 @@
         var _flatItems = [];
         var _debounceTimer = null;
 
+        var _fusePoliticians = null; // Fuse instance for politicians
+
         // Build Fuse instances from search index data
         function _initFuse(data) {
             var stocks = [];
             var investors = [];
+            var politicians = [];
             for (var i = 0; i < data.length; i++) {
                 if (data[i].type === 'investor') {
                     investors.push(data[i]);
+                } else if (data[i].type === 'politician') {
+                    politicians.push(data[i]);
                 } else {
                     stocks.push(data[i]);
                 }
@@ -1196,6 +1202,16 @@
                 }
             });
             _fuseInvestors = new Fuse(investors, {
+                keys: [
+                    { name: 'ticker', weight: 1.0 },
+                    { name: 'name', weight: 0.7 }
+                ],
+                threshold: 0.35,
+                distance: 100,
+                includeScore: true,
+                minMatchCharLength: 1,
+            });
+            _fusePoliticians = new Fuse(politicians, {
                 keys: [
                     { name: 'ticker', weight: 1.0 },
                     { name: 'name', weight: 0.7 }
@@ -1233,12 +1249,16 @@
                 .catch(function() { _indexReady = true; });
         }
 
-        function escHtml(s) {
+        /* Global HTML-escape helper — prevents XSS when building
+           innerHTML from database-sourced strings (used by search,
+           congress charts, politician charts, etc.) */
+        window.escHtml = function(s) {
             if (!s) return '';
             var d = document.createElement('div');
             d.textContent = s;
             return d.innerHTML;
-        }
+        };
+        var escHtml = window.escHtml; // local alias for this scope
 
         window.tickerSearchFilter = function(query) {
             // Debounce: wait 150ms after last keystroke
@@ -1260,10 +1280,12 @@
             // Search with Fuse.js
             var stockResults = _fuseStocks ? _fuseStocks.search(query, { limit: 10 }) : [];
             var investorResults = _fuseInvestors ? _fuseInvestors.search(query, { limit: 5 }) : [];
+            var politicianResults = _fusePoliticians ? _fusePoliticians.search(query, { limit: 5 }) : [];
 
             // Extract items from Fuse results
             var stocks = stockResults.map(function(r) { return r.item; });
             var investors = investorResults.map(function(r) { return r.item; });
+            var politicians = politicianResults.map(function(r) { return r.item; });
 
             // Boost exact ticker prefix matches to the top
             var qUpper = query.toUpperCase();
@@ -1278,7 +1300,7 @@
             });
 
             // No results
-            if (stocks.length === 0 && investors.length === 0) {
+            if (stocks.length === 0 && investors.length === 0 && politicians.length === 0) {
                 container.innerHTML = '<div class="ts-empty">No results found for &ldquo;' + escHtml(query) + '&rdquo;</div>';
                 container.style.display = "block";
                 _flatItems = [];
@@ -1336,6 +1358,28 @@
                 }
             }
 
+            // ── POLITICIANS section ──
+            if (politicians.length > 0) {
+                html += '<div class="ts-category">Congress</div>';
+                for (var p = 0; p < politicians.length; p++) {
+                    var pol = politicians[p];
+                    var partyColor = (pol.party === 'Democrat') ? '#2563eb'
+                                   : (pol.party === 'Republican') ? '#dc2626' : '#6b7280';
+                    var partyIcon = (pol.party === 'Democrat') ? '&#128309;'
+                                  : (pol.party === 'Republican') ? '&#128308;' : '&#9898;';
+                    html += '<div class="ts-item" data-gidx="' + globalIdx + '"'
+                        + ' data-ticker="' + escHtml(pol.ticker) + '"'
+                        + ' data-type="politician" data-member-id="' + escHtml(pol.member_id || '') + '">'
+                        + '<span style="margin-right:2px;">' + partyIcon + '</span>'
+                        + '<span class="ts-item-ticker" style="font-family:inherit;min-width:auto;">' + escHtml(pol.ticker) + '</span>'
+                        + '<span class="ts-item-name">' + escHtml(pol.name) + '</span>'
+                        + '<span class="ts-item-meta" style="color:' + partyColor + ';">Congress</span>'
+                        + '</div>';
+                    _flatItems.push({ ticker: pol.ticker, type: 'politician', member_id: pol.member_id || '' });
+                    globalIdx++;
+                }
+            }
+
             _selectedIdx = -1;
             container.innerHTML = html;
             container.style.display = "block";
@@ -1346,7 +1390,7 @@
                 el.addEventListener("click", function() {
                     var idx = parseInt(el.dataset.gidx);
                     if (_flatItems[idx]) {
-                        tickerSearchGo(_flatItems[idx].ticker, _flatItems[idx].type, _flatItems[idx].cik);
+                        tickerSearchGo(_flatItems[idx].ticker, _flatItems[idx].type, _flatItems[idx].cik, _flatItems[idx].member_id);
                     }
                 });
             });
@@ -1368,7 +1412,7 @@
                 e.preventDefault();
                 var idx = _selectedIdx >= 0 ? _selectedIdx : 0;
                 if (_flatItems[idx]) {
-                    tickerSearchGo(_flatItems[idx].ticker, _flatItems[idx].type, _flatItems[idx].cik);
+                    tickerSearchGo(_flatItems[idx].ticker, _flatItems[idx].type, _flatItems[idx].cik, _flatItems[idx].member_id);
                 }
             } else if (e.key === "Escape") {
                 container.style.display = "none";
@@ -1388,17 +1432,20 @@
             });
         }
 
-        window.tickerSearchGo = function(ticker, type, cik) {
+        window.tickerSearchGo = function(ticker, type, cik, memberId) {
             // PostHog: track search selections
             if (window.posthog) {
                 posthog.capture('stock_search', {
                     ticker: ticker,
                     search_type: type,
-                    cik: cik || null
+                    cik: cik || null,
+                    member_id: memberId || null
                 });
             }
             if (type === 'investor' && cik) {
                 window.location.href = "/holdings/" + cik;
+            } else if (type === 'politician' && memberId) {
+                window.location.href = "/politician/" + memberId;
             } else {
                 window.location.href = "/stock/" + ticker;
             }

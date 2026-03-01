@@ -1183,9 +1183,13 @@ def upsert_history_purchases(rows: list[dict]) -> int:
     for i in range(0, len(deduped), CHUNK):
         chunk = deduped[i : i + CHUNK]
         try:
-            # DO NOTHING on conflict — write-once semantics
+            # DO NOTHING on conflict — write-once cold archive.
+            # ignore_duplicates=True → PostgREST sends
+            # "Prefer: resolution=ignore-duplicates" → ON CONFLICT DO NOTHING.
             client.table("insider_purchases_history").upsert(
-                chunk, on_conflict="sec_url", default_to_null=False
+                chunk,
+                on_conflict="sec_url",
+                ignore_duplicates=True,
             ).execute()
             inserted += len(chunk)
         except Exception as exc:
@@ -1333,24 +1337,47 @@ def bulk_update_forward_returns(updates: list[dict]) -> int:
     if client is None:
         return 0
 
+    # Batch upsert in chunks of 50 — avoids N+1 individual UPDATEs.
+    # Uses upsert with on_conflict="sec_url" so the DB handles matching.
+    CHUNK = 50
     updated = 0
+
+    # Filter out rows with no sec_url or no payload
+    valid_rows = []
     for row in updates:
         sec_url = row.get("sec_url")
         if not sec_url:
             continue
-        # Build update payload without sec_url (it's the filter key)
-        payload = {k: v for k, v in row.items() if k != "sec_url"}
-        if not payload:
+        payload = {k: v for k, v in row.items()}
+        if len(payload) <= 1:  # only sec_url, nothing to update
             continue
+        valid_rows.append(payload)
+
+    for i in range(0, len(valid_rows), CHUNK):
+        chunk = valid_rows[i : i + CHUNK]
         try:
-            client.table("insider_purchases_history").update(payload).eq(
-                "sec_url", sec_url
+            client.table("insider_purchases_history").upsert(
+                chunk, on_conflict="sec_url"
             ).execute()
-            updated += 1
+            updated += len(chunk)
         except Exception as exc:
             logger.warning(
-                "bulk_update_forward_returns failed for %s: %s", sec_url, exc
+                "bulk_update_forward_returns chunk %d failed: %s", i // CHUNK, exc
             )
+            # Fall back to individual updates for this chunk
+            for row in chunk:
+                sec_url = row.get("sec_url")
+                payload = {k: v for k, v in row.items() if k != "sec_url"}
+                try:
+                    client.table("insider_purchases_history").update(payload).eq(
+                        "sec_url", sec_url
+                    ).execute()
+                    updated += 1
+                except Exception as exc2:
+                    logger.warning(
+                        "bulk_update_forward_returns fallback failed for %s: %s",
+                        sec_url, exc2,
+                    )
 
     return updated
 
@@ -2083,3 +2110,382 @@ def cleanup_old_notifications(days: int = 2) -> int:
     except Exception as exc:
         logger.warning("cleanup_old_notifications failed: %s", exc)
         return 0
+
+
+# ── Congress Trading: member + trade CRUD ─────────────────────────────
+
+_CONGRESS_MEMBER_COLS = (
+    "member_id,full_name,first_name,last_name,party,chamber,"
+    "state,state_abbr,district,is_current,"
+    "first_trade_date,last_trade_date,total_trades,"
+    "created_at,updated_at"
+)
+
+_CONGRESS_TRADE_COLS = (
+    "trade_id,member_id,politician_name,party,chamber,state,"
+    "ticker,asset_name,trade_type,trade_date,filing_date,"
+    "amount_low,amount_high,amount_display,owner,cap_trades_url,created_at"
+)
+
+
+def upsert_congress_members(rows: list[dict]) -> int:
+    """Batch upsert politician profiles into ``congress_members``.
+
+    Uses ``ON CONFLICT (member_id) DO UPDATE`` to refresh metadata
+    (last_trade_date, total_trades, etc.) on re-scrapes.
+    Returns the number of rows upserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    if not rows:
+        return 0
+
+    # Deduplicate by member_id
+    seen: dict[str, dict] = {}
+    for row in rows:
+        mid = row.get("member_id", "")
+        if mid:
+            seen[mid] = row
+    deduped = list(seen.values())
+
+    upserted = 0
+    CHUNK = 50
+    for i in range(0, len(deduped), CHUNK):
+        chunk = deduped[i : i + CHUNK]
+        try:
+            client.table("congress_members").upsert(
+                chunk, on_conflict="member_id"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_congress_members chunk %d failed: %s", i, exc)
+
+    logger.info("Congress members: %d upserted out of %d provided", upserted, len(rows))
+    return upserted
+
+
+def upsert_congress_trades(rows: list[dict]) -> int:
+    """Batch insert trades into ``congress_trades`` (cold, write-once).
+
+    Uses ``ON CONFLICT (trade_id) DO NOTHING`` — existing rows are never
+    overwritten.  Follows the ``upsert_history_purchases()`` pattern.
+    Returns the number of rows inserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    if not rows:
+        return 0
+
+    # Deduplicate by trade_id within the batch
+    seen: dict[str, dict] = {}
+    for row in rows:
+        tid = row.get("trade_id", "")
+        if tid and tid not in seen:
+            seen[tid] = row
+    deduped = list(seen.values())
+
+    if len(deduped) < len(rows):
+        logger.info(
+            "Congress trades: deduplicated %d → %d rows",
+            len(rows), len(deduped),
+        )
+
+    inserted = 0
+    CHUNK = 50
+    for i in range(0, len(deduped), CHUNK):
+        chunk = deduped[i : i + CHUNK]
+        try:
+            # DO NOTHING on conflict — write-once cold archive.
+            # ignore_duplicates=True → PostgREST sends
+            # "Prefer: resolution=ignore-duplicates" which translates
+            # to INSERT … ON CONFLICT (trade_id) DO NOTHING.
+            client.table("congress_trades").upsert(
+                chunk,
+                on_conflict="trade_id",
+                ignore_duplicates=True,
+            ).execute()
+            inserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_congress_trades chunk %d failed: %s", i, exc)
+
+    logger.info(
+        "Congress trades: %d inserted out of %d provided", inserted, len(rows)
+    )
+    return inserted
+
+
+def get_congress_member(member_id: str) -> dict | None:
+    """Get a single politician's profile from ``congress_members``."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("congress_members")
+            .select(_CONGRESS_MEMBER_COLS)
+            .eq("member_id", member_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("get_congress_member(%s) failed: %s", member_id, exc)
+        return None
+
+
+def get_all_congress_members() -> list[dict] | None:
+    """Get all politician profiles (for search index and listing page).
+
+    Returns list sorted by total_trades DESC (most active first).
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("congress_members")
+            .select(_CONGRESS_MEMBER_COLS)
+            .order("total_trades", desc=True)
+            .limit(500)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_all_congress_members failed: %s", exc)
+        return None
+
+
+def get_congress_trades_by_member(
+    member_id: str, limit: int = 500
+) -> list[dict] | None:
+    """Get all trades for a specific politician (for profile page).
+
+    Returns trades sorted by trade_date DESC (newest first).
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("congress_trades")
+            .select(_CONGRESS_TRADE_COLS)
+            .eq("member_id", member_id)
+            .order("trade_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_congress_trades_by_member(%s) failed: %s", member_id, exc)
+        return None
+
+
+def get_congress_trades_by_ticker(
+    ticker: str, limit: int = 500
+) -> list[dict] | None:
+    """Get all congressional trades for a stock ticker (for Congress subtab).
+
+    Returns trades sorted by trade_date DESC (newest first).
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("congress_trades")
+            .select(_CONGRESS_TRADE_COLS)
+            .eq("ticker", ticker.upper())
+            .order("trade_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_congress_trades_by_ticker(%s) failed: %s", ticker, exc)
+        return None
+
+
+def get_congress_recent_trades(limit: int = 100) -> list[dict] | None:
+    """Get most recent trades across all politicians (for notifications).
+
+    Returns trades sorted by filing_date DESC (most recently disclosed).
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("congress_trades")
+            .select(_CONGRESS_TRADE_COLS)
+            .order("filing_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_congress_recent_trades failed: %s", exc)
+        return None
+
+
+# ── Congress Trades Prices (forward-return enrichment) ─────────────────
+
+_CONGRESS_PRICE_COLS = (
+    "trade_id,ticker,trade_date,close_on_trade,"
+    "close_at_30d,close_at_90d,close_at_180d,close_at_365d,"
+    "return_30d,return_90d,return_180d,return_365d,prices_updated"
+)
+
+
+def get_congress_trades_missing_prices(limit: int = 5000) -> list[dict] | None:
+    """Get congress trades that don't have price data yet.
+
+    Fetches trades with a non-null ticker that do NOT have a corresponding
+    row in ``congress_trades_prices``.  Used by the backfill script.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        # Use a LEFT JOIN via PostgREST embedding syntax:
+        # Select from congress_trades with a left join to congress_trades_prices
+        # where the prices row is null (i.e., not yet backfilled).
+        # PostgREST doesn't directly support "WHERE joined IS NULL" with
+        # embedding, so we fetch trades and filter client-side, or use RPC.
+        # Simpler approach: fetch all trade_ids that DO have prices, then
+        # fetch trades NOT in that set.
+
+        # Step 1: get existing price trade_ids
+        price_resp = (
+            client.table("congress_trades_prices")
+            .select("trade_id")
+            .limit(50000)
+            .execute()
+        )
+        existing_ids = {r["trade_id"] for r in (price_resp.data or [])}
+
+        # Step 2: get trades with tickers, not in existing set
+        resp = (
+            client.table("congress_trades")
+            .select("trade_id,member_id,politician_name,ticker,trade_date,trade_type,amount_low,amount_high")
+            .not_.is_("ticker", "null")
+            .order("trade_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        all_trades = resp.data or []
+
+        # Filter out those already priced
+        missing = [t for t in all_trades if t["trade_id"] not in existing_ids]
+        logger.info(
+            "Congress trades missing prices: %d of %d (existing: %d)",
+            len(missing), len(all_trades), len(existing_ids),
+        )
+        return missing
+    except Exception as exc:
+        logger.warning("get_congress_trades_missing_prices failed: %s", exc)
+        return None
+
+
+def upsert_congress_trade_prices(rows: list[dict]) -> int:
+    """Batch upsert price/return data into ``congress_trades_prices``.
+
+    Uses ON CONFLICT (trade_id) DO UPDATE so prices can be refreshed
+    as new forward windows close.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+    if not rows:
+        return 0
+
+    upserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("congress_trades_prices").upsert(
+                chunk, on_conflict="trade_id"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_congress_trade_prices chunk %d failed: %s", i, exc)
+
+    logger.info("Congress trade prices: %d upserted", upserted)
+    return upserted
+
+
+def get_congress_trades_recent_months(
+    months: int = 6, limit: int = 5000
+) -> list[dict] | None:
+    """Get trades from the last N months for trending/momentum calculations.
+
+    Returns trades sorted by trade_date DESC with a non-null ticker.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=months * 30)).strftime(
+            "%Y-%m-%d"
+        )
+        resp = (
+            client.table("congress_trades")
+            .select(_CONGRESS_TRADE_COLS)
+            .gte("trade_date", cutoff)
+            .not_.is_("ticker", "null")
+            .order("trade_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_congress_trades_recent_months failed: %s", exc)
+        return None
+
+
+def get_congress_all_ticker_trades(limit: int = 50000) -> list[dict] | None:
+    """Get all trades with a non-null ticker (for consensus calculation).
+
+    Returns a slim projection for aggregation — avoids transferring
+    large text fields.  Paginated to handle the full ~35K dataset.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        slim_cols = (
+            "trade_id,member_id,politician_name,party,chamber,"
+            "ticker,asset_name,trade_type,trade_date,"
+            "amount_low,amount_high"
+        )
+        all_rows: list[dict] = []
+        page_size = 1000
+        offset = 0
+
+        while offset < limit:
+            resp = (
+                client.table("congress_trades")
+                .select(slim_cols)
+                .not_.is_("ticker", "null")
+                .order("trade_date", desc=True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = resp.data or []
+            all_rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        logger.info("Congress all ticker trades: fetched %d rows", len(all_rows))
+        return all_rows
+    except Exception as exc:
+        logger.warning("get_congress_all_ticker_trades failed: %s", exc)
+        return None

@@ -293,3 +293,55 @@ def create_reddit_notification(
         },
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+
+
+# ── Congress trade notifications ─────────────────────────────────────
+
+
+def create_congress_trade_notification(trade: dict) -> dict | None:
+    """Create a notification for a new congressional trade filing.
+
+    Deterministic ID: ``congress-{member_id}-{trade_id}``
+    Type: ``congress_trade``
+
+    Args:
+        trade: Dict with keys from ``congress_trades`` table row.
+
+    Returns:
+        A notification dict matching the Supabase schema, or None.
+    """
+    member_id = trade.get("member_id", "")
+    trade_id = trade.get("trade_id", "")
+    if not member_id or not trade_id:
+        return None
+
+    trade_type = trade.get("trade_type", "")
+    action = "bought" if trade_type == "buy" else "sold" if trade_type == "sell" else "traded"
+    ticker = trade.get("ticker") or trade.get("asset_name", "assets")
+
+    party = trade.get("party", "")
+    party_icon = "🔵" if party == "Democrat" else "🔴" if party == "Republican" else "⚪"
+
+    name = _sanitize(trade.get("politician_name", "Unknown"))
+    amount = trade.get("amount_display", "")
+    filing_date = trade.get("filing_date", "")
+
+    message = f"{amount}" if amount else ""
+    if filing_date:
+        message += f" — Filed {filing_date}" if message else f"Filed {filing_date}"
+
+    return {
+        "id": f"congress-{member_id}-{trade_id}",
+        "type": "congress_trade",
+        "title": f"{party_icon} {name} {action} {ticker}",
+        "message": _sanitize(message),
+        "icon": "🏛️",
+        "toast_type": "bullish" if trade_type == "buy" else "bearish",
+        "link": f"/politician/{member_id}",
+        "metadata": {
+            "ticker": trade.get("ticker"),
+            "party": party,
+            "member_id": member_id,
+        },
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }

@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
@@ -35,6 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from filings import (
@@ -48,6 +49,7 @@ from filings import (
     company_filings,
     insider_trading,
     insider_insights,
+    congress_trading,
     supabase_cache,
     auth,
     youtube,
@@ -185,8 +187,9 @@ async def lifespan(app: FastAPI):
     # asyncio.to_thread call sites plus background tasks that make slow
     # HTTP calls (SEC EDGAR, yfinance, ApeWisdom).  A larger pool prevents
     # user requests from queuing behind background work.
+    _pool_size = int(os.environ.get("WORKER_THREADS", "32"))
     loop = asyncio.get_running_loop()
-    loop.set_default_executor(ThreadPoolExecutor(max_workers=32))
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=_pool_size))
 
     # ── Try Supabase first (persists across Railway deploys) ──
     # Timeout after 30s so workers don't get killed by gunicorn if Supabase is slow
@@ -240,11 +243,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PaperPanda", lifespan=lifespan)
 
+# ── GZip compression — ~20-35% reduction on HTML/JSON/CSS responses ──
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
-# Static files (logo, favicon, etc.)
+# Static files (logo, favicon, etc.) — immutable cache for hashed assets
+_static_dir = Path(__file__).parent / "static"
 app.mount(
-    "/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static"
+    "/static",
+    StaticFiles(directory=_static_dir),
+    name="static",
 )
 
 # Template globals
@@ -328,6 +337,7 @@ def _consensus_cache_set(key: str, value: tuple[float, dict | None]) -> None:
 _TICKER_RE = _re.compile(r"^[A-Za-z][A-Za-z0-9.]{0,11}$")
 _CIK_RE = _re.compile(r"^[0-9]{1,10}$")
 _CUSIP_RE = _re.compile(r"^[A-Za-z0-9]{6,9}$")
+_MEMBER_ID_RE = _re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 _ALLOWED_HOST: str = os.environ.get("ALLOWED_HOST", "")  # e.g. "paperpanda.io"
 
 
@@ -339,6 +349,11 @@ def _valid_ticker(ticker: str) -> bool:
 def _valid_cik(cik: str) -> bool:
     """Return True if *cik* looks like a valid CIK number."""
     return bool(_CIK_RE.match(cik))
+
+
+def _valid_member_id(member_id: str) -> bool:
+    """Return True if *member_id* looks like a valid congress member ID."""
+    return bool(_MEMBER_ID_RE.match(member_id))
 
 
 def _valid_cusip(cusip: str) -> bool:
@@ -380,6 +395,13 @@ def _check_csrf_origin(request: Request) -> JSONResponse | None:
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
+        # Static asset cache: 1 year for images/fonts, 1 hour for other static
+        if request.url.path.startswith("/static/"):
+            ext = request.url.path.rsplit(".", 1)[-1].lower() if "." in request.url.path else ""
+            if ext in ("png", "webp", "jpg", "jpeg", "svg", "ico", "woff2", "woff"):
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = "public, max-age=3600"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -633,6 +655,16 @@ async def _background_refresh_sweep(app: FastAPI) -> None:
             "Background sweep complete: %d refreshed, %d failed", done, failed
         )
         app.state.refresh_status = "idle"
+
+        # Cleanup stale per-CIK locks and progress tracking
+        active_ciks = {si.cik for si in SUPERINVESTORS}
+        async with _refresh_locks_mu:
+            stale_keys = [k for k in _refresh_locks if k not in active_ciks]
+            for k in stale_keys:
+                _refresh_locks.pop(k, None)
+        _refresh_in_progress.difference_update(
+            _refresh_in_progress - active_ciks
+        )
 
     except Exception:
         logger.exception("Background sweep crashed")
@@ -2309,6 +2341,182 @@ async def stock_insider_trades_api(request: Request, ticker: str):
     )
 
 
+# ── Congress Trading endpoints ────────────────────────────────────
+
+
+@app.get("/politician/{member_id}", response_class=HTMLResponse)
+async def politician_page(request: Request, member_id: str):
+    """Politician profile page — congressional trading activity."""
+    if not _valid_member_id(member_id):
+        raise HTTPException(status_code=400, detail="Invalid member ID")
+
+    # Check per-politician cache (OrderedDict — O(1) LRU eviction)
+    now = time_module.time()
+    cached = _politician_cache.get(member_id)
+    if cached and (now - cached[0]) < _POLITICIAN_CACHE_TTL:
+        _politician_cache.move_to_end(member_id)  # mark as recently used
+        display = cached[1]
+    else:
+        member = await asyncio.to_thread(
+            supabase_cache.get_congress_member, member_id
+        )
+        if not member:
+            raise HTTPException(status_code=404, detail="Politician not found")
+        trades = await asyncio.to_thread(
+            supabase_cache.get_congress_trades_by_member, member_id
+        )
+        display = congress_trading.prepare_politician_display(trades or [], member)
+        # LRU eviction: remove oldest (first item) if at capacity
+        if len(_politician_cache) >= _POLITICIAN_CACHE_MAX:
+            _politician_cache.popitem(last=False)  # O(1) eviction
+        _politician_cache[member_id] = (now, display)
+
+    return templates.TemplateResponse(
+        "politician.html",
+        {"request": request, **display},
+    )
+
+
+@app.get("/api/stock/{ticker}/congress", response_class=HTMLResponse)
+async def stock_congress_api(request: Request, ticker: str):
+    """Stock page Congress subtab — congressional trading for a ticker."""
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+    trades = await asyncio.to_thread(
+        supabase_cache.get_congress_trades_by_ticker, ticker
+    )
+    display = congress_trading.prepare_stock_congress_display(
+        ticker.upper(), trades or []
+    )
+    return templates.TemplateResponse(
+        "partials/stock_congress.html",
+        {"request": request, **display},
+    )
+
+
+# ── Congress page: /congress with in-memory cache ─────────────────
+
+_congress_page_cache: dict = {"data": None, "ts": 0.0}
+_CONGRESS_PAGE_TTL = 900  # 15 minutes
+
+# Per-politician profile cache (LRU-bounded, 15-min TTL)
+# OrderedDict gives O(1) eviction via move_to_end + popitem
+from collections import OrderedDict as _OrderedDict
+_politician_cache: _OrderedDict[str, tuple[float, dict]] = _OrderedDict()
+_POLITICIAN_CACHE_TTL = 900  # 15 minutes
+_POLITICIAN_CACHE_MAX = 100  # max entries (LRU eviction)
+
+
+_congress_page_lock = asyncio.Lock()
+
+
+async def _get_congress_page_data() -> dict:
+    """Fetch and cache all display data for the /congress page.
+
+    Uses asyncio.gather for concurrent DB fetches and a lock to
+    prevent thundering-herd cache stampede on TTL expiry.
+    """
+    now = time_module.time()
+    if (
+        _congress_page_cache["data"] is not None
+        and (now - _congress_page_cache["ts"]) < _CONGRESS_PAGE_TTL
+    ):
+        return _congress_page_cache["data"]
+
+    async with _congress_page_lock:
+        # Double-check after acquiring lock (another request may have filled it)
+        now = time_module.time()
+        if (
+            _congress_page_cache["data"] is not None
+            and (now - _congress_page_cache["ts"]) < _CONGRESS_PAGE_TTL
+        ):
+            return _congress_page_cache["data"]
+
+        # Concurrent DB fetches — these are independent queries
+        members, all_trades, recent_trades = await asyncio.gather(
+            asyncio.to_thread(supabase_cache.get_all_congress_members),
+            asyncio.to_thread(supabase_cache.get_congress_all_ticker_trades, 50000),
+            asyncio.to_thread(supabase_cache.get_congress_trades_recent_months, 6, 5000),
+        )
+
+        data = congress_trading.prepare_congress_page_data(
+            members or [], all_trades or [], recent_trades or []
+        )
+        # Store raw recent trades so activity endpoint can re-filter
+        data["_recent_trades"] = recent_trades or []
+
+        _congress_page_cache["data"] = data
+        _congress_page_cache["ts"] = time_module.time()
+        return data
+
+
+@app.get("/congress", response_class=HTMLResponse)
+async def congress_page(request: Request, view: str = "congress"):
+    """Congress trading page — chamber visualization + holdings analytics."""
+    if view not in ("congress", "holdings", "activity"):
+        view = "congress"
+
+    data = await _get_congress_page_data()
+
+    return templates.TemplateResponse(
+        "congress.html",
+        {
+            "request": request,
+            "view": view,
+            **data,
+        },
+    )
+
+
+@app.get("/api/congress-activity", response_class=HTMLResponse)
+async def congress_activity_api(
+    request: Request,
+    timeframe: str = "ALL",
+    chamber: str = "all",
+    party: str = "all",
+):
+    """Lazy-loaded activity dashboard for the Congress page.
+
+    Accepts optional filter query params: timeframe (1W/1M/3M/ALL),
+    chamber (all/house/senate), party (all/democrat/republican).
+    """
+    # Validate filter values
+    if timeframe not in ("1W", "1M", "3M", "ALL"):
+        timeframe = "ALL"
+    if chamber.lower() not in ("all", "house", "senate"):
+        chamber = "all"
+    if party.lower() not in ("all", "democrat", "republican"):
+        party = "all"
+
+    # Fetch recent trades (6-month window covers all timeframes)
+    page_data = await _get_congress_page_data()
+    recent_trades = page_data.get("_recent_trades", [])
+
+    # Build filtered activity dashboard
+    activity_data = congress_trading.prepare_congress_activity(
+        recent_trades,
+        timeframe=timeframe,
+        chamber=chamber,
+        party=party,
+        limit=200,
+    )
+
+    return templates.TemplateResponse(
+        "partials/congress_activity.html",
+        {"request": request, **activity_data},
+    )
+
+
+@app.get("/api/congress-trending", response_class=HTMLResponse)
+async def congress_trending_api(request: Request):
+    """Lazy-loaded trending chart partial for Congress — used on homepage."""
+    data = await _get_congress_page_data()
+    return templates.TemplateResponse(
+        "partials/congress_trending.html",
+        {"request": request, "trending": data.get("trending", [])},
+    )
+
+
 # ── Insider insights: response cache + yfinance helper ────────────
 _insights_cache: "OrderedDict[str, tuple[float, str]]"
 try:
@@ -2332,13 +2540,13 @@ def _insights_cache_set(key: str, html: str) -> None:
             _insights_cache.pop(oldest, None)
 
 
-def _get_current_price_yf(ticker: str) -> float | None:
+async def _get_current_price_yf(ticker: str) -> float | None:
     """Fetch current stock price via yfinance (single Ticker object).
 
     Hard 8-second timeout prevents thread pool starvation when Yahoo
-    Finance is slow or unresponsive.  Returns None on any failure.
+    Finance is slow or unresponsive.  Uses the app's shared thread pool
+    instead of spawning a new ThreadPoolExecutor per call.
     """
-    import concurrent.futures
 
     def _fetch():
         import yfinance as yf
@@ -2349,10 +2557,8 @@ def _get_current_price_yf(ticker: str) -> float | None:
         return None
 
     try:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_fetch)
-            return future.result(timeout=8)
-    except (concurrent.futures.TimeoutError, Exception):
+        return await asyncio.wait_for(asyncio.to_thread(_fetch), timeout=8)
+    except (asyncio.TimeoutError, Exception):
         return None
 
 
@@ -2376,7 +2582,7 @@ async def insider_insights_api(request: Request, ticker: str):
         return HTMLResponse("")  # Not enough data for insights
 
     # Single yfinance call (best-effort, non-blocking, 8s hard timeout)
-    current_price = await asyncio.to_thread(_get_current_price_yf, key)
+    current_price = await _get_current_price_yf(key)
 
     insights_data = insider_insights.compute_insider_insights(
         ticker, purchases, current_price
@@ -2421,6 +2627,13 @@ async def ticker_search_index(request: Request):
             entry["sector"] = item["sector"]
         if item.get("cik"):
             entry["cik"] = item["cik"]
+        # Politician-specific fields needed by client search
+        if item.get("member_id"):
+            entry["member_id"] = item["member_id"]
+        if item.get("party"):
+            entry["party"] = item["party"]
+        if item.get("chamber"):
+            entry["chamber"] = item["chamber"]
         slim.append(entry)
     return JSONResponse(content=slim)
 
@@ -2949,6 +3162,11 @@ if _has_limiter:
     company_filings_tab = limiter.limit("30/minute")(company_filings_tab)
     insider_trades_api = limiter.limit("20/minute")(insider_trades_api)
     stock_insider_trades_api = limiter.limit("30/minute")(stock_insider_trades_api)
+    stock_congress_api = limiter.limit("30/minute")(stock_congress_api)
+    politician_page = limiter.limit("30/minute")(politician_page)
+    congress_page = limiter.limit("30/minute")(congress_page)
+    congress_activity_api = limiter.limit("30/minute")(congress_activity_api)
+    congress_trending_api = limiter.limit("30/minute")(congress_trending_api)
     insider_insights_api = limiter.limit("30/minute")(insider_insights_api)
     # Expensive aggregate / external-API endpoints
     ticker_search_index = limiter.limit("20/minute")(ticker_search_index)
@@ -2997,9 +3215,12 @@ def main():
     port = int(os.environ.get("PORT", 8000))
     host = os.environ.get("HOST", "127.0.0.1")
     reload = os.environ.get("RAILWAY_ENVIRONMENT") is None
+    # Production: use multiple workers for concurrency; dev: single with reload
+    workers = int(os.environ.get("WEB_CONCURRENCY", 1)) if not reload else 1
     uvicorn.run(
         "filings.web:app",
         host=host,
         port=port,
         reload=reload,
+        workers=workers,
     )

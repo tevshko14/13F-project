@@ -1,0 +1,221 @@
+{# Stock page "Congress" subtab — congressional trading activity for a ticker #}
+<style>
+    /* ── Party Breakdown Bar ── */
+    .congress-party-bar {
+        display: flex;
+        height: 28px;
+        border-radius: 6px;
+        overflow: hidden;
+        margin-bottom: 0.5em;
+    }
+    .congress-party-bar-dem {
+        background: #2563eb;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-size: 0.75em; font-weight: 700;
+        min-width: 30px;
+    }
+    .congress-party-bar-rep {
+        background: #dc2626;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-size: 0.75em; font-weight: 700;
+        min-width: 30px;
+    }
+    .congress-party-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.78em;
+        color: var(--pp-text-muted);
+        margin-bottom: 1.5em;
+    }
+    .congress-party-labels span:first-child { color: #2563eb; font-weight: 600; }
+    .congress-party-labels span:last-child { color: #dc2626; font-weight: 600; }
+
+    /* ── Politician cards ── */
+    .congress-pol-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 0.8em;
+        margin-bottom: 2em;
+    }
+    .congress-pol-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 10px;
+        padding: 0.9em 1em;
+        background: var(--pp-surface);
+        display: flex;
+        align-items: center;
+        gap: 0.8em;
+        transition: border-color 0.15s;
+        text-decoration: none;
+        color: inherit;
+    }
+    .congress-pol-card:hover { border-color: var(--pp-overlay-20); }
+    .congress-pol-avatar {
+        width: 36px; height: 36px;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 700; font-size: 0.85em; color: #fff;
+        flex-shrink: 0;
+    }
+    .congress-pol-avatar--dem { background: #2563eb; }
+    .congress-pol-avatar--rep { background: #dc2626; }
+    .congress-pol-avatar--ind { background: #6b7280; }
+    .congress-pol-info { flex: 1; min-width: 0; }
+    .congress-pol-name { font-weight: 600; font-size: 0.9em; }
+    .congress-pol-meta { font-size: 0.75em; color: var(--pp-text-muted); }
+    .congress-pol-trades {
+        text-align: right;
+        font-size: 0.8em;
+    }
+
+    /* ── Trade badges ── */
+    .ctrade-badge {
+        display: inline-block;
+        padding: 0.1em 0.5em;
+        border-radius: 4px;
+        font-size: 0.78em;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .ctrade-badge--buy { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
+    .ctrade-badge--sell { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
+
+    /* ── Trade table ── */
+    .congress-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: max(13px, 0.85rem);
+    }
+    .congress-table thead th {
+        padding: 10px 14px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-text-muted);
+        background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border);
+        white-space: nowrap;
+    }
+    .congress-table tbody td {
+        padding: 10px 14px;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .congress-table tbody tr:hover { background-color: var(--pp-surface-alt); }
+    .congress-table tbody tr:last-child td { border-bottom: none; }
+
+    .congress-section-title {
+        font-size: 1em;
+        font-weight: 700;
+        margin: 1.5em 0 0.5em;
+    }
+
+    @media (max-width: 768px) {
+        .congress-pol-grid { grid-template-columns: 1fr; }
+        .congress-table thead th, .congress-table tbody td { padding: 8px 10px; font-size: 12px; }
+    }
+</style>
+
+{% if total_trades > 0 %}
+
+{# ── Party Breakdown ── #}
+{% if party_breakdown.democrat_pct > 0 or party_breakdown.republican_pct > 0 %}
+<div style="margin-bottom: 0.3em; font-size: 0.82em; color: var(--pp-text-muted);">
+    Buy volume by party (estimated from disclosure ranges)
+</div>
+<div class="congress-party-bar">
+    {% if party_breakdown.democrat_pct > 0 %}
+    <div class="congress-party-bar-dem" style="width: {{ party_breakdown.democrat_pct }}%;">
+        {{ party_breakdown.democrat_pct }}% D
+    </div>
+    {% endif %}
+    {% if party_breakdown.republican_pct > 0 %}
+    <div class="congress-party-bar-rep" style="width: {{ party_breakdown.republican_pct }}%;">
+        {{ party_breakdown.republican_pct }}% R
+    </div>
+    {% endif %}
+</div>
+<div class="congress-party-labels">
+    <span>Democrat: {{ party_breakdown.democrat_value_fmt }}</span>
+    <span>Republican: {{ party_breakdown.republican_value_fmt }}</span>
+</div>
+{% endif %}
+
+{# ── Politicians ── #}
+<div class="congress-section-title">
+    {{ total_politicians }} Member{{ 's' if total_politicians != 1 else '' }} Trading {{ ticker }}
+</div>
+<div class="congress-pol-grid">
+    {% for pol in politicians[:12] %}
+    <a href="/politician/{{ pol.member_id }}" class="congress-pol-card">
+        <div class="congress-pol-avatar congress-pol-avatar--{{ 'dem' if pol.party == 'Democrat' else ('rep' if pol.party == 'Republican' else 'ind') }}">
+            {{ pol.party_short }}
+        </div>
+        <div class="congress-pol-info">
+            <div class="congress-pol-name">{{ pol.name }}</div>
+            <div class="congress-pol-meta">{{ pol.chamber }} &middot; {{ pol.state }}</div>
+        </div>
+        <div class="congress-pol-trades">
+            <div style="font-weight: 600;">{{ pol.total_trades }} trade{{ 's' if pol.total_trades != 1 else '' }}</div>
+            <div>
+                {% if pol.last_action == 'buy' %}
+                    <span class="ctrade-badge ctrade-badge--buy">Last: Buy</span>
+                {% elif pol.last_action == 'sell' %}
+                    <span class="ctrade-badge ctrade-badge--sell">Last: Sell</span>
+                {% endif %}
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+
+{# ── Recent Trades ── #}
+{% if recent_trades %}
+<div class="congress-section-title">Recent Trades</div>
+<div style="overflow-x: auto;">
+<table class="congress-table">
+    <thead>
+        <tr>
+            <th>Trade Date</th>
+            <th>Filed</th>
+            <th>Politician</th>
+            <th>Party</th>
+            <th>Type</th>
+            <th style="text-align: right;">Amount</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in recent_trades %}
+        <tr>
+            <td style="white-space: nowrap;">{{ t.trade_date }}</td>
+            <td style="white-space: nowrap; color: var(--pp-text-muted);">{{ t.filing_date }}</td>
+            <td>
+                <a href="/politician/{{ t.member_id }}" style="font-weight: 600;">{{ t.politician_name }}</a>
+            </td>
+            <td>
+                {% if t.party == 'Democrat' %}
+                    <span style="color: #2563eb; font-weight: 600;">D</span>
+                {% elif t.party == 'Republican' %}
+                    <span style="color: #dc2626; font-weight: 600;">R</span>
+                {% else %}
+                    <span style="color: #6b7280;">I</span>
+                {% endif %}
+            </td>
+            <td>
+                <span class="ctrade-badge ctrade-badge--{{ t.trade_type }}">{{ t.trade_type }}</span>
+            </td>
+            <td style="text-align: right; font-weight: 500;">{{ t.amount_compact or t.amount_display }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endif %}
+
+{% else %}
+<div style="text-align: center; padding: 3em 1em; color: var(--pp-text-muted);">
+    <p>No congressional trading data available for {{ ticker }}.</p>
+    <p><small>Congressional trades are sourced from STOCK Act disclosures.</small></p>
+</div>
+{% endif %}
