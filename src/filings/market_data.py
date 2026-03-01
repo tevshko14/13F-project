@@ -793,7 +793,33 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
             "cik": si.cik,
         }
 
-    # Sort: tickers first (superinvestor-held → S&P 500 → others), then investors
+    # ── 5. Add congress member profiles ──
+    try:
+        from filings import supabase_cache as _supa
+
+        _congress_members = _supa.get_all_congress_members() or []
+        for m in _congress_members:
+            mid = m.get("member_id", "")
+            if not mid:
+                continue
+            key = f"_politician_{mid}"
+            party_short = m.get("party", "")[:1]  # "D" or "R"
+            chamber = m.get("chamber", "")
+            state_abbr = m.get("state_abbr", "")
+            all_items[key] = {
+                "ticker": m.get("full_name", ""),  # display name in search
+                "name": f"{party_short} - {chamber} - {state_abbr}",
+                "held_by_super": False,
+                "in_sp500": False,
+                "type": "politician",
+                "member_id": mid,
+                "party": m.get("party", ""),
+                "chamber": chamber,
+            }
+    except Exception:
+        pass  # Graceful degradation if congress data unavailable
+
+    # Sort: tickers first (superinvestor-held → S&P 500 → others), then investors/politicians
     result = sorted(
         all_items.values(),
         key=lambda x: (

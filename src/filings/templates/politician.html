@@ -1,0 +1,638 @@
+{% extends "base.html" %}
+{% block title %}{{ member.full_name }} — Congressional Trading | PaperPanda{% endblock %}
+{% block meta_description %}Track {{ member.full_name }}'s congressional stock trades filed under the STOCK Act. See portfolio, trade history, and estimated net worth.{% endblock %}
+{% block og_title %}{{ member.full_name }} — Congressional Trading | PaperPanda{% endblock %}
+{% block og_description %}Track {{ member.full_name }}'s STOCK Act disclosures. See portfolio, trades, and estimated net worth from {{ member.chamber }}.{% endblock %}
+{% block twitter_title %}{{ member.full_name }} — Congressional Trading | PaperPanda{% endblock %}
+{% block twitter_description %}{{ member.full_name }}'s congressional stock trades and portfolio.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Congress", "item": "https://paperpanda.io/congress"},
+        {"@type": "ListItem", "position": 3, "name": "{{ member.full_name }}"}
+    ]
+}
+</script>
+{% endblock %}
+{% block content %}
+
+<style>
+    /* ── Header ── */
+    .pol-header {
+        margin-bottom: 2em;
+    }
+    .pol-header h1 {
+        margin: 0 0 0.2em;
+        font-size: 1.8em;
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
+        flex-wrap: wrap;
+    }
+    .pol-header-meta {
+        font-size: 0.9em;
+        color: var(--pp-text-muted);
+    }
+    .party-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3em;
+        padding: 0.2em 0.7em;
+        border-radius: 999px;
+        font-size: 0.55em;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        vertical-align: middle;
+    }
+    .party-badge--dem { background: rgba(37, 99, 235, 0.12); color: #2563eb; }
+    .party-badge--rep { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
+    .party-badge--ind { background: rgba(107, 114, 128, 0.12); color: #6b7280; }
+
+    /* ── Stats Grid ── */
+    .pol-stats {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 1em;
+        margin-bottom: 2em;
+    }
+    .pol-stat-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 10px;
+        padding: 1em;
+        background: var(--pp-surface);
+        text-align: center;
+    }
+    .pol-stat-value {
+        font-size: 1.4em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .pol-stat-label {
+        font-size: 0.75em;
+        color: var(--pp-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-top: 0.2em;
+    }
+
+    /* ── Tables (reuse inv-table from investor.html) ── */
+    .pol-table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+        font-size: max(14px, 0.875rem);
+    }
+    .pol-table thead th {
+        padding: 12px 16px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-text-muted);
+        background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border);
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    .pol-table tbody td {
+        padding: 12px 16px;
+        vertical-align: middle;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+        line-height: 1.5;
+    }
+    .pol-table tbody tr {
+        transition: background-color 0.15s ease;
+    }
+    .pol-table tbody tr:hover {
+        background-color: var(--pp-surface-alt);
+    }
+    .pol-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    /* ── Trade type badges ── */
+    .trade-badge {
+        display: inline-block;
+        padding: 0.15em 0.6em;
+        border-radius: 4px;
+        font-size: 0.8em;
+        font-weight: 600;
+        text-transform: uppercase;
+    }
+    .trade-badge--buy { background: rgba(22, 163, 74, 0.12); color: #16a34a; }
+    .trade-badge--sell { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
+    .trade-badge--exchange { background: rgba(107, 114, 128, 0.12); color: #6b7280; }
+
+    /* ── Section headers ── */
+    .pol-section-title {
+        font-size: 1.1em;
+        font-weight: 700;
+        margin: 2em 0 0.5em;
+        color: var(--pp-text);
+    }
+    .pol-section-sub {
+        font-size: 0.82em;
+        color: var(--pp-text-muted);
+        margin-bottom: 1em;
+    }
+
+    /* ── Holdings overflow ── */
+    .pol-overflow { display: none; }
+    .pol-expand-btn {
+        background: none;
+        border: 1px solid var(--pp-overlay-10);
+        border-radius: 6px;
+        padding: 0.4em 1.2em;
+        cursor: pointer;
+        font-size: 0.85em;
+        color: var(--pp-text-muted);
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+        margin: 0.5em auto 0;
+        transition: background 0.15s;
+    }
+    .pol-expand-btn:hover { background: var(--pp-overlay-5); }
+
+    /* ── Portfolio Donut Chart ── */
+    .pol-chart-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 12px;
+        padding: 1.5em;
+        background: var(--pp-surface);
+        box-shadow: var(--pp-card-shadow-sm);
+        margin-bottom: 2em;
+    }
+    .pol-chart-header {
+        font-size: 1.05em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .pol-chart-sub {
+        font-size: 0.82em;
+        color: var(--pp-overlay-50);
+        margin-bottom: 1em;
+    }
+    .pol-chart-wrapper {
+        display: flex;
+        gap: 1.5em;
+        align-items: center;
+    }
+    .pol-chart-container {
+        width: 280px;
+        height: 280px;
+        flex-shrink: 0;
+    }
+    .pol-chart-legend {
+        flex: 1;
+        min-width: 0;
+    }
+    .pol-legend-item {
+        display: flex;
+        align-items: center;
+        gap: 0.6em;
+        padding: 0.4em 0;
+        cursor: pointer;
+        transition: opacity 0.15s;
+        text-decoration: none;
+        color: inherit;
+    }
+    .pol-legend-item:hover { opacity: 0.7; }
+    .pol-legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        flex-shrink: 0;
+    }
+    .pol-legend-ticker {
+        font-weight: 700;
+        font-size: 0.9em;
+        font-family: monospace;
+        min-width: 50px;
+    }
+    .pol-legend-pct {
+        font-weight: 600;
+        font-size: 0.85em;
+        color: var(--pp-text);
+    }
+    .pol-legend-name {
+        font-size: 0.78em;
+        color: var(--pp-overlay-50);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    @media (max-width: 768px) {
+        .pol-chart-wrapper { flex-direction: column; }
+        .pol-chart-container { width: 100%; max-width: 280px; margin: 0 auto; }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+        .pol-table thead th, .pol-table tbody td { padding: 10px 10px; font-size: 13px; }
+        .pol-stats { grid-template-columns: repeat(2, 1fr); }
+    }
+</style>
+
+{# ── Header ── #}
+<div class="pol-header">
+    <h1>
+        {{ member.full_name }}
+        {% if member.party == 'Democrat' %}
+            <span class="party-badge party-badge--dem">{{ member.party }}</span>
+        {% elif member.party == 'Republican' %}
+            <span class="party-badge party-badge--rep">{{ member.party }}</span>
+        {% else %}
+            <span class="party-badge party-badge--ind">{{ member.party }}</span>
+        {% endif %}
+    </h1>
+    <p class="pol-header-meta">
+        {{ member.chamber }}
+        {% if member.state %} &middot; {{ member.state }}{% endif %}
+        {% if member.district %} ({{ member.district }}){% endif %}
+        {% if member.is_current %} &middot; <strong>Current Member</strong>{% else %} &middot; Former Member{% endif %}
+        {% if years_active %} &middot; Active: {{ years_active }}{% endif %}
+    </p>
+</div>
+
+{# ── Stats Grid ── #}
+<div class="pol-stats">
+    <div class="pol-stat-card">
+        <div class="pol-stat-value">{{ total_trades }}</div>
+        <div class="pol-stat-label">Total Trades</div>
+    </div>
+    <div class="pol-stat-card">
+        <div class="pol-stat-value" style="color: #16a34a;">{{ total_buys }}</div>
+        <div class="pol-stat-label">Buys</div>
+    </div>
+    <div class="pol-stat-card">
+        <div class="pol-stat-value" style="color: #dc2626;">{{ total_sells }}</div>
+        <div class="pol-stat-label">Sells</div>
+    </div>
+    <div class="pol-stat-card">
+        <div class="pol-stat-value">{{ net_worth_display }}</div>
+        <div class="pol-stat-label">Est. Net Worth</div>
+    </div>
+    <div class="pol-stat-card">
+        <div class="pol-stat-value">{{ member.last_trade_date or 'N/A' }}</div>
+        <div class="pol-stat-label">Last Trade</div>
+    </div>
+</div>
+
+{# ── Portfolio Donut Chart ── #}
+{% if portfolio and portfolio | length >= 2 %}
+<div class="pol-chart-card">
+    <div class="pol-chart-header">Portfolio Concentration</div>
+    <div class="pol-chart-sub">Top holdings by estimated value — hover for details</div>
+    <div class="pol-chart-wrapper">
+        <div class="pol-chart-container" id="pol-portfolio-donut"></div>
+        <div class="pol-chart-legend" id="pol-portfolio-legend"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var COLORS = [
+        '#1976d2', '#388e3c', '#e65100', '#7b1fa2', '#c62828',
+        '#00838f', '#f9a825', '#4e342e', '#546e7a', '#ad1457'
+    ];
+
+    var rawPortfolio = {{ portfolio | tojson }};
+    var container = document.getElementById('pol-portfolio-donut');
+    var legendEl = document.getElementById('pol-portfolio-legend');
+    if (!container || !rawPortfolio || rawPortfolio.length === 0) return;
+
+    // Build chart data — use midpoint of est_value as sizing
+    var totalValue = 0;
+    for (var i = 0; i < rawPortfolio.length; i++) {
+        var low = rawPortfolio[i].est_value_low || 0;
+        var high = rawPortfolio[i].est_value_high || 0;
+        totalValue += (low + high) / 2;
+    }
+    if (totalValue <= 0) return;
+
+    var top10 = rawPortfolio.slice(0, 10);
+    var otherValue = 0;
+    for (var j = 10; j < rawPortfolio.length; j++) {
+        var ol = rawPortfolio[j].est_value_low || 0;
+        var oh = rawPortfolio[j].est_value_high || 0;
+        otherValue += (ol + oh) / 2;
+    }
+
+    var chartData = [];
+    for (var k = 0; k < top10.length; k++) {
+        var p = top10[k];
+        var midVal = ((p.est_value_low || 0) + (p.est_value_high || 0)) / 2;
+        var pct = totalValue > 0 ? (midVal / totalValue * 100) : 0;
+        chartData.push({
+            name: p.ticker || 'Unknown',
+            value: Math.round(midVal),
+            pct: Math.round(pct * 10) / 10,
+            asset_name: p.asset_name || '',
+            est_display: p.est_value_display || '',
+            buys: p.buys || 0,
+            sells: p.sells || 0,
+            last_action: p.last_action || '',
+            last_trade_date: p.last_trade_date || '',
+            itemStyle: { color: COLORS[k % COLORS.length] }
+        });
+    }
+    if (otherValue > 0) {
+        var otherPct = totalValue > 0 ? (otherValue / totalValue * 100) : 0;
+        chartData.push({
+            name: 'Other',
+            value: Math.round(otherValue),
+            pct: Math.round(otherPct * 10) / 10,
+            asset_name: (rawPortfolio.length - 10) + ' more holdings',
+            est_display: '',
+            buys: 0, sells: 0,
+            last_action: '',
+            last_trade_date: '',
+            itemStyle: { color: '#9e9e9e' }
+        });
+    }
+
+    // Build legend (use escHtml to prevent XSS from database strings)
+    var esc = window.escHtml || function(s){ return s; };
+    var legendHtml = '';
+    for (var m = 0; m < chartData.length; m++) {
+        var d = chartData[m];
+        var href = d.name !== 'Other' ? '/stock/' + encodeURIComponent(d.name) : '#';
+        legendHtml += '<a class="pol-legend-item" href="' + href + '" data-idx="' + m + '">';
+        legendHtml += '<span class="pol-legend-dot" style="background:' + d.itemStyle.color + ';"></span>';
+        legendHtml += '<span class="pol-legend-ticker">' + esc(d.name) + '</span>';
+        legendHtml += '<span class="pol-legend-pct">' + d.pct + '%</span>';
+        legendHtml += '<span class="pol-legend-name">' + esc(d.asset_name) + '</span>';
+        legendHtml += '</a>';
+    }
+    legendEl.innerHTML = legendHtml;
+
+    window.requireECharts(function(err) {
+        if (err) {
+            container.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>';
+            return;
+        }
+
+        var chart = echarts.init(container);
+
+        chart.setOption({
+            tooltip: {
+                trigger: 'item',
+                appendToBody: true,
+                confine: true,
+                backgroundColor: 'rgba(30, 30, 30, 0.95)',
+                borderColor: 'transparent',
+                textStyle: { color: '#fff', fontSize: 13 },
+                padding: [12, 16],
+                extraCssText: 'border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); z-index: 9999;',
+                formatter: function(params) {
+                    var d = params.data;
+                    if (!d) return '';
+                    var esc = window.escHtml || function(s){ return s; };
+                    var html = '<strong style="font-size:1.15em;">' + esc(d.name) + '</strong>';
+                    html += ' <span style="opacity:0.7;">' + d.pct + '%</span>';
+                    if (d.asset_name) html += '<br/><span style="opacity:0.6;">' + esc(d.asset_name) + '</span>';
+                    if (d.est_display) html += '<br/><br/>Est. Value: <strong>' + esc(d.est_display) + '</strong>';
+                    if (d.buys || d.sells) {
+                        html += '<br/>Buys: ' + d.buys + ' &middot; Sells: ' + d.sells;
+                    }
+                    if (d.last_action && d.last_trade_date) {
+                        var actionColor = d.last_action === 'buy' ? '#4ade80' : '#f87171';
+                        html += '<br/>Last: <span style="color:' + actionColor + ';">' + esc(d.last_action.toUpperCase()) + '</span> on ' + esc(d.last_trade_date);
+                    }
+                    return html;
+                }
+            },
+            series: [{
+                type: 'pie',
+                radius: ['45%', '78%'],
+                center: ['50%', '50%'],
+                avoidLabelOverlap: true,
+                padAngle: 2,
+                itemStyle: {
+                    borderRadius: 6,
+                    borderColor: 'transparent',
+                    borderWidth: 2
+                },
+                label: { show: false },
+                emphasis: {
+                    scaleSize: 8,
+                    label: {
+                        show: true,
+                        fontSize: 14,
+                        fontWeight: 'bold',
+                        formatter: '{b}\n{d}%'
+                    }
+                },
+                data: chartData
+            }]
+        });
+
+        // Legend hover highlight
+        var legendItems = legendEl.querySelectorAll('.pol-legend-item');
+        legendItems.forEach(function(item) {
+            var idx = parseInt(item.dataset.idx);
+            item.addEventListener('mouseenter', function() {
+                chart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: idx });
+            });
+            item.addEventListener('mouseleave', function() {
+                chart.dispatchAction({ type: 'downplay', seriesIndex: 0, dataIndex: idx });
+            });
+        });
+
+        // Chart click → stock page
+        chart.on('click', function(params) {
+            if (params.data && params.data.name && params.data.name !== 'Other') {
+                window.location.href = '/stock/' + params.data.name;
+            }
+        });
+
+        window.addEventListener('resize', function() { chart.resize(); });
+    });
+})();
+</script>
+{% endif %}
+
+{# ── Portfolio ── #}
+{% if portfolio %}
+<div class="pol-section-title">Estimated Portfolio</div>
+<div class="pol-section-sub">Derived from disclosed trades. Amounts are STOCK Act disclosure ranges, not exact values.</div>
+
+<div style="overflow-x: auto;">
+<table class="pol-table" data-sortable>
+    <thead>
+        <tr>
+            <th>Ticker</th>
+            <th>Company</th>
+            <th>Last Action</th>
+            <th>Buys</th>
+            <th>Sells</th>
+            <th style="text-align: right;">Est. Value</th>
+            <th>Last Trade</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for pos in portfolio[:15] %}
+        <tr>
+            <td>
+                {% if pos.ticker %}
+                    <a href="/stock/{{ pos.ticker }}" style="font-weight: 600;">{{ pos.ticker }}</a>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>{{ pos.asset_name }}</td>
+            <td>
+                <span class="trade-badge trade-badge--{{ pos.last_action }}">{{ pos.last_action }}</span>
+            </td>
+            <td>{{ pos.buys }}</td>
+            <td>{{ pos.sells }}</td>
+            <td style="text-align: right; font-weight: 600;">{{ pos.est_value_display }}</td>
+            <td style="color: var(--pp-text-muted);">{{ pos.last_trade_date }}</td>
+        </tr>
+        {% endfor %}
+        {% for pos in portfolio[15:] %}
+        <tr class="pol-overflow">
+            <td>
+                {% if pos.ticker %}
+                    <a href="/stock/{{ pos.ticker }}" style="font-weight: 600;">{{ pos.ticker }}</a>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>{{ pos.asset_name }}</td>
+            <td>
+                <span class="trade-badge trade-badge--{{ pos.last_action }}">{{ pos.last_action }}</span>
+            </td>
+            <td>{{ pos.buys }}</td>
+            <td>{{ pos.sells }}</td>
+            <td style="text-align: right; font-weight: 600;">{{ pos.est_value_display }}</td>
+            <td style="color: var(--pp-text-muted);">{{ pos.last_trade_date }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+{% if portfolio | length > 15 %}
+<button class="pol-expand-btn" onclick="togglePolOverflow(this)">
+    <span>Show all {{ portfolio | length }} holdings</span>
+    <span class="holdings-expand-arrow">▼</span>
+</button>
+{% endif %}
+{% endif %}
+
+{# ── Trade History ── #}
+<div class="pol-section-title">Trade History</div>
+<div class="pol-section-sub">All STOCK Act disclosures, newest first.</div>
+
+{# ── Filter Buttons ── #}
+<div style="display: flex; gap: 0.5em; margin-bottom: 1em; flex-wrap: wrap;">
+    <button class="insider-filter active" onclick="filterPolTrades('all', this)">All ({{ total_trades }})</button>
+    <button class="insider-filter" onclick="filterPolTrades('buy', this)">Buys ({{ total_buys }})</button>
+    <button class="insider-filter" onclick="filterPolTrades('sell', this)">Sells ({{ total_sells }})</button>
+</div>
+
+<style>
+    .insider-filter {
+        background: transparent;
+        border: 1.5px solid var(--pp-overlay-15);
+        border-radius: 6px;
+        padding: 0.35em 0.9em;
+        font-size: 0.82em;
+        font-weight: 600;
+        cursor: pointer;
+        color: var(--pp-text-muted);
+        transition: all 0.15s;
+    }
+    .insider-filter:hover { border-color: var(--pp-text-secondary); color: var(--pp-text-secondary); }
+    .insider-filter.active { background: #1976d2; border-color: #1976d2; color: #fff; }
+</style>
+
+<div style="overflow-x: auto;">
+<table class="pol-table" id="trades-table" data-sortable>
+    <thead>
+        <tr>
+            <th>Trade Date</th>
+            <th>Filed</th>
+            <th>Ticker</th>
+            <th>Asset</th>
+            <th>Type</th>
+            <th style="text-align: right;">Amount</th>
+            <th>Owner</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in trades %}
+        <tr data-trade-type="{{ t.trade_type }}">
+            <td style="white-space: nowrap;">{{ t.trade_date }}</td>
+            <td style="white-space: nowrap; color: var(--pp-text-muted);">{{ t.filing_date }}</td>
+            <td>
+                {% if t.ticker %}
+                    <a href="/stock/{{ t.ticker }}" style="font-weight: 600;">{{ t.ticker }}</a>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>{{ t.asset_name }}</td>
+            <td>
+                <span class="trade-badge trade-badge--{{ t.trade_type }}">{{ t.trade_type }}</span>
+            </td>
+            <td style="text-align: right; font-weight: 500;">{{ t.amount_compact or t.amount_display }}</td>
+            <td style="color: var(--pp-text-muted);">{{ t.owner }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+{% if not trades %}
+<div style="text-align: center; padding: 3em 1em; color: var(--pp-text-muted);">
+    <p>No trades on file for {{ member.full_name }}.</p>
+</div>
+{% endif %}
+
+<script>
+/* Toggle portfolio overflow rows */
+window.togglePolOverflow = function(btn) {
+    var rows = document.querySelectorAll('.pol-overflow');
+    var arrow = btn.querySelector('.holdings-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+    var expanded = rows.length > 0 && rows[0].style.display !== 'none' && rows[0].style.display !== '';
+
+    if (expanded) {
+        rows.forEach(function(r) { r.style.display = 'none'; });
+        arrow.classList.remove('expanded');
+        label.textContent = 'Show all {{ portfolio | length }} holdings';
+    } else {
+        rows.forEach(function(r) { r.style.display = ''; });
+        arrow.classList.add('expanded');
+        label.textContent = 'Show top 15';
+    }
+};
+
+/* Filter trade table by type */
+window.filterPolTrades = function(type, btn) {
+    document.querySelectorAll('.insider-filter').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    document.querySelectorAll('#trades-table tbody tr').forEach(function(row) {
+        if (type === 'all') {
+            row.style.display = '';
+        } else {
+            row.style.display = (row.dataset.tradeType === type) ? '' : 'none';
+        }
+    });
+};
+
+/* Init sortable tables */
+if (window.initSortableTables) window.initSortableTables();
+</script>
+
+{% endblock %}

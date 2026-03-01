@@ -66,6 +66,7 @@
   .notif-page-type--13f { color: #2563eb; }
   .notif-page-type--youtube { color: #dc2626; }
   .notif-page-type--reddit { color: #f97316; }
+  .notif-page-type--congress { color: #059669; }
   .notif-empty {
     text-align: center;
     padding: 3em 1em;
@@ -121,6 +122,7 @@
   .notif-chip--13f { --chip-color: #2563eb; }
   .notif-chip--youtube { --chip-color: #dc2626; }
   .notif-chip--reddit { --chip-color: #f97316; }
+  .notif-chip--congress { --chip-color: #059669; }
 </style>
 
 <div class="notif-page-header">
@@ -129,8 +131,8 @@
 </div>
 
 <div class="notif-filters">
-  {% set type_labels = {"13f_change": "📊 13F Filings", "youtube": "🎬 YouTube", "reddit_velocity": "🔥 Reddit"} %}
-  {% set type_css = {"13f_change": "13f", "youtube": "youtube", "reddit_velocity": "reddit"} %}
+  {% set type_labels = {"13f_change": "📊 13F Filings", "youtube": "🎬 YouTube", "reddit_velocity": "🔥 Reddit", "congress_trade": "🏛️ Congress"} %}
+  {% set type_css = {"13f_change": "13f", "youtube": "youtube", "reddit_velocity": "reddit", "congress_trade": "congress"} %}
   <a href="/notifications"
      class="notif-chip{% if not active_types %} notif-chip--active{% endif %}">
     All
@@ -158,6 +160,8 @@
           <span class="notif-page-type notif-page-type--youtube">YouTube</span>
         {% elif n.type == 'reddit_velocity' %}
           <span class="notif-page-type notif-page-type--reddit">Reddit</span>
+        {% elif n.type == 'congress_trade' %}
+          <span class="notif-page-type notif-page-type--congress">Congress</span>
         {% else %}
           <span class="notif-page-type">{{ n.type }}</span>
         {% endif %}

@@ -1,0 +1,95 @@
+{# Trending with Congress — ECharts bar chart, loaded asynchronously via HTMX #}
+<article>
+    <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5em;">
+        <div>
+            <strong>Most Bought by Congress This Quarter</strong>
+            {% if trending %}
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Top {{ trending|length }} stocks
+            </span>
+            {% endif %}
+        </div>
+    </header>
+    {% if trending %}
+    <div id="cg-home-trending-chart" style="width: 100%; height: 300px;"></div>
+    {% else %}
+    <p class="text-muted">No recent congressional purchases found.</p>
+    {% endif %}
+</article>
+
+{% if trending %}
+<script>
+(function() {
+    var rawData = {{ trending | tojson }};
+    var container = document.getElementById('cg-home-trending-chart');
+    if (!container || !rawData || rawData.length === 0) return;
+
+    window.requireECharts(function(err) {
+    if (err) { container.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+
+    var chart = echarts.init(container);
+    var tickers = rawData.map(function(d) { return d.ticker; });
+    var counts = rawData.map(function(d) { return d.add_count; });
+
+    var cs = getComputedStyle(document.documentElement);
+    var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+    var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
+    chart.setOption({
+        grid: { left: 40, right: 16, top: 10, bottom: 60 },
+        xAxis: {
+            type: 'category', data: tickers,
+            axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor },
+            axisLine: { lineStyle: { color: gridColor } },
+            axisTick: { alignWithLabel: true, lineStyle: { color: gridColor } }
+        },
+        yAxis: {
+            type: 'value', name: 'Buyers',
+            nameTextStyle: { fontSize: 10, color: axisColor },
+            minInterval: 1,
+            axisLabel: { color: axisColor },
+            splitLine: { lineStyle: { color: gridColor } }
+        },
+        tooltip: {
+            trigger: 'axis', axisPointer: { type: 'shadow' },
+            formatter: function(params) {
+                if (!params || params.length === 0) return '';
+                var d = rawData[params[0].dataIndex]; if (!d) return '';
+                var esc = window.escHtml || function(s){ return s; };
+                var html = '<strong style="font-size:1.15em;">' + esc(d.ticker) + '</strong>';
+                html += '<br/><span style="opacity:0.7;">' + esc(d.name) + '</span>';
+                html += '<br/><br/>Unique buyers: <strong>' + d.add_count + '</strong>';
+                html += '<br/><span style="color:#2563eb;">D: ' + d.democrat + '</span>';
+                html += ' &nbsp; <span style="color:#dc2626;">R: ' + d.republican + '</span>';
+                if (d.top_traders && d.top_traders.length > 0) {
+                    html += '<br/><br/><span style="opacity:0.5;">Top Buyers:</span>';
+                    for (var i = 0; i < d.top_traders.length; i++) {
+                        html += '<br/>&nbsp;&nbsp;' + esc(d.top_traders[i]);
+                    }
+                }
+                return html;
+            }
+        },
+        series: [{
+            type: 'bar', data: counts,
+            itemStyle: {
+                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                    { offset: 0, color: '#059669' }, { offset: 1, color: '#34d399' }
+                ]),
+                borderRadius: [4, 4, 0, 0]
+            },
+            barMaxWidth: 36,
+            label: { show: true, position: 'top', fontSize: 11, fontWeight: 'bold', color: 'rgba(0,0,0,0.5)' }
+        }]
+    });
+
+    chart.on('click', function(params) {
+        var d = rawData[params.dataIndex];
+        if (d && d.link) window.location.href = d.link;
+    });
+
+    window.addEventListener('resize', function() { chart.resize(); });
+    });
+})();
+</script>
+{% endif %}

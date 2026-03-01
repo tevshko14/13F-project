@@ -26,7 +26,7 @@
         </svg>
         <input type="search"
                id="ticker-search-input"
-               placeholder="Search for a stock, superinvestor, or insider"
+               placeholder="Search for a stock, fund, insider, or politician"
                autocomplete="off"
                oninput="tickerSearchFilter(this.value)"
                onfocus="tickerSearchFilter(this.value)"
@@ -59,6 +59,11 @@
         <div class="home-card-icon">&#128269;</div>
         <strong>Insiders</strong>
         <span class="text-muted text-small">Latest SEC Form 4 insider buys and sells</span>
+    </a>
+    <a href="/congress" class="home-card">
+        <div class="home-card-icon">&#127963;</div>
+        <strong>Congress</strong>
+        <span class="text-muted text-small">STOCK Act disclosures from House &amp; Senate members</span>
     </a>
 </div>
 
@@ -271,6 +276,16 @@
     <div hx-get="/api/most-added" hx-trigger="load" hx-swap="innerHTML">
         <article>
             <p aria-busy="true"><span class="spinner"></span> Loading most-added stocks...</p>
+        </article>
+    </div>
+</div>
+
+{# ── Trending with Congress (lazy-loaded) ── #}
+<div style="margin-top: 1.5em;">
+    <h3 style="margin-bottom: 0.5em;">Trending with Congress</h3>
+    <div hx-get="/api/congress-trending" hx-trigger="load" hx-swap="innerHTML">
+        <article>
+            <p aria-busy="true"><span class="spinner"></span> Loading congressional trends...</p>
         </article>
     </div>
 </div>
@@ -533,10 +548,10 @@ document.addEventListener('keydown', function(e) {
         }
     }
 
-    /* ── Feature Cards: 3-column row on desktop, centered ── */
+    /* ── Feature Cards: 4-column row on desktop, centered ── */
     .home-cards {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(4, 1fr);
         gap: 16px;
         margin-bottom: 1.5em;
         max-width: 680px;

@@ -225,6 +225,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── aum_data.py                   # Capital Deployed: AUM (Form ADV), XBRL cash, deployment ratios, leaderboard builder
     ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale) + display helpers (quarterly groups, insider cards, chart data, title resolution via SEC XML)
     ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
+    ├── congress_trading.py           # STOCK Act: Capitol Trades scraper + 6 display prep functions (chamber viz, trending, consensus, momentum, activity)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -239,6 +240,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── retail.html               # Retail page: Sentiment, Leaderboard, Calendar sub-tabs
         ├── grand_portfolio.html      # Top Funds page: Funds, Holdings, Activity sub-tabs (URL: /funds)
         ├── insider_trading.html      # Insider trading screener: global buys/sells with chart
+        ├── congress.html             # Congress Trading page: 3-tab (Congress dots, Holdings charts, Activity feed)
+        ├── politician.html           # Politician profile: stats, donut chart, portfolio table, trade history
         ├── search.html               # Fund manager search
         ├── investor.html             # Individual fund page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
@@ -269,6 +272,9 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── compare_content.html    # Compare quarters partial (lazy-loaded into investor page)
             ├── deployment_leaderboard.html # Capital Deployed leaderboard (HTMX partial for /funds Deployment tab)
             ├── deployment_card.html    # Capital Deployed stat card (HTMX partial for investor page)
+            ├── congress_activity.html  # Congress activity feed (HTMX lazy-loaded, filter buttons)
+            ├── congress_trending.html  # Homepage "Trending with Congress" bar chart (HTMX lazy-loaded)
+            ├── stock_congress.html     # Per-ticker Congress trading subtab (HTMX lazy-loaded)
             └── data_error.html         # Reusable error partial (rate limit CTA, generic fallback, HTMX-aware)
 ```
 
@@ -1076,7 +1082,64 @@ JS function (same pattern as grand_portfolio's `.gp-subtab`). URL synced via `hi
 - Green/red badges for rank changes and mention deltas
 - Fear & Greed badge at the top with color-coded mood
 
-### 5.15 Performance Optimizations
+### 5.15 Congress Trading Module (`congress_trading.py` + `supabase_cache.py`)
+
+Congressional stock trading data from STOCK Act disclosures, scraped from Capitol Trades.
+
+**Architecture:**
+- `congress_trading.py` — Scraper (Capitol Trades) + display preparation functions
+- `supabase_cache.py` — Cold archive storage (two tables: `congress_members`, `congress_trades`)
+- `congress_trades_prices` — Separate join table for price enrichment (write-once main table has UPDATE trigger protection)
+
+**Data flow:**
+```
+Capitol Trades → scraper → congress_members + congress_trades (Supabase cold archive)
+                                                    ↓
+yfinance backfill → congress_trades_prices (forward returns at +30d/90d/180d/365d)
+```
+
+**Cold archive protection** (3 levels):
+1. Application: `INSERT ... ON CONFLICT DO NOTHING` (no overwrites)
+2. Database: `BEFORE UPDATE` trigger on `congress_trades` raises exception
+3. Script: `load_congress_history.py` has `--dry-run` and confirmation prompts
+
+**Key files:**
+| File | Purpose |
+|---|---|
+| `congress_trading.py` | Scraper + 6 display prep functions (chamber viz, trending, consensus, momentum, activity, page orchestrator) |
+| `supabase_cache.py` (congress section) | 8 query/upsert functions for members, trades, prices |
+| `scripts/backfill_congress_prices.py` | yfinance batch price backfill (50 tickers/batch, 2s sleep) |
+| `scripts/load_congress_history.py` | One-time historical data load from Capitol Trades |
+| `sql/002_congress_cold_table_protection.sql` | Write-once trigger protection |
+| `sql/003_congress_trades_prices.sql` | Price enrichment join table |
+| `sql/004_congress_trades_indexes.sql` | Performance indexes on congress_trades |
+| `templates/congress.html` | Main Congress page (3 tabs: Congress, Holdings, Activity) |
+| `templates/politician.html` | Politician profile page (stats, portfolio donut chart, trade history) |
+| `templates/partials/congress_activity.html` | Activity feed partial (HTMX lazy-loaded) |
+| `templates/partials/congress_trending.html` | Homepage trending chart partial (HTMX lazy-loaded) |
+
+**Congress page `/congress` — 3-tab structure:**
+1. **Congress tab** — Chamber dot visualizations (ECharts scatter). Each dot = one politician, colored by party (blue/red/gray), labeled with 2-letter state code. Hover shows name, party, state, trades, top holdings. Click → politician profile.
+2. **Holdings tab** — Trending bar chart (top 15 bought stocks), Consensus Leaders (horizontal bar, top 10 by holders), Recent Momentum (stacked buys/sells), All Holdings sortable table.
+3. **Activity tab** — Recent trade filings feed with filter buttons (All/Buys/Sells/House/Senate). HTMX lazy-loaded.
+
+**Politician profile `/politician/{member_id}`:**
+- Stats grid (trades, buys, sells, est. net worth, last trade)
+- Portfolio donut chart (ECharts, top 10 holdings by estimated value, matching investor.html pattern)
+- Estimated Portfolio sortable table
+- Full Trade History table
+
+**Caching:**
+- `/congress` page: 15-min in-memory TTL cache with asyncio.Lock (thundering-herd protection)
+- `/politician/{id}`: 15-min per-politician LRU cache (max 100 entries)
+- DB fetches use `asyncio.gather` for concurrent Supabase calls
+
+**Security:**
+- All ECharts tooltip HTML uses `window.escHtml()` to prevent stored XSS from database strings
+- `member_id` route parameter validated against `^[A-Za-z0-9_-]{1,40}$` regex
+- Jinja2 autoescaping active on all templates (no `| safe` usage)
+
+### 5.16 Performance Optimizations
 
 **Problem:** With 84 superinvestors, synchronous file I/O was blocking the async event loop.
 Per-fund TTL now skips fresh funds during background refresh, reducing API calls significantly.
@@ -1135,6 +1198,11 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/api/deployment-leaderboard` | `deployment_leaderboard_partial` | Deployment cache | `partials/deployment_leaderboard.html` |
 | GET | `/api/deployment/{cik}` | `deployment_card_partial` | Deployment cache | `partials/deployment_card.html` |
 | POST | `/api/deployment/sync` | `trigger_deployment_sync` | ADV + XBRL + 13F (background) | JSON response |
+| GET | `/congress` | `congress_page` | Supabase (15-min cache) | `congress.html` |
+| GET | `/politician/{member_id}` | `politician_page` | Supabase (15-min LRU cache) | `politician.html` |
+| GET | `/api/stock/{ticker}/congress` | `stock_congress_api` | Supabase | `partials/stock_congress.html` |
+| GET | `/api/congress-activity` | `congress_activity_api` | Congress page cache | `partials/congress_activity.html` |
+| GET | `/api/congress-trending` | `congress_trending_api` | Congress page cache | `partials/congress_trending.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**
@@ -1263,6 +1331,14 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   │     └── Sortable table: AUM, 13F equity, deployment bars, cash estimates, sources
   ├── insider_trading.html (global insider trades screener)
   │     └── lazy-loads partials/insider_trades.html via fetch(/api/insider-trades)
+  ├── congress.html (URL: /congress, sub-tabs: Congress | Holdings | Activity)
+  │     ├── Congress tab: ECharts scatter dot viz for Senate + House (state labels, party colors)
+  │     ├── Holdings tab: Trending bar chart, Consensus Leaders, Momentum, All Holdings table
+  │     └── Activity tab: lazy-loads partials/congress_activity.html via HTMX
+  ├── politician.html (URL: /politician/{member_id})
+  │     ├── Stats grid + ECharts donut portfolio chart (top 10 holdings)
+  │     ├── Estimated Portfolio sortable table
+  │     └── Trade History sortable table
   ├── search.html
   ├── investor.html (Tabbed: Holdings + Compare Quarters, lazy-loads compare)
   │     ├── imports partials/ticker_link.html (macro)
