@@ -929,6 +929,9 @@ def _format_compact_value(val: float) -> str:
 
 # ── Title resolution (fix "See Remarks") ────────────────────────────
 
+# LRU-style cache with max 500 entries to prevent unbounded memory growth.
+# Keyed by (insider_name, ticker) → abbreviated title string.
+_TITLE_CACHE_MAX = 500
 _title_cache: dict[tuple[str, str], str] = {}
 
 # Longest-first so "Chief Information Security Officer" matches before
@@ -1071,6 +1074,9 @@ def _resolve_see_remarks_titles(trades: list[InsiderTrade]) -> None:
 
     for name, title in resolved.items():
         _title_cache[(name, ticker)] = title
+    # Evict oldest entries if cache exceeds max size
+    while len(_title_cache) > _TITLE_CACHE_MAX:
+        _title_cache.pop(next(iter(_title_cache)))
 
     logger.info(
         "Resolved %d 'See Remarks' titles for %s via SEC Form 4 XML",

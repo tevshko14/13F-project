@@ -2294,7 +2294,7 @@ async def stock_insider_trades_api(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
     trades = await asyncio.to_thread(insider_trading.get_ticker_insider_trades, ticker)
-    display = insider_trading.prepare_ticker_display(trades)
+    display = await asyncio.to_thread(insider_trading.prepare_ticker_display, trades)
     return templates.TemplateResponse(
         "partials/stock_insider_trades.html",
         {
@@ -2805,7 +2805,15 @@ async def clear_session(request: Request):
 @app.get("/health")
 async def health_check(request: Request):
     """Public health probe for Railway readiness checks."""
-    return JSONResponse({"status": "ok"})
+    import resource
+
+    rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+    uptime = round(time_module.time() - _app_start_time)
+    return JSONResponse({
+        "status": "ok",
+        "uptime_seconds": uptime,
+        "memory_mb": round(rss_mb, 1),
+    })
 
 
 _HEALTH_SECRET: str = os.environ.get("HEALTH_SECRET", "")
@@ -2834,14 +2842,21 @@ async def health_detail(request: Request):
         if cik not in cache_data or cache.is_fund_stale(cache_data.get(cik, {}))
     )
 
+    import resource
+
+    rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
+
     return JSONResponse(
         {
             "status": "ok",
             "uptime_seconds": uptime,
+            "memory_mb": round(rss_mb, 1),
             "cache_entries": len(cache_data),
             "cache_age": cache.get_cache_age_str(cache_data),
             "total_funds": len(SUPERINVESTORS),
             "stale_funds": stale_count,
+            "insider_title_cache_size": len(insider_trading._title_cache),
+            "insider_trade_cache_size": len(insider_trading._cache),
             "market_data_ready": getattr(app.state, "market_data_ready", False),
             "supabase_connected": supabase_cache.is_available(),
             "background_refresh": {
