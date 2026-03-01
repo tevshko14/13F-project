@@ -754,7 +754,7 @@ async def _reddit_velocity_scanner() -> None:
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
-    return PlainTextResponse("ok")
+    return JSONResponse({"status": "ok"})
 
 
 # --- Homepage: dashboard with market data & widgets ---
