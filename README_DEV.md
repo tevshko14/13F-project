@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-02-27 (Insider trading UX overhaul: quarterly groups, insider cards with hover tooltips, timeline chart, per-insider dropdown filter, full trade history via screener pagination, SEC Form 4 XML title resolution)
+> Last updated: 2026-03-01 (Congress trading: daily sync cron, health staleness detection, historical backfill to 2023, notifications integration, pie chart UX fixes, momentum dark mode contrast)
 
 ---
 
@@ -216,7 +216,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
     ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications tables)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
-    ├── notifications.py              # Notification creators (13F, YouTube, Reddit) + filing season detection
+    ├── notifications.py              # Notification creators (13F, YouTube, Reddit, Congress trades) + filing season detection
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
     ├── sentiment.py                  # Market sentiment (CNN, Finnhub, ApeWisdom, Alpha Vantage)
     ├── vitals.py                     # Alternative data (Glassdoor, People Data Labs, App Store)
@@ -225,7 +225,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── aum_data.py                   # Capital Deployed: AUM (Form ADV), XBRL cash, deployment ratios, leaderboard builder
     ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale) + display helpers (quarterly groups, insider cards, chart data, title resolution via SEC XML)
     ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
-    ├── congress_trading.py           # STOCK Act: Capitol Trades scraper + 6 display prep functions (chamber viz, trending, consensus, momentum, activity)
+    ├── congress_trading.py           # STOCK Act: Capitol Trades scraper (with date cutoff) + 6 display prep functions (chamber viz, trending, consensus, momentum, activity)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -1096,6 +1096,15 @@ Congressional stock trading data from STOCK Act disclosures, scraped from Capito
 Capitol Trades → scraper → congress_members + congress_trades (Supabase cold archive)
                                                     ↓
 yfinance backfill → congress_trades_prices (forward returns at +30d/90d/180d/365d)
+
+Daily sync (Railway Cron, 24h):
+  sync_congress_trades.py → incremental scrape (newest-first, stop on known)
+                          → upsert new members + trades
+                          → log to congress_sync_log
+
+Notifications (on congress page cache refresh, every 15 min):
+  _emit_congress_notifications() → filing-date watermark → create_congress_trade_notification()
+                                 → upsert to notifications table
 ```
 
 **Cold archive protection** (3 levels):
@@ -1106,10 +1115,11 @@ yfinance backfill → congress_trades_prices (forward returns at +30d/90d/180d/3
 **Key files:**
 | File | Purpose |
 |---|---|
-| `congress_trading.py` | Scraper + 6 display prep functions (chamber viz, trending, consensus, momentum, activity, page orchestrator) |
-| `supabase_cache.py` (congress section) | 8 query/upsert functions for members, trades, prices |
+| `congress_trading.py` | Scraper (with `min_trade_date` cutoff) + 6 display prep functions (chamber viz, trending, consensus, momentum, activity, page orchestrator) |
+| `supabase_cache.py` (congress section) | 9 query/upsert functions for members, trades, prices, sync log |
+| `scripts/sync_congress_trades.py` | Daily incremental sync cron job (Railway Cron Service, 24h cadence) |
 | `scripts/backfill_congress_prices.py` | yfinance batch price backfill (50 tickers/batch, 2s sleep) |
-| `scripts/load_congress_history.py` | One-time historical data load from Capitol Trades |
+| `scripts/load_congress_history.py` | Historical data load from Capitol Trades (default cutoff: 2019-01-01) |
 | `sql/002_congress_cold_table_protection.sql` | Write-once trigger protection |
 | `sql/003_congress_trades_prices.sql` | Price enrichment join table |
 | `sql/004_congress_trades_indexes.sql` | Performance indexes on congress_trades |
@@ -1117,6 +1127,11 @@ yfinance backfill → congress_trades_prices (forward returns at +30d/90d/180d/3
 | `templates/politician.html` | Politician profile page (stats, portfolio donut chart, trade history) |
 | `templates/partials/congress_activity.html` | Activity feed partial (HTMX lazy-loaded) |
 | `templates/partials/congress_trending.html` | Homepage trending chart partial (HTMX lazy-loaded) |
+
+**Health monitoring:**
+- `/health` — fast probe (no DB calls), returns `"status": "ok"` for UptimeRobot
+- `/health/detail` — includes `congress_sync` summary with recent run history, staleness detection (>48h = stale, 3 consecutive errors = failing)
+- `congress_sync_log` table tracks every cron run: status, pages scraped, new trades, duration, errors
 
 **Congress page `/congress` — 3-tab structure:**
 1. **Congress tab** — Chamber dot visualizations (ECharts scatter). Each dot = one politician, colored by party (blue/red/gray), labeled with 2-letter state code. Hover shows name, party, state, trades, top holdings. Click → politician profile.
@@ -1214,7 +1229,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 - Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
 - Exception handlers detect HTMX requests (`HX-Request` header) and API paths to return inline `data_error.html` partial instead of full error pages.
 - `/support` and homepage widget use Stripe OOTB web components (Buy Button + Pricing Table) -- zero backend Stripe SDK needed.
-- `/health` endpoint includes `stale_funds`, `refresh_status`, `refresh_progress`, and `vitals_cache` diagnostics.
+- `/health` endpoint is a fast probe (no DB calls) returning `"status": "ok"` for UptimeRobot. `/health/detail` includes `stale_funds`, `refresh_status`, `refresh_progress`, `vitals_cache`, and `congress_sync` diagnostics.
 
 ---
 
@@ -1652,6 +1667,14 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Full trade history: switched from per-ticker URL (~40 trades) to screener endpoint with `fd=0`/`td=0` for all-time history (paginated, up to 300 trades)
 - [x] Hot/cold table architecture: `insider_trades` (30-day rolling) + `insider_purchases_history` (permanent), merged with OpenInsider scrape
 - [x] SEC Form 4 XML title resolution: "See Remarks" → real officer titles (CEO, CFO, CTO, etc.) via `<remarks>` parsing + `<isDirector>`/`<isOfficer>` fallback
+- [x] Congress Trading feature: STOCK Act trade tracker with Capitol Trades scraper, chamber visualization, trending/consensus/momentum charts, activity feed, politician profiles
+- [x] Congress notifications: filing-date watermark trigger, 🏛️ Congress chip in notification filters
+- [x] Congress daily sync cron job: incremental scrape every 24h via Railway Cron Service, `congress_sync_log` monitoring table
+- [x] Congress historical backfill: full Capitol Trades dataset (~35K trades, 200+ politicians, 2023–2026)
+- [x] Health endpoint staleness detection: `/health/detail` includes congress sync status, consecutive error tracking
+- [x] Pie chart UX: centered layout with side legend, 480x480 canvas, transparent borders, outside-slice labels (politician + fund charts)
+- [x] Momentum chart dark mode: improved label contrast, Unicode strikethrough on legend toggle
+- [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF

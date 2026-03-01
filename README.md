@@ -10,8 +10,18 @@ A web dashboard for tracking SEC 13F institutional holdings filings from 84 supe
 - **Quick Access Cards** - Retail, Funds, and Insiders overview cards
 - **Support Widget** - Panda Fund progress bar with Stripe Pricing Table embed for direct monthly subscriptions
 
+### Congress Trading Page (`/congress`)
+- **Congress Tab** - Chamber dot visualizations (Senate + House), each dot is a politician colored by party, with hover stats and click → profile
+- **Holdings Tab** - Trending stocks bought by Congress, consensus leaders, recent buy/sell momentum, all-holdings table
+- **Activity Tab** - Real-time trade filing feed with filter buttons (All/Buys/Sells/House/Senate)
+
+### Politician Profile Pages (`/politician/{id}`)
+- **Stats Grid** - Total trades, buys, sells, estimated net worth, last trade date
+- **Portfolio Concentration** - ECharts donut chart (top 10 holdings by value)
+- **Trade History** - Full sortable trade table
+
 ### Navigation
-Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda** | **🔔 Notification Bell**
+Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Support the Panda** | **🔔 Notification Bell**
 
 ### Retail Page (`/retail`)
 - **Sentiment Tab** - CNN Fear & Greed gauge, summary cards (Most Mentioned, Biggest Rank Mover, Top 5 Trending)
@@ -51,7 +61,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 
 ### Cross-Site Features
 - **Watchlist** - Star tickers from any stock page, persistent sidebar on all pages
-- **Notification Bell** - Red dot indicator in the navbar with dropdown preview (latest 8) and full history page (`/notifications`). Three notification sources: 13F filing changes (new buys/sells from superinvestors), YouTube uploads from tracked finance channels, and Reddit ticker velocity spikes. Toast popups for new alerts (max 2 visible). Client-side dismiss state via `localStorage`, 120-second HTMX polling with 15-second server-side cache. Global notifications stored in Supabase with 48-hour retention.
+- **Notification Bell** - Red dot indicator in the navbar with dropdown preview (latest 8) and full history page (`/notifications`). Four notification sources: 13F filing changes (new buys/sells from superinvestors), YouTube uploads from tracked finance channels, Reddit ticker velocity spikes, and congressional trade filings. Toast popups for new alerts (max 2 visible). Client-side dismiss state via `localStorage`, 120-second HTMX polling with 15-second server-side cache. Global notifications stored in Supabase with 48-hour retention.
 - **Sortable Tables** - Click any column header to sort across all pages
 - **Background Refresh** - Self-healing, request-triggered refresh for stale 13F data with per-fund TTL
 - **Graceful Error Handling** - HTMX-aware inline error partials with Panda Fund CTA on rate limits
@@ -77,6 +87,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Support the Panda*
 | Sentiment | CNN, Finnhub, ApeWisdom, Alpha Vantage |
 | Vitals | People Data Labs, Glassdoor (RapidAPI), Apple iTunes |
 | Insider Data | OpenInsider (scraped, full history) + SEC Form 4 XML (title resolution) + Supabase `insider_trades` table |
+| Congress Data | Capitol Trades (scraped, STOCK Act disclosures) + Supabase cold archive (~35K trades, 200+ politicians) |
 | Caching | Supabase Postgres (L2, survives deploys) + disk JSON (L3 fallback) |
 | Hosting | Railway (auto-deploy from main) |
 | Domain | [paperpanda.io](https://paperpanda.io) |
@@ -127,6 +138,8 @@ railway up
 | `PANDA_FUND_RAISED` | No | - | Current month's donation total in dollars |
 | `FEEDBACK_LINK` | No | - | URL to feedback form (Notion, Google Form, etc.) |
 | `ENABLE_BACKGROUND_REFRESH` | No | - | Enable/disable background 13F refresh (default: `true`) |
+| `WEB_WORKERS` | No | - | Gunicorn worker count (default: `2`) |
+| `HEALTH_SECRET` | No | - | Secret for `/health/detail` endpoint |
 
 > **Note:** The App Store ratings feature requires no API key (Apple's public iTunes API).
 > Without Supabase env vars, the app works identically using disk-only cache.
@@ -147,9 +160,10 @@ src/filings/
 ├── supabase_cache.py   # Supabase L2 persistent cache (survives deploys)
 ├── insider_trading.py  # Form 4 insider transaction data (Supabase-first + scrape fallback)
 ├── insider_sync.py     # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
+├── congress_trading.py # STOCK Act: Capitol Trades scraper + display prep (chamber viz, trending, consensus, momentum, activity)
 ├── models.py           # Dataclasses (data contracts)
 ├── watchlist.py        # Watchlist persistence
-├── notifications.py    # Notification creators (13F, YouTube, Reddit) + filing season detection
+├── notifications.py    # Notification creators (13F, YouTube, Reddit, Congress) + filing season detection
 ├── sync_worker.py      # Cron worker: refresh 13F data + create notifications
 ├── youtube_sync.py     # Cron worker: sync YouTube events + create notifications
 ├── company_filings.py  # SEC filing links for stock pages
@@ -167,6 +181,9 @@ src/filings/
     ├── investor.html   # Individual fund page (Holdings + Compare tabs)
     ├── stock.html      # Stock page (7 tabs, lazy-loaded)
     ├── insider_trading.html  # Insider trading screener page
+    ├── congress.html   # Congress Trading page (3 tabs: Congress, Holdings, Activity)
+    ├── politician.html # Politician profile (stats, donut chart, trade history)
+    ├── notifications.html # Notification history page
     ├── activity.html   # Cross-fund activity feed
     ├── support.html    # Panda Fund transparency dashboard + Stripe donations
     └── partials/       # HTMX / lazy-loaded partials
@@ -183,6 +200,17 @@ src/filings/
         ├── compare_content.html     # Compare quarters (lazy-loaded)
         └── data_error.html          # Reusable error partial (rate limits, HTMX-aware)
 ```
+
+## Cron Jobs (Railway Cron Services)
+
+| Service | Command | Schedule | Purpose |
+|---------|---------|----------|---------|
+| 13F Sync | `filings-sync` | Every 12h | Refresh stale superinvestor 13F holdings from SEC EDGAR |
+| Insider Sync | `filings-insider-sync` | Every 30min | Scrape OpenInsider → upsert to Supabase |
+| YouTube Sync | `filings-youtube-sync` | Periodic | Sync YouTube events + create notifications |
+| Congress Sync | `python scripts/sync_congress_trades.py` | Every 24h | Incremental scrape of Capitol Trades → Supabase |
+
+Each cron service shares the same Docker image. The `START_COMMAND` env var overrides the default gunicorn web server with the cron script.
 
 ## Caching Strategy
 
@@ -222,6 +250,11 @@ Per-ticker data merges hot table → OpenInsider scrape → cold table, deduplic
 | `pdl_quota` | Monthly PDL API call counter (100/month limit) | Never expires |
 | `appstore` | Apple App Store ratings per ticker | 7 days |
 | `insider_trades` | Insider trades (dedicated table, upsert-only) | No TTL (data persists) |
+| `congress_members` | 200+ politician profiles (cold archive) | No TTL (upsert-refreshed) |
+| `congress_trades` | ~35K STOCK Act disclosures (cold, write-once) | No TTL (append-only) |
+| `congress_trades_prices` | Forward return data (+30/90/180/365d) | No TTL (refreshed as windows close) |
+| `congress_sync_log` | Daily sync job health tracking | 90 days |
+| `notifications` | 13F, YouTube, Reddit, Congress trade alerts | 48 hours |
 
 ### TTL by data type
 
@@ -249,8 +282,11 @@ On every deploy, the app runs a background cleanup to stay within the Supabase f
 | `insider_trades` | 6 months |
 | `youtube_events` | 30 days |
 | `sync_logs` | 30 days |
+| `congress_sync_log` | 90 days |
 | `notifications` | 48 hours |
 | `api_cache` | Expired entries only (by `expires_at`) |
+| `congress_trades` | Permanent (cold, write-once) |
+| `congress_members` | Permanent (refreshed on sync) |
 
 ## License
 
