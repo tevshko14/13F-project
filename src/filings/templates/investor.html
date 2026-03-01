@@ -209,16 +209,13 @@
         overflow: visible;
     }
     .chart-container {
-        width: 340px;
-        height: 340px;
+        width: 480px;
+        height: 480px;
         flex-shrink: 0;
         overflow: visible;
     }
     .chart-legend {
-        display: flex;
-        flex-direction: column;
-        gap: 0.45em;
-        min-width: 200px;
+        min-width: 180px;
     }
     .chart-legend-item {
         display: flex;
@@ -321,12 +318,11 @@
                 tooltip: {
                     trigger: 'item',
                     appendToBody: true,
-                    confine: true,
                     backgroundColor: 'rgba(30, 30, 30, 0.95)',
                     borderColor: 'transparent',
                     textStyle: { color: '#fff', fontSize: 13 },
                     padding: [12, 16],
-                    extraCssText: 'border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); z-index: 9999;',
+                    extraCssText: 'border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.25); z-index: 9999; max-width: 350px;',
                     formatter: function(params) {
                         var d = params.data._raw;
                         if (!d) return '<strong>' + params.name + '</strong><br/>Weight: ' + params.value.toFixed(1) + '%';
@@ -364,13 +360,13 @@
                 },
                 series: [{
                     type: 'pie',
-                    radius: ['45%', '78%'],
+                    radius: ['32%', '55%'],
                     center: ['50%', '50%'],
                     avoidLabelOverlap: true,
                     padAngle: 2,
                     itemStyle: {
                         borderRadius: 6,
-                        borderColor: '#fff',
+                        borderColor: 'transparent',
                         borderWidth: 2
                     },
                     label: { show: false },

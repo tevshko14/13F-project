@@ -749,10 +749,18 @@ async def _reddit_velocity_scanner() -> None:
 # Pages
 # ═══════════════════════════════════════════════════════════════════════
 
+# --- Health check (for UptimeRobot / load balancers) ---
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+async def health_check():
+    return PlainTextResponse("ok")
+
+
 # --- Homepage: dashboard with market data & widgets ---
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def homepage(request: Request):
     monthly_goal = _PANDA_FUND_MONTHLY_GOAL
     current_month = datetime.now().strftime("%Y-%m")
