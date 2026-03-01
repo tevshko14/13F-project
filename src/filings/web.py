@@ -2059,7 +2059,7 @@ async def notification_count(request: Request, since: str = "2000-01-01T00:00:00
     return JSONResponse({"count": count})
 
 
-_NOTIF_TYPES = ["13f_change", "youtube", "reddit_velocity"]
+_NOTIF_TYPES = ["13f_change", "youtube", "reddit_velocity", "congress_trade"]
 
 
 @app.get("/notifications", response_class=HTMLResponse)
@@ -2407,6 +2407,66 @@ async def stock_congress_api(request: Request, ticker: str):
 _congress_page_cache: dict = {"data": None, "ts": 0.0}
 _CONGRESS_PAGE_TTL = 900  # 15 minutes
 
+# Congress notification tracking — set to today on first boot to avoid
+# retroactively flooding notifications from the entire cold archive.
+_congress_last_notified_filing: str = ""
+_CONGRESS_NOTIF_MAX = 10  # cap per refresh cycle
+
+
+async def _emit_congress_notifications(recent_trades: list[dict]) -> None:
+    """Check for new congress filings and create notifications.
+
+    Compares ``filing_date`` of recent trades against the last filing
+    date we already notified about.  On first call, initialises the
+    watermark to today so old archive data doesn't trigger alerts.
+    """
+    global _congress_last_notified_filing
+
+    if not recent_trades:
+        return
+
+    # First boot: seed watermark to today (no retroactive flood)
+    if not _congress_last_notified_filing:
+        _congress_last_notified_filing = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        logger.info(
+            "Congress notifications: initialised watermark to %s",
+            _congress_last_notified_filing,
+        )
+        return
+
+    # Filter trades filed after our watermark, with a real ticker
+    new_trades = [
+        t for t in recent_trades
+        if (t.get("filing_date") or "") > _congress_last_notified_filing
+        and t.get("ticker")
+    ]
+    if not new_trades:
+        return
+
+    # Sort by estimated amount descending — largest trades are most noteworthy
+    def _mid(t: dict) -> float:
+        low = t.get("amount_low") or 0
+        high = t.get("amount_high") or 0
+        return (low + high) / 2
+
+    new_trades.sort(key=_mid, reverse=True)
+    capped = new_trades[:_CONGRESS_NOTIF_MAX]
+
+    notif_rows = []
+    for t in capped:
+        notif = notifications.create_congress_trade_notification(t)
+        if notif:
+            notif_rows.append(notif)
+
+    if notif_rows:
+        n = await asyncio.to_thread(supabase_cache.upsert_notifications, notif_rows)
+        logger.info("Created %d congress trade notifications", n)
+
+    # Advance watermark to the newest filing_date we just processed
+    max_filing = max(t.get("filing_date", "") for t in new_trades)
+    if max_filing > _congress_last_notified_filing:
+        _congress_last_notified_filing = max_filing
+
 # Per-politician profile cache (LRU-bounded, 15-min TTL)
 # OrderedDict gives O(1) eviction via move_to_end + popitem
 from collections import OrderedDict as _OrderedDict
@@ -2455,6 +2515,13 @@ async def _get_congress_page_data() -> dict:
 
         _congress_page_cache["data"] = data
         _congress_page_cache["ts"] = time_module.time()
+
+        # Emit notifications for any new filings since last refresh
+        try:
+            await _emit_congress_notifications(recent_trades or [])
+        except Exception:
+            logger.warning("Congress notification emission failed", exc_info=True)
+
         return data
 
 
