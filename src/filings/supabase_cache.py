@@ -2489,3 +2489,28 @@ def get_congress_all_ticker_trades(limit: int = 50000) -> list[dict] | None:
     except Exception as exc:
         logger.warning("get_congress_all_ticker_trades failed: %s", exc)
         return None
+
+
+# ── Congress sync log ─────────────────────────────────────────────────
+
+
+def get_latest_congress_sync(limit: int = 5) -> list[dict] | None:
+    """Get the most recent sync log entries for health monitoring.
+
+    Returns rows from ``congress_sync_log`` sorted by started_at DESC.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("congress_sync_log")
+            .select("*")
+            .order("started_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_latest_congress_sync failed: %s", exc)
+        return None

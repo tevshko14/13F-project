@@ -3092,16 +3092,86 @@ async def clear_session(request: Request):
 
 @app.get("/health")
 async def health_check(request: Request):
-    """Public health probe for Railway readiness checks."""
+    """Public health probe for Railway readiness checks.
+
+    Includes congress sync staleness detection — flags warning if the
+    last successful sync was >48h ago or the last 3 runs all failed.
+    """
     import resource
 
     rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
     uptime = round(time_module.time() - _app_start_time)
+
+    # ── Congress sync staleness check ──
+    congress_sync_status = "unknown"
+    try:
+        sync_logs = await asyncio.to_thread(supabase_cache.get_latest_congress_sync, 3)
+        if sync_logs:
+            latest = sync_logs[0]
+            last_started = latest.get("started_at", "")
+            last_status = latest.get("status", "unknown")
+
+            # Check if last sync was >48h ago (expected every 24h, 2x buffer)
+            if last_started:
+                from datetime import datetime as _dt, timezone as _tz
+                try:
+                    ts = _dt.fromisoformat(last_started.replace("Z", "+00:00"))
+                    age_hours = (
+                        _dt.now(_tz.utc) - ts
+                    ).total_seconds() / 3600
+                    if age_hours > 48:
+                        congress_sync_status = f"stale ({age_hours:.0f}h since last sync)"
+                    elif last_status == "error":
+                        # Check if last 3 are all errors
+                        all_errors = all(
+                            r.get("status") == "error" for r in sync_logs[:3]
+                        )
+                        congress_sync_status = (
+                            "failing (3 consecutive errors)"
+                            if all_errors and len(sync_logs) >= 3
+                            else f"last_error ({age_hours:.0f}h ago)"
+                        )
+                    else:
+                        congress_sync_status = "healthy"
+                except (ValueError, TypeError):
+                    congress_sync_status = "parse_error"
+        else:
+            congress_sync_status = "no_data"
+    except Exception:
+        congress_sync_status = "check_failed"
+
     return JSONResponse({
         "status": "ok",
         "uptime_seconds": uptime,
         "memory_mb": round(rss_mb, 1),
+        "congress_sync": congress_sync_status,
     })
+
+
+async def _get_congress_sync_summary() -> dict:
+    """Build a summary dict of congress sync status for /health/detail."""
+    try:
+        logs = await asyncio.to_thread(supabase_cache.get_latest_congress_sync, 5)
+        if not logs:
+            return {"status": "no_data", "last_sync": None, "recent_runs": []}
+        latest = logs[0]
+        return {
+            "status": latest.get("status", "unknown"),
+            "last_sync": latest.get("started_at"),
+            "last_trades_found": latest.get("new_trades", 0),
+            "last_duration_secs": latest.get("duration_secs"),
+            "recent_runs": [
+                {
+                    "started_at": r.get("started_at"),
+                    "status": r.get("status"),
+                    "new_trades": r.get("new_trades", 0),
+                    "pages_scraped": r.get("pages_scraped", 0),
+                }
+                for r in logs
+            ],
+        }
+    except Exception:
+        return {"status": "check_failed"}
 
 
 _HEALTH_SECRET: str = os.environ.get("HEALTH_SECRET", "")
@@ -3154,6 +3224,7 @@ async def health_detail(request: Request):
                 "in_progress_ciks": len(_refresh_in_progress),
             },
             "vitals_cache": vitals.get_vitals_cache_info(),
+            "congress_sync": await _get_congress_sync_summary(),
         }
     )
 
