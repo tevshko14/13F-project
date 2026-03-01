@@ -3090,61 +3090,21 @@ async def clear_session(request: Request):
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check(request: Request):
-    """Public health probe for Railway readiness checks.
+    """Public health probe for UptimeRobot / Railway readiness checks.
 
-    Includes congress sync staleness detection — flags warning if the
-    last successful sync was >48h ago or the last 3 runs all failed.
+    Must stay fast and dependency-free — no DB calls here.
+    Use /health/detail for congress sync staleness and other deep checks.
     """
     import resource
 
     rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
     uptime = round(time_module.time() - _app_start_time)
-
-    # ── Congress sync staleness check ──
-    congress_sync_status = "unknown"
-    try:
-        sync_logs = await asyncio.to_thread(supabase_cache.get_latest_congress_sync, 3)
-        if sync_logs:
-            latest = sync_logs[0]
-            last_started = latest.get("started_at", "")
-            last_status = latest.get("status", "unknown")
-
-            # Check if last sync was >48h ago (expected every 24h, 2x buffer)
-            if last_started:
-                from datetime import datetime as _dt, timezone as _tz
-                try:
-                    ts = _dt.fromisoformat(last_started.replace("Z", "+00:00"))
-                    age_hours = (
-                        _dt.now(_tz.utc) - ts
-                    ).total_seconds() / 3600
-                    if age_hours > 48:
-                        congress_sync_status = f"stale ({age_hours:.0f}h since last sync)"
-                    elif last_status == "error":
-                        # Check if last 3 are all errors
-                        all_errors = all(
-                            r.get("status") == "error" for r in sync_logs[:3]
-                        )
-                        congress_sync_status = (
-                            "failing (3 consecutive errors)"
-                            if all_errors and len(sync_logs) >= 3
-                            else f"last_error ({age_hours:.0f}h ago)"
-                        )
-                    else:
-                        congress_sync_status = "healthy"
-                except (ValueError, TypeError):
-                    congress_sync_status = "parse_error"
-        else:
-            congress_sync_status = "no_data"
-    except Exception:
-        congress_sync_status = "check_failed"
-
     return JSONResponse({
         "status": "ok",
         "uptime_seconds": uptime,
         "memory_mb": round(rss_mb, 1),
-        "congress_sync": congress_sync_status,
     })
 
 
