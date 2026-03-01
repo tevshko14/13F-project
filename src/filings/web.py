@@ -2009,6 +2009,7 @@ async def notification_bell(
     if count > 0 and latest:
         trigger_data = {
             "ppNewNotification": {
+                "id": latest.get("id", ""),
                 "type": latest.get("toast_type", "alert"),
                 "title": latest.get("title", ""),
                 "message": latest.get("message", ""),

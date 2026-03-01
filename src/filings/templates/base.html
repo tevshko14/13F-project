@@ -1631,8 +1631,22 @@
         });
 
         // Listen for HX-Trigger toast events from the bell poll
+        // Deduplicate by notification ID to prevent repeat toasts across polls
+        var _shownToastIds = new Set(
+            JSON.parse(localStorage.getItem('pp-shown-toasts') || '[]')
+        );
         document.body.addEventListener('ppNewNotification', function(e) {
             if (e.detail && window.ppToast) {
+                var nid = e.detail.id || '';
+                if (nid && _shownToastIds.has(nid)) return;  // already shown
+                if (nid) {
+                    _shownToastIds.add(nid);
+                    // Keep set bounded — only retain last 50 IDs
+                    var arr = Array.from(_shownToastIds);
+                    if (arr.length > 50) arr = arr.slice(arr.length - 50);
+                    _shownToastIds = new Set(arr);
+                    localStorage.setItem('pp-shown-toasts', JSON.stringify(arr));
+                }
                 window.ppToast(e.detail);
             }
         });
