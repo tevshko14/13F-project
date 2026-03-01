@@ -3090,24 +3090,6 @@ async def clear_session(request: Request):
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@app.api_route("/health", methods=["GET", "HEAD"])
-async def health_check(request: Request):
-    """Public health probe for UptimeRobot / Railway readiness checks.
-
-    Must stay fast and dependency-free — no DB calls here.
-    Use /health/detail for congress sync staleness and other deep checks.
-    """
-    import resource
-
-    rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
-    uptime = round(time_module.time() - _app_start_time)
-    return JSONResponse({
-        "status": "ok",
-        "uptime_seconds": uptime,
-        "memory_mb": round(rss_mb, 1),
-    })
-
-
 async def _get_congress_sync_summary() -> dict:
     """Build a summary dict of congress sync status for /health/detail."""
     try:
