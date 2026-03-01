@@ -419,6 +419,7 @@ def scrape_capitol_trades(
     max_pages: int = 0,
     page_size: int = _CT_PAGE_SIZE,
     delay: float = _CT_DELAY,
+    min_trade_date: str = "",
 ) -> list[CongressTrade]:
     """Scrape all trades from Capitol Trades paginated listing.
 
@@ -426,6 +427,9 @@ def scrape_capitol_trades(
         max_pages: Maximum pages to scrape (0 = all pages).
         page_size: Trades per page (Capitol Trades supports up to 100).
         delay: Seconds to wait between requests (polite scraping).
+        min_trade_date: Optional YYYY-MM-DD cutoff — trades older than
+            this are skipped, and scraping stops when an entire page
+            falls below the cutoff (Capitol Trades is newest-first).
 
     Returns:
         List of CongressTrade objects, newest first.
@@ -433,6 +437,9 @@ def scrape_capitol_trades(
     all_trades: list[CongressTrade] = []
     seen_ids: set[str] = set()
     page = 1
+
+    if min_trade_date:
+        logger.info("Date cutoff: trades before %s will be skipped", min_trade_date)
 
     with httpx.Client(headers=_HEADERS, timeout=30.0, follow_redirects=True) as client:
         while True:
@@ -457,19 +464,35 @@ def scrape_capitol_trades(
                 break
 
             page_count = 0
+            skipped_old = 0
             for obj in trade_objs:
                 trade = _parse_trade_json(obj)
-                if trade and trade.trade_id not in seen_ids:
-                    seen_ids.add(trade.trade_id)
-                    all_trades.append(trade)
-                    page_count += 1
+                if trade is None:
+                    continue
+                if trade.trade_id in seen_ids:
+                    continue
+                # Date cutoff: skip trades before min_trade_date
+                if min_trade_date and trade.trade_date and trade.trade_date < min_trade_date:
+                    skipped_old += 1
+                    continue
+                seen_ids.add(trade.trade_id)
+                all_trades.append(trade)
+                page_count += 1
 
             logger.info(
-                "Page %d: parsed %d trades (%d unique total)",
+                "Page %d: parsed %d trades (%d unique total)%s",
                 page, page_count, len(all_trades),
+                f" (skipped {skipped_old} before cutoff)" if skipped_old else "",
             )
 
-            if page_count == 0:
+            # If the entire page was before the cutoff, we've gone far enough
+            if min_trade_date and page_count == 0 and skipped_old > 0:
+                logger.info(
+                    "Entire page %d was before %s — stopping", page, min_trade_date
+                )
+                break
+
+            if page_count == 0 and skipped_old == 0:
                 logger.info("No new trades on page %d — stopping", page)
                 break
 

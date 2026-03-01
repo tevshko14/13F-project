@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """One-time historical load of Capitol Trades data into Supabase.
 
-Scrapes all ~35K congressional trades from Capitol Trades (3 years of
-STOCK Act disclosures), derives politician profiles, and populates the
+Scrapes congressional trades from Capitol Trades (STOCK Act disclosures
+back to 2019), derives politician profiles, and populates the
 ``congress_members`` and ``congress_trades`` Supabase tables.
 
 ⚠️  COLD ARCHIVE — DATA PROTECTION ⚠️
@@ -18,9 +18,10 @@ STOCK Act disclosures), derives politician profiles, and populates the
 
 Usage:
     uv run python scripts/load_congress_history.py [--max-pages N] [--dry-run]
+    uv run python scripts/load_congress_history.py --min-date 2019-01-01
 
-The full scrape takes ~12 minutes (~350 pages at 2s/page).  Use --max-pages
-for testing.  Use --dry-run to scrape without writing to Supabase.
+The full scrape (~7 years to 2019) takes ~30 minutes (~1500+ pages at 2s/page).
+Use --max-pages for testing.  Use --dry-run to scrape without writing to Supabase.
 """
 
 from __future__ import annotations
@@ -35,6 +36,10 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from filings import congress_trading, supabase_cache
+
+
+# Default: go back to 2019 for rich historical data
+_DEFAULT_MIN_DATE = "2019-01-01"
 
 
 def _setup_logging() -> None:
@@ -62,6 +67,10 @@ def main() -> None:
         help="Seconds between requests (default: 2.0)",
     )
     parser.add_argument(
+        "--min-date", type=str, default=_DEFAULT_MIN_DATE,
+        help=f"Earliest trade date to include, YYYY-MM-DD (default: {_DEFAULT_MIN_DATE})",
+    )
+    parser.add_argument(
         "--dry-run", action="store_true",
         help="Scrape only — don't write to Supabase",
     )
@@ -71,8 +80,8 @@ def main() -> None:
 
     logger.info("=== Capitol Trades Historical Load ===")
     logger.info(
-        "Settings: max_pages=%s, page_size=%d, delay=%.1fs, dry_run=%s",
-        args.max_pages or "ALL", args.page_size, args.delay, args.dry_run,
+        "Settings: max_pages=%s, page_size=%d, delay=%.1fs, min_date=%s, dry_run=%s",
+        args.max_pages or "ALL", args.page_size, args.delay, args.min_date, args.dry_run,
     )
 
     # ── Phase 1: Scrape ──
@@ -81,6 +90,7 @@ def main() -> None:
         max_pages=args.max_pages,
         page_size=args.page_size,
         delay=args.delay,
+        min_trade_date=args.min_date,
     )
     scrape_time = time.time() - t0
     logger.info(
