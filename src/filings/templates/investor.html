@@ -315,6 +315,7 @@
 
             var chart = echarts.init(chartEl);
             chart.setOption({
+                animation: false,
                 tooltip: {
                     trigger: 'item',
                     appendToBody: true,
@@ -427,9 +428,8 @@
                 if (d && d.ticker) window.location.href = '/stock/' + d.ticker;
             });
 
-            // Responsive (debounced)
-            var _resizeTimer;
-            window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { chart.resize(); }, 150); });
+            // Responsive
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
             }); // end requireECharts
         })
         .catch(function() {

@@ -34,6 +34,7 @@
     var container = document.getElementById('trending-combined-chart');
     if (!container || !rawData || rawData.length === 0) return;
 
+    window._ppLazyChart(container, function() {
     window.requireECharts(function(err) {
     if (err) { container.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
 
@@ -73,7 +74,7 @@
         return sorted;
     }
 
-    function renderChart(sortBy) {
+    function renderChart(sortBy, animate) {
         var data = getData(sortBy);
         var showSI = legendSelected['Superinvestors'] !== false;
         var showCG = legendSelected['Congress'] !== false;
@@ -101,6 +102,7 @@
         var legendColor = cs.getPropertyValue('--pp-chart-legend').trim() || axisSecondary;
 
         chart.setOption({
+            animation: animate !== false,
             grid: { left: 70, right: 30, top: 36, bottom: 30 },
             legend: {
                 data: ['Superinvestors', 'Congress'],
@@ -242,15 +244,12 @@
     };
 
     /* Initial render */
-    renderChart('count');
+    renderChart('count', false);
 
-    /* Responsive resize (debounced) */
-    var _resizeTimer;
-    window.addEventListener('resize', function() {
-        clearTimeout(_resizeTimer);
-        _resizeTimer = setTimeout(function() { chart.resize(); }, 150);
-    });
+    /* Responsive resize (global debounced handler) */
+    if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
     }); /* end requireECharts */
+    }); /* end _ppLazyChart */
 })();
 </script>
 {% endif %}

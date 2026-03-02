@@ -386,6 +386,7 @@
         var chart = echarts.init(container);
 
         chart.setOption({
+            animation: false,
             tooltip: {
                 trigger: 'item',
                 appendToBody: true,
@@ -457,7 +458,7 @@
             }
         });
 
-        window.addEventListener('resize', function() { chart.resize(); });
+        if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
     });
 })();
 </script>

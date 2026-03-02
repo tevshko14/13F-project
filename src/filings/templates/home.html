@@ -7,6 +7,9 @@
 {% block twitter_description %}Free superinvestor 13F portfolio tracker. See what Buffett, Ackman, Burry & 80+ top investors are buying.{% endblock %}
 {% block canonical_url %}https://paperpanda.io/{% endblock %}
 {% block og_url %}https://paperpanda.io/{% endblock %}
+{% block extra_head_scripts %}
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
+{% endblock %}
 {% block content %}
 
 {# Override Pico CSS narrow container for the bento grid dashboard #}
@@ -132,20 +135,11 @@
             <h3 class="bento-card-title">S&amp;P 500 Heatmap</h3>
             <div class="heatmap-toggle" id="heatmap-toggle">
                 <button class="heatmap-pill active" data-period="1D"
-                        hx-get="/api/heatmap?period=1D"
-                        hx-target="#heatmap-body"
-                        hx-swap="innerHTML"
-                        hx-indicator="#heatmap-body">1D</button>
+                        onclick="switchHeatmapPeriod('1D', this)">1D</button>
                 <button class="heatmap-pill" data-period="1W"
-                        hx-get="/api/heatmap?period=1W"
-                        hx-target="#heatmap-body"
-                        hx-swap="innerHTML"
-                        hx-indicator="#heatmap-body">1W</button>
+                        onclick="switchHeatmapPeriod('1W', this)">1W</button>
                 <button class="heatmap-pill" data-period="1M"
-                        hx-get="/api/heatmap?period=1M"
-                        hx-target="#heatmap-body"
-                        hx-swap="innerHTML"
-                        hx-indicator="#heatmap-body">1M</button>
+                        onclick="switchHeatmapPeriod('1M', this)">1M</button>
             </div>
         </div>
         <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML">
@@ -215,20 +209,32 @@
 
 </div>{# end .bento-grid #}
 
-{# ── Heatmap toggle JS ── #}
+{# ── Heatmap period switch via JSON (avoids full HTML re-render) ── #}
 <script>
-(function() {
-    var toggle = document.getElementById('heatmap-toggle');
-    if (!toggle) return;
-    toggle.addEventListener('click', function(e) {
-        var btn = e.target.closest('.heatmap-pill');
-        if (!btn) return;
-        toggle.querySelectorAll('.heatmap-pill').forEach(function(b) {
-            b.classList.remove('active');
+function switchHeatmapPeriod(period, btn) {
+    /* Update active pill */
+    document.querySelectorAll('.heatmap-pill').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    /* Show loading state */
+    var body = document.getElementById('heatmap-body');
+    if (body) body.style.opacity = '0.4';
+    /* Fetch JSON and update existing chart (no full re-render) */
+    fetch('/api/heatmap-data?period=' + period)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (body) body.style.opacity = '';
+            if (d.data && window._ppUpdateHeatmap) {
+                window._ppUpdateHeatmap(d.data, d.period_label || period);
+            } else if (d.error) {
+                /* Fallback: full HTMX reload if chart not ready */
+                if (body) body.innerHTML = '<div class="bento-loading"><span class="spinner"></span></div>';
+                htmx.ajax('GET', '/api/heatmap?period=' + period, {target: '#heatmap-body', swap: 'innerHTML'});
+            }
+        })
+        .catch(function() {
+            if (body) body.style.opacity = '';
         });
-        btn.classList.add('active');
-    });
-})();
+}
 </script>
 
 {% if stripe_configured %}
@@ -557,6 +563,11 @@ document.addEventListener('keydown', function(e) {
     /* ── Card Body ── */
     .bento-card-body {
         /* partials render directly inside here */
+        transition: opacity 0.2s ease;
+    }
+    .bento-card-body.htmx-request {
+        opacity: 0.4;
+        pointer-events: none;
     }
     .bento-card-body-flex {
         flex: 1;

@@ -36,6 +36,7 @@
     var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
 
     chart.setOption({
+        animation: false,
         grid: { left: 40, right: 16, top: 30, bottom: 60 },
         xAxis: {
             type: 'category', data: tickers,
@@ -88,7 +89,7 @@
         if (d && d.link) window.location.href = d.link;
     });
 
-    window.addEventListener('resize', function() { chart.resize(); });
+    if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
     });
 })();
 </script>

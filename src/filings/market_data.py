@@ -71,6 +71,12 @@ _INDEX_TTL = 1_800  # 30 minutes
 _news_cache: tuple[float, list[dict]] | None = None
 _NEWS_TTL = 1_800  # 30 minutes
 
+_heatmap_built_cache: dict[str, tuple[float, list[dict]]] = {}
+_HEATMAP_BUILT_TTL = 1_800  # 30 minutes — same as market data
+
+_sparkline_cache: dict[str, tuple[float, dict[str, list[float]]]] = {}
+_SPARKLINE_TTL = 1_800  # 30 minutes
+
 
 # ── Supabase warm-load (survive redeploys) ───────────────────────────
 
@@ -421,8 +427,16 @@ def get_sparkline_points(tickers: list[str], num_points: int = 20) -> dict[str, 
 
     Uses the cached 1-month close DataFrame (same data as heatmap).
     Returns {ticker: [0.0, 0.15, 0.42, ..., 1.0]} with `num_points` values.
-    Missing tickers are silently omitted.
+    Missing tickers are silently omitted.  Results are cached for 30 min.
     """
+    cache_key = f"{','.join(sorted(tickers))}:{num_points}"
+    with _lock:
+        cached = _sparkline_cache.get(cache_key)
+        if cached is not None:
+            ts, data = cached
+            if time.time() - ts < _SPARKLINE_TTL:
+                return data
+
     close_data = _ensure_close_df()
     if close_data is None:
         return {}
@@ -452,6 +466,9 @@ def get_sparkline_points(tickers: list[str], num_points: int = 20) -> dict[str, 
                 result[ticker] = [0.5] * len(values)
         except Exception:
             continue
+
+    with _lock:
+        _sparkline_cache[cache_key] = (time.time(), result)
 
     return result
 
@@ -1012,12 +1029,22 @@ def build_heatmap_data(
     market_data: dict,
     constituents: list[dict],
     superinvestor_ticker_counts: dict[str, int],
+    period: str = "1D",
 ) -> list[dict]:
     """Build ECharts treemap data grouped by sector.
 
     Returns list of sector groups:
     [{"name": "Tech", "children": [{"name": "AAPL", "value": 1, ...}]}]
+
+    Results are cached per-period for _HEATMAP_BUILT_TTL seconds.
     """
+    with _lock:
+        cached = _heatmap_built_cache.get(period)
+        if cached is not None:
+            ts, data = cached
+            if time.time() - ts < _HEATMAP_BUILT_TTL:
+                return data
+
     sectors: dict[str, list[dict]] = {}
 
     for c in constituents:
@@ -1057,6 +1084,9 @@ def build_heatmap_data(
                 "children": sectors[name],
             }
         )
+
+    with _lock:
+        _heatmap_built_cache[period] = (time.time(), result)
 
     return result
 

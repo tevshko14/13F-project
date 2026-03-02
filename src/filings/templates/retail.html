@@ -368,6 +368,7 @@
         var chart = echarts.init(container);
 
         chart.setOption({
+            animation: false,
             tooltip: {
                 appendToBody: true,
                 confine: true,
@@ -429,8 +430,7 @@
             }
         });
 
-        var _resizeTimer;
-        window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { chart.resize(); }, 150); });
+        if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
         }); // end requireECharts
     }
 
