@@ -8,6 +8,7 @@ configurable TTLs to avoid repeated downloads.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -36,6 +37,12 @@ _MOST_ADDED_TTL = 1_800  # 30 minutes
 
 _all_listings_cache: tuple[float, list[dict]] | None = None
 _ALL_LISTINGS_TTL = 86_400  # 24 hours — listings change infrequently
+
+_index_cache: tuple[float, dict] | None = None
+_INDEX_TTL = 1_800  # 30 minutes
+
+_news_cache: tuple[float, list[dict]] | None = None
+_NEWS_TTL = 1_800  # 30 minutes
 
 
 # ── S&P 500 Constituents ──────────────────────────────────────────────
@@ -277,6 +284,408 @@ def get_sp500_market_data(period: str = "1D") -> dict:
     with _lock:
         _market_data_cache[period] = (time.time(), result)
     return result
+
+
+# ── Sparkline Data ────────────────────────────────────────────────────
+
+
+def get_sparkline_points(tickers: list[str], num_points: int = 20) -> dict[str, list[float]]:
+    """Return normalized sparkline points (0-1 range) for a list of tickers.
+
+    Uses the cached 1-month close DataFrame (same data as heatmap).
+    Returns {ticker: [0.0, 0.15, 0.42, ..., 1.0]} with `num_points` values.
+    Missing tickers are silently omitted.
+    """
+    close_data = _ensure_close_df()
+    if close_data is None:
+        return {}
+
+    result: dict[str, list[float]] = {}
+    for ticker in tickers:
+        try:
+            if ticker not in close_data.columns:
+                continue
+            series = close_data[ticker].dropna()
+            if len(series) < 3:
+                continue
+
+            # Downsample to num_points evenly spaced values
+            values = series.values.tolist()
+            if len(values) > num_points:
+                step = (len(values) - 1) / (num_points - 1)
+                values = [values[round(i * step)] for i in range(num_points)]
+
+            # Normalize to 0-1 range
+            lo = min(values)
+            hi = max(values)
+            span = hi - lo
+            if span > 0:
+                result[ticker] = [round((v - lo) / span, 3) for v in values]
+            else:
+                result[ticker] = [0.5] * len(values)
+        except Exception:
+            continue
+
+    return result
+
+
+# ── Index & Commodity Market Data ─────────────────────────────────────
+
+_INDEX_SYMBOLS: dict[str, dict] = {
+    # Indices
+    "^GSPC": {"name": "S&P 500", "tab": "indices"},
+    "^IXIC": {"name": "Nasdaq", "tab": "indices"},
+    "^DJI": {"name": "Dow Jones", "tab": "indices"},
+    "^RUT": {"name": "Russell 2000", "tab": "indices"},
+    "^VIX": {"name": "VIX", "tab": "indices"},
+    # Commodities
+    "GC=F": {"name": "Gold", "tab": "commodities"},
+    "CL=F": {"name": "Crude Oil", "tab": "commodities"},
+    "SI=F": {"name": "Silver", "tab": "commodities"},
+    "NG=F": {"name": "Natural Gas", "tab": "commodities"},
+}
+
+
+def get_index_market_data() -> dict:
+    """Fetch 1-year daily close data for major indices and commodities.
+
+    Returns dict keyed by symbol (e.g. "^GSPC"):
+        {symbol: {name, tab, price, pct_change, point_change, spark, history}}
+
+    - spark: normalized 0-1 list (20 points) for inline sparklines
+    - history: [[epoch_ms, close], ...] for ECharts line chart (full 1Y)
+
+    Uses 30-min TTL cache.  Returns empty dict on failure.
+    """
+    global _index_cache
+
+    with _lock:
+        if _index_cache is not None:
+            ts, data = _index_cache
+            if time.time() - ts < _INDEX_TTL:
+                return data
+
+    symbols = list(_INDEX_SYMBOLS.keys())
+
+    try:
+        import yfinance as yf
+
+        df = yf.download(symbols, period="1y", threads=False, progress=False)
+
+        if df.empty:
+            logger.warning("yfinance returned empty DataFrame for indices")
+            return {}
+
+        # Extract close prices — handle both MultiIndex and flat columns
+        if isinstance(df.columns, type(df.columns)) and hasattr(df.columns, "get_level_values"):
+            try:
+                levels = df.columns.get_level_values(0).unique().tolist()
+                if "Close" in levels:
+                    close_data = df["Close"]
+                else:
+                    close_data = df
+            except Exception:
+                close_data = df
+        else:
+            close_data = df
+
+        result: dict = {}
+        for sym, meta in _INDEX_SYMBOLS.items():
+            try:
+                col = sym
+                if col not in close_data.columns:
+                    # Try without special chars
+                    continue
+                series = close_data[col].dropna()
+                if len(series) < 2:
+                    continue
+
+                last_close = float(series.iloc[-1])
+                prev_close = float(series.iloc[-2])
+                pct = round((last_close - prev_close) / prev_close * 100, 2) if prev_close else 0.0
+                point_chg = round(last_close - prev_close, 2)
+
+                # Sparkline (normalized 0-1, 20 points)
+                values = series.values.tolist()
+                num_points = 20
+                if len(values) > num_points:
+                    step = (len(values) - 1) / (num_points - 1)
+                    spark_vals = [values[round(i * step)] for i in range(num_points)]
+                else:
+                    spark_vals = values
+                lo, hi = min(spark_vals), max(spark_vals)
+                span = hi - lo
+                if span > 0:
+                    spark = [round((v - lo) / span, 3) for v in spark_vals]
+                else:
+                    spark = [0.5] * len(spark_vals)
+
+                # History for ECharts: [[epoch_ms, close], ...]
+                history = []
+                for dt, val in zip(series.index, series.values):
+                    epoch_ms = int(dt.timestamp() * 1000)
+                    history.append([epoch_ms, round(float(val), 2)])
+
+                result[sym] = {
+                    "name": meta["name"],
+                    "tab": meta["tab"],
+                    "price": round(last_close, 2),
+                    "pct_change": pct,
+                    "point_change": point_chg,
+                    "spark": spark,
+                    "history": history,
+                }
+            except Exception:
+                continue
+
+        logger.info("Fetched index/commodity data for %d symbols", len(result))
+        with _lock:
+            _index_cache = (time.time(), result)
+        return result
+
+    except Exception as e:
+        logger.warning("yfinance index download failed: %s", e)
+        return {}
+
+
+# Approximate trading days per period for slicing chart history
+_PERIOD_TRADING_DAYS = {"1D": 2, "1W": 5, "1M": 22, "3M": 66, "1Y": 253}
+
+# Per-symbol on-demand chart cache for extended stock history
+_overview_chart_cache: dict[str, tuple[float, list]] = {}
+_OVERVIEW_CHART_TTL = 1_800  # 30 min
+
+
+def _slice_history(history: list, period: str) -> list:
+    """Slice a full history list to the requested period."""
+    num_days = _PERIOD_TRADING_DAYS.get(period)
+    if num_days is None or len(history) <= num_days:
+        return history
+    return history[-num_days:]
+
+
+def _pct_change_for_history(history: list) -> float:
+    """Compute % change from first to last point in a history list."""
+    if len(history) < 2:
+        return 0.0
+    start = history[0][1]
+    end = history[-1][1]
+    if start and start > 0:
+        return round((end - start) / start * 100, 2)
+    return 0.0
+
+
+def get_overview_chart_data(symbol: str, period: str = "1M") -> dict | None:
+    """Return chart data for any symbol (stock, index, or commodity).
+
+    period: "1D", "1W", "1M", "3M", "1Y"
+
+    Returns {"name": str, "price": float, "pct_change": float,
+             "history": [[epoch_ms, close], ...]}
+    or None if not found.
+    """
+    if period not in _PERIOD_TRADING_DAYS:
+        period = "1M"
+
+    # 1. Check index/commodity cache first (has full 1Y of data)
+    with _lock:
+        if _index_cache is not None:
+            _, idx_data = _index_cache
+            if symbol in idx_data:
+                d = idx_data[symbol]
+                sliced = _slice_history(d["history"], period)
+                return {
+                    "name": d["name"],
+                    "price": d["price"],
+                    "pct_change": _pct_change_for_history(sliced),
+                    "history": sliced,
+                }
+
+    # 2. For stocks — try cached close DataFrame first (has ~1M of data)
+    num_days = _PERIOD_TRADING_DAYS[period]
+
+    if num_days <= 22:
+        # 1M or less — use the existing S&P 500 close DataFrame
+        close_data = _ensure_close_df()
+        if close_data is not None and symbol in close_data.columns:
+            series = close_data[symbol].dropna()
+            if len(series) >= 2:
+                sliced_series = series[-num_days:] if num_days < len(series) else series
+                history = []
+                for dt, val in zip(sliced_series.index, sliced_series.values):
+                    epoch_ms = int(dt.timestamp() * 1000)
+                    history.append([epoch_ms, round(float(val), 2)])
+
+                constituents = get_sp500_constituents()
+                name = symbol
+                for c in constituents:
+                    if c["ticker"] == symbol:
+                        name = c["name"]
+                        break
+
+                return {
+                    "name": name,
+                    "price": round(float(sliced_series.iloc[-1]), 2),
+                    "pct_change": _pct_change_for_history(history),
+                    "history": history,
+                }
+
+    # 3. Longer period for stocks — on-demand download with cache
+    cache_key = f"{symbol}:{period}"
+    with _lock:
+        cached = _overview_chart_cache.get(cache_key)
+        if cached is not None:
+            ts, data = cached
+            if time.time() - ts < _OVERVIEW_CHART_TTL:
+                return data
+
+    try:
+        import yfinance as yf
+
+        yf_periods = {"3M": "3mo", "1Y": "1y"}
+        yf_period = yf_periods.get(period, "3mo")
+
+        dl = yf.download([symbol], period=yf_period, threads=False, progress=False)
+        if dl.empty:
+            return None
+
+        # Extract close prices
+        if hasattr(dl.columns, "get_level_values"):
+            levels = dl.columns.get_level_values(0).unique().tolist()
+            close_col = dl["Close"] if "Close" in levels else dl
+        else:
+            close_col = dl
+
+        # Handle single-ticker DataFrame (may have symbol as sub-column)
+        if hasattr(close_col, "columns") and symbol in close_col.columns:
+            series = close_col[symbol].dropna()
+        elif hasattr(close_col, "columns") and len(close_col.columns) == 1:
+            series = close_col.iloc[:, 0].dropna()
+        else:
+            series = close_col.squeeze().dropna()
+
+        if len(series) < 2:
+            return None
+
+        history = []
+        for dt, val in zip(series.index, series.values):
+            epoch_ms = int(dt.timestamp() * 1000)
+            history.append([epoch_ms, round(float(val), 2)])
+
+        constituents = get_sp500_constituents()
+        name = symbol
+        for c in constituents:
+            if c["ticker"] == symbol:
+                name = c["name"]
+                break
+
+        result = {
+            "name": name,
+            "price": round(float(series.iloc[-1]), 2),
+            "pct_change": _pct_change_for_history(history),
+            "history": history,
+        }
+
+        with _lock:
+            _overview_chart_cache[cache_key] = (time.time(), result)
+        return result
+
+    except Exception as e:
+        logger.warning("On-demand chart download failed for %s: %s", symbol, e)
+        return None
+
+
+# ── Market News ──────────────────────────────────────────────────────
+
+
+def _time_ago(unix_ts: int) -> str:
+    """Convert a UNIX timestamp to a human-readable 'time ago' string."""
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
+    diff = now - dt
+    secs = int(diff.total_seconds())
+
+    if secs < 60:
+        return "just now"
+    if secs < 3600:
+        m = secs // 60
+        return f"{m}m ago"
+    if secs < 86400:
+        h = secs // 3600
+        return f"{h}h ago"
+    d = secs // 86400
+    if d == 1:
+        return "1d ago"
+    return f"{d}d ago"
+
+
+def get_market_news(category: str = "general", max_articles: int = 20) -> list[dict]:
+    """Fetch general market news from Finnhub.
+
+    Returns list of dicts:
+        [{headline, summary, source, datetime_iso, time_ago, image,
+          related_tickers, url}, ...]
+
+    Uses 30-min TTL cache. Returns empty list on failure or missing API key.
+    """
+    global _news_cache
+
+    with _lock:
+        if _news_cache is not None:
+            ts, data = _news_cache
+            if time.time() - ts < _NEWS_TTL:
+                return data
+
+    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not api_key:
+        logger.warning("FINNHUB_API_KEY not set — market news unavailable")
+        return []
+
+    try:
+        import finnhub
+        from datetime import datetime, timezone
+
+        client = finnhub.Client(api_key=api_key)
+        raw = client.general_news(category, min_id=0)
+
+        if not raw or not isinstance(raw, list):
+            logger.warning("Finnhub general_news returned empty/invalid response")
+            return []
+
+        articles: list[dict] = []
+        for item in raw[:max_articles]:
+            unix_ts = item.get("datetime", 0)
+            dt = datetime.fromtimestamp(unix_ts, tz=timezone.utc)
+
+            # Parse related tickers
+            related_raw = item.get("related", "") or ""
+            related_tickers = [
+                t.strip()
+                for t in related_raw.split(",")
+                if t.strip() and t.strip().isalpha() and len(t.strip()) <= 5
+            ]
+
+            articles.append({
+                "headline": item.get("headline", ""),
+                "summary": item.get("summary", ""),
+                "source": item.get("source", ""),
+                "datetime_iso": dt.isoformat(),
+                "time_ago": _time_ago(unix_ts),
+                "image": item.get("image", ""),
+                "related_tickers": related_tickers,
+                "url": item.get("url", ""),
+            })
+
+        logger.info("Fetched %d market news articles from Finnhub", len(articles))
+        with _lock:
+            _news_cache = (time.time(), articles)
+        return articles
+
+    except Exception as e:
+        logger.warning("Finnhub market news fetch failed: %s", e)
+        return []
 
 
 # ── 52-Week Range (bulk) ──────────────────────────────────────────────

@@ -1,0 +1,253 @@
+{# Trending with Smart Money — stacked horizontal ECharts bar chart, loaded via HTMX #}
+<article>
+    <header style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5em;">
+        <div>
+            <strong>Trending with Smart Money</strong>
+            {% if merged %}
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Top {{ merged|length }} stocks
+            </span>
+            {% endif %}
+        </div>
+        {% if merged %}
+        <div style="display: flex; gap: 0.3em;">
+            <button id="tc-sort-count-btn" class="secondary"
+                    style="padding: 0.15em 0.5em; font-size: 0.75em; margin: 0;"
+                    onclick="sortTrendingCombined('count')">Sort: Count &darr;</button>
+            <button id="tc-sort-az-btn" class="outline secondary"
+                    style="padding: 0.15em 0.5em; font-size: 0.75em; margin: 0;"
+                    onclick="sortTrendingCombined('az')">A&ndash;Z</button>
+        </div>
+        {% endif %}
+    </header>
+    {% if merged %}
+    <div id="trending-combined-chart" style="width: 100%; height: 700px;"></div>
+    {% else %}
+    <p class="text-muted">No trending data available yet.</p>
+    {% endif %}
+</article>
+
+{% if merged %}
+<script>
+(function() {
+    var rawData = {{ merged | tojson }};
+    var container = document.getElementById('trending-combined-chart');
+    if (!container || !rawData || rawData.length === 0) return;
+
+    window.requireECharts(function(err) {
+    if (err) { container.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+
+    var chart = echarts.init(container);
+    var currentSort = 'count';
+    var legendSelected = { 'Superinvestors': true, 'Congress': true };
+    var esc = window.escHtml || function(s) { return s; };
+
+    function getData(sortBy) {
+        var showSI = legendSelected['Superinvestors'] !== false;
+        var showCG = legendSelected['Congress'] !== false;
+
+        /* Filter: drop tickers with zero count for all visible series */
+        var filtered = rawData.filter(function(d) {
+            if (showSI && showCG) return true;
+            if (showSI) return d.si_count > 0;
+            if (showCG) return d.cg_count > 0;
+            return true;
+        });
+
+        var sorted = filtered.slice();
+        if (sortBy === 'az') {
+            sorted.sort(function(a, b) {
+                var ta = (a.ticker || '').toUpperCase();
+                var tb = (b.ticker || '').toUpperCase();
+                /* Reverse for horizontal: A at top, Z at bottom */
+                return ta > tb ? -1 : ta < tb ? 1 : 0;
+            });
+        } else {
+            /* Sort by the visible metric — lowest at top so highest at bottom (ECharts y-axis) */
+            sorted.sort(function(a, b) {
+                var va = (showSI ? a.si_count : 0) + (showCG ? a.cg_count : 0);
+                var vb = (showSI ? b.si_count : 0) + (showCG ? b.cg_count : 0);
+                return va - vb;
+            });
+        }
+        return sorted;
+    }
+
+    function renderChart(sortBy) {
+        var data = getData(sortBy);
+        var showSI = legendSelected['Superinvestors'] !== false;
+        var showCG = legendSelected['Congress'] !== false;
+        var tickers = data.map(function(d) { return d.ticker; });
+
+        /* Per-bar border radius: round the right side [0,4,4,0] only
+           on the outermost (rightmost) visible bar in the stack */
+        var siCounts = data.map(function(d) {
+            var isTop = !showCG || d.cg_count === 0;
+            return { value: d.si_count, itemStyle: { borderRadius: isTop ? [0, 4, 4, 0] : [0, 0, 0, 0] } };
+        });
+        var cgCounts = data.map(function(d) {
+            return { value: d.cg_count, itemStyle: { borderRadius: [0, 4, 4, 0] } };
+        });
+
+        /* Dynamic height: ~22px per bar, min 400px */
+        var desiredHeight = Math.max(400, data.length * 22 + 60);
+        container.style.height = desiredHeight + 'px';
+        chart.resize();
+
+        var cs = getComputedStyle(document.documentElement);
+        var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+        var axisSecondary = cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a';
+        var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+        var legendColor = cs.getPropertyValue('--pp-chart-legend').trim() || axisSecondary;
+
+        chart.setOption({
+            grid: { left: 70, right: 30, top: 36, bottom: 30 },
+            legend: {
+                data: ['Superinvestors', 'Congress'],
+                top: 0,
+                textStyle: { color: legendColor, fontSize: 12 },
+                selected: legendSelected,
+                itemGap: 20
+            },
+            yAxis: {
+                type: 'category',
+                data: tickers,
+                axisLabel: {
+                    fontSize: 11,
+                    fontWeight: 'bold',
+                    fontFamily: 'monospace',
+                    color: axisColor
+                },
+                axisLine: { lineStyle: { color: gridColor } },
+                axisTick: { alignWithLabel: true, lineStyle: { color: gridColor } },
+                inverse: false
+            },
+            xAxis: {
+                type: 'value',
+                name: '# Buyers',
+                nameTextStyle: { fontSize: 10, color: axisSecondary },
+                nameLocation: 'end',
+                axisLabel: { color: axisSecondary },
+                axisLine: { lineStyle: { color: gridColor } },
+                splitLine: { lineStyle: { color: gridColor } },
+                minInterval: 1
+            },
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'shadow' },
+                formatter: function(params) {
+                    if (!params || params.length === 0) return '';
+                    var idx = params[0].dataIndex;
+                    var d = chart._trendingData;
+                    if (!d) return '';
+                    d = d[idx];
+                    if (!d) return '';
+
+                    var html = '<strong style="font-size:1.15em;">' + esc(d.ticker) + '</strong>';
+                    html += '<br/><span style="opacity:0.7;">' + esc(d.name) + '</span>';
+
+                    if (d.si_count > 0) {
+                        html += '<br/><br/><span style="color:#1976d2;">&#9632;</span> <strong>Superinvestors: '
+                              + d.si_count + '</strong>';
+                        var adders = d.si_adders || [];
+                        var showAdders = adders.slice(0, 4);
+                        for (var i = 0; i < showAdders.length; i++) {
+                            html += '<br/>&nbsp;&nbsp;&bull; ' + esc(showAdders[i]);
+                        }
+                        if (adders.length > 4) {
+                            html += '<br/>&nbsp;&nbsp;+ ' + (adders.length - 4) + ' more';
+                        }
+                    }
+
+                    if (d.cg_count > 0) {
+                        html += '<br/><br/><span style="color:#059669;">&#9632;</span> <strong>Congress: '
+                              + d.cg_count + '</strong>';
+                        html += '<br/>&nbsp;&nbsp;<span style="color:#2563eb;">D: ' + d.cg_democrat + '</span>';
+                        html += ' &nbsp; <span style="color:#dc2626;">R: ' + d.cg_republican + '</span>';
+                        var traders = d.cg_traders || [];
+                        if (traders.length > 0) {
+                            html += '<br/><span style="opacity:0.5;">Top buyers:</span>';
+                            for (var j = 0; j < traders.length && j < 3; j++) {
+                                html += '<br/>&nbsp;&nbsp;' + esc(traders[j]);
+                            }
+                        }
+                    }
+
+                    var total = d.si_count + d.cg_count;
+                    html += '<br/><br/><strong>Total: ' + total + ' buyer'
+                          + (total !== 1 ? 's' : '') + '</strong>';
+
+                    return html;
+                }
+            },
+            series: [
+                {
+                    name: 'Superinvestors',
+                    type: 'bar',
+                    stack: 'total',
+                    data: siCounts,
+                    itemStyle: {
+                        color: '#1976d2'
+                    },
+                    emphasis: { itemStyle: { color: '#1565c0' } },
+                    barMaxWidth: 20
+                },
+                {
+                    name: 'Congress',
+                    type: 'bar',
+                    stack: 'total',
+                    data: cgCounts,
+                    itemStyle: {
+                        color: new echarts.graphic.LinearGradient(1, 0, 0, 0, [
+                            { offset: 0, color: '#059669' },
+                            { offset: 1, color: '#34d399' }
+                        ])
+                    },
+                    emphasis: { itemStyle: { color: '#047857' } },
+                    barMaxWidth: 20
+                }
+            ]
+        }, true);
+
+        chart._trendingData = data;
+    }
+
+    /* Re-render on legend toggle so tickers re-sort and filter */
+    chart.on('legendselectchanged', function(params) {
+        legendSelected = params.selected;
+        renderChart(currentSort);
+    });
+
+    /* Click bar → navigate to stock page */
+    chart.on('click', function(params) {
+        var data = chart._trendingData;
+        if (!data) return;
+        var d = data[params.dataIndex];
+        if (d && d.ticker) {
+            window.location.href = '/stock/' + d.ticker;
+        }
+    });
+
+    /* Sort toggle */
+    window.sortTrendingCombined = function(sortBy) {
+        currentSort = sortBy;
+        renderChart(sortBy);
+        var countBtn = document.getElementById('tc-sort-count-btn');
+        var azBtn = document.getElementById('tc-sort-az-btn');
+        if (countBtn) countBtn.className = sortBy === 'count' ? 'secondary' : 'outline secondary';
+        if (azBtn) azBtn.className = sortBy === 'az' ? 'secondary' : 'outline secondary';
+    };
+
+    /* Initial render */
+    renderChart('count');
+
+    /* Responsive resize (debounced) */
+    var _resizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(_resizeTimer);
+        _resizeTimer = setTimeout(function() { chart.resize(); }, 150);
+    });
+    }); /* end requireECharts */
+})();
+</script>
+{% endif %}
