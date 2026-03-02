@@ -3,12 +3,18 @@
 -- NOTE: Most tables are auto-applied on first deploy via _auto_migrate() in supabase_cache.py
 --
 -- Tables:
---   api_cache        — Universal persistent cache (L2) for API data
---   sync_logs        — Cron worker run tracking and error logging
---   insider_trades   — Dedicated table for SEC Form 4 insider trading data
---   youtube_events   — YouTube calendar: upcoming livestreams + recent uploads
---   youtube_channels — YouTube channel metadata (subscribers, views, frequency)
---   profiles         — User authentication / tier tracking
+--   api_cache                  — Universal persistent cache (L2) for API data
+--   sync_logs                  — Cron worker run tracking and error logging
+--   insider_trades             — Dedicated table for SEC Form 4 insider trading data
+--   insider_purchases_history  — Cold archive of insider buys (delete-protected, write-once returns)
+--   youtube_events             — YouTube calendar: upcoming livestreams + recent uploads
+--   youtube_channels           — YouTube channel metadata (subscribers, views, frequency)
+--   supporters                 — Stripe donation / subscription tracking (Panda Fund)
+--   notifications              — Server-generated alerts (13F, YouTube, Reddit, Congress)
+--   congress_trades            — STOCK Act disclosures from Capitol Trades (cold, write-once)
+--   congress_members           — Politician profiles derived from trade data
+--   congress_trades_prices     — Forward-return enrichment for Congress trades
+--   profiles                   — User authentication / tier tracking
 --
 -- Supabase Storage:
 --   paperpanda-archive  — Private bucket for cold storage (archived 13F quarters)
@@ -212,6 +218,187 @@ DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 7. supporters — Panda Fund donation tracking
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- One row per Stripe payment/subscription event. The web layer aggregates
+-- these to compute the monthly total shown on /support.
+
+CREATE TABLE IF NOT EXISTS supporters (
+    id              BIGSERIAL PRIMARY KEY,
+    stripe_event_id TEXT NOT NULL UNIQUE,        -- idempotency key (Stripe event.id)
+    session_id      TEXT NOT NULL DEFAULT '',     -- Stripe checkout session ID
+    customer_email  TEXT NOT NULL DEFAULT '',
+    amount_cents    INTEGER NOT NULL DEFAULT 0,
+    currency        TEXT NOT NULL DEFAULT 'usd',
+    mode            TEXT NOT NULL DEFAULT 'payment',  -- 'payment' | 'subscription'
+    month           TEXT NOT NULL,                -- 'YYYY-MM' for easy grouping
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_supporters_month
+    ON supporters (month DESC);
+CREATE INDEX IF NOT EXISTS idx_supporters_event
+    ON supporters (stripe_event_id);
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 8. notifications — Server-generated alerts
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- Global, server-generated notifications for 13F changes, YouTube uploads,
+-- Reddit velocity spikes, and Congress trades. 48-hour retention with
+-- background cleanup.
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id              TEXT PRIMARY KEY,
+    type            TEXT NOT NULL,                -- "13f", "youtube", "reddit", "congress"
+    title           TEXT NOT NULL,
+    message         TEXT NOT NULL DEFAULT '',
+    icon            TEXT NOT NULL DEFAULT '',
+    toast_type      TEXT NOT NULL DEFAULT 'alert',
+    link            TEXT NOT NULL DEFAULT '',
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_created
+    ON notifications (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_type_created
+    ON notifications (type, created_at DESC);
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 9. insider_purchases_history — Cold archive of insider buys
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- Write-once cold archive of insider purchase transactions with forward
+-- returns. Protected by DELETE and write-once UPDATE triggers.
+-- See sql/001_insider_purchases_history.sql for triggers and migration.
+
+CREATE TABLE IF NOT EXISTS insider_purchases_history (
+    id              BIGSERIAL PRIMARY KEY,
+    sec_url         TEXT NOT NULL UNIQUE,
+    filing_date     DATE NOT NULL,
+    trade_date      DATE NOT NULL,
+    ticker          TEXT NOT NULL,
+    company_name    TEXT NOT NULL DEFAULT '',
+    insider_name    TEXT NOT NULL,
+    title           TEXT NOT NULL DEFAULT '',
+    price           NUMERIC(12,4),
+    qty             INTEGER,
+    value           NUMERIC(16,2),
+    close_on_trade  NUMERIC(12,4),
+    close_at_30d    NUMERIC(12,4),
+    close_at_90d    NUMERIC(12,4),
+    close_at_180d   NUMERIC(12,4),
+    close_at_365d   NUMERIC(12,4),
+    returns_updated TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_iph_ticker_trade_date
+    ON insider_purchases_history (ticker, trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_iph_pending_returns
+    ON insider_purchases_history (ticker, trade_date)
+    WHERE returns_updated IS NULL;
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 10. congress_trades — STOCK Act disclosures (cold, write-once)
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- Scraped from Capitol Trades (~35K trades, 200+ politicians).
+-- Write-once cold archive: ON CONFLICT DO NOTHING on insert.
+-- Protected by DELETE and UPDATE triggers (see sql/002_congress_cold_table_protection.sql).
+
+CREATE TABLE IF NOT EXISTS congress_trades (
+    trade_id        TEXT PRIMARY KEY,
+    member_id       TEXT NOT NULL,
+    politician_name TEXT NOT NULL,
+    party           TEXT NOT NULL DEFAULT '',
+    chamber         TEXT NOT NULL DEFAULT '',     -- "Senate" or "House"
+    state           TEXT NOT NULL DEFAULT '',
+    ticker          TEXT,
+    asset_name      TEXT NOT NULL DEFAULT '',
+    trade_type      TEXT NOT NULL DEFAULT '',     -- "buy", "sell", "exchange"
+    trade_date      DATE,
+    filing_date     DATE,
+    amount_low      NUMERIC(16,2),
+    amount_high     NUMERIC(16,2),
+    amount_display  TEXT NOT NULL DEFAULT '',
+    owner           TEXT NOT NULL DEFAULT '',     -- "Self", "Spouse", "Child", "Joint"
+    cap_trades_url  TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ct_member_id
+    ON congress_trades (member_id, trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_ct_ticker
+    ON congress_trades (ticker, trade_date DESC) WHERE ticker IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ct_trade_date
+    ON congress_trades (trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_ct_filing_date
+    ON congress_trades (filing_date DESC);
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 11. congress_members — Politician profiles
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- Derived from Capitol Trades data. Updatable (metadata refresh on re-scrapes),
+-- but DELETE-protected (see sql/002_congress_cold_table_protection.sql).
+
+CREATE TABLE IF NOT EXISTS congress_members (
+    member_id        TEXT PRIMARY KEY,
+    full_name        TEXT NOT NULL,
+    first_name       TEXT NOT NULL DEFAULT '',
+    last_name        TEXT NOT NULL DEFAULT '',
+    party            TEXT NOT NULL DEFAULT '',
+    chamber          TEXT NOT NULL DEFAULT '',
+    state            TEXT NOT NULL DEFAULT '',
+    state_abbr       TEXT NOT NULL DEFAULT '',
+    district         TEXT NOT NULL DEFAULT '',
+    is_current       BOOLEAN NOT NULL DEFAULT TRUE,
+    first_trade_date DATE,
+    last_trade_date  DATE,
+    total_trades     INTEGER NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cm_total_trades
+    ON congress_members (total_trades DESC);
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 12. congress_trades_prices — Forward-return enrichment
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- Separate join table for price data because congress_trades has UPDATE
+-- triggers that block all modifications. See sql/003_congress_trades_prices.sql.
+
+CREATE TABLE IF NOT EXISTS congress_trades_prices (
+    trade_id       TEXT PRIMARY KEY REFERENCES congress_trades(trade_id),
+    ticker         TEXT,
+    trade_date     DATE,
+    close_on_trade NUMERIC(12, 4),
+    close_at_30d   NUMERIC(12, 4),
+    close_at_90d   NUMERIC(12, 4),
+    close_at_180d  NUMERIC(12, 4),
+    close_at_365d  NUMERIC(12, 4),
+    return_30d     NUMERIC(8, 4),
+    return_90d     NUMERIC(8, 4),
+    return_180d    NUMERIC(8, 4),
+    return_365d    NUMERIC(8, 4),
+    prices_updated TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ctp_trade_id ON congress_trades_prices (trade_id);
+CREATE INDEX IF NOT EXISTS idx_ctp_ticker ON congress_trades_prices (ticker, trade_date DESC);
 
 
 -- ═══════════════════════════════════════════════════════════════════════

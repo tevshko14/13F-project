@@ -1,0 +1,246 @@
+{# Retail Sentiment Card — Fear & Greed gauge + Reddit top movers #}
+{% if fear_greed or top_movers %}
+<div class="rs-widget">
+
+    {# ── Fear & Greed Gauge ── #}
+    {% if fear_greed %}
+    <div class="rs-gauge-section">
+        <div class="rs-gauge-wrap">
+            <svg viewBox="0 0 200 110" class="rs-gauge-svg">
+                {# Background arc #}
+                <defs>
+                    <linearGradient id="rs-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#dc2626"/>
+                        <stop offset="25%" style="stop-color:#f97316"/>
+                        <stop offset="50%" style="stop-color:#eab308"/>
+                        <stop offset="75%" style="stop-color:#84cc16"/>
+                        <stop offset="100%" style="stop-color:#16a34a"/>
+                    </linearGradient>
+                </defs>
+                <path d="M 25 90 A 75 75 0 0 1 175 90"
+                      fill="none" stroke="var(--pp-border-light)" stroke-width="12"
+                      stroke-linecap="round"/>
+                <path d="M 25 90 A 75 75 0 0 1 175 90"
+                      fill="none" stroke="url(#rs-grad)" stroke-width="12"
+                      stroke-linecap="round" opacity="0.35"/>
+                {# Needle — rotated based on score #}
+                {% set angle = -90 + (fear_greed.score / 100) * 180 %}
+                <line x1="100" y1="90" x2="100" y2="25"
+                      stroke="var(--pp-text)" stroke-width="2.5" stroke-linecap="round"
+                      transform="rotate({{ angle }}, 100, 90)"/>
+                <circle cx="100" cy="90" r="4" fill="var(--pp-text)"/>
+            </svg>
+            {# Score colored by sentiment level #}
+            {% set s = fear_greed.score %}
+            {% if s <= 25 %}{% set score_cls = 'rs-clr-extreme-fear' %}
+            {% elif s <= 45 %}{% set score_cls = 'rs-clr-fear' %}
+            {% elif s <= 55 %}{% set score_cls = 'rs-clr-neutral' %}
+            {% elif s <= 75 %}{% set score_cls = 'rs-clr-greed' %}
+            {% else %}{% set score_cls = 'rs-clr-extreme-greed' %}{% endif %}
+            <div class="rs-score {{ score_cls }}">{{ s | int }}</div>
+            <div class="rs-rating {{ score_cls }}">
+                {{ fear_greed.rating }}
+            </div>
+        </div>
+        <div class="rs-history">
+            {% if fear_greed.one_week_ago is not none %}
+            {% set w = fear_greed.one_week_ago %}
+            <span class="rs-hist-item">Last Week: <span class="{% if w <= 25 %}rs-clr-extreme-fear{% elif w <= 45 %}rs-clr-fear{% elif w <= 55 %}rs-clr-neutral{% elif w <= 75 %}rs-clr-greed{% else %}rs-clr-extreme-greed{% endif %}">{{ w | int }}</span></span>
+            {% endif %}
+            {% if fear_greed.one_month_ago is not none %}
+            {% set m = fear_greed.one_month_ago %}
+            <span class="rs-hist-item">Last Month: <span class="{% if m <= 25 %}rs-clr-extreme-fear{% elif m <= 45 %}rs-clr-fear{% elif m <= 55 %}rs-clr-neutral{% elif m <= 75 %}rs-clr-greed{% else %}rs-clr-extreme-greed{% endif %}">{{ m | int }}</span></span>
+            {% endif %}
+            {% if fear_greed.one_year_ago is not none %}
+            {% set y = fear_greed.one_year_ago %}
+            <span class="rs-hist-item">Last Year: <span class="{% if y <= 25 %}rs-clr-extreme-fear{% elif y <= 45 %}rs-clr-fear{% elif y <= 55 %}rs-clr-neutral{% elif y <= 75 %}rs-clr-greed{% else %}rs-clr-extreme-greed{% endif %}">{{ y | int }}</span></span>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# ── Divider ── #}
+    <div class="rs-divider"></div>
+
+    {# ── Top Reddit Movers ── #}
+    {% if top_movers %}
+    <div class="rs-movers-section">
+        <div class="rs-section-title">Trending on Reddit</div>
+        <div class="rs-movers-list">
+            {% for m in top_movers %}
+            <a href="/stock/{{ m.ticker }}" class="rs-mover-row">
+                <span class="rs-mover-rank">#{{ m.rank }}</span>
+                <span class="rs-mover-ticker">{{ m.ticker }}</span>
+                <span class="rs-mover-mentions">{{ m.mentions }}</span>
+                <span class="rs-mover-velocity {% if m.velocity_pct >= 0 %}rs-up{% else %}rs-down{% endif %}">
+                    {% if m.velocity_pct >= 0 %}+{% endif %}{{ m.velocity_pct }}%
+                </span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# ── Top Mentioned ── #}
+    {% if top_mentioned %}
+    <div class="rs-mentioned-section">
+        <div class="rs-section-title">Most Mentioned</div>
+        <div class="rs-movers-list">
+            {% for m in top_mentioned %}
+            <a href="/stock/{{ m.ticker }}" class="rs-mover-row">
+                <span class="rs-mover-rank">#{{ m.rank }}</span>
+                <span class="rs-mover-ticker">{{ m.ticker }}</span>
+                <span class="rs-mover-mentions">{{ m.mentions }} mentions</span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+    .rs-widget {
+        padding: 0;
+    }
+
+    /* ── Gauge Section ── */
+    .rs-gauge-section {
+        text-align: center;
+        padding: 0.8em 0.8em 0.4em;
+    }
+
+    .rs-gauge-wrap {
+        position: relative;
+        max-width: 180px;
+        margin: 0 auto;
+    }
+
+    .rs-gauge-svg {
+        width: 100%;
+        height: auto;
+        display: block;
+    }
+
+    .rs-score {
+        font-size: 2em;
+        font-weight: 800;
+        line-height: 1;
+        margin-top: 0.1em;
+    }
+
+    .rs-rating {
+        font-size: 0.8em;
+        font-weight: 700;
+        margin-top: 0.15em;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+
+    /* Sentiment color scale — used on score, rating, and history values */
+    .rs-clr-extreme-fear { color: #dc2626; }
+    .rs-clr-fear         { color: #f97316; }
+    .rs-clr-neutral      { color: #eab308; }
+    .rs-clr-greed        { color: #84cc16; }
+    .rs-clr-extreme-greed { color: #16a34a; }
+
+    .rs-history {
+        display: flex;
+        justify-content: center;
+        gap: 0.8em;
+        margin-top: 0.5em;
+        padding-bottom: 0.2em;
+    }
+
+    .rs-hist-item {
+        font-size: 0.72em;
+        color: var(--pp-text-muted);
+        font-weight: 600;
+        font-family: monospace;
+    }
+
+    /* ── Divider ── */
+    .rs-divider {
+        height: 1px;
+        background: var(--pp-border-light);
+        margin: 0;
+    }
+
+    /* ── Movers Section ── */
+    .rs-movers-section,
+    .rs-mentioned-section {
+        padding: 0.5em 0 0;
+    }
+
+    .rs-section-title {
+        font-size: 0.75em;
+        font-weight: 700;
+        color: var(--pp-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 0 0.8em 0.3em;
+    }
+
+    .rs-movers-list {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .rs-mover-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
+        padding: 0.4em 0.8em;
+        text-decoration: none;
+        color: var(--pp-text);
+        transition: background 0.15s;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+
+    .rs-mover-row:last-child {
+        border-bottom: none;
+    }
+
+    .rs-mover-row:hover {
+        background: var(--pp-surface-hover);
+    }
+
+    .rs-mover-rank {
+        font-size: 0.7em;
+        font-weight: 600;
+        color: var(--pp-text-faint);
+        min-width: 1.8em;
+    }
+
+    .rs-mover-ticker {
+        font-weight: 700;
+        font-family: monospace;
+        font-size: 0.85em;
+        letter-spacing: 0.02em;
+        min-width: 3.5em;
+    }
+
+    .rs-mover-mentions {
+        flex: 1;
+        font-size: 0.72em;
+        color: var(--pp-text-muted);
+        text-align: right;
+    }
+
+    .rs-mover-velocity {
+        font-size: 0.75em;
+        font-weight: 700;
+        min-width: 4em;
+        text-align: right;
+    }
+
+    .rs-up { color: #16a34a; }
+    .rs-down { color: #dc2626; }
+
+    /* ── Mentioned section divider ── */
+    .rs-mentioned-section {
+        border-top: 1px solid var(--pp-border-light);
+    }
+</style>
+{% else %}
+<p class="text-muted" style="text-align:center;padding:2em 0.5em;">Sentiment data unavailable.</p>
+{% endif %}

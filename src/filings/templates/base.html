@@ -138,6 +138,10 @@
             --pp-sub-text: #888;
             --pp-sub-text-light: #999;
             --pp-neutral-orange-bg: #fff3e0;
+            --pp-glass-bg: rgba(255, 255, 255, 0.6);
+            --pp-glass-border: rgba(255, 255, 255, 0.3);
+            --pp-glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+            --pp-glass-blur: 12px;
         }
         :root[data-theme="dark"] {
             --pp-surface: #1a1a1e;
@@ -185,6 +189,10 @@
             --pp-sub-text: #a1a1aa;
             --pp-sub-text-light: #71717a;
             --pp-neutral-orange-bg: rgba(230, 81, 0, 0.15);
+            --pp-glass-bg: rgba(255, 255, 255, 0.04);
+            --pp-glass-border: rgba(255, 255, 255, 0.08);
+            --pp-glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+            --pp-glass-blur: 12px;
         }
 
         .htmx-indicator { display: none; }
@@ -818,15 +826,26 @@
             white-space: nowrap;
             cursor: pointer;
             margin: 0;
-            background: var(--pp-support-btn-bg);
+            background: rgba(25, 118, 210, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             color: var(--pp-support-btn-text) !important;
-            border: 1px solid var(--pp-support-btn-bg);
+            border: 1px solid rgba(25, 118, 210, 0.3);
             text-decoration: none;
-            transition: background 0.15s, box-shadow 0.15s;
+            transition: background 0.2s, box-shadow 0.2s, border-color 0.2s;
         }
         a.nav-support-btn:hover {
-            background: var(--pp-support-btn-hover);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            background: rgba(25, 118, 210, 0.4);
+            border-color: rgba(25, 118, 210, 0.5);
+            box-shadow: 0 0 12px rgba(25, 118, 210, 0.3), 0 0 0 1px rgba(25, 118, 210, 0.15);
+        }
+        [data-theme="light"] a.nav-support-btn {
+            background: rgba(24, 24, 27, 0.75);
+            border: 1px solid rgba(24, 24, 27, 0.2);
+        }
+        [data-theme="light"] a.nav-support-btn:hover {
+            background: rgba(24, 24, 27, 0.9);
+            box-shadow: 0 0 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.08);
         }
 
         /* ── Theme Toggle Button ── */
@@ -871,6 +890,125 @@
         :root[data-theme="dark"] .logo-dark { display: inline; }
 
         /* Stripe Embedded Checkout inherits theme from Stripe Dashboard branding */
+
+        /* ══════════════════════════════════════════════════════════ */
+        /*  Global Mesh Gradient Background                         */
+        /* ══════════════════════════════════════════════════════════ */
+        .mesh-bg {
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .mesh-blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(100px);
+            will-change: transform, opacity;
+        }
+        .mesh-blob-1 {
+            width: 600px; height: 600px;
+            background: radial-gradient(circle, #0d47a1, #0d47a1 40%, transparent 70%);
+            top: -10%; left: -5%;
+            animation: meshDrift1 18s ease-in-out infinite, meshBreathe1 4s ease-in-out infinite;
+        }
+        .mesh-blob-2 {
+            width: 500px; height: 500px;
+            background: radial-gradient(circle, #4a148c, #4a148c 40%, transparent 70%);
+            top: 40%; right: -8%;
+            animation: meshDrift2 22s ease-in-out infinite, meshBreathe2 5s ease-in-out infinite;
+        }
+        .mesh-blob-3 {
+            width: 450px; height: 450px;
+            background: radial-gradient(circle, #004d40, #004d40 40%, transparent 70%);
+            bottom: -5%; left: 30%;
+            animation: meshDrift3 20s ease-in-out infinite, meshBreathe3 4.5s ease-in-out infinite;
+        }
+        @keyframes meshDrift1 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33%      { transform: translate(80px, 60px) scale(1.08); }
+            66%      { transform: translate(-40px, 30px) scale(0.95); }
+        }
+        @keyframes meshDrift2 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33%      { transform: translate(-60px, -50px) scale(1.1); }
+            66%      { transform: translate(40px, -20px) scale(0.92); }
+        }
+        @keyframes meshDrift3 {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33%      { transform: translate(50px, -40px) scale(1.05); }
+            66%      { transform: translate(-70px, 20px) scale(0.97); }
+        }
+        @keyframes meshBreathe1 { 0%, 100% { opacity: 0.18; } 50% { opacity: 0.28; } }
+        @keyframes meshBreathe2 { 0%, 100% { opacity: 0.16; } 50% { opacity: 0.26; } }
+        @keyframes meshBreathe3 { 0%, 100% { opacity: 0.17; } 50% { opacity: 0.27; } }
+
+        @media (prefers-reduced-motion: reduce) {
+            .mesh-blob { animation: none !important; opacity: 0.18 !important; }
+        }
+        @media (max-width: 768px) {
+            .mesh-blob { animation: none !important; filter: blur(60px); opacity: 0.12; }
+            .mesh-blob-1 { width: 300px; height: 300px; }
+            .mesh-blob-2 { width: 250px; height: 250px; }
+            .mesh-blob-3 { width: 200px; height: 200px; }
+        }
+        @media (min-width: 769px) and (max-width: 1023px) {
+            .mesh-blob-1 { animation: meshDrift1 18s ease-in-out infinite; filter: blur(80px); }
+            .mesh-blob-2 { animation: meshDrift2 22s ease-in-out infinite; filter: blur(80px); }
+            .mesh-blob-3 { animation: meshDrift3 20s ease-in-out infinite; filter: blur(80px); }
+        }
+        [data-theme="light"] .mesh-blob-1 { animation: meshDrift1 18s ease-in-out infinite, meshBreatheLight1 4s ease-in-out infinite; }
+        [data-theme="light"] .mesh-blob-2 { animation: meshDrift2 22s ease-in-out infinite, meshBreatheLight2 5s ease-in-out infinite; }
+        [data-theme="light"] .mesh-blob-3 { animation: meshDrift3 20s ease-in-out infinite, meshBreatheLight3 4.5s ease-in-out infinite; }
+        @keyframes meshBreatheLight1 { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.14; } }
+        @keyframes meshBreatheLight2 { 0%, 100% { opacity: 0.07; } 50% { opacity: 0.13; } }
+        @keyframes meshBreatheLight3 { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.14; } }
+        @media (max-width: 768px) {
+            [data-theme="light"] .mesh-blob { animation: none !important; opacity: 0.07; }
+        }
+
+        /* ══════════════════════════════════════════════════════════ */
+        /*  Global Glass Card Overrides                             */
+        /*  Applies glassmorphism to common card patterns site-wide */
+        /* ══════════════════════════════════════════════════════════ */
+        .glass-card,
+        .cg-card,
+        .dash-card,
+        .chart-card,
+        .rt-card,
+        .pol-stat-card,
+        .pol-chart-card,
+        .auth-card,
+        .donate-widget,
+        .tier-card,
+        .deploy-card,
+        .vitals-card,
+        .vitals-paywall-card,
+        .congress-pol-card,
+        .insight-card,
+        .recent-upload-card,
+        .panda-progress,
+        .mn-card {
+            background: var(--pp-glass-bg) !important;
+            backdrop-filter: blur(var(--pp-glass-blur));
+            -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+            border: 1px solid var(--pp-glass-border) !important;
+            border-radius: 16px !important;
+            box-shadow: var(--pp-glass-shadow) !important;
+        }
+
+        /* Tables wrapped in <figure> — give them the glass treatment */
+        main.container > figure,
+        main.container > article {
+            background: var(--pp-glass-bg) !important;
+            backdrop-filter: blur(var(--pp-glass-blur));
+            -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+            border: 1px solid var(--pp-glass-border) !important;
+            border-radius: 16px !important;
+            box-shadow: var(--pp-glass-shadow) !important;
+            overflow: hidden;
+        }
     </style>
     {% if supabase_anon_key %}
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" defer></script>
@@ -960,6 +1098,13 @@
             </ul>
         </div>
     </nav>
+    {# ── Animated Mesh Gradient Background (global) ── #}
+    <div class="mesh-bg" aria-hidden="true">
+        <div class="mesh-blob mesh-blob-1"></div>
+        <div class="mesh-blob mesh-blob-2"></div>
+        <div class="mesh-blob mesh-blob-3"></div>
+    </div>
+
     <main class="container">
         {% block content %}{% endblock %}
     </main>
@@ -1686,6 +1831,60 @@
 
         // Apply on DOM ready
         applyTheme(getStoredTheme());
+
+        // ── Re-theme ECharts on toggle ──
+        document.addEventListener('pp-theme-changed', function() {
+            if (typeof echarts === 'undefined') return;
+            var cs = getComputedStyle(document.documentElement);
+            var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+            var axisSecondary = cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a';
+            var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
+            // Find every live ECharts instance on the page
+            var containers = document.querySelectorAll('[_echarts_instance_]');
+            containers.forEach(function(el) {
+                var chart = echarts.getInstanceByDom(el);
+                if (!chart) return;
+                var opt = chart.getOption();
+                if (!opt) return;
+
+                // Patch xAxis
+                if (opt.xAxis) {
+                    opt.xAxis.forEach(function(axis) {
+                        if (axis.axisLabel) axis.axisLabel.color = axisColor;
+                        if (axis.nameTextStyle) axis.nameTextStyle.color = axisColor;
+                        if (axis.axisLine && axis.axisLine.lineStyle) axis.axisLine.lineStyle.color = gridColor;
+                        if (axis.splitLine && axis.splitLine.lineStyle) axis.splitLine.lineStyle.color = gridColor;
+                        if (axis.axisTick && axis.axisTick.lineStyle) axis.axisTick.lineStyle.color = gridColor;
+                    });
+                }
+                // Patch yAxis
+                if (opt.yAxis) {
+                    opt.yAxis.forEach(function(axis) {
+                        if (axis.axisLabel) axis.axisLabel.color = axisColor;
+                        if (axis.nameTextStyle) axis.nameTextStyle.color = axisColor;
+                        if (axis.axisLine && axis.axisLine.lineStyle) axis.axisLine.lineStyle.color = gridColor;
+                        if (axis.splitLine && axis.splitLine.lineStyle) axis.splitLine.lineStyle.color = gridColor;
+                    });
+                }
+                // Patch series labels
+                if (opt.series) {
+                    opt.series.forEach(function(s) {
+                        if (s.label && s.label.color) s.label.color = axisColor;
+                    });
+                }
+                // Patch legend text
+                var legendPatch = {};
+                if (opt.legend && opt.legend.length > 0) {
+                    opt.legend.forEach(function(leg) {
+                        if (leg.textStyle) leg.textStyle.color = axisColor;
+                    });
+                    legendPatch = { legend: opt.legend };
+                }
+
+                chart.setOption(Object.assign({ xAxis: opt.xAxis, yAxis: opt.yAxis, series: opt.series }, legendPatch));
+            });
+        });
     })();
     </script>
 {% block extra_scripts %}{% endblock %}

@@ -429,7 +429,14 @@
             return lastName + ' (' + d.state + ')';
         });
         var counts = reversed.map(function(d) { return d.trade_count; });
-        var colors = reversed.map(function(d) { return d.color; });
+        var barGradients = reversed.map(function(d) {
+            var c = (d.color || '').toLowerCase();
+            if (c === '#2563eb' || c === '#3b82f6') // Democrat blue
+                return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#64b5f6' }]);
+            if (c === '#dc2626' || c === '#ef4444') // Republican red
+                return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#7f1d1d' }, { offset: 1, color: '#fca5a5' }]);
+            return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#4b5563' }, { offset: 1, color: '#9ca3af' }]); // Independent gray
+        });
 
         chart.setOption({
             grid: { left: 130, right: 50, top: 10, bottom: 10 },
@@ -483,13 +490,13 @@
             series: [{
                 type: 'bar', data: counts,
                 itemStyle: {
-                    color: function(params) { return colors[params.dataIndex] || '#6b7280'; },
+                    color: function(params) { return barGradients[params.dataIndex]; },
                     borderRadius: [0, 4, 4, 0]
                 },
                 barMaxWidth: 20,
                 label: {
                     show: true, position: 'right', fontSize: 10,
-                    fontWeight: 'bold', color: 'rgba(255,255,255,0.5)',
+                    fontWeight: 'bold', color: axisColor,
                     formatter: '{c}'
                 }
             }]
@@ -614,7 +621,7 @@
             var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
 
             trendChart.setOption({
-                grid: { left: 40, right: 16, top: 10, bottom: 60 },
+                grid: { left: 40, right: 16, top: 30, bottom: 60 },
                 xAxis: {
                     type: 'category', data: tTickers,
                     axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor },
@@ -652,12 +659,12 @@
                     type: 'bar', data: tCounts,
                     itemStyle: {
                         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                            { offset: 0, color: '#059669' }, { offset: 1, color: '#34d399' }
+                            { offset: 0, color: '#6ee7b7' }, { offset: 1, color: '#065f46' }
                         ]),
                         borderRadius: [4, 4, 0, 0]
                     },
                     barMaxWidth: 36,
-                    label: { show: true, position: 'top', fontSize: 11, fontWeight: 'bold', color: 'rgba(0,0,0,0.5)' }
+                    label: { show: true, position: 'top', fontSize: 11, fontWeight: 'bold', color: axisColor }
                 }]
             });
             trendChart.on('click', function(params) { var d = trendingData[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
@@ -678,8 +685,8 @@
 
             consChart.setOption({
                 grid: { left: 80, right: 30, top: 10, bottom: 20 },
-                xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10 }, minInterval: 1 },
-                yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' } },
+                xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10, color: axisColor }, axisLabel: { color: axisColor }, minInterval: 1 },
+                yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor } },
                 tooltip: {
                     trigger: 'axis', axisPointer: { type: 'shadow' },
                     formatter: function(params) {
@@ -701,12 +708,12 @@
                     type: 'bar', data: cCounts,
                     itemStyle: {
                         color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-                            { offset: 0, color: '#1976d2' }, { offset: 1, color: '#42a5f5' }
+                            { offset: 0, color: '#0d47a1' }, { offset: 1, color: '#64b5f6' }
                         ]),
                         borderRadius: [0, 4, 4, 0]
                     },
                     barMaxWidth: 28,
-                    label: { show: true, position: 'right', fontSize: 11, fontWeight: 'bold', color: 'rgba(0,0,0,0.5)', formatter: '{c}' }
+                    label: { show: true, position: 'right', fontSize: 11, fontWeight: 'bold', color: axisColor, formatter: '{c}' }
                 }]
             });
             consChart.on('click', function(params) { var d = cDataRev[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
@@ -725,6 +732,14 @@
             var mBuys = momentumData.map(function(d) { return d.buys; });
             var mSells = momentumData.map(function(d) { return -d.sells; });
 
+            // Symmetric Y axis: find the max absolute value and round up
+            var maxVal = 0;
+            for (var i = 0; i < momentumData.length; i++) {
+                if (momentumData[i].buys > maxVal) maxVal = momentumData[i].buys;
+                if (momentumData[i].sells > maxVal) maxVal = momentumData[i].sells;
+            }
+            maxVal = Math.ceil(maxVal / 4) * 4; // round up to nearest 4 for even grid lines
+
             momChart.setOption({
                 grid: { left: 40, right: 16, top: 30, bottom: 60 },
                 legend: {
@@ -740,7 +755,7 @@
                     type: 'category', data: mTickers,
                     axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor }
                 },
-                yAxis: { type: 'value', name: 'Trades', nameTextStyle: { color: axisColor }, axisLabel: { color: axisColor } },
+                yAxis: { type: 'value', name: 'Trades', min: -maxVal, max: maxVal, interval: maxVal / 4, nameTextStyle: { color: axisColor }, axisLabel: { color: axisColor }, splitLine: { lineStyle: { color: gridColor } } },
                 tooltip: {
                     trigger: 'axis', axisPointer: { type: 'shadow' },
                     formatter: function(params) {
@@ -762,12 +777,12 @@
                 series: [
                     {
                         name: 'Buys', type: 'bar', stack: 'total', data: mBuys,
-                        itemStyle: { color: '#059669', borderRadius: [4, 4, 0, 0] },
+                        itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#047857' }, { offset: 1, color: '#34d399' }]), borderRadius: [4, 4, 0, 0] },
                         barMaxWidth: 36
                     },
                     {
                         name: 'Sells', type: 'bar', stack: 'total', data: mSells,
-                        itemStyle: { color: '#dc2626', borderRadius: [0, 0, 4, 4] },
+                        itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#b91c1c' }, { offset: 1, color: '#f87171' }]), borderRadius: [0, 0, 4, 4] },
                         barMaxWidth: 36
                     }
                 ]

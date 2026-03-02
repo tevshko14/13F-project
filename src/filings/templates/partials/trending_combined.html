@@ -187,7 +187,10 @@
                     stack: 'total',
                     data: siCounts,
                     itemStyle: {
-                        color: '#1976d2'
+                        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                            { offset: 0, color: '#1565c0' },
+                            { offset: 1, color: '#42a5f5' }
+                        ])
                     },
                     emphasis: { itemStyle: { color: '#1565c0' } },
                     barMaxWidth: 20
@@ -198,8 +201,8 @@
                     stack: 'total',
                     data: cgCounts,
                     itemStyle: {
-                        color: new echarts.graphic.LinearGradient(1, 0, 0, 0, [
-                            { offset: 0, color: '#059669' },
+                        color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                            { offset: 0, color: '#047857' },
                             { offset: 1, color: '#34d399' }
                         ])
                     },

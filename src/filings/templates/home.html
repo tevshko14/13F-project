@@ -9,9 +9,35 @@
 {% block og_url %}https://paperpanda.io/{% endblock %}
 {% block content %}
 
+{# Override Pico CSS narrow container for the bento grid dashboard #}
+<style>
+    main.container {
+        max-width: 1280px !important;
+        width: 100% !important;
+        padding-left: 2em !important;
+        padding-right: 2em !important;
+    }
+</style>
+
+{# Mesh gradient background is now in base.html #}
+
 {# ── Hero Section ── #}
 <div style="text-align: center; margin-bottom: 0.5em;">
-    <h1 style="margin-bottom: 0.2em;">Welcome to PaperPanda</h1>
+    <h1 class="hero-title" style="margin-bottom: 0.2em;">Welcome to PaperPanda</h1>
+<style>
+    .hero-title {
+        color: #fff;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        -webkit-text-stroke: 0.5px rgba(0, 0, 0, 0.4);
+        paint-order: stroke fill;
+        text-shadow: 0 0 20px rgba(25, 118, 210, 0.2), 0 0 40px rgba(25, 118, 210, 0.08);
+    }
+    [data-theme="light"] .hero-title {
+        color: var(--pp-text);
+        text-shadow: 0 0 30px rgba(25, 118, 210, 0.2), 0 0 60px rgba(25, 118, 210, 0.08);
+    }
+</style>
     <p class="text-muted" style="font-size: 1.1em; max-width: 600px; margin: 0 auto;">
         Track superinvestor portfolios, insider trades, analyst ratings, and market news — all in one place.
     </p>
@@ -68,63 +94,128 @@
 </div>
 
 {# ── Scrolling Ticker Tape (lazy-loaded) ── #}
-<div id="ticker-tape-wrap" style="margin: 1.5em -1em 2em -1em;"
+<div id="ticker-tape-wrap" style="margin: 1.5em 0 2em 0;"
      hx-get="/api/ticker-tape" hx-trigger="load" hx-swap="innerHTML">
     <p class="text-muted" style="text-align:center;font-size:0.85em;" aria-busy="true">
         Loading market data...
     </p>
 </div>
 
-{# ── Market Overview + News: two-column layout ── #}
-<div class="home-grid">
+{# ══════════════════════════════════════════════════════════════ #}
+{# ── BENTO GRID ── #}
+{# ══════════════════════════════════════════════════════════════ #}
+<div class="bento-grid">
 
-    {# ── Left: Market Overview (custom, lazy-loaded) ── #}
-    <div style="display:flex;flex-direction:column;">
-        <h3 style="margin-bottom: 0.5em;">Market Overview</h3>
-        <div hx-get="/api/market-overview" hx-trigger="load" hx-swap="innerHTML">
-            <article><p aria-busy="true"><span class="spinner"></span> Loading market data...</p></article>
+    {# ── Card 1: Market Overview (5 cols) ── #}
+    <div class="glass-card bento-overview">
+        <div class="bento-card-header">
+            <h3 class="bento-card-title">Market Overview</h3>
+        </div>
+        <div class="bento-card-body" hx-get="/api/market-overview" hx-trigger="load" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
         </div>
     </div>
 
-    {# ── Right: Market News (custom, lazy-loaded) ── #}
-    <div style="display:flex;flex-direction:column;">
-        <h3 style="margin-bottom: 0.5em;">Market News</h3>
-        <div hx-get="/api/market-news" hx-trigger="load" hx-swap="innerHTML" style="flex:1;display:flex;flex-direction:column;">
-            <article><p aria-busy="true"><span class="spinner"></span> Loading market news...</p></article>
+    {# ── Card 2: Market News (7 cols) ── #}
+    <div class="glass-card bento-news">
+        <div class="bento-card-header">
+            <h3 class="bento-card-title">Market News</h3>
+        </div>
+        <div class="bento-card-body bento-card-body-flex" hx-get="/api/market-news" hx-trigger="load" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
         </div>
     </div>
 
-</div>
-
-{# ── S&P 500 Heatmap (lazy-loaded with timeframe toggle) ── #}
-<div class="heatmap-section">
-    <div class="heatmap-header">
-        <h3 class="heatmap-title">S&amp;P 500 Heatmap</h3>
-        <div class="heatmap-toggle" id="heatmap-toggle">
-            <button class="heatmap-pill active" data-period="1D"
-                    hx-get="/api/heatmap?period=1D"
-                    hx-target="#heatmap-body"
-                    hx-swap="innerHTML"
-                    hx-indicator="#heatmap-body">1D</button>
-            <button class="heatmap-pill" data-period="1W"
-                    hx-get="/api/heatmap?period=1W"
-                    hx-target="#heatmap-body"
-                    hx-swap="innerHTML"
-                    hx-indicator="#heatmap-body">1W</button>
-            <button class="heatmap-pill" data-period="1M"
-                    hx-get="/api/heatmap?period=1M"
-                    hx-target="#heatmap-body"
-                    hx-swap="innerHTML"
-                    hx-indicator="#heatmap-body">1M</button>
+    {# ── Card 3: S&P 500 Heatmap (8 cols) ── #}
+    <div class="glass-card bento-heatmap">
+        <div class="bento-card-header">
+            <h3 class="bento-card-title">S&amp;P 500 Heatmap</h3>
+            <div class="heatmap-toggle" id="heatmap-toggle">
+                <button class="heatmap-pill active" data-period="1D"
+                        hx-get="/api/heatmap?period=1D"
+                        hx-target="#heatmap-body"
+                        hx-swap="innerHTML"
+                        hx-indicator="#heatmap-body">1D</button>
+                <button class="heatmap-pill" data-period="1W"
+                        hx-get="/api/heatmap?period=1W"
+                        hx-target="#heatmap-body"
+                        hx-swap="innerHTML"
+                        hx-indicator="#heatmap-body">1W</button>
+                <button class="heatmap-pill" data-period="1M"
+                        hx-get="/api/heatmap?period=1M"
+                        hx-target="#heatmap-body"
+                        hx-swap="innerHTML"
+                        hx-indicator="#heatmap-body">1M</button>
+            </div>
+        </div>
+        <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
         </div>
     </div>
-    <div id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load" hx-swap="innerHTML">
-        <article>
-            <p aria-busy="true"><span class="spinner"></span> Loading S&amp;P 500 heatmap...</p>
-        </article>
-    </div>
-</div>
 
+    {# ── Card 4: Retail Sentiment (4 cols) ── #}
+    <div class="glass-card bento-sentiment">
+        <div class="bento-card-header">
+            <h3 class="bento-card-title">Retail Sentiment</h3>
+        </div>
+        <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
+        </div>
+    </div>
+
+    {# ── Card 5: Trending with Smart Money (12 cols) ── #}
+    <div class="glass-card bento-trending">
+        <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
+        </div>
+    </div>
+
+    {# ── Card 6: Support the Panda (12 cols) ── #}
+    <div class="glass-card bento-support">
+        <div class="pw-body">
+            <div class="pw-top">
+                <div class="pw-header">
+                    <span class="pw-icon">&#x1F43C;</span>
+                    <strong class="pw-title">Support the Panda</strong>
+                </div>
+                <p class="pw-copy">
+                    PaperPanda is open and ad-free. I pay for these expensive data APIs out of pocket.
+                    Help keep the project alive.
+                </p>
+                <div class="pw-progress-track">
+                    <div class="pw-progress-fill" style="width: {{ panda_pct }}%;"></div>
+                </div>
+                <div class="pw-progress-label">
+                    ${{ panda_raised }} / ${{ panda_goal }} this month
+                </div>
+            </div>
+            {% if stripe_configured %}
+            <div class="pw-tier-pills">
+                <button class="pw-tier-pill" onclick="openHomeCheckout('{{ price_bamboo }}', 'subscription')">
+                    &#x1F38B; Bamboo <strong>$5/mo</strong>
+                </button>
+                <button class="pw-tier-pill pw-tier-popular" onclick="openHomeCheckout('{{ price_panda }}', 'subscription')">
+                    &#x1F43C; Panda <strong>$15/mo</strong>
+                </button>
+                <button class="pw-tier-pill" onclick="openHomeCheckout('{{ price_giant_panda }}', 'subscription')">
+                    &#x1F451; Giant Panda <strong>$30/mo</strong>
+                </button>
+                <button class="pw-tier-pill pw-tier-onetime" onclick="openHomeCheckout('{{ price_onetime }}', 'payment')">
+                    &#x2764;&#xFE0F; One-time donation
+                </button>
+            </div>
+            {% else %}
+            <div class="pw-tier-pills">
+                <a href="/support" class="pw-tier-pill">&#x1F43C; Support &rarr;</a>
+            </div>
+            {% endif %}
+            <a href="/support" class="pw-learn-more">Learn more about the Panda Fund &rarr;</a>
+        </div>
+    </div>
+
+</div>{# end .bento-grid #}
+
+{# ── Heatmap toggle JS ── #}
 <script>
 (function() {
     var toggle = document.getElementById('heatmap-toggle');
@@ -139,59 +230,6 @@
     });
 })();
 </script>
-
-{# ── Trending with Smart Money (combined, lazy-loaded) ── #}
-<div style="margin-top: 1.5em;">
-    <h3 style="margin-bottom: 0.5em;">Trending with Smart Money</h3>
-    <div hx-get="/api/trending-combined" hx-trigger="load" hx-swap="innerHTML">
-        <article>
-            <p aria-busy="true"><span class="spinner"></span> Loading trending stocks...</p>
-        </article>
-    </div>
-</div>
-
-{# ── Support the Panda widget ── #}
-<div class="panda-widget">
-    <div class="pw-body">
-        <div class="pw-top">
-            <div class="pw-header">
-                <span class="pw-icon">&#x1F43C;</span>
-                <strong class="pw-title">Support the Panda</strong>
-            </div>
-            <p class="pw-copy">
-                PaperPanda is open and ad-free. I pay for these expensive data APIs out of pocket.
-                Help keep the project alive.
-            </p>
-            <div class="pw-progress-track">
-                <div class="pw-progress-fill" style="width: {{ panda_pct }}%;"></div>
-            </div>
-            <div class="pw-progress-label">
-                ${{ panda_raised }} / ${{ panda_goal }} this month
-            </div>
-        </div>
-        {% if stripe_configured %}
-        <div class="pw-tier-pills">
-            <button class="pw-tier-pill" onclick="openHomeCheckout('{{ price_bamboo }}', 'subscription')">
-                &#x1F38B; Bamboo <strong>$5/mo</strong>
-            </button>
-            <button class="pw-tier-pill pw-tier-popular" onclick="openHomeCheckout('{{ price_panda }}', 'subscription')">
-                &#x1F43C; Panda <strong>$15/mo</strong>
-            </button>
-            <button class="pw-tier-pill" onclick="openHomeCheckout('{{ price_giant_panda }}', 'subscription')">
-                &#x1F451; Giant Panda <strong>$30/mo</strong>
-            </button>
-            <button class="pw-tier-pill pw-tier-onetime" onclick="openHomeCheckout('{{ price_onetime }}', 'payment')">
-                &#x2764;&#xFE0F; One-time donation
-            </button>
-        </div>
-        {% else %}
-        <div class="pw-tier-pills">
-            <a href="/support" class="pw-tier-pill">&#x1F43C; Support &rarr;</a>
-        </div>
-        {% endif %}
-        <a href="/support" class="pw-learn-more">Learn more about the Panda Fund &rarr;</a>
-    </div>
-</div>
 
 {% if stripe_configured %}
 {# ── Homepage Checkout Overlay (embedded Stripe) ── #}
@@ -259,7 +297,9 @@ document.addEventListener('keydown', function(e) {
 {% endif %}
 
 <style>
-    /* ── Checkout overlay (homepage) ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Checkout overlay (homepage)                              ── */
+    /* ══════════════════════════════════════════════════════════════ */
     .checkout-overlay {
         display: none;
         position: fixed;
@@ -303,7 +343,9 @@ document.addEventListener('keydown', function(e) {
     }
     #home-checkout-mount { min-height: 300px; }
 
-    /* ── Hero Search Bar (Brave-style pill) ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Hero Search Bar (Brave-style pill)                      ── */
+    /* ══════════════════════════════════════════════════════════════ */
     .hero-search-wrapper {
         display: flex;
         justify-content: center;
@@ -318,14 +360,26 @@ document.addEventListener('keydown', function(e) {
         max-width: 720px;
         height: 56px;
         background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
+        border: 1px solid var(--pp-glass-border);
         border-radius: 28px;
         padding: 0 6px 0 20px;
-        transition: border-color 0.2s, box-shadow 0.2s;
+        box-shadow: 0 0 20px rgba(25, 118, 210, 0.12), 0 0 0 1px rgba(25, 118, 210, 0.08);
+        animation: searchGlow 3s ease-in-out infinite;
+        transition: border-color 0.3s, box-shadow 0.3s;
+    }
+    @keyframes searchGlow {
+        0%, 100% { box-shadow: 0 0 20px rgba(25, 118, 210, 0.12), 0 0 0 1px rgba(25, 118, 210, 0.08); }
+        50%      { box-shadow: 0 0 24px rgba(25, 118, 210, 0.2), 0 0 0 1px rgba(25, 118, 210, 0.12); }
+    }
+    .hero-search-bar:hover {
+        animation: none;
+        border-color: rgba(25, 118, 210, 0.3);
+        box-shadow: 0 0 24px rgba(25, 118, 210, 0.18), 0 0 0 1px rgba(25, 118, 210, 0.12);
     }
     .hero-search-bar:focus-within {
-        border-color: #1976d2;
-        box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.12), 0 4px 16px rgba(0,0,0,0.06);
+        animation: none;
+        border-color: rgba(25, 118, 210, 0.5);
+        box-shadow: 0 0 28px rgba(25, 118, 210, 0.25), 0 0 0 2px rgba(25, 118, 210, 0.18), 0 4px 16px rgba(0,0,0,0.06);
     }
     .hero-search-icon {
         width: 20px;
@@ -351,7 +405,6 @@ document.addEventListener('keydown', function(e) {
         color: var(--pp-overlay-35);
         font-size: 16px;
     }
-    /* Remove PicoCSS input styling overrides */
     .hero-search-bar input[type="search"]:focus {
         border: none;
         outline: none;
@@ -375,7 +428,6 @@ document.addEventListener('keydown', function(e) {
     .hero-search-btn:hover {
         background: #1565c0;
     }
-    /* Dropdown results styling for hero bar */
     .hero-search-bar #ticker-search-results {
         border-radius: 16px;
         padding: 0.4em 0;
@@ -408,7 +460,9 @@ document.addEventListener('keydown', function(e) {
         }
     }
 
-    /* ── Feature Cards: 4-column row on desktop, centered ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Feature Cards: 4-column row on desktop, centered        ── */
+    /* ══════════════════════════════════════════════════════════════ */
     .home-cards {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -424,12 +478,15 @@ document.addEventListener('keydown', function(e) {
         align-items: center;
         text-align: center;
         padding: 0.9em 0.7em;
-        border: 1px solid var(--pp-overlay-10);
-        border-radius: 10px;
+        background: var(--pp-glass-bg);
+        backdrop-filter: blur(var(--pp-glass-blur));
+        -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+        border: 1px solid var(--pp-glass-border);
+        border-radius: 12px;
         text-decoration: none;
         color: inherit;
         transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
-        min-width: 0;              /* allow cards to shrink inside grid */
+        min-width: 0;
     }
     .home-card:hover {
         border-color: #1976d2;
@@ -456,47 +513,116 @@ document.addEventListener('keydown', function(e) {
         }
     }
 
-    .home-grid {
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Bento Grid Layout                                       ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    .bento-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 2em;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 1.25em;
     }
-    @media (max-width: 768px) {
-        .home-grid {
+
+    /* ── Glass Card ── */
+    .glass-card {
+        background: var(--pp-glass-bg);
+        backdrop-filter: blur(var(--pp-glass-blur));
+        -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+        border: 1px solid var(--pp-glass-border);
+        border-radius: 16px;
+        box-shadow: var(--pp-glass-shadow);
+        overflow: hidden;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .glass-card:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--pp-glass-shadow), 0 8px 32px rgba(0, 0, 0, 0.06);
+    }
+
+    /* ── Card Header ── */
+    .bento-card-header {
+        padding: 0.75em 1em 0.4em;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5em;
+    }
+    .bento-card-title {
+        margin: 0;
+        font-size: 0.95em;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--pp-text);
+    }
+
+    /* ── Card Body ── */
+    .bento-card-body {
+        /* partials render directly inside here */
+    }
+    .bento-card-body-flex {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* ── Loading State ── */
+    .bento-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 200px;
+        color: var(--pp-text-muted);
+    }
+
+    /* ── Grid Placement (Desktop ≥1024px) ── */
+    .bento-overview   { grid-column: span 5; }
+    .bento-news       { grid-column: span 7; display: flex; flex-direction: column; }
+    .bento-heatmap    { grid-column: span 8; }
+    .bento-sentiment  { grid-column: span 4; }
+    .bento-trending   { grid-column: span 12; }
+    .bento-support    { grid-column: span 12; }
+
+    /* ── Tablet (768-1023px) ── */
+    @media (max-width: 1023px) {
+        .bento-overview   { grid-column: span 6; }
+        .bento-news       { grid-column: span 6; }
+        .bento-heatmap    { grid-column: span 12; }
+        .bento-sentiment  { grid-column: span 12; }
+        .bento-trending   { grid-column: span 12; }
+        .bento-support    { grid-column: span 12; }
+    }
+
+    /* ── Mobile (<768px) ── */
+    @media (max-width: 767px) {
+        .bento-grid {
             grid-template-columns: 1fr;
+            gap: 1em;
+        }
+        .bento-overview,
+        .bento-news,
+        .bento-heatmap,
+        .bento-sentiment,
+        .bento-trending,
+        .bento-support {
+            grid-column: span 1;
         }
     }
 
-    /* ── Heatmap Section ── */
-    .heatmap-section {
-        margin-top: 3rem;
-    }
-    .heatmap-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 0.75em;
-        padding-bottom: 0.6em;
-        border-bottom: 1px solid var(--pp-nav-border);
-    }
-    .heatmap-title {
-        margin: 0;
-        font-size: 1.25em;
-    }
-
-    /* Segmented pill toggle */
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Heatmap Toggle (inside card header)                     ── */
+    /* ══════════════════════════════════════════════════════════════ */
     .heatmap-toggle {
         display: flex;
         gap: 0;
         background: var(--pp-overlay-5);
         border-radius: 8px;
         padding: 3px;
+        flex-shrink: 0;
     }
     .heatmap-pill {
         background: transparent;
         border: none;
-        padding: 0.35em 0.9em;
-        font-size: 0.82em;
+        padding: 0.3em 0.7em;
+        font-size: 0.78em;
         font-weight: 600;
         color: var(--pp-overlay-50);
         cursor: pointer;
@@ -522,23 +648,13 @@ document.addEventListener('keydown', function(e) {
         opacity: 0.4;
     }
 
-    /* Responsive: stack toggle below title on mobile */
-    @media (max-width: 520px) {
-        .heatmap-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 0.5em;
-        }
-    }
-
-    /* ── Support the Panda widget ── */
-    .panda-widget {
-        margin: 2.5em 0 1em;
-    }
-    .pw-body {
-        background: var(--pp-surface-alt);
-        border: 1px solid var(--pp-border);
-        border-radius: 14px;
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Support the Panda widget (inside glass card)            ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    .bento-support .pw-body {
+        background: transparent;
+        border: none;
+        border-radius: 0;
         padding: 1.4em 1.8em;
     }
     .pw-top {
@@ -639,7 +755,24 @@ document.addEventListener('keydown', function(e) {
         color: var(--pp-text);
     }
     @media (max-width: 640px) {
-        .pw-body { padding: 1.2em 1em; }
+        .bento-support .pw-body { padding: 1.2em 1em; }
     }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Fade-in animation for bento cards                       ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    @keyframes bentoFadeIn {
+        from { opacity: 0; transform: translateY(12px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    .glass-card {
+        animation: bentoFadeIn 0.4s ease both;
+    }
+    .glass-card:nth-child(1) { animation-delay: 0s; }
+    .glass-card:nth-child(2) { animation-delay: 0.05s; }
+    .glass-card:nth-child(3) { animation-delay: 0.1s; }
+    .glass-card:nth-child(4) { animation-delay: 0.15s; }
+    .glass-card:nth-child(5) { animation-delay: 0.2s; }
+    .glass-card:nth-child(6) { animation-delay: 0.25s; }
 </style>
 {% endblock %}

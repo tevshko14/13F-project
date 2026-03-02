@@ -259,6 +259,10 @@
         if (momentumData[j].ticker) momentumTickerMap[momentumData[j].ticker.toUpperCase()] = j;
     }
 
+    var cs = getComputedStyle(document.documentElement);
+    var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+    var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
     var consensusChart = echarts.init(consensusEl);
     var cTickers = consensusData.map(function(d) { return d.ticker; }).reverse();
     var cCounts  = consensusData.map(function(d) { return d.holders; }).reverse();
@@ -266,8 +270,8 @@
 
     consensusChart.setOption({
         grid: { left: 80, right: 30, top: 10, bottom: 20 },
-        xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10 }, minInterval: 1 },
-        yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace' } },
+        xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10, color: axisColor }, axisLabel: { color: axisColor }, minInterval: 1 },
+        yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor } },
         tooltip: {
             trigger: 'axis', axisPointer: { type: 'shadow' },
             formatter: function(params) {
@@ -288,10 +292,10 @@
         },
         series: [{
             type: 'bar', data: cCounts,
-            itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#1976d2' }, { offset: 1, color: '#42a5f5' }]), borderRadius: [0, 4, 4, 0] },
-            emphasis: { itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#1565c0' }, { offset: 1, color: '#1976d2' }]) } },
+            itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#64b5f6' }]), borderRadius: [0, 4, 4, 0] },
+            emphasis: { itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#1976d2' }]) } },
             barMaxWidth: 28,
-            label: { show: true, position: 'right', fontSize: 11, fontWeight: 'bold', color: 'rgba(0,0,0,0.5)', formatter: '{c}' }
+            label: { show: true, position: 'right', fontSize: 11, fontWeight: 'bold', color: axisColor, formatter: '{c}' }
         }]
     });
     consensusChart.on('click', function(params) { var d = cDataRev[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
@@ -299,7 +303,11 @@
     var momentumChart = echarts.init(momentumEl);
     var mTickers = momentumData.map(function(d) { return d.ticker || '?'; });
     var mCounts  = momentumData.map(function(d) { return d.add_count; });
-    var mColors  = momentumData.map(function(d) { return d.is_trending ? '#e65100' : '#1976d2'; });
+    var mGradients = momentumData.map(function(d) {
+        return d.is_trending
+            ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#fdba74' }, { offset: 1, color: '#7c2d12' }])
+            : new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#64b5f6' }, { offset: 1, color: '#0d47a1' }]);
+    });
 
     momentumChart.setOption({
         grid: { left: 40, right: 16, top: 10, bottom: 60 },
@@ -322,8 +330,8 @@
         },
         series: [{
             type: 'bar',
-            data: mCounts.map(function(count, idx) { return { value: count, itemStyle: { color: mColors[idx], borderRadius: [3, 3, 0, 0] } }; }),
-            emphasis: { itemStyle: { color: '#1565c0' } }, barMaxWidth: 40
+            data: mCounts.map(function(count, idx) { return { value: count, itemStyle: { color: mGradients[idx], borderRadius: [3, 3, 0, 0] } }; }),
+            emphasis: { itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#1976d2' }]) } }, barMaxWidth: 40
         }]
     });
     momentumChart.on('click', function(params) { var d = momentumData[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
@@ -344,7 +352,7 @@
 </script>
 
 {# ── Holdings Table ── #}
-<article style="margin-top: 2rem;">
+<article class="glass-card" style="margin-top: 2rem;">
     <header>
         <strong>All Holdings</strong>
         <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
@@ -408,6 +416,7 @@
     <small class="sync-badge">Auto-synced</small>
 </div>
 
+<div class="glass-card" style="padding: 0; overflow: hidden;">
 <div class="pp-table-wrap">
 <table class="gp-table">
     <thead>
@@ -462,6 +471,7 @@
     </tbody>
 </table>
 </div>{# end pp-table-wrap #}
+</div>{# end glass-card #}
 
 </div>{# end panel-funds #}
 
@@ -469,6 +479,7 @@
 {# ── Panel 3: Activity Intelligence Dashboard                       #}
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-activity" class="gp-panel{% if view == 'activity' %} active{% endif %}">
+    <div class="glass-card" style="padding: 1.5em; overflow: hidden;">
     <div id="activity-dashboard"
          hx-get="/api/activity-feed?timeframe=ALL&ptype=guru"
          hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
@@ -477,6 +488,7 @@
             <p aria-busy="true"><span class="spinner"></span> Loading activity intelligence...</p>
         </article>
     </div>
+    </div>{# end glass-card #}
     <script>
     /* Read URL params on load and override the default hx-get if ptype/timeframe specified */
     (function() {
@@ -496,6 +508,7 @@
 {# ── Panel 4: Deployment (lazy-loaded HTMX)                         #}
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-deployment" class="gp-panel{% if view == 'deployment' %} active{% endif %}">
+    <div class="glass-card" style="padding: 0; overflow: hidden;">
     <div id="deployment-leaderboard"
          hx-get="/api/deployment-leaderboard"
          hx-trigger="{% if view == 'deployment' %}load{% else %}revealed{% endif %}"
@@ -504,6 +517,7 @@
             <p aria-busy="true"><span class="spinner"></span> Loading deployment data...</p>
         </article>
     </div>
+    </div>{# end glass-card #}
 </div>{# end panel-deployment #}
 
 {# ── Tab Switching + URL Sync Script ── #}

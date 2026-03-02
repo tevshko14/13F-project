@@ -1747,7 +1747,7 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-02-26 (Notification bell system:
+> This file documents the system as of 2026-03-01 (Notification bell system:
 > Supabase-backed, 3 sources (13F/YouTube/Reddit), HTMX bell + dropdown + toast +
 > history page, 48h retention, 15s server cache, SQL pagination; Capital Deployed
 > feature, AUM/deployment ratio leaderboard, XBRL cash, Form ADV integration,

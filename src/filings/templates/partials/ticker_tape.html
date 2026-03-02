@@ -38,9 +38,9 @@
         overflow: hidden;
         width: 100%;
         position: relative;
-        background: transparent;
-        border-top: 1px solid var(--pp-border-light);
-        border-bottom: 1px solid var(--pp-border-light);
+        background: var(--pp-glass-bg);
+        border: 1px solid var(--pp-glass-border);
+        border-radius: 16px;
         padding: 0;
     }
 
@@ -70,6 +70,8 @@
         white-space: nowrap;
         font-size: 0.85em;
         border-right: 1px solid var(--pp-border-light);
+        border-radius: 12px;
+        margin: 2px 0;
         transition: background 0.15s;
     }
 
@@ -120,12 +122,14 @@
 
     .ticker-tape::before {
         left: 0;
-        background: linear-gradient(to right, var(--pico-background-color), transparent);
+        border-radius: 16px 0 0 16px;
+        background: linear-gradient(to right, var(--pp-surface, var(--pico-background-color)), transparent);
     }
 
     .ticker-tape::after {
         right: 0;
-        background: linear-gradient(to left, var(--pico-background-color), transparent);
+        border-radius: 0 16px 16px 0;
+        background: linear-gradient(to left, var(--pp-surface, var(--pico-background-color)), transparent);
     }
 
     /* Responsive: slightly smaller on mobile */
