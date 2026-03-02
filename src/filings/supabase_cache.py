@@ -2560,8 +2560,11 @@ def get_existing_logo_tickers() -> set[str]:
         return set()
 
 
-def upsert_logos(rows: list[dict]) -> int:
-    """Batch upsert rows into ``ticker_logos``.
+def insert_logos(rows: list[dict]) -> int:
+    """Insert-only: add new logos to ``ticker_logos``, never overwrite existing.
+
+    Uses upsert with ``ignore_duplicates=True`` so rows whose ticker
+    already exists are silently skipped — existing data is NEVER modified.
 
     Each row should have: ``ticker``, ``logo_b64``, ``content_type``, ``logo_domain``.
     """
@@ -2569,16 +2572,16 @@ def upsert_logos(rows: list[dict]) -> int:
     if client is None:
         return 0
 
-    upserted = 0
+    inserted = 0
     CHUNK = 50
     for i in range(0, len(rows), CHUNK):
         chunk = rows[i : i + CHUNK]
         try:
             client.table("ticker_logos").upsert(
-                chunk, on_conflict="ticker"
+                chunk, on_conflict="ticker", ignore_duplicates=True
             ).execute()
-            upserted += len(chunk)
+            inserted += len(chunk)
         except Exception as exc:
-            logger.warning("upsert_logos chunk %d failed: %s", i, exc)
+            logger.warning("insert_logos chunk %d failed: %s", i, exc)
 
-    return upserted
+    return inserted
