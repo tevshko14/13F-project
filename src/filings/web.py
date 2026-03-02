@@ -210,6 +210,9 @@ async def lifespan(app: FastAPI):
     funds in the background so users never see outdated data even if the
     cron job fails.
     """
+    global _heavy_pool, _heavy_sem, _posthog_http, _startup_ts
+    _startup_ts = time_module.time()
+
     # ── Thread pool architecture ─────────────────────────────────────────
     # Default pool: lightweight work (cache reads, template rendering, etc.)
     # Heavy pool: yfinance downloads, Finnhub, SEC EDGAR — slow HTTP calls
@@ -220,8 +223,6 @@ async def lifespan(app: FastAPI):
     _pool_size = int(os.environ.get("WORKER_THREADS", "32"))
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=_pool_size))
-
-    global _heavy_pool, _heavy_sem, _posthog_http
     _heavy_pool = ThreadPoolExecutor(
         max_workers=int(os.environ.get("HEAVY_THREADS", "16")),
         thread_name_prefix="heavy",
@@ -866,26 +867,32 @@ async def _reddit_velocity_scanner() -> None:
 
 
 _health_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="health")
+_startup_ts: float = 0.0  # set in lifespan
+_STARTUP_GRACE = 90  # seconds: don't report unhealthy during cold start
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
     """Health check that detects thread pool starvation.
 
-    Uses a **dedicated single-thread pool** so it never competes with
-    the default or heavy pools.  We probe the *default* pool with a
-    3-second timeout — if it can't service a trivial lambda, user
-    requests are also stuck and Railway should restart us.
+    During the startup grace period (90s), always returns OK so Railway
+    doesn't restart us mid-warmup.  After that, probes the default pool
+    with a retry to distinguish temporary load from true starvation.
     """
-    loop = asyncio.get_running_loop()
+    import time as _time
+
+    # During cold start, yfinance downloads saturate the pool temporarily.
+    # Don't report unhealthy — Railway would restart us in a loop.
+    if _startup_ts and (_time.time() - _startup_ts) < _STARTUP_GRACE:
+        return JSONResponse({"status": "ok", "warming": True})
+
     try:
         # Probe the DEFAULT pool (the one user requests use)
         await asyncio.wait_for(
             asyncio.to_thread(lambda: True), timeout=3
         )
     except (asyncio.TimeoutError, Exception):
-        # Default pool is saturated — check if it's *truly* stuck or
-        # just temporarily busy.  Give it one more chance with 5s.
+        # Default pool is saturated — retry with longer timeout
         try:
             await asyncio.wait_for(
                 asyncio.to_thread(lambda: True), timeout=5
