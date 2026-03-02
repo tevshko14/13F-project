@@ -1,0 +1,377 @@
+{# Custom Market Overview — tabbed widget with ECharts chart + symbol list #}
+{% if has_data %}
+<div class="mo-widget">
+    {# Tab buttons #}
+    <div class="mo-tabs">
+        <button class="mo-tab active" data-tab="mega_caps" onclick="moSwitchTab('mega_caps')">Mega Caps</button>
+        <button class="mo-tab" data-tab="indices" onclick="moSwitchTab('indices')">Indices</button>
+        <button class="mo-tab" data-tab="commodities" onclick="moSwitchTab('commodities')">Commodities</button>
+    </div>
+
+    {# ECharts line chart #}
+    <div id="mo-chart" style="width: 100%; height: 170px;"></div>
+
+    {# Period filter buttons #}
+    <div class="mo-periods">
+        <button class="mo-period" data-period="1D" onclick="moSwitchPeriod('1D')">1D</button>
+        <button class="mo-period" data-period="1W" onclick="moSwitchPeriod('1W')">1W</button>
+        <button class="mo-period" data-period="1M" onclick="moSwitchPeriod('1M')">1M</button>
+        <button class="mo-period active" data-period="3M" onclick="moSwitchPeriod('3M')">3M</button>
+        <button class="mo-period" data-period="1Y" onclick="moSwitchPeriod('1Y')">1Y</button>
+    </div>
+
+    {# Symbol list #}
+    <div id="mo-list" class="mo-list"></div>
+</div>
+
+<style>
+    .mo-widget {
+        background: transparent;
+        border: 1px solid var(--pp-border-light);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .mo-tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 1px solid var(--pp-border-light);
+        padding: 0;
+    }
+
+    .mo-tab {
+        flex: 1;
+        padding: 0.6em 0.8em;
+        font-size: 0.85em;
+        font-weight: 600;
+        border: none;
+        border-radius: 0;
+        background: transparent;
+        color: var(--pp-text-muted);
+        cursor: pointer;
+        transition: color 0.2s, background 0.2s;
+        margin: 0;
+    }
+
+    .mo-tab:hover {
+        background: var(--pp-surface-hover);
+        color: var(--pp-text);
+    }
+
+    .mo-tab.active {
+        color: #1976d2;
+        background: var(--pp-surface);
+        box-shadow: inset 0 -2px 0 #1976d2;
+    }
+
+    .mo-periods {
+        display: flex;
+        justify-content: center;
+        gap: 0.25em;
+        padding: 0.4em 0.8em;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+
+    .mo-period {
+        padding: 0.2em 0.6em;
+        font-size: 0.75em;
+        font-weight: 600;
+        border: 1px solid var(--pp-border-light);
+        border-radius: 4px;
+        background: transparent;
+        color: var(--pp-text-muted);
+        cursor: pointer;
+        transition: color 0.15s, background 0.15s, border-color 0.15s;
+        margin: 0;
+        min-width: 2.2em;
+    }
+
+    .mo-period:hover {
+        color: var(--pp-text);
+        border-color: var(--pp-text-muted);
+    }
+
+    .mo-period.active {
+        color: #1976d2;
+        border-color: #1976d2;
+        background: rgba(25, 118, 210, 0.08);
+    }
+
+    .mo-list {
+    }
+
+    .mo-row {
+        display: flex;
+        align-items: center;
+        padding: 0.55em 0.8em;
+        gap: 0.6em;
+        cursor: pointer;
+        transition: background 0.15s;
+        border-bottom: 1px solid var(--pp-border-light);
+        text-decoration: none;
+        color: var(--pp-text);
+    }
+
+    .mo-row:last-child {
+        border-bottom: none;
+    }
+
+    .mo-row:hover {
+        background: var(--pp-surface-hover);
+    }
+
+    .mo-row.active {
+        background: var(--pp-surface-hover);
+        box-shadow: inset 3px 0 0 #1976d2;
+    }
+
+    .mo-name {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .mo-name-sym {
+        font-weight: 700;
+        font-family: monospace;
+        font-size: 0.85em;
+        display: block;
+        letter-spacing: 0.02em;
+    }
+
+    .mo-name-label {
+        font-size: 0.75em;
+        color: var(--pp-text-muted);
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .mo-spark {
+        flex-shrink: 0;
+    }
+
+    .mo-price-col {
+        text-align: right;
+        min-width: 70px;
+    }
+
+    .mo-price {
+        font-weight: 600;
+        font-size: 0.9em;
+        display: block;
+    }
+
+    .mo-change {
+        font-size: 0.75em;
+        font-weight: 600;
+        display: block;
+    }
+
+    .mo-up { color: #16a34a; }
+    .mo-down { color: #dc2626; }
+</style>
+
+<script>
+(function() {
+    var allTabs = {{ tabs_json | safe }};
+    var currentTab = 'mega_caps';
+    var currentSymbol = null;
+    var currentPeriod = '3M';
+    var chart = null;
+    var esc = window.escHtml || function(s) { return s; };
+
+    window.requireECharts(function(err) {
+    if (err) { document.getElementById('mo-chart').innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+
+    var container = document.getElementById('mo-chart');
+    chart = echarts.init(container);
+
+    function formatPrice(p) {
+        if (p >= 1000) return p.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+        if (p >= 100) return p.toFixed(2);
+        return p.toFixed(2);
+    }
+
+    function sparkSVG(points, pct) {
+        if (!points || points.length < 3) return '';
+        var w = 44, h = 16;
+        var color = pct >= 0 ? '#16a34a' : '#dc2626';
+        var coords = [];
+        for (var i = 0; i < points.length; i++) {
+            var x = (i / (points.length - 1)) * w;
+            var y = h - points[i] * 14 - 1;
+            coords.push(x.toFixed(1) + ',' + y.toFixed(1));
+        }
+        return '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" class="mo-spark">'
+            + '<polyline fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" points="' + coords.join(' ') + '"/></svg>';
+    }
+
+    function renderList(tabKey) {
+        var items = allTabs[tabKey] || [];
+        var listEl = document.getElementById('mo-list');
+        var html = '';
+        for (var i = 0; i < items.length; i++) {
+            var d = items[i];
+            var isActive = (currentSymbol === d.symbol) ? ' active' : '';
+            var cls = d.pct_change >= 0 ? 'mo-up' : 'mo-down';
+            var tag = (d.link) ? 'a' : 'div';
+            var href = (d.link) ? ' href="' + d.link + '"' : '';
+            html += '<' + tag + href + ' class="mo-row' + isActive + '" data-idx="' + i + '" data-sym="' + esc(d.symbol) + '">';
+            html += '<div class="mo-name">';
+            html += '<span class="mo-name-sym">' + esc(d.symbol.replace('^', '').replace('=F', '')) + '</span>';
+            html += '<span class="mo-name-label">' + esc(d.name) + '</span>';
+            html += '</div>';
+            html += sparkSVG(d.spark, d.pct_change);
+            html += '<div class="mo-price-col">';
+            html += '<span class="mo-price">' + formatPrice(d.price) + '</span>';
+            html += '<span class="mo-change ' + cls + '">' + (d.pct_change >= 0 ? '+' : '') + d.pct_change.toFixed(2) + '%</span>';
+            html += '</div>';
+            html += '</' + tag + '>';
+        }
+        listEl.innerHTML = html;
+
+        /* Attach click handlers for chart updates */
+        var rows = listEl.querySelectorAll('.mo-row');
+        for (var j = 0; j < rows.length; j++) {
+            rows[j].addEventListener('click', (function(idx) {
+                return function(e) {
+                    var item = (allTabs[currentTab] || [])[idx];
+                    if (!item) return;
+                    if (item.link && !e.ctrlKey && !e.metaKey) {
+                        return;
+                    }
+                    e.preventDefault();
+                    selectSymbol(idx);
+                };
+            })(j));
+        }
+    }
+
+    function selectSymbol(idx) {
+        var items = allTabs[currentTab] || [];
+        if (idx < 0 || idx >= items.length) return;
+        var d = items[idx];
+        currentSymbol = d.symbol;
+
+        /* Highlight active row */
+        var rows = document.querySelectorAll('#mo-list .mo-row');
+        for (var r = 0; r < rows.length; r++) {
+            rows[r].classList.toggle('active', r === idx);
+        }
+
+        /* Fetch chart data for the selected symbol + current period */
+        fetchChart(d.symbol);
+    }
+
+    function fetchChart(symbol) {
+        fetch('/api/market-overview-chart/' + encodeURIComponent(symbol) + '?period=' + currentPeriod)
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                if (data && data.history) {
+                    renderChart(data);
+                }
+            })
+            .catch(function() {});
+    }
+
+    function renderChart(d) {
+        if (!chart || !d.history || d.history.length === 0) return;
+
+        var cs = getComputedStyle(document.documentElement);
+        var axisColor = cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a';
+        var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
+        var isUp = d.pct_change >= 0;
+        var lineColor = isUp ? '#1976d2' : '#dc2626';
+        var areaTop = isUp ? 'rgba(25, 118, 210, 0.15)' : 'rgba(220, 38, 38, 0.15)';
+        var areaBottom = isUp ? 'rgba(25, 118, 210, 0)' : 'rgba(220, 38, 38, 0)';
+
+        chart.setOption({
+            grid: { left: 10, right: 10, top: 10, bottom: 24 },
+            xAxis: {
+                type: 'time',
+                axisLabel: { color: axisColor, fontSize: 10 },
+                axisLine: { show: false },
+                axisTick: { show: false },
+                splitLine: { show: false }
+            },
+            yAxis: {
+                type: 'value',
+                show: false,
+                scale: true
+            },
+            tooltip: {
+                trigger: 'axis',
+                formatter: function(params) {
+                    if (!params || params.length === 0) return '';
+                    var p = params[0];
+                    var dateStr = new Date(p.value[0]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    return '<strong>' + esc(d.name) + '</strong><br/>' + dateStr + ': <strong>' + formatPrice(p.value[1]) + '</strong>';
+                }
+            },
+            series: [{
+                type: 'line',
+                data: d.history,
+                smooth: 0.3,
+                showSymbol: false,
+                lineStyle: { color: lineColor, width: 2 },
+                areaStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: areaTop },
+                        { offset: 1, color: areaBottom }
+                    ])
+                }
+            }]
+        }, true);
+    }
+
+    /* Period switching */
+    window.moSwitchPeriod = function(period) {
+        currentPeriod = period;
+        var btns = document.querySelectorAll('.mo-period');
+        for (var b = 0; b < btns.length; b++) {
+            btns[b].classList.toggle('active', btns[b].getAttribute('data-period') === period);
+        }
+        /* Re-fetch chart for the currently selected symbol */
+        if (currentSymbol) {
+            fetchChart(currentSymbol);
+        }
+    };
+
+    /* Tab switching */
+    window.moSwitchTab = function(tabKey) {
+        currentTab = tabKey;
+        var btns = document.querySelectorAll('.mo-tab');
+        for (var b = 0; b < btns.length; b++) {
+            btns[b].classList.toggle('active', btns[b].getAttribute('data-tab') === tabKey);
+        }
+        renderList(tabKey);
+        /* Auto-select first symbol */
+        var items = allTabs[tabKey] || [];
+        if (items.length > 0) {
+            selectSymbol(0);
+        }
+    };
+
+    /* Initial render */
+    renderList('mega_caps');
+    var initialItems = allTabs['mega_caps'] || [];
+    if (initialItems.length > 0) {
+        currentSymbol = initialItems[0].symbol;
+        fetchChart(initialItems[0].symbol);
+    }
+
+    /* Responsive resize */
+    var _moTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(_moTimer);
+        _moTimer = setTimeout(function() { if (chart) chart.resize(); }, 150);
+    });
+
+    }); /* end requireECharts */
+})();
+</script>
+{% else %}
+<p class="text-muted">Market data unavailable.</p>
+{% endif %}

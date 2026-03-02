@@ -19,7 +19,7 @@ import os
 import re as _re
 import time as time_module
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import uvicorn
@@ -277,6 +277,17 @@ if _has_limiter:
 def _fund_cache() -> dict:
     """Return the current fund cache dict from app.state."""
     return getattr(app.state, "fund_cache", {})
+
+
+def _current_quarter_bounds() -> tuple[str, str]:
+    """Return (start, end) ISO dates for the current SEC filing quarter."""
+    today = date.today()
+    q = (today.month - 1) // 3
+    starts = [f"{today.year}-01-01", f"{today.year}-04-01",
+              f"{today.year}-07-01", f"{today.year}-10-01"]
+    ends = [f"{today.year}-03-31", f"{today.year}-06-30",
+            f"{today.year}-09-30", f"{today.year}-12-31"]
+    return starts[q], ends[q]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -543,10 +554,13 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 
 async def _prefetch_market_data(app: FastAPI):
-    """Prefetch S&P 500 market data on startup (runs in background thread)."""
+    """Prefetch S&P 500 + index/commodity market data on startup."""
     try:
         app.state.market_data_ready = False
-        await asyncio.to_thread(market_data.get_sp500_market_data)
+        await asyncio.gather(
+            asyncio.to_thread(market_data.get_sp500_market_data),
+            asyncio.to_thread(market_data.get_index_market_data),
+        )
         app.state.market_data_ready = True
     except Exception:
         app.state.market_data_ready = False
@@ -2593,6 +2607,92 @@ async def congress_trending_api(request: Request):
     )
 
 
+@app.get("/api/trending-combined", response_class=HTMLResponse)
+async def trending_combined_api(request: Request):
+    """Lazy-loaded combined trending chart — superinvestors + congress."""
+    cache_data = _fund_cache()
+    if not cache_data:
+        return HTMLResponse(
+            '<article>'
+            '<p class="text-muted" aria-busy="true">Loading fund data...</p>'
+            '</article>'
+            '<div hx-get="/api/trending-combined" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
+        )
+
+    # Fetch both datasets concurrently
+    si_task = asyncio.to_thread(
+        market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK
+    )
+    cg_task = _get_congress_page_data()
+    si_entries, cg_page_data = await asyncio.gather(si_task, cg_task)
+
+    # Use the full 6-month congress data (same window as the congress page)
+    # so the combined chart matches what users see on /congress.
+    cg_trending = cg_page_data.get("trending", [])
+
+    # Normalize known ticker renames so both datasets merge correctly.
+    # 13F filings resolve tickers from CUSIP which can lag behind renames.
+    _TICKER_ALIASES: dict[str, str] = {
+        "FB": "META",
+        "TWTR": "X",
+    }
+
+    # Merge datasets — union of tickers (canonical form)
+    combined: dict[str, dict] = {}
+
+    for e in si_entries:
+        t = e.get("ticker")
+        if not t:
+            continue
+        t = _TICKER_ALIASES.get(t, t)
+        if t in combined:
+            # Same ticker from a previous entry (shouldn't happen, but be safe)
+            combined[t]["si_count"] += e["add_count"]
+            combined[t]["si_adders"].extend(e.get("adders", []))
+        else:
+            combined[t] = {
+                "ticker": t,
+                "name": e.get("issuer_name", t),
+                "si_count": e["add_count"],
+                "si_adders": e.get("adders", []),
+                "cg_count": 0,
+                "cg_democrat": 0,
+                "cg_republican": 0,
+                "cg_traders": [],
+            }
+
+    for c in cg_trending:
+        t = _TICKER_ALIASES.get(c["ticker"], c["ticker"])
+        if t in combined:
+            combined[t]["cg_count"] = c["add_count"]
+            combined[t]["cg_democrat"] = c.get("democrat", 0)
+            combined[t]["cg_republican"] = c.get("republican", 0)
+            combined[t]["cg_traders"] = c.get("top_traders", [])
+        else:
+            combined[t] = {
+                "ticker": t,
+                "name": c.get("name", t),
+                "si_count": 0,
+                "si_adders": [],
+                "cg_count": c["add_count"],
+                "cg_democrat": c.get("democrat", 0),
+                "cg_republican": c.get("republican", 0),
+                "cg_traders": c.get("top_traders", []),
+            }
+
+    # Sort by total buyers desc, take top 30
+    merged = sorted(
+        combined.values(),
+        key=lambda x: (x["si_count"] + x["cg_count"], x["si_count"]),
+        reverse=True,
+    )[:30]
+
+    return templates.TemplateResponse(
+        "partials/trending_combined.html",
+        {"request": request, "merged": merged},
+    )
+
+
 # ── Insider insights: response cache + yfinance helper ────────────
 _insights_cache: "OrderedDict[str, tuple[float, str]]"
 try:
@@ -2869,6 +2969,181 @@ async def api_activity_feed(
     # Page 1: full dashboard with stats, controls, clusters, table
     ctx["clusters"] = clusters
     return templates.TemplateResponse("partials/activity_feed_content.html", ctx)
+
+
+# ── Ticker Tape (curated stock scroll) ────────────────────────────────
+
+TICKER_TAPE_SYMBOLS = [
+    # Mega-cap tech (matches original TradingView tape)
+    "AAPL", "MSFT", "AMZN", "GOOGL", "TSLA", "NVDA", "META",
+    # Financials / Healthcare / Consumer
+    "JPM", "V", "BRK-B", "UNH", "LLY", "JNJ", "HD", "WMT", "COST",
+    # Other popular large-caps
+    "NFLX", "AMD", "CRM", "AVGO", "XOM", "PG", "ADBE", "ORCL",
+]
+
+
+@app.get("/api/ticker-tape", response_class=HTMLResponse)
+async def ticker_tape_api(request: Request):
+    """Lazy-loaded scrolling ticker tape for the homepage."""
+    if not getattr(app.state, "market_data_ready", False):
+        return HTMLResponse(
+            '<div hx-get="/api/ticker-tape" hx-trigger="load delay:5s" '
+            'hx-swap="outerHTML">'
+            '<p class="text-muted" style="text-align:center;font-size:0.85em;" '
+            'aria-busy="true">Loading market data...</p></div>'
+        )
+
+    mkt, sparklines = await asyncio.gather(
+        asyncio.to_thread(market_data.get_sp500_market_data, "1D"),
+        asyncio.to_thread(market_data.get_sparkline_points, TICKER_TAPE_SYMBOLS, 20),
+    )
+    if not mkt or "_metadata" not in mkt:
+        return HTMLResponse(
+            '<div hx-get="/api/ticker-tape" hx-trigger="load delay:5s" '
+            'hx-swap="outerHTML">'
+            '<p class="text-muted" style="text-align:center;font-size:0.85em;" '
+            'aria-busy="true">Market data loading...</p></div>'
+        )
+
+    tickers: list[dict] = []
+    for sym in TICKER_TAPE_SYMBOLS:
+        entry = mkt.get(sym)
+        if entry and isinstance(entry, dict):
+            tickers.append({
+                "ticker": sym,
+                "price": entry["price"],
+                "pct_change": entry["pct_change"],
+                "spark": sparklines.get(sym, []),
+            })
+
+    return templates.TemplateResponse(
+        "partials/ticker_tape.html",
+        {"request": request, "tickers": tickers},
+    )
+
+
+# ── Market Overview (custom replacement for TradingView) ──────────────
+
+_MEGA_CAP_SYMBOLS = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA"]
+
+_MEGA_CAP_NAMES = {
+    "AAPL": "Apple", "MSFT": "Microsoft", "GOOGL": "Alphabet",
+    "AMZN": "Amazon", "NVDA": "Nvidia", "META": "Meta", "TSLA": "Tesla",
+}
+
+
+@app.get("/api/market-overview", response_class=HTMLResponse)
+async def market_overview_api(request: Request):
+    """Lazy-loaded custom Market Overview widget."""
+    if not getattr(app.state, "market_data_ready", False):
+        return HTMLResponse(
+            '<div hx-get="/api/market-overview" hx-trigger="load delay:5s" '
+            'hx-swap="outerHTML">'
+            '<article><p aria-busy="true"><span class="spinner"></span> '
+            "Loading market data...</p></article></div>"
+        )
+
+    # Fetch all data concurrently
+    idx_task = asyncio.to_thread(market_data.get_index_market_data)
+    sp_task = asyncio.to_thread(market_data.get_sp500_market_data, "1D")
+    spark_task = asyncio.to_thread(
+        market_data.get_sparkline_points, _MEGA_CAP_SYMBOLS, 20
+    )
+    idx_data, sp_data, spark_data = await asyncio.gather(
+        idx_task, sp_task, spark_task
+    )
+
+    # Build tabs data
+    indices = []
+    commodities = []
+    for sym, entry in (idx_data or {}).items():
+        item = {
+            "symbol": sym,
+            "name": entry["name"],
+            "price": entry["price"],
+            "pct_change": entry["pct_change"],
+            "point_change": entry.get("point_change", 0),
+            "spark": entry.get("spark", []),
+            "history": entry.get("history", []),
+        }
+        if entry["tab"] == "indices":
+            indices.append(item)
+        else:
+            commodities.append(item)
+
+    mega_caps = []
+    for sym in _MEGA_CAP_SYMBOLS:
+        entry = (sp_data or {}).get(sym)
+        if not entry or not isinstance(entry, dict):
+            continue
+        # Get chart history from close_df
+        chart_data = await asyncio.to_thread(
+            market_data.get_overview_chart_data, sym
+        )
+        mega_caps.append({
+            "symbol": sym,
+            "name": _MEGA_CAP_NAMES.get(sym, sym),
+            "price": entry["price"],
+            "pct_change": entry["pct_change"],
+            "point_change": round(
+                entry["price"] * entry["pct_change"] / 100, 2
+            ),
+            "spark": spark_data.get(sym, []),
+            "history": chart_data["history"] if chart_data else [],
+            "link": f"/stock/{sym}",
+        })
+
+    # Preserve order: indices follow _INDEX_SYMBOLS key order
+    idx_order = [s for s in market_data._INDEX_SYMBOLS if market_data._INDEX_SYMBOLS[s]["tab"] == "indices"]
+    indices.sort(key=lambda x: idx_order.index(x["symbol"]) if x["symbol"] in idx_order else 99)
+    cmd_order = [s for s in market_data._INDEX_SYMBOLS if market_data._INDEX_SYMBOLS[s]["tab"] == "commodities"]
+    commodities.sort(key=lambda x: cmd_order.index(x["symbol"]) if x["symbol"] in cmd_order else 99)
+
+    tabs = {
+        "indices": indices,
+        "mega_caps": mega_caps,
+        "commodities": commodities,
+    }
+
+    return templates.TemplateResponse(
+        "partials/market_overview.html",
+        {
+            "request": request,
+            "tabs_json": json_module.dumps(tabs),
+            "has_data": bool(indices or mega_caps or commodities),
+        },
+    )
+
+
+@app.get("/api/market-overview-chart/{symbol:path}", response_class=JSONResponse)
+async def market_overview_chart_api(
+    request: Request,
+    symbol: str,
+    period: str = Query("1M", regex="^(1D|1W|1M|3M|1Y)$"),
+):
+    """Return chart data for a specific symbol (stock, index, or commodity)."""
+    chart = await asyncio.to_thread(market_data.get_overview_chart_data, symbol, period)
+    if chart is None:
+        return JSONResponse({"error": "Symbol not found"}, status_code=404)
+    return JSONResponse(chart)
+
+
+@app.get("/api/market-news", response_class=HTMLResponse)
+async def market_news_api(request: Request):
+    """Return market news HTML partial (lazy-loaded via HTMX)."""
+    articles = await asyncio.to_thread(market_data.get_market_news)
+    if not articles:
+        return HTMLResponse(
+            "<article>"
+            '<p class="text-muted" style="text-align:center;">Market news temporarily unavailable.</p>'
+            "</article>"
+            '<div hx-get="/api/market-news" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
+        )
+    return templates.TemplateResponse(
+        "partials/market_news.html",
+        {"request": request, "articles": articles},
+    )
 
 
 @app.get("/api/heatmap", response_class=HTMLResponse)
@@ -3256,6 +3531,7 @@ if _has_limiter:
     congress_page = limiter.limit("30/minute")(congress_page)
     congress_activity_api = limiter.limit("30/minute")(congress_activity_api)
     congress_trending_api = limiter.limit("30/minute")(congress_trending_api)
+    trending_combined_api = limiter.limit("15/minute")(trending_combined_api)
     insider_insights_api = limiter.limit("30/minute")(insider_insights_api)
     # Expensive aggregate / external-API endpoints
     ticker_search_index = limiter.limit("20/minute")(ticker_search_index)
@@ -3263,6 +3539,10 @@ if _has_limiter:
     retail_leaderboard_data = limiter.limit("15/minute")(retail_leaderboard_data)
     retail_calendar_api = limiter.limit("15/minute")(retail_calendar_api)
     retail_calendar_data = limiter.limit("15/minute")(retail_calendar_data)
+    ticker_tape_api = limiter.limit("15/minute")(ticker_tape_api)
+    market_overview_api = limiter.limit("15/minute")(market_overview_api)
+    market_overview_chart_api = limiter.limit("30/minute")(market_overview_chart_api)
+    market_news_api = limiter.limit("15/minute")(market_news_api)
     heatmap = limiter.limit("10/minute")(heatmap)
     most_added = limiter.limit("10/minute")(most_added)
     api_activity_feed = limiter.limit("15/minute")(api_activity_feed)

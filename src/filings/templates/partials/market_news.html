@@ -1,0 +1,409 @@
+{# Custom Market News — news cards with pagination + popup modal, loaded via HTMX #}
+{% if articles %}
+<div class="mn-widget">
+    {# Card list — JS will show only current page #}
+    <div id="mn-cards" class="mn-cards"></div>
+
+    {# Pagination footer #}
+    <div class="mn-pagination">
+        <button id="mn-prev" class="mn-page-btn" onclick="mnPage(-1)" disabled>&lsaquo;</button>
+        <span id="mn-page-info" class="mn-page-info"></span>
+        <button id="mn-next" class="mn-page-btn" onclick="mnPage(1)">&rsaquo;</button>
+    </div>
+</div>
+
+{# ── Modal overlay ── #}
+<div id="mn-modal" class="mn-modal-backdrop" onclick="mnClose(event)">
+    <div class="mn-modal" onclick="event.stopPropagation()">
+        <button class="mn-modal-close" onclick="mnClose()" aria-label="Close">&times;</button>
+        <img id="mn-modal-img" class="mn-modal-img" src="" alt="" style="display:none" onerror="this.style.display='none'">
+        <h3 id="mn-modal-headline" class="mn-modal-headline"></h3>
+        <div class="mn-modal-meta">
+            <span id="mn-modal-source" class="mn-source"></span>
+            <span class="mn-dot">&middot;</span>
+            <span id="mn-modal-time"></span>
+        </div>
+        <p id="mn-modal-summary" class="mn-modal-summary"></p>
+        <div id="mn-modal-tickers" class="mn-tickers"></div>
+        <a id="mn-modal-link" href="#" target="_blank" rel="noopener noreferrer" class="mn-modal-extlink">
+            Read full article &#8599;
+        </a>
+    </div>
+</div>
+
+<style>
+    /* ── News widget — fill grid cell height ── */
+    .mn-widget {
+        background: transparent;
+        border: 1px solid var(--pp-border-light);
+        border-radius: 8px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .mn-cards {
+        flex: 1;
+    }
+
+    .mn-card {
+        display: flex;
+        gap: 0.7em;
+        padding: 0.65em 0.8em;
+        border-bottom: 1px solid var(--pp-border-light);
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .mn-card:last-child {
+        border-bottom: none;
+    }
+
+    .mn-card:hover {
+        background: var(--pp-surface-hover);
+    }
+
+    .mn-thumb {
+        width: 72px;
+        height: 54px;
+        object-fit: cover;
+        border-radius: 6px;
+        flex-shrink: 0;
+        background: var(--pp-border-light);
+    }
+
+    .mn-body {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .mn-headline {
+        font-weight: 600;
+        font-size: 0.85em;
+        line-height: 1.3;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .mn-meta {
+        font-size: 0.72em;
+        color: var(--pp-text-muted);
+        margin-top: 0.2em;
+    }
+
+    .mn-source {
+        font-weight: 600;
+    }
+
+    .mn-dot {
+        margin: 0 0.25em;
+    }
+
+    .mn-summary {
+        font-size: 0.75em;
+        color: var(--pp-text-muted);
+        margin-top: 0.2em;
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .mn-tickers {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3em;
+        margin-top: 0.3em;
+    }
+
+    .mn-ticker-pill {
+        font-size: 0.68em;
+        font-weight: 700;
+        font-family: monospace;
+        padding: 0.1em 0.4em;
+        border-radius: 3px;
+        background: rgba(25, 118, 210, 0.1);
+        color: #1976d2;
+        text-decoration: none;
+        transition: background 0.15s;
+    }
+
+    .mn-ticker-pill:hover {
+        background: rgba(25, 118, 210, 0.2);
+        text-decoration: none;
+    }
+
+    /* ── Pagination ── */
+    .mn-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.8em;
+        padding: 0.45em 0.8em;
+        border-top: 1px solid var(--pp-border-light);
+    }
+
+    .mn-page-btn {
+        background: transparent;
+        border: 1px solid var(--pp-border-light);
+        border-radius: 4px;
+        padding: 0.15em 0.5em;
+        font-size: 0.9em;
+        font-weight: 600;
+        color: var(--pp-text-muted);
+        cursor: pointer;
+        margin: 0;
+        line-height: 1.2;
+        transition: color 0.15s, border-color 0.15s;
+    }
+
+    .mn-page-btn:hover:not(:disabled) {
+        color: var(--pp-text);
+        border-color: var(--pp-text-muted);
+    }
+
+    .mn-page-btn:disabled {
+        opacity: 0.3;
+        cursor: default;
+    }
+
+    .mn-page-info {
+        font-size: 0.75em;
+        color: var(--pp-text-muted);
+        font-weight: 500;
+    }
+
+    /* ── Modal ── */
+    .mn-modal-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: rgba(0, 0, 0, 0.5);
+        align-items: center;
+        justify-content: center;
+        padding: 1.5em;
+    }
+
+    .mn-modal-backdrop.open {
+        display: flex;
+    }
+
+    .mn-modal {
+        background: var(--pico-background-color, #fff);
+        border: 1px solid var(--pp-border-light);
+        border-radius: 12px;
+        max-width: 560px;
+        width: 100%;
+        max-height: 80vh;
+        overflow-y: auto;
+        padding: 1.5em;
+        position: relative;
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.2);
+    }
+
+    .mn-modal-close {
+        position: absolute;
+        top: 0.5em;
+        right: 0.6em;
+        background: none;
+        border: none;
+        font-size: 1.5em;
+        color: var(--pp-text-muted);
+        cursor: pointer;
+        padding: 0.1em 0.3em;
+        line-height: 1;
+        margin: 0;
+    }
+
+    .mn-modal-close:hover {
+        color: var(--pp-text);
+    }
+
+    .mn-modal-img {
+        width: 100%;
+        max-height: 220px;
+        object-fit: cover;
+        border-radius: 8px;
+        margin-bottom: 1em;
+        background: var(--pp-border-light);
+    }
+
+    .mn-modal-headline {
+        font-size: 1.1em;
+        font-weight: 700;
+        line-height: 1.3;
+        margin: 0 0 0.4em 0;
+        padding-right: 1.5em;
+    }
+
+    .mn-modal-meta {
+        font-size: 0.8em;
+        color: var(--pp-text-muted);
+        margin-bottom: 0.8em;
+    }
+
+    .mn-modal-summary {
+        font-size: 0.9em;
+        line-height: 1.55;
+        color: var(--pp-text);
+        margin-bottom: 0.8em;
+    }
+
+    .mn-modal-extlink {
+        display: inline-block;
+        font-size: 0.82em;
+        font-weight: 600;
+        color: #1976d2;
+        text-decoration: none;
+        margin-top: 0.5em;
+    }
+
+    .mn-modal-extlink:hover {
+        text-decoration: underline;
+    }
+
+    /* Mobile tweaks */
+    @media (max-width: 640px) {
+        .mn-thumb {
+            width: 56px;
+            height: 42px;
+        }
+        .mn-modal {
+            max-width: 100%;
+            margin: 0.5em;
+            padding: 1em;
+        }
+    }
+</style>
+
+<script>
+(function() {
+    var articles = {{ articles | tojson }};
+    var modal = document.getElementById('mn-modal');
+    var currentPage = 0;
+    var esc = window.escHtml || function(s) { return s; };
+
+    /* ── Compute perPage to match the Market Overview height ── */
+    var perPage = 6; /* default */
+    (function calcPerPage() {
+        var moWidget = document.querySelector('.mo-widget');
+        if (!moWidget) return;
+        /* Measure the market overview widget height */
+        var moH = moWidget.offsetHeight;
+        /* Subtract pagination bar (~36px) and border (2px) */
+        var available = moH - 38;
+        /* Each card is roughly 80px tall */
+        var cardH = 80;
+        var fit = Math.floor(available / cardH);
+        if (fit >= 3) perPage = fit;
+    })();
+
+    var totalPages = Math.ceil(articles.length / perPage);
+
+    function renderCards() {
+        var container = document.getElementById('mn-cards');
+        var start = currentPage * perPage;
+        var end = Math.min(start + perPage, articles.length);
+        var html = '';
+
+        for (var i = start; i < end; i++) {
+            var a = articles[i];
+            html += '<div class="mn-card" onclick="mnOpen(' + i + ')">';
+            if (a.image) {
+                html += '<img class="mn-thumb" src="' + esc(a.image) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+            }
+            html += '<div class="mn-body">';
+            html += '<div class="mn-headline">' + esc(a.headline) + '</div>';
+            html += '<div class="mn-meta">';
+            html += '<span class="mn-source">' + esc(a.source) + '</span>';
+            html += '<span class="mn-dot">&middot;</span>';
+            html += '<span class="mn-time">' + esc(a.time_ago) + '</span>';
+            html += '</div>';
+            if (a.summary) {
+                var snip = a.summary.length > 120 ? a.summary.substring(0, 120) + '\u2026' : a.summary;
+                html += '<div class="mn-summary">' + esc(snip) + '</div>';
+            }
+            if (a.related_tickers && a.related_tickers.length) {
+                html += '<div class="mn-tickers">';
+                var max = Math.min(a.related_tickers.length, 4);
+                for (var t = 0; t < max; t++) {
+                    html += '<a href="/stock/' + esc(a.related_tickers[t]) + '" class="mn-ticker-pill" onclick="event.stopPropagation()">' + esc(a.related_tickers[t]) + '</a>';
+                }
+                html += '</div>';
+            }
+            html += '</div></div>';
+        }
+
+        container.innerHTML = html;
+
+        /* Update pagination controls */
+        document.getElementById('mn-prev').disabled = (currentPage === 0);
+        document.getElementById('mn-next').disabled = (currentPage >= totalPages - 1);
+        document.getElementById('mn-page-info').textContent = (currentPage + 1) + ' / ' + totalPages;
+    }
+
+    window.mnPage = function(dir) {
+        var next = currentPage + dir;
+        if (next < 0 || next >= totalPages) return;
+        currentPage = next;
+        renderCards();
+    };
+
+    /* ── Modal ── */
+    window.mnOpen = function(idx) {
+        var a = articles[idx];
+        if (!a) return;
+
+        var img = document.getElementById('mn-modal-img');
+        if (a.image) {
+            img.src = a.image;
+            img.style.display = 'block';
+        } else {
+            img.style.display = 'none';
+        }
+
+        document.getElementById('mn-modal-headline').textContent = a.headline || '';
+        document.getElementById('mn-modal-source').textContent = a.source || '';
+        document.getElementById('mn-modal-time').textContent = a.time_ago || '';
+        document.getElementById('mn-modal-summary').textContent = a.summary || '';
+        document.getElementById('mn-modal-link').href = a.url || '#';
+
+        var tickerDiv = document.getElementById('mn-modal-tickers');
+        var html = '';
+        if (a.related_tickers && a.related_tickers.length) {
+            for (var i = 0; i < a.related_tickers.length; i++) {
+                html += '<a href="/stock/' + a.related_tickers[i] + '" class="mn-ticker-pill">' + a.related_tickers[i] + '</a>';
+            }
+        }
+        tickerDiv.innerHTML = html;
+
+        modal.classList.add('open');
+        document.body.style.overflow = 'hidden';
+    };
+
+    window.mnClose = function(e) {
+        if (e && e.target && e.target !== modal) return;
+        modal.classList.remove('open');
+        document.body.style.overflow = '';
+    };
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && modal.classList.contains('open')) {
+            modal.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+    });
+
+    /* Initial render */
+    renderCards();
+})();
+</script>
+{% else %}
+<article>
+    <p class="text-muted" style="text-align:center;">Market news temporarily unavailable.</p>
+</article>
+{% endif %}
