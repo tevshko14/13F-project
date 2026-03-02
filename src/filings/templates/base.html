@@ -108,8 +108,11 @@
             --pp-dropdown-shadow: 0 8px 30px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06);
             --pp-dropdown-item-hover: #f5f5f5;
             --pp-gradient-fade: linear-gradient(transparent, #fff);
-            --pp-toast-bg: #18181b;
+            --pp-toast-bg: rgba(24, 24, 27, 0.85);
             --pp-toast-text: #fafafa;
+            --pp-toast-border: rgba(0, 0, 0, 0.08);
+            --pp-toast-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06);
+            --pp-dropdown-glass-bg: rgba(20, 20, 24, 0.98);
             --pp-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
             --pp-card-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
             --pp-overlay-5: rgba(0, 0, 0, 0.05);
@@ -159,8 +162,11 @@
             --pp-dropdown-shadow: 0 8px 30px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
             --pp-dropdown-item-hover: #2a2a2e;
             --pp-gradient-fade: linear-gradient(transparent, #1a1a1e);
-            --pp-toast-bg: #333338;
+            --pp-toast-bg: rgba(30, 30, 36, 0.75);
             --pp-toast-text: #e4e4e7;
+            --pp-toast-border: rgba(255, 255, 255, 0.08);
+            --pp-dropdown-glass-bg: rgba(22, 22, 28, 0.98);
+            --pp-toast-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.25);
             --pp-card-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.15);
             --pp-card-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
             --pp-overlay-5: rgba(255, 255, 255, 0.05);
@@ -625,26 +631,30 @@
             position: absolute;
             top: calc(100% + 8px);
             right: 0;
-            width: 340px;
-            max-height: 420px;
+            width: 360px;
+            max-height: 440px;
             overflow-y: auto;
-            background: var(--pico-card-background-color, #fff);
-            border: 1px solid var(--pico-muted-border-color);
-            border-radius: 10px;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+            background: var(--pp-dropdown-glass-bg);
+            border: 1px solid var(--pp-toast-border);
+            border-radius: 16px;
+            box-shadow: var(--pp-toast-shadow);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
             z-index: 1000;
+            color: var(--pp-toast-text);
         }
         .pp-notif-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0.7em 1em;
-            border-bottom: 1px solid var(--pico-muted-border-color);
+            padding: 0.8em 1.1em;
+            border-bottom: 1px solid var(--pp-toast-border);
             font-size: 0.85em;
             font-weight: 600;
+            letter-spacing: -0.01em;
         }
         .pp-notif-header a {
-            font-weight: 400;
+            font-weight: 500;
             font-size: 0.9em;
             color: var(--pico-primary);
         }
@@ -652,21 +662,25 @@
             display: flex;
             align-items: flex-start;
             gap: 0.6em;
-            padding: 0.6em 1em;
-            border-bottom: 1px solid var(--pico-muted-border-color, #eee);
+            padding: 0.7em 1.1em;
+            margin: 0;
+            border-bottom: 1px solid var(--pp-toast-border);
             text-decoration: none;
             color: inherit;
             font-size: 0.82em;
             transition: background 0.15s;
         }
         .pp-notif-item:hover {
-            background: var(--pico-secondary-background, #f5f5f5);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        :root:not([data-theme="dark"]) .pp-notif-item:hover {
+            background: rgba(0, 0, 0, 0.04);
         }
         .pp-notif-item:last-child {
             border-bottom: none;
         }
         .pp-notif-new {
-            background: rgba(59, 130, 246, 0.06);
+            background: rgba(59, 130, 246, 0.08);
         }
         .pp-notif-icon {
             font-size: 1.25em;
@@ -679,43 +693,47 @@
         .pp-notif-title {
             font-weight: 600;
             font-size: 0.92em;
-            margin-bottom: 0.1em;
+            margin-bottom: 0.15em;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            letter-spacing: -0.01em;
         }
         .pp-notif-msg {
-            color: var(--pico-muted-color);
+            opacity: 0.6;
             font-size: 0.85em;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
         .pp-notif-time {
-            color: var(--pico-muted-color);
+            opacity: 0.4;
             font-size: 0.75em;
-            opacity: 0.7;
             margin-top: 0.15em;
         }
         .pp-notif-empty {
             text-align: center;
             padding: 2em 1em;
-            color: var(--pico-muted-color);
+            opacity: 0.5;
             font-size: 0.85em;
         }
         .pp-notif-footer {
             display: block;
             text-align: center;
-            padding: 0.7em 1em;
+            padding: 0.75em 1em;
+            margin: 0;
             font-size: 0.8em;
             font-weight: 600;
             color: var(--pico-primary);
             text-decoration: none;
-            border-top: 1px solid var(--pico-muted-border-color);
+            border-top: 1px solid var(--pp-toast-border);
             transition: background 0.15s;
         }
         .pp-notif-footer:hover {
-            background: var(--pico-card-background-color);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        :root:not([data-theme="dark"]) .pp-notif-footer:hover {
+            background: rgba(0, 0, 0, 0.04);
         }
 
         /* Sortable table headers */
@@ -1617,37 +1635,50 @@
         .pp-toast {
             background: var(--pp-toast-bg);
             color: var(--pp-toast-text);
-            padding: 0.85em 1.2em;
-            border-radius: 10px;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.18);
+            padding: 0.9em 1.2em;
+            border-radius: 14px;
+            box-shadow: var(--pp-toast-shadow);
+            border: 1px solid var(--pp-toast-border);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
             font-size: 0.88em;
             line-height: 1.4;
             display: flex;
             align-items: flex-start;
             gap: 0.7em;
-            animation: ppToastIn 0.3s ease-out;
+            animation: ppToastIn 0.35s cubic-bezier(0.21, 1.02, 0.73, 1);
             cursor: pointer;
             pointer-events: auto;
-            transition: opacity 0.3s;
+            transition: transform 0.2s, opacity 0.2s;
+            overflow: hidden;
+            position: relative;
         }
-        .pp-toast:hover { opacity: 0.85; }
-        .pp-toast-icon { font-size: 1.3em; flex-shrink: 0; }
+        .pp-toast::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; bottom: 0;
+            width: 3px;
+            border-radius: 14px 0 0 14px;
+            background: var(--toast-accent, #71717a);
+        }
+        .pp-toast:hover { transform: translateX(-4px); opacity: 0.95; }
+        .pp-toast-icon { font-size: 1.3em; flex-shrink: 0; margin-left: 0.3em; }
         .pp-toast-body { flex: 1; }
-        .pp-toast-title { font-weight: 600; margin-bottom: 0.15em; }
-        .pp-toast-msg { opacity: 0.8; font-size: 0.9em; }
+        .pp-toast-title { font-weight: 600; margin-bottom: 0.2em; letter-spacing: -0.01em; }
+        .pp-toast-msg { opacity: 0.65; font-size: 0.85em; }
         .pp-toast-close {
-            opacity: 0.5; cursor: pointer; font-size: 1.1em;
+            opacity: 0.35; cursor: pointer; font-size: 1.1em;
             padding: 0; background: none; border: none; color: inherit;
-            flex-shrink: 0;
+            flex-shrink: 0; transition: opacity 0.15s;
         }
         .pp-toast-close:hover { opacity: 1; }
         @keyframes ppToastIn {
-            from { transform: translateY(20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
+            from { transform: translateY(24px) scale(0.96); opacity: 0; }
+            to { transform: translateY(0) scale(1); opacity: 1; }
         }
         @keyframes ppToastOut {
-            from { transform: translateY(0); opacity: 1; }
-            to { transform: translateY(20px); opacity: 0; }
+            from { transform: translateY(0) scale(1); opacity: 1; }
+            to { transform: translateY(16px) scale(0.96); opacity: 0; }
         }
     </style>
     <script>
@@ -1655,14 +1686,14 @@
         var container = document.getElementById('pp-toast-container');
         if (!container) return;
 
-        var borderColor = '#a1a1aa';
-        if (opts.type === 'bullish') borderColor = '#166534';
-        else if (opts.type === 'bearish') borderColor = '#9f1239';
-        else if (opts.type === 'alert') borderColor = '#FFD700';
+        var accentColor = '#71717a';
+        if (opts.type === 'bullish') accentColor = '#34d399';
+        else if (opts.type === 'bearish') accentColor = '#f87171';
+        else if (opts.type === 'alert') accentColor = '#fbbf24';
 
         var toast = document.createElement('div');
         toast.className = 'pp-toast';
-        toast.style.borderLeft = '4px solid ' + borderColor;
+        toast.style.setProperty('--toast-accent', accentColor);
 
         var icon = document.createElement('span');
         icon.className = 'pp-toast-icon';
@@ -1831,6 +1862,34 @@
 
         // Apply on DOM ready
         applyTheme(getStoredTheme());
+
+        // ── Dispose ECharts & remove resize listeners on hx-boost navigation ──
+        // Prevents memory leaks: ECharts instances hold GPU memory, canvas
+        // contexts, and event handlers that aren't released when HTMX removes
+        // the DOM node.  A single global resize handler replaces the per-chart
+        // ones to avoid listener accumulation across navigations.
+        (function() {
+            var _resizeHandlers = [];
+
+            // Global registry: charts register their resize callback here
+            window._ppRegisterResize = function(fn) { _resizeHandlers.push(fn); };
+
+            window.addEventListener('resize', function() {
+                _resizeHandlers.forEach(function(fn) { try { fn(); } catch(e) {} });
+            });
+
+            document.addEventListener('htmx:beforeSwap', function() {
+                if (typeof echarts === 'undefined') return;
+                // Dispose every ECharts instance in the outgoing DOM
+                var containers = document.querySelectorAll('[_echarts_instance_]');
+                containers.forEach(function(el) {
+                    var chart = echarts.getInstanceByDom(el);
+                    if (chart) chart.dispose();
+                });
+                // Clear per-page resize handlers (they reference disposed charts)
+                _resizeHandlers.length = 0;
+            });
+        })();
 
         // ── Re-theme ECharts on toggle ──
         document.addEventListener('pp-theme-changed', function() {
