@@ -55,6 +55,11 @@
     {% block json_ld_extra %}{% endblock %}
     <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+    {# ── Resource hints for critical CDNs ── #}
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="preconnect" href="https://unpkg.com" crossorigin>
+    <link rel="dns-prefetch" href="https://logo.clearbit.com">
+    <link rel="dns-prefetch" href="https://finnhub.io">
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
@@ -80,6 +85,38 @@
             document.head.appendChild(s);
         };
     })();
+    /* Lazy-load Chart.js on demand (mirrors ECharts pattern) */
+    (function(){
+        var _CHARTJS_CDN = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+        var _loading = false;
+        var _queue = [];
+        window.requireChartJS = function(cb) {
+            if (window.Chart) { cb(); return; }
+            _queue.push(cb);
+            if (_loading) return;
+            _loading = true;
+            var s = document.createElement('script');
+            s.src = _CHARTJS_CDN;
+            s.onload = function() { while (_queue.length) _queue.shift()(); };
+            s.onerror = function() {
+                _loading = false;
+                while (_queue.length) _queue.shift()('Chart.js failed to load');
+            };
+            document.head.appendChild(s);
+        };
+    })();
+    /* Lazy-init charts: only calls initFn when container scrolls into view */
+    window._ppLazyChart = function(container, initFn) {
+        if (!container) return;
+        if (!('IntersectionObserver' in window)) { initFn(); return; }
+        var observer = new IntersectionObserver(function(entries) {
+            if (entries[0].isIntersecting) {
+                observer.disconnect();
+                initFn();
+            }
+        }, { rootMargin: '200px' });
+        observer.observe(container);
+    };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js" defer></script>
     {% if posthog_key %}
@@ -1874,8 +1911,12 @@
             // Global registry: charts register their resize callback here
             window._ppRegisterResize = function(fn) { _resizeHandlers.push(fn); };
 
+            var _globalResizeTimer;
             window.addEventListener('resize', function() {
-                _resizeHandlers.forEach(function(fn) { try { fn(); } catch(e) {} });
+                clearTimeout(_globalResizeTimer);
+                _globalResizeTimer = setTimeout(function() {
+                    _resizeHandlers.forEach(function(fn) { try { fn(); } catch(e) {} });
+                }, 150);
             });
 
             document.addEventListener('htmx:beforeSwap', function(evt) {

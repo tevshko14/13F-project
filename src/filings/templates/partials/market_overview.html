@@ -260,8 +260,12 @@
             rows[r].classList.toggle('active', r === idx);
         }
 
-        /* Fetch chart data for the selected symbol + current period */
-        fetchChart(d.symbol);
+        /* Use inline history if available and period matches default (3M) */
+        if (currentPeriod === '3M' && d.history && d.history.length > 0) {
+            renderChart({ name: d.name, price: d.price, pct_change: d.pct_change, history: d.history }, false);
+        } else {
+            fetchChart(d.symbol);
+        }
     }
 
     function fetchChart(symbol) {
@@ -275,7 +279,7 @@
             .catch(function() {});
     }
 
-    function renderChart(d) {
+    function renderChart(d, animate) {
         if (!chart || !d.history || d.history.length === 0) return;
 
         var cs = getComputedStyle(document.documentElement);
@@ -288,6 +292,7 @@
         var areaBottom = isUp ? 'rgba(25, 118, 210, 0)' : 'rgba(220, 38, 38, 0)';
 
         chart.setOption({
+            animation: animate !== false,
             grid: { left: 10, right: 10, top: 10, bottom: 24 },
             xAxis: {
                 type: 'time',
@@ -354,20 +359,21 @@
         }
     };
 
-    /* Initial render */
+    /* Initial render — use inline chart data (already fetched server-side) */
     renderList('mega_caps');
     var initialItems = allTabs['mega_caps'] || [];
     if (initialItems.length > 0) {
         currentSymbol = initialItems[0].symbol;
-        fetchChart(initialItems[0].symbol);
+        var d = initialItems[0];
+        if (d.history && d.history.length > 0) {
+            renderChart({ name: d.name, price: d.price, pct_change: d.pct_change, history: d.history }, false);
+        } else {
+            fetchChart(d.symbol);
+        }
     }
 
-    /* Responsive resize */
-    var _moTimer;
-    window.addEventListener('resize', function() {
-        clearTimeout(_moTimer);
-        _moTimer = setTimeout(function() { if (chart) chart.resize(); }, 150);
-    });
+    /* Responsive resize (global debounced handler) */
+    if (window._ppRegisterResize) window._ppRegisterResize(function() { if (chart) chart.resize(); });
 
     }); /* end requireECharts */
 })();

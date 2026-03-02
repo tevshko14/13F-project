@@ -269,6 +269,7 @@
     var cDataRev = consensusData.slice().reverse();
 
     consensusChart.setOption({
+        animation: false,
         grid: { left: 80, right: 30, top: 10, bottom: 20 },
         xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10, color: axisColor }, axisLabel: { color: axisColor }, minInterval: 1 },
         yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor } },
@@ -310,6 +311,7 @@
     });
 
     momentumChart.setOption({
+        animation: false,
         grid: { left: 40, right: 16, top: 10, bottom: 60 },
         xAxis: { type: 'category', data: mTickers, axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }, axisTick: { alignWithLabel: true } },
         yAxis: { type: 'value', name: '# Added', nameTextStyle: { fontSize: 10 }, minInterval: 1 },
@@ -342,8 +344,7 @@
     momentumChart.on('mouseover', function(params) { var d = momentumData[params.dataIndex]; if (d && d.ticker) { var c = consensusTickerMap[d.ticker.toUpperCase()]; if (c !== undefined) consensusChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: consensusData.length - 1 - c }); } });
     momentumChart.on('mouseout', function() { consensusChart.dispatchAction({ type: 'downplay', seriesIndex: 0 }); });
 
-    var _resizeTimer;
-    window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { consensusChart.resize(); momentumChart.resize(); }, 150); });
+    if (window._ppRegisterResize) window._ppRegisterResize(function() { consensusChart.resize(); momentumChart.resize(); });
 
     // Resize charts when holdings panel becomes visible
     window._gpCharts = { consensus: consensusChart, momentum: momentumChart };

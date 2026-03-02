@@ -17,6 +17,9 @@
 }
 </script>
 {% endblock %}
+{% block extra_head_scripts %}
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
+{% endblock %}
 {% block content %}
 <hgroup>
     <h1>Congress Trading</h1>
@@ -315,6 +318,7 @@
             var chart = echarts.init(el);
 
             chart.setOption({
+                animation: false,
                 grid: { left: 10, right: 10, top: 10, bottom: 10, containLabel: false },
                 xAxis: { type: 'value', show: false, min: -0.5, max: cols - 0.5 },
                 yAxis: { type: 'value', show: false, inverse: true, min: -0.5 },
@@ -439,6 +443,7 @@
         });
 
         chart.setOption({
+            animation: false,
             grid: { left: 130, right: 50, top: 10, bottom: 10 },
             yAxis: {
                 type: 'category',
@@ -621,6 +626,7 @@
             var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
 
             trendChart.setOption({
+                animation: false,
                 grid: { left: 40, right: 16, top: 30, bottom: 60 },
                 xAxis: {
                     type: 'category', data: tTickers,
@@ -684,6 +690,7 @@
             var cDataRev = consensusData.slice().reverse();
 
             consChart.setOption({
+                animation: false,
                 grid: { left: 80, right: 30, top: 10, bottom: 20 },
                 xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10, color: axisColor }, axisLabel: { color: axisColor }, minInterval: 1 },
                 yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor } },
@@ -741,6 +748,7 @@
             maxVal = Math.ceil(maxVal / 4) * 4; // round up to nearest 4 for even grid lines
 
             momChart.setOption({
+                animation: false,
                 grid: { left: 40, right: 16, top: 30, bottom: 60 },
                 legend: {
                     data: ['Buys', 'Sells'], top: 0, textStyle: { color: axisColor },
@@ -865,18 +873,14 @@
         switchCongressView(view);
     });
 
-    // Debounced window resize handler — keeps all charts responsive
-    var _cgResizeTimer;
-    window.addEventListener('resize', function() {
-        clearTimeout(_cgResizeTimer);
-        _cgResizeTimer = setTimeout(function() {
-            if (!window._cgCharts) return;
-            for (var key in window._cgCharts) {
-                if (window._cgCharts[key] && window._cgCharts[key].resize) {
-                    window._cgCharts[key].resize();
-                }
+    // Global resize handler — keeps all charts responsive
+    if (window._ppRegisterResize) window._ppRegisterResize(function() {
+        if (!window._cgCharts) return;
+        for (var key in window._cgCharts) {
+            if (window._cgCharts[key] && window._cgCharts[key].resize) {
+                window._cgCharts[key].resize();
             }
-        }, 200);
+        }
     });
 
     window.toggleCongressHoldings = function(btn) {

@@ -52,7 +52,7 @@
         return sorted;
     }
 
-    function renderChart(sortBy) {
+    function renderChart(sortBy, animate) {
         var data = getData(sortBy);
         var tickers = data.map(function(d) { return d.ticker || (d.cusip || '').substring(0, 6); });
         var counts = data.map(function(d) { return d.add_count; });
@@ -63,6 +63,7 @@
         var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
 
         chart.setOption({
+            animation: animate !== false,
             grid: { left: 40, right: 16, top: 10, bottom: 60 },
             xAxis: {
                 type: 'category',
@@ -175,11 +176,10 @@
     };
 
     // Initial render
-    renderChart('count');
+    renderChart('count', false);
 
-    // Responsive resize (debounced)
-    var _resizeTimer;
-    window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { chart.resize(); }, 150); });
+    // Responsive resize (global debounced handler)
+    if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
     }); // end requireECharts
 })();
 </script>

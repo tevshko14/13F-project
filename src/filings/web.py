@@ -169,6 +169,34 @@ async def _get_refresh_lock(cik: str) -> asyncio.Lock:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Heavy thread pool — isolated from the default asyncio pool so slow
+# yfinance/Finnhub/SEC calls never starve health checks or fast routes.
+# ═══════════════════════════════════════════════════════════════════════
+
+_heavy_pool: ThreadPoolExecutor | None = None
+_heavy_sem: asyncio.Semaphore | None = None
+
+
+async def _to_heavy(fn, *args):
+    """Run *fn* on the heavy thread pool, gated by a semaphore.
+
+    Use instead of ``asyncio.to_thread()`` for any function that makes
+    slow HTTP calls (yfinance, Finnhub, SEC EDGAR, ApeWisdom, etc.).
+    The semaphore prevents cache-miss stampedes from saturating the pool.
+    """
+    pool = _heavy_pool
+    sem = _heavy_sem
+    if pool is None:
+        # Fallback: heavy pool not yet initialised (should not happen)
+        return await asyncio.to_thread(fn, *args)
+    loop = asyncio.get_running_loop()
+    if sem is not None:
+        async with sem:
+            return await loop.run_in_executor(pool, fn, *args)
+    return await loop.run_in_executor(pool, fn, *args)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Lifespan
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -182,14 +210,23 @@ async def lifespan(app: FastAPI):
     funds in the background so users never see outdated data even if the
     cron job fails.
     """
-    # ── Expand the default thread pool ──────────────────────────────────
-    # Python defaults to min(32, cpu+4) ≈ 8 threads.  This app has 50+
-    # asyncio.to_thread call sites plus background tasks that make slow
-    # HTTP calls (SEC EDGAR, yfinance, ApeWisdom).  A larger pool prevents
-    # user requests from queuing behind background work.
+    # ── Thread pool architecture ─────────────────────────────────────────
+    # Default pool: lightweight work (cache reads, template rendering, etc.)
+    # Heavy pool: yfinance downloads, Finnhub, SEC EDGAR — slow HTTP calls
+    #             that can block 5-15s.  Isolated so they never starve the
+    #             default pool (which handles health checks + fast routes).
+    # Semaphore: caps concurrent heavy-pool submissions to prevent
+    #            cache-miss stampedes from saturating even the heavy pool.
     _pool_size = int(os.environ.get("WORKER_THREADS", "32"))
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=_pool_size))
+
+    global _heavy_pool, _heavy_sem, _posthog_http
+    _heavy_pool = ThreadPoolExecutor(
+        max_workers=int(os.environ.get("HEAVY_THREADS", "16")),
+        thread_name_prefix="heavy",
+    )
+    _heavy_sem = asyncio.Semaphore(int(os.environ.get("HEAVY_CONCURRENCY", "12")))
 
     # ── Try Supabase first (persists across Railway deploys) ──
     # Timeout after 30s so workers don't get killed by gunicorn if Supabase is slow
@@ -252,10 +289,13 @@ async def lifespan(app: FastAPI):
     if _bg_tasks:
         await asyncio.gather(*_bg_tasks, return_exceptions=True)
 
-    global _posthog_http
+    # _heavy_pool already declared global at top of lifespan
     if _posthog_http and not _posthog_http.is_closed:
         await _posthog_http.aclose()
         _posthog_http = None
+    if _heavy_pool is not None:
+        _heavy_pool.shutdown(wait=False)
+        _heavy_pool = None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -424,6 +464,17 @@ def _check_csrf_origin(request: Request) -> JSONResponse | None:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+_HTMX_PARTIAL_CACHE: dict[str, int] = {
+    "/api/ticker-tape": 120,
+    "/api/market-overview": 120,
+    "/api/market-news": 300,
+    "/api/heatmap": 120,
+    "/api/heatmap-data": 120,
+    "/api/retail-sentiment": 120,
+    "/api/trending-combined": 120,
+}
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -434,6 +485,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
+        # HTMX partial cache: short-lived, stale-while-revalidate for snappy UX
+        elif request.url.path in _HTMX_PARTIAL_CACHE:
+            ttl = _HTMX_PARTIAL_CACHE[request.url.path]
+            response.headers["Cache-Control"] = (
+                f"public, max-age={ttl}, stale-while-revalidate={ttl * 2}"
+            )
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -587,7 +644,7 @@ async def _prefetch_market_data(app: FastAPI):
 
     # ── Phase 1: Supabase warm (fast) ──
     try:
-        warmed = await asyncio.to_thread(market_data.warm_from_supabase)
+        warmed = await _to_heavy(market_data.warm_from_supabase)
         if warmed:
             app.state.market_data_ready = True
             logger.info("Phase 1 complete: market data ready from Supabase")
@@ -597,8 +654,8 @@ async def _prefetch_market_data(app: FastAPI):
     # ── Phase 2: yfinance refresh (slow, runs regardless) ──
     try:
         await asyncio.gather(
-            asyncio.to_thread(market_data.get_sp500_market_data),
-            asyncio.to_thread(market_data.get_index_market_data),
+            _to_heavy(market_data.get_sp500_market_data),
+            _to_heavy(market_data.get_index_market_data),
         )
         app.state.market_data_ready = True
         logger.info("Phase 2 complete: market data refreshed from yfinance")
@@ -766,7 +823,7 @@ async def _reddit_velocity_scanner() -> None:
     await asyncio.sleep(60)  # let startup settle
     while True:
         try:
-            apewisdom = await asyncio.to_thread(sentiment._get_apewisdom_all)
+            apewisdom = await _to_heavy(sentiment._get_apewisdom_all)
             if apewisdom:
                 notif_rows: list[dict] = []
                 for item in apewisdom:
@@ -808,25 +865,41 @@ async def _reddit_velocity_scanner() -> None:
 # --- Health check (for UptimeRobot / load balancers) ---
 
 
+_health_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="health")
+
+
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
-    """Health check that also detects thread pool starvation.
+    """Health check that detects thread pool starvation.
 
-    If we can't get a response from the thread pool within 3 seconds,
-    the pool is likely exhausted by hung yfinance/Finnhub calls and
-    the app is effectively dead — return 503 so Railway restarts us.
+    Uses a **dedicated single-thread pool** so it never competes with
+    the default or heavy pools.  We probe the *default* pool with a
+    3-second timeout — if it can't service a trivial lambda, user
+    requests are also stuck and Railway should restart us.
     """
+    loop = asyncio.get_running_loop()
     try:
+        # Probe the DEFAULT pool (the one user requests use)
         await asyncio.wait_for(
             asyncio.to_thread(lambda: True), timeout=3
         )
-        return JSONResponse({"status": "ok"})
     except (asyncio.TimeoutError, Exception):
-        logger.error("health_check: thread pool appears starved — returning 503")
-        return JSONResponse(
-            {"status": "unhealthy", "reason": "thread pool exhausted"},
-            status_code=503,
-        )
+        # Default pool is saturated — check if it's *truly* stuck or
+        # just temporarily busy.  Give it one more chance with 5s.
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(lambda: True), timeout=5
+            )
+        except (asyncio.TimeoutError, Exception):
+            logger.error("health_check: default thread pool starved — returning 503")
+            return JSONResponse(
+                {"status": "unhealthy", "reason": "thread pool exhausted"},
+                status_code=503,
+            )
+        # Recovered on retry — pool was temporarily busy but not stuck
+        logger.warning("health_check: default pool slow but recovered on retry")
+
+    return JSONResponse({"status": "ok"})
 
 
 # --- Homepage: dashboard with market data & widgets ---
@@ -1412,7 +1485,7 @@ async def stock_detail(request: Request, ticker: str):
 async def analyst_ratings(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
-    ratings = await asyncio.to_thread(analysts.get_analyst_ratings, ticker)
+    ratings = await _to_heavy(analysts.get_analyst_ratings, ticker)
     consensus = analysts.get_consensus_summary(ratings)
     return templates.TemplateResponse(
         "partials/analyst_ratings.html",
@@ -1429,7 +1502,7 @@ async def analyst_ratings(request: Request, ticker: str):
 async def sentiment_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
-    data = await asyncio.to_thread(sentiment.get_sentiment_data, ticker)
+    data = await _to_heavy(sentiment.get_sentiment_data, ticker)
     return templates.TemplateResponse(
         "partials/sentiment.html",
         {
@@ -1461,7 +1534,7 @@ async def vitals_data(request: Request, ticker: str):
     #             "user": user,
     #         })
 
-    data = await asyncio.to_thread(vitals.get_vitals_data, ticker)
+    data = await _to_heavy(vitals.get_vitals_data, ticker)
     return templates.TemplateResponse(
         "partials/vitals.html",
         {
@@ -2255,8 +2328,8 @@ async def retail_page(request: Request, view: str = "sentiment"):
         view = "sentiment"
 
     fear_greed, apewisdom, high_impact_events = await asyncio.gather(
-        asyncio.to_thread(sentiment._get_cnn_fear_greed),
-        asyncio.to_thread(sentiment._get_apewisdom_all),
+        _to_heavy(sentiment._get_cnn_fear_greed),
+        _to_heavy(sentiment._get_apewisdom_all),
         asyncio.to_thread(youtube.get_high_impact_events, 9),
     )
 
@@ -2294,8 +2367,8 @@ async def retail_page(request: Request, view: str = "sentiment"):
 @app.get("/api/retail/leaderboard", response_class=HTMLResponse)
 async def retail_leaderboard_api(request: Request):
     all_data, fear_greed = await asyncio.gather(
-        asyncio.to_thread(sentiment._get_apewisdom_all),
-        asyncio.to_thread(sentiment._get_cnn_fear_greed),
+        _to_heavy(sentiment._get_apewisdom_all),
+        _to_heavy(sentiment._get_cnn_fear_greed),
     )
     ownership_map = _get_ownership_map()
     enriched = sentiment.build_retail_leaderboard_data(
@@ -2316,8 +2389,8 @@ async def retail_leaderboard_api(request: Request):
 async def retail_leaderboard_data(request: Request):
     """Enriched leaderboard JSON for treemap, bubble chart, and guru toggle."""
     all_data, fear_greed = await asyncio.gather(
-        asyncio.to_thread(sentiment._get_apewisdom_all),
-        asyncio.to_thread(sentiment._get_cnn_fear_greed),
+        _to_heavy(sentiment._get_apewisdom_all),
+        _to_heavy(sentiment._get_cnn_fear_greed),
     )
     ownership_map = _get_ownership_map()
     result = sentiment.build_retail_leaderboard_data(
@@ -2846,7 +2919,7 @@ async def insider_insights_api(request: Request, ticker: str):
 @app.get("/api/ticker-search-index")
 async def ticker_search_index(request: Request):
     cache_data = _fund_cache()
-    data = await asyncio.to_thread(market_data.get_ticker_search_list, cache_data)
+    data = await _to_heavy(market_data.get_ticker_search_list, cache_data)
     # Strip fields the client doesn't need to reduce payload (~8000 items)
     slim = []
     for item in data:
@@ -3057,8 +3130,8 @@ async def ticker_tape_api(request: Request):
         )
 
     mkt, sparklines = await asyncio.gather(
-        asyncio.to_thread(market_data.get_sp500_market_data, "1D"),
-        asyncio.to_thread(market_data.get_sparkline_points, TICKER_TAPE_SYMBOLS, 20),
+        _to_heavy(market_data.get_sp500_market_data, "1D"),
+        _to_heavy(market_data.get_sparkline_points, TICKER_TAPE_SYMBOLS, 20),
     )
     if not mkt or "_metadata" not in mkt:
         return HTMLResponse(
@@ -3107,8 +3180,8 @@ async def market_overview_api(request: Request):
         )
 
     # Fetch all data concurrently
-    idx_task = asyncio.to_thread(market_data.get_index_market_data)
-    sp_task = asyncio.to_thread(market_data.get_sp500_market_data, "1D")
+    idx_task = _to_heavy(market_data.get_index_market_data)
+    sp_task = _to_heavy(market_data.get_sp500_market_data, "1D")
     spark_task = asyncio.to_thread(
         market_data.get_sparkline_points, _MEGA_CAP_SYMBOLS, 20
     )
@@ -3141,7 +3214,7 @@ async def market_overview_api(request: Request):
         if isinstance((sp_data or {}).get(sym), dict)
     ]
     chart_tasks = [
-        asyncio.to_thread(market_data.get_overview_chart_data, sym)
+        _to_heavy(market_data.get_overview_chart_data, sym)
         for sym, _ in _valid_mega
     ]
     chart_results = await asyncio.gather(*chart_tasks) if chart_tasks else []
@@ -3190,7 +3263,7 @@ async def market_overview_chart_api(
     period: str = Query("1M", regex="^(1D|1W|1M|3M|1Y)$"),
 ):
     """Return chart data for a specific symbol (stock, index, or commodity)."""
-    chart = await asyncio.to_thread(market_data.get_overview_chart_data, symbol, period)
+    chart = await _to_heavy(market_data.get_overview_chart_data, symbol, period)
     if chart is None:
         return JSONResponse({"error": "Symbol not found"}, status_code=404)
     return JSONResponse(chart)
@@ -3199,7 +3272,7 @@ async def market_overview_chart_api(
 @app.get("/api/market-news", response_class=HTMLResponse)
 async def market_news_api(request: Request):
     """Return market news HTML partial (lazy-loaded via HTMX)."""
-    articles = await asyncio.to_thread(market_data.get_market_news)
+    articles = await _to_heavy(market_data.get_market_news)
     if not articles:
         return HTMLResponse(
             "<article>"
@@ -3216,7 +3289,7 @@ async def market_news_api(request: Request):
 @app.get("/api/retail-sentiment", response_class=HTMLResponse)
 async def retail_sentiment_api(request: Request):
     """Return retail sentiment HTML partial (lazy-loaded via HTMX)."""
-    data = await asyncio.to_thread(sentiment.get_retail_sentiment_overview)
+    data = await _to_heavy(sentiment.get_retail_sentiment_overview)
     if not data or (data.get("fear_greed") is None and not data.get("top_movers")):
         return HTMLResponse(
             '<p class="text-muted" style="text-align:center;padding:2em 0.5em;">'
@@ -3244,8 +3317,8 @@ async def heatmap(request: Request, period: str = "1D"):
         )
 
     mkt, constituents = await asyncio.gather(
-        asyncio.to_thread(market_data.get_sp500_market_data, period),
-        asyncio.to_thread(market_data.get_sp500_constituents),
+        _to_heavy(market_data.get_sp500_market_data, period),
+        _to_heavy(market_data.get_sp500_constituents),
     )
     if not mkt or "_metadata" not in mkt:
         return HTMLResponse(
@@ -3259,7 +3332,7 @@ async def heatmap(request: Request, period: str = "1D"):
     super_ticker_counts = {t: len(holders) for t, holders in ownership_map.items()}
 
     heatmap_data = market_data.build_heatmap_data(
-        mkt, constituents, super_ticker_counts
+        mkt, constituents, super_ticker_counts, period=period
     )
     metadata = mkt.get("_metadata", {})
 
@@ -3272,6 +3345,43 @@ async def heatmap(request: Request, period: str = "1D"):
             "period": period,
         },
     )
+
+
+@app.get("/api/heatmap-data")
+async def heatmap_data_api(request: Request, period: str = "1D"):
+    """JSON-only heatmap data for client-side period switching (no full re-render)."""
+    if period not in ("1D", "1W", "1M"):
+        period = "1D"
+
+    if not getattr(app.state, "market_data_ready", False):
+        return JSONResponse({"error": "loading"}, status_code=503)
+
+    mkt, constituents = await asyncio.gather(
+        _to_heavy(market_data.get_sp500_market_data, period),
+        _to_heavy(market_data.get_sp500_constituents),
+    )
+    if not mkt or "_metadata" not in mkt:
+        return JSONResponse({"error": "loading"}, status_code=503)
+
+    ownership_map = _get_ownership_map()
+    super_ticker_counts = {t: len(holders) for t, holders in ownership_map.items()}
+
+    heatmap_data = market_data.build_heatmap_data(
+        mkt, constituents, super_ticker_counts, period=period
+    )
+    metadata = mkt.get("_metadata", {})
+
+    period_labels = {"1D": "today", "1W": "this week", "1M": "this month"}
+
+    return JSONResponse({
+        "data": heatmap_data,
+        "period_label": period_labels.get(period, period),
+        "metadata": {
+            "count": metadata.get("count", 0),
+            "fetched_at": metadata.get("fetched_at", ""),
+            "period_label": period_labels.get(period, period),
+        },
+    })
 
 
 @app.get("/api/most-added", response_class=HTMLResponse)
@@ -3320,7 +3430,7 @@ async def most_added(request: Request):
 
         async def _lookup_consensus(t: str) -> tuple[str, dict | None]:
             try:
-                ratings = await asyncio.to_thread(analysts.get_analyst_ratings, t)
+                ratings = await _to_heavy(analysts.get_analyst_ratings, t)
                 result = analysts.get_consensus_summary(ratings)
             except Exception:
                 result = None

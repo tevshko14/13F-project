@@ -986,6 +986,7 @@ if (window.location.hash === '#feedback') {
     });
 
     var option = {
+        animation: false,
         tooltip: {
             trigger: 'axis',
             axisPointer: { type: 'shadow' },
@@ -1042,8 +1043,7 @@ if (window.location.hash === '#feedback') {
     };
 
     chart.setOption(option);
-    var _resizeTimer;
-    window.addEventListener('resize', function() { clearTimeout(_resizeTimer); _resizeTimer = setTimeout(function() { chart.resize(); }, 150); });
+    if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
     }); // end requireECharts
 })();
 </script>
