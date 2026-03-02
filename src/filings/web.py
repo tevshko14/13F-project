@@ -1025,7 +1025,9 @@ async def _populate_logos_task(limit: int = 200):
             status.update({"phase": "done", "message": "All tickers already processed"})
             return
 
-        # 3. Try Clearbit with guessed domains (no yfinance needed)
+        # 3. Download logos via Google Favicons API (Clearbit was shut down)
+        _FAVICON_URL = "https://www.google.com/s2/favicons?domain={domain}&sz=128"
+
         rows_to_insert: list[dict] = []
         downloaded = 0
         failed = 0
@@ -1038,8 +1040,10 @@ async def _populate_logos_task(limit: int = 200):
                 found = False
                 for domain in domains_to_try:
                     try:
-                        resp = await http.get(f"https://logo.clearbit.com/{domain}")
-                        if resp.status_code == 200 and len(resp.content) > 100:
+                        resp = await http.get(_FAVICON_URL.format(domain=domain))
+                        # Google returns a generic globe icon (~200-300 bytes) for
+                        # unknown domains.  Real logos are typically > 400 bytes.
+                        if resp.status_code == 200 and len(resp.content) > 400:
                             b64 = _b64.b64encode(resp.content).decode("ascii")
                             ct = resp.headers.get("content-type", "image/png")
                             rows_to_insert.append({
@@ -1055,7 +1059,7 @@ async def _populate_logos_task(limit: int = 200):
                             break
                     except Exception:
                         pass
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.05)
 
                 if not found:
                     failed += 1
@@ -1066,7 +1070,7 @@ async def _populate_logos_task(limit: int = 200):
                     rows_to_insert.clear()
 
                 status.update({"downloaded": downloaded, "failed": failed})
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
 
         if rows_to_insert:
             await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
