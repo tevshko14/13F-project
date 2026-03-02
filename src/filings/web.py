@@ -954,20 +954,19 @@ async def serve_logo(ticker: str):
     )
 
 
-@app.get("/api/admin/populate-logos")
-async def populate_logos(request: Request):
-    """Download company logos from Clearbit and INSERT into Supabase (never overwrites).
+_logo_populate_status: dict = {}  # shared progress dict for background task
 
-    Two-phase approach:
-      Phase 1: Resolve domains via yfinance for tickers that have issuer names
-               (batched, with generous timeouts).
-      Phase 2: Download PNGs from Clearbit for resolved domains.
 
-    Only processes tickers that look like real stock symbols (1-5 alpha chars).
-    Existing rows in ticker_logos are NEVER modified or overwritten.
+async def _populate_logos_task():
+    """Background task: resolve domains + download logos from Clearbit.
+
+    Insert-only — existing rows in ticker_logos are NEVER modified.
     """
     import httpx
     import re
+
+    status = _logo_populate_status
+    status.update({"phase": "collecting", "downloaded": 0, "failed": 0, "total": 0})
 
     _valid_ticker = re.compile(r"^[A-Z]{1,5}$")
 
@@ -982,24 +981,27 @@ async def populate_logos(request: Request):
                 ticker_names.setdefault(t.upper(), name)
 
     # Also add insider trade tickers
-    insider_tickers = await asyncio.to_thread(supabase_cache.get_distinct_insider_tickers)
-    for t in insider_tickers:
-        tu = t.upper()
-        if _valid_ticker.match(tu):
-            ticker_names.setdefault(tu, "")
+    try:
+        insider_tickers = await asyncio.to_thread(supabase_cache.get_distinct_insider_tickers)
+        for t in insider_tickers:
+            tu = t.upper()
+            if _valid_ticker.match(tu):
+                ticker_names.setdefault(tu, "")
+    except Exception:
+        pass
 
     # 2. Check which tickers already exist in Supabase (skip them entirely)
     existing = await asyncio.to_thread(supabase_cache.get_existing_logo_tickers)
     new_tickers = sorted(set(ticker_names.keys()) - existing)
 
-    total = len(ticker_names)
-    already = len(existing)
-    downloaded = 0
-    skipped = 0
-    failed_list: list[str] = []
+    status.update({
+        "phase": "resolving_domains",
+        "total": len(new_tickers),
+        "already_in_db": len(existing),
+    })
 
-    # 3. Phase 1: Batch-resolve domains via yfinance (5 concurrent)
-    domain_map: dict[str, str] = {}  # ticker -> domain
+    # 3. Batch-resolve domains via yfinance (5 concurrent, 15s timeout each)
+    domain_map: dict[str, str] = {}
     sem = asyncio.Semaphore(5)
 
     async def _resolve_one(ticker: str) -> tuple[str, str | None]:
@@ -1013,23 +1015,25 @@ async def populate_logos(request: Request):
             except Exception:
                 return (ticker, None)
 
-    # Process in batches of 50 to avoid overwhelming yfinance
     for batch_start in range(0, len(new_tickers), 50):
         batch = new_tickers[batch_start : batch_start + 50]
         results = await asyncio.gather(*[_resolve_one(t) for t in batch])
         for ticker, domain in results:
             if domain:
                 domain_map[ticker] = domain
-        # Brief pause between batches
+        status["domains_resolved"] = len(domain_map)
         await asyncio.sleep(1)
 
-    # 4. Phase 2: Download logos from Clearbit for resolved domains
+    status["phase"] = "downloading"
+
+    # 4. Download PNGs from Clearbit
     rows_to_insert: list[dict] = []
+    downloaded = 0
+    failed = 0
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as http:
         for ticker in new_tickers:
             domain = domain_map.get(ticker)
             if not domain:
-                skipped += 1
                 continue
 
             try:
@@ -1047,35 +1051,61 @@ async def populate_logos(request: Request):
                     _logo_set.add(ticker)
                     downloaded += 1
                 else:
-                    failed_list.append(ticker)
+                    failed += 1
             except Exception:
-                failed_list.append(ticker)
+                failed += 1
 
-            # Batch insert every 50 rows (insert-only, never overwrites)
+            # Batch insert every 50 (insert-only, never overwrites)
             if len(rows_to_insert) >= 50:
                 await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
                 rows_to_insert.clear()
 
-            # Rate limit: 150ms between Clearbit requests
+            status.update({"downloaded": downloaded, "failed": failed})
             await asyncio.sleep(0.15)
 
-    # Final batch insert
     if rows_to_insert:
         await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
 
-    # Update Jinja global
     templates.env.globals["logo_tickers"] = _logo_set
 
-    return JSONResponse({
-        "total_tickers": total,
-        "already_in_db": already,
-        "new_to_process": len(new_tickers),
-        "domains_resolved": len(domain_map),
+    status.update({
+        "phase": "done",
         "downloaded": downloaded,
-        "skipped_no_domain": skipped,
-        "failed_download": len(failed_list),
-        "failed_tickers": failed_list[:50],
-        "in_memory_total": len(_logo_cache),
+        "failed": failed,
+        "in_memory": len(_logo_cache),
+    })
+    logger.info("Logo populate done: %d downloaded, %d failed, %d in memory",
+                downloaded, failed, len(_logo_cache))
+
+
+@app.get("/api/admin/populate-logos")
+async def populate_logos(request: Request):
+    """Kick off background logo population. Returns immediately with status.
+
+    Call /api/admin/logo-status to check progress.
+    Existing logos are NEVER overwritten (insert-only).
+    """
+    if _logo_populate_status.get("phase") in ("collecting", "resolving_domains", "downloading"):
+        return JSONResponse({
+            "status": "already_running",
+            **_logo_populate_status,
+        })
+
+    _logo_populate_status.clear()
+    asyncio.create_task(_populate_logos_task(), name="populate_logos")
+
+    return JSONResponse({
+        "status": "started",
+        "message": "Logo population started in background. Check /api/admin/logo-status for progress.",
+    })
+
+
+@app.get("/api/admin/logo-status")
+async def logo_status():
+    """Check the progress of the background logo population task."""
+    return JSONResponse({
+        "in_memory": len(_logo_cache),
+        **_logo_populate_status,
     })
 
 
