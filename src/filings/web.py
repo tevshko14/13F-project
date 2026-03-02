@@ -956,138 +956,126 @@ async def serve_logo(ticker: str):
 
 @app.get("/api/admin/populate-logos")
 async def populate_logos(request: Request):
-    """One-shot endpoint to download company logos from Clearbit and store in Supabase.
+    """Download company logos from Clearbit and INSERT into Supabase (never overwrites).
 
-    Collects all unique tickers from fund holdings, insider trades, and congress trades,
-    then downloads logos for any that don't already exist in the ticker_logos table.
+    Two-phase approach:
+      Phase 1: Resolve domains via yfinance for tickers that have issuer names
+               (batched, with generous timeouts).
+      Phase 2: Download PNGs from Clearbit for resolved domains.
+
+    Only processes tickers that look like real stock symbols (1-5 alpha chars).
+    Existing rows in ticker_logos are NEVER modified or overwritten.
     """
     import httpx
+    import re
 
-    # 1. Collect all known tickers
-    all_tickers: set[str] = set()
+    _valid_ticker = re.compile(r"^[A-Z]{1,5}$")
 
-    # From 13F fund holdings
+    # 1. Collect ticker -> issuer_name map from 13F holdings
+    ticker_names: dict[str, str] = {}
     fc = _fund_cache()
     for fund_data in fc.values():
         for h in fund_data.get("all_holdings", []):
             t = h.get("ticker")
-            if t:
-                all_tickers.add(t.upper())
+            name = h.get("issuer")
+            if t and name and _valid_ticker.match(t.upper()):
+                ticker_names.setdefault(t.upper(), name)
 
-    # From insider trades (Supabase)
+    # Also add insider trade tickers
     insider_tickers = await asyncio.to_thread(supabase_cache.get_distinct_insider_tickers)
-    all_tickers.update(t.upper() for t in insider_tickers)
+    for t in insider_tickers:
+        tu = t.upper()
+        if _valid_ticker.match(tu):
+            ticker_names.setdefault(tu, "")
 
-    # From congress trades (Supabase)
-    try:
-        congress_resp = await asyncio.to_thread(
-            lambda: supabase_cache._get_client().table("congress_trades")
-            .select("ticker")
-            .neq("ticker", "")
-            .limit(50000)
-            .execute()
-            if supabase_cache._get_client()
-            else None
-        )
-        if congress_resp and congress_resp.data:
-            all_tickers.update(
-                r["ticker"].upper() for r in congress_resp.data if r.get("ticker")
-            )
-    except Exception:
-        pass
-
-    # 2. Check which already have logos
+    # 2. Check which tickers already exist in Supabase (skip them entirely)
     existing = await asyncio.to_thread(supabase_cache.get_existing_logo_tickers)
-    new_tickers = sorted(all_tickers - existing)
+    new_tickers = sorted(set(ticker_names.keys()) - existing)
 
-    total = len(all_tickers)
+    total = len(ticker_names)
     already = len(existing)
     downloaded = 0
-    failed = 0
+    skipped = 0
     failed_list: list[str] = []
 
-    # 3. Download logos for new tickers
-    rows_to_upsert: list[dict] = []
-    async with httpx.AsyncClient(timeout=10.0) as http:
-        for i, ticker in enumerate(new_tickers):
-            # Resolve domain via yfinance
-            try:
-                domain = await _to_heavy(client._resolve_logo_domain, ticker)
-            except Exception:
-                domain = None
+    # 3. Phase 1: Batch-resolve domains via yfinance (5 concurrent)
+    domain_map: dict[str, str] = {}  # ticker -> domain
+    sem = asyncio.Semaphore(5)
 
+    async def _resolve_one(ticker: str) -> tuple[str, str | None]:
+        async with sem:
+            try:
+                domain = await asyncio.wait_for(
+                    _to_heavy(client._resolve_logo_domain, ticker),
+                    timeout=15,
+                )
+                return (ticker, domain)
+            except Exception:
+                return (ticker, None)
+
+    # Process in batches of 50 to avoid overwhelming yfinance
+    for batch_start in range(0, len(new_tickers), 50):
+        batch = new_tickers[batch_start : batch_start + 50]
+        results = await asyncio.gather(*[_resolve_one(t) for t in batch])
+        for ticker, domain in results:
+            if domain:
+                domain_map[ticker] = domain
+        # Brief pause between batches
+        await asyncio.sleep(1)
+
+    # 4. Phase 2: Download logos from Clearbit for resolved domains
+    rows_to_insert: list[dict] = []
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as http:
+        for ticker in new_tickers:
+            domain = domain_map.get(ticker)
             if not domain:
-                # Store empty row so we don't retry this ticker
-                rows_to_upsert.append({
-                    "ticker": ticker,
-                    "logo_b64": "",
-                    "content_type": "image/png",
-                    "logo_domain": "",
-                })
-                failed += 1
-                failed_list.append(ticker)
+                skipped += 1
                 continue
 
-            # Download PNG from Clearbit
             try:
-                resp = await http.get(
-                    f"https://logo.clearbit.com/{domain}",
-                    follow_redirects=True,
-                )
+                resp = await http.get(f"https://logo.clearbit.com/{domain}")
                 if resp.status_code == 200 and len(resp.content) > 100:
                     b64 = _b64.b64encode(resp.content).decode("ascii")
                     ct = resp.headers.get("content-type", "image/png")
-                    rows_to_upsert.append({
+                    rows_to_insert.append({
                         "ticker": ticker,
                         "logo_b64": b64,
                         "content_type": ct,
                         "logo_domain": domain,
                     })
-                    # Also add to in-memory cache immediately
                     _logo_cache[ticker] = resp.content
                     _logo_set.add(ticker)
                     downloaded += 1
                 else:
-                    rows_to_upsert.append({
-                        "ticker": ticker,
-                        "logo_b64": "",
-                        "content_type": "image/png",
-                        "logo_domain": domain,
-                    })
-                    failed += 1
                     failed_list.append(ticker)
             except Exception:
-                rows_to_upsert.append({
-                    "ticker": ticker,
-                    "logo_b64": "",
-                    "content_type": "image/png",
-                    "logo_domain": domain,
-                })
-                failed += 1
                 failed_list.append(ticker)
 
-            # Batch upsert every 50 rows
-            if len(rows_to_upsert) >= 50:
-                await asyncio.to_thread(supabase_cache.upsert_logos, rows_to_upsert)
-                rows_to_upsert.clear()
+            # Batch insert every 50 rows (insert-only, never overwrites)
+            if len(rows_to_insert) >= 50:
+                await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
+                rows_to_insert.clear()
 
-            # Rate limit: 200ms between Clearbit requests
-            await asyncio.sleep(0.2)
+            # Rate limit: 150ms between Clearbit requests
+            await asyncio.sleep(0.15)
 
-    # Final batch upsert
-    if rows_to_upsert:
-        await asyncio.to_thread(supabase_cache.upsert_logos, rows_to_upsert)
+    # Final batch insert
+    if rows_to_insert:
+        await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
 
     # Update Jinja global
     templates.env.globals["logo_tickers"] = _logo_set
 
     return JSONResponse({
         "total_tickers": total,
-        "already_had_logos": already,
+        "already_in_db": already,
+        "new_to_process": len(new_tickers),
+        "domains_resolved": len(domain_map),
         "downloaded": downloaded,
-        "failed": failed,
-        "failed_tickers": failed_list[:50],  # truncate for readability
-        "in_memory": len(_logo_cache),
+        "skipped_no_domain": skipped,
+        "failed_download": len(failed_list),
+        "failed_tickers": failed_list[:50],
+        "in_memory_total": len(_logo_cache),
     })
 
 
