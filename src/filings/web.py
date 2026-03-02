@@ -957,10 +957,12 @@ async def serve_logo(ticker: str):
 _logo_populate_status: dict = {}  # shared progress dict for background task
 
 
-async def _populate_logos_task():
+async def _populate_logos_task(limit: int = 200):
     """Background task: resolve domains + download logos from Clearbit.
 
+    Processes at most ``limit`` new tickers per invocation.
     Insert-only — existing rows in ticker_logos are NEVER modified.
+    Call the endpoint repeatedly to process all tickers in chunks.
     """
     import httpx
     import re
@@ -970,118 +972,130 @@ async def _populate_logos_task():
 
     _valid_ticker = re.compile(r"^[A-Z]{1,5}$")
 
-    # 1. Collect ticker -> issuer_name map from 13F holdings
-    ticker_names: dict[str, str] = {}
-    fc = _fund_cache()
-    for fund_data in fc.values():
-        for h in fund_data.get("all_holdings", []):
-            t = h.get("ticker")
-            name = h.get("issuer")
-            if t and name and _valid_ticker.match(t.upper()):
-                ticker_names.setdefault(t.upper(), name)
-
-    # Also add insider trade tickers
     try:
-        insider_tickers = await asyncio.to_thread(supabase_cache.get_distinct_insider_tickers)
-        for t in insider_tickers:
-            tu = t.upper()
-            if _valid_ticker.match(tu):
-                ticker_names.setdefault(tu, "")
-    except Exception:
-        pass
+        # 1. Collect valid tickers from 13F holdings
+        ticker_names: dict[str, str] = {}
+        fc = _fund_cache()
+        for fund_data in fc.values():
+            for h in fund_data.get("all_holdings", []):
+                t = h.get("ticker")
+                name = h.get("issuer")
+                if t and name and _valid_ticker.match(t.upper()):
+                    ticker_names.setdefault(t.upper(), name)
 
-    # 2. Check which tickers already exist in Supabase (skip them entirely)
-    existing = await asyncio.to_thread(supabase_cache.get_existing_logo_tickers)
-    new_tickers = sorted(set(ticker_names.keys()) - existing)
+        try:
+            insider_tickers = await asyncio.to_thread(supabase_cache.get_distinct_insider_tickers)
+            for t in insider_tickers:
+                tu = t.upper()
+                if _valid_ticker.match(tu):
+                    ticker_names.setdefault(tu, "")
+        except Exception:
+            pass
 
-    status.update({
-        "phase": "resolving_domains",
-        "total": len(new_tickers),
-        "already_in_db": len(existing),
-    })
+        # 2. Skip tickers already in Supabase
+        existing = await asyncio.to_thread(supabase_cache.get_existing_logo_tickers)
+        new_tickers = sorted(set(ticker_names.keys()) - existing)[:limit]
 
-    # 3. Batch-resolve domains via yfinance (5 concurrent, 15s timeout each)
-    domain_map: dict[str, str] = {}
-    sem = asyncio.Semaphore(5)
+        status.update({
+            "phase": "resolving_domains",
+            "total": len(new_tickers),
+            "already_in_db": len(existing),
+            "remaining_after_this": max(0, len(set(ticker_names.keys()) - existing) - limit),
+        })
 
-    async def _resolve_one(ticker: str) -> tuple[str, str | None]:
-        async with sem:
-            try:
-                domain = await asyncio.wait_for(
-                    _to_heavy(client._resolve_logo_domain, ticker),
-                    timeout=15,
-                )
-                return (ticker, domain)
-            except Exception:
-                return (ticker, None)
+        if not new_tickers:
+            status["phase"] = "done"
+            status["message"] = "All tickers already processed"
+            return
 
-    for batch_start in range(0, len(new_tickers), 50):
-        batch = new_tickers[batch_start : batch_start + 50]
-        results = await asyncio.gather(*[_resolve_one(t) for t in batch])
-        for ticker, domain in results:
-            if domain:
-                domain_map[ticker] = domain
-        status["domains_resolved"] = len(domain_map)
-        await asyncio.sleep(1)
+        # 3. Resolve domains via yfinance (3 concurrent, 10s timeout)
+        domain_map: dict[str, str] = {}
+        resolve_sem = asyncio.Semaphore(3)
 
-    status["phase"] = "downloading"
+        async def _resolve_one(ticker: str) -> tuple[str, str | None]:
+            async with resolve_sem:
+                try:
+                    domain = await asyncio.wait_for(
+                        _to_heavy(client._resolve_logo_domain, ticker),
+                        timeout=10,
+                    )
+                    return (ticker, domain)
+                except Exception:
+                    return (ticker, None)
 
-    # 4. Download PNGs from Clearbit
-    rows_to_insert: list[dict] = []
-    downloaded = 0
-    failed = 0
-    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as http:
-        for ticker in new_tickers:
-            domain = domain_map.get(ticker)
-            if not domain:
-                continue
+        # Process in small batches of 20
+        for batch_start in range(0, len(new_tickers), 20):
+            batch = new_tickers[batch_start : batch_start + 20]
+            results = await asyncio.gather(*[_resolve_one(t) for t in batch])
+            for ticker, domain in results:
+                if domain:
+                    domain_map[ticker] = domain
+            status["domains_resolved"] = len(domain_map)
+            await asyncio.sleep(0.5)
 
-            try:
-                resp = await http.get(f"https://logo.clearbit.com/{domain}")
-                if resp.status_code == 200 and len(resp.content) > 100:
-                    b64 = _b64.b64encode(resp.content).decode("ascii")
-                    ct = resp.headers.get("content-type", "image/png")
-                    rows_to_insert.append({
-                        "ticker": ticker,
-                        "logo_b64": b64,
-                        "content_type": ct,
-                        "logo_domain": domain,
-                    })
-                    _logo_cache[ticker] = resp.content
-                    _logo_set.add(ticker)
-                    downloaded += 1
-                else:
+        status["phase"] = "downloading"
+
+        # 4. Download PNGs from Clearbit
+        rows_to_insert: list[dict] = []
+        downloaded = 0
+        failed = 0
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as http:
+            for ticker in new_tickers:
+                domain = domain_map.get(ticker)
+                if not domain:
+                    continue
+
+                try:
+                    resp = await http.get(f"https://logo.clearbit.com/{domain}")
+                    if resp.status_code == 200 and len(resp.content) > 100:
+                        b64 = _b64.b64encode(resp.content).decode("ascii")
+                        ct = resp.headers.get("content-type", "image/png")
+                        rows_to_insert.append({
+                            "ticker": ticker,
+                            "logo_b64": b64,
+                            "content_type": ct,
+                            "logo_domain": domain,
+                        })
+                        _logo_cache[ticker] = resp.content
+                        _logo_set.add(ticker)
+                        downloaded += 1
+                    else:
+                        failed += 1
+                except Exception:
                     failed += 1
-            except Exception:
-                failed += 1
 
-            # Batch insert every 50 (insert-only, never overwrites)
-            if len(rows_to_insert) >= 50:
-                await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
-                rows_to_insert.clear()
+                if len(rows_to_insert) >= 25:
+                    await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
+                    rows_to_insert.clear()
 
-            status.update({"downloaded": downloaded, "failed": failed})
-            await asyncio.sleep(0.15)
+                status.update({"downloaded": downloaded, "failed": failed})
+                await asyncio.sleep(0.15)
 
-    if rows_to_insert:
-        await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
+        if rows_to_insert:
+            await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
 
-    templates.env.globals["logo_tickers"] = _logo_set
+        templates.env.globals["logo_tickers"] = _logo_set
 
-    status.update({
-        "phase": "done",
-        "downloaded": downloaded,
-        "failed": failed,
-        "in_memory": len(_logo_cache),
-    })
-    logger.info("Logo populate done: %d downloaded, %d failed, %d in memory",
-                downloaded, failed, len(_logo_cache))
+        status.update({
+            "phase": "done",
+            "downloaded": downloaded,
+            "failed": failed,
+            "in_memory": len(_logo_cache),
+        })
+        logger.info("Logo populate done: %d downloaded, %d failed, %d in memory",
+                    downloaded, failed, len(_logo_cache))
+
+    except Exception as exc:
+        status.update({"phase": "error", "error": str(exc)})
+        logger.error("Logo populate failed: %s", exc)
 
 
 @app.get("/api/admin/populate-logos")
-async def populate_logos(request: Request):
+async def populate_logos(request: Request, limit: int = Query(200, ge=1, le=500)):
     """Kick off background logo population. Returns immediately with status.
 
+    ?limit=N controls how many new tickers to process (default 200, max 500).
+    Call repeatedly to process all tickers in chunks.
     Call /api/admin/logo-status to check progress.
     Existing logos are NEVER overwritten (insert-only).
     """
@@ -1092,7 +1106,7 @@ async def populate_logos(request: Request):
         })
 
     _logo_populate_status.clear()
-    asyncio.create_task(_populate_logos_task(), name="populate_logos")
+    asyncio.create_task(_populate_logos_task(limit=limit), name="populate_logos")
 
     return JSONResponse({
         "status": "started",
