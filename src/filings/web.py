@@ -957,37 +957,206 @@ async def serve_logo(ticker: str):
 _logo_populate_status: dict = {}  # shared progress dict for background task
 
 
-def _guess_domains(issuer_name: str) -> list[str]:
-    """Guess company domains from 13F issuer name for Clearbit logo lookup.
+# ── Well-known ticker → domain overrides ───────────────────────────────
+# Covers top S&P 500 companies whose domains can't be guessed from issuer names.
+_KNOWN_TICKER_DOMAINS: dict[str, str] = {
+    "GOOGL": "google.com", "GOOG": "google.com",
+    "META": "meta.com",
+    "BRK.A": "berkshirehathaway.com", "BRK.B": "berkshirehathaway.com",
+    "BRK": "berkshirehathaway.com",
+    "UNH": "unitedhealthgroup.com",
+    "PG": "pg.com",
+    "HD": "homedepot.com",
+    "CVX": "chevron.com",
+    "KO": "coca-cola.com",
+    "PEP": "pepsico.com",
+    "MRK": "merck.com",
+    "ABBV": "abbvie.com",
+    "WMT": "walmart.com",
+    "DIS": "disney.com",
+    "CSCO": "cisco.com",
+    "CRM": "salesforce.com",
+    "NFLX": "netflix.com",
+    "ADBE": "adobe.com",
+    "CMCSA": "comcast.com",
+    "INTC": "intel.com",
+    "QCOM": "qualcomm.com",
+    "TXN": "ti.com",
+    "AVGO": "broadcom.com",
+    "COST": "costco.com",
+    "TMO": "thermofisher.com",
+    "DHR": "danaher.com",
+    "PM": "pmi.com",
+    "RTX": "rtx.com",
+    "NEE": "nexteraenergy.com",
+    "LIN": "linde.com",
+    "LOW": "lowes.com",
+    "BMY": "bms.com",
+    "SPGI": "spglobal.com",
+    "ISRG": "intuitive.com",
+    "GS": "goldmansachs.com",
+    "BLK": "blackrock.com",
+    "AXP": "americanexpress.com",
+    "SYK": "stryker.com",
+    "MDLZ": "mondelezinternational.com",
+    "GILD": "gilead.com",
+    "ADI": "analog.com",
+    "BKNG": "booking.com",
+    "VRTX": "vrtx.com",
+    "REGN": "regeneron.com",
+    "PANW": "paloaltonetworks.com",
+    "LRCX": "lamresearch.com",
+    "KLAC": "kla.com",
+    "BSX": "bostonscientific.com",
+    "CB": "chubb.com",
+    "MMC": "marshmclennan.com",
+    "CI": "cigna.com",
+    "ZTS": "zoetis.com",
+    "SNPS": "synopsys.com",
+    "CDNS": "cadence.com",
+    "PYPL": "paypal.com",
+    "CME": "cmegroup.com",
+    "HCA": "hcahealthcare.com",
+    "MCK": "mckesson.com",
+    "WM": "wm.com",
+    "GEV": "gevernova.com",
+    "MAR": "marriott.com",
+    "APH": "amphenol.com",
+    "MSI": "motorolasolutions.com",
+    "USB": "usbank.com",
+    "PLTR": "palantir.com",
+    "F": "ford.com",
+    "GM": "gm.com",
+    "CAT": "caterpillar.com",
+    "BA": "boeing.com",
+    "DE": "deere.com",
+    "MMM": "3m.com",
+    "SLB": "slb.com",
+    "EOG": "eogresources.com",
+    "WFC": "wellsfargo.com",
+    "BAC": "bankofamerica.com",
+    "C": "citigroup.com",
+    "T": "att.com",
+    "VZ": "verizon.com",
+    "TMUS": "t-mobile.com",
+    "SO": "southerncompany.com",
+    "DUK": "duke-energy.com",
+    "COP": "conocophillips.com",
+    "UBER": "uber.com",
+    "SPOT": "spotify.com",
+    "SQ": "squareup.com",
+    "SHOP": "shopify.com",
+    "SNOW": "snowflake.com",
+    "ABNB": "airbnb.com",
+    "COIN": "coinbase.com",
+    "HOOD": "robinhood.com",
+    "RIVN": "rivian.com",
+    "LCID": "lucidmotors.com",
+    "DDOG": "datadoghq.com",
+    "NET": "cloudflare.com",
+    "CRWD": "crowdstrike.com",
+    "ZS": "zscaler.com",
+    "TEAM": "atlassian.com",
+    "MDB": "mongodb.com",
+    "OKTA": "okta.com",
+    "TTD": "thetradedesk.com",
+    "RBLX": "roblox.com",
+    "U": "unity.com",
+    "DASH": "doordash.com",
+    "LYFT": "lyft.com",
+    "PINS": "pinterest.com",
+    "SNAP": "snapchat.com",
+    "TWLO": "twilio.com",
+    "ROKU": "roku.com",
+    "Z": "zillow.com",
+    "FICO": "fico.com",
+    "LLY": "lilly.com",
+    "PFE": "pfizer.com",
+    "ABT": "abbott.com",
+    "JNJ": "jnj.com",
+    "NKE": "nike.com",
+    "SBUX": "starbucks.com",
+    "MCD": "mcdonalds.com",
+    "TGT": "target.com",
+    "YUM": "yum.com",
+    "CMG": "chipotle.com",
+    "ADP": "adp.com",
+    "FIS": "fisglobal.com",
+    "ICE": "ice.com",
+    "MRVL": "marvell.com",
+    "ON": "onsemi.com",
+    "AMAT": "appliedmaterials.com",
+    "MU": "micron.com",
+    "NOW": "servicenow.com",
+    "ORCL": "oracle.com",
+    "SAP": "sap.com",
+    "INTU": "intuit.com",
+    "WDAY": "workday.com",
+    "VEEV": "veeva.com",
+    "SPLK": "splunk.com",
+    "FTNT": "fortinet.com",
+    "DELL": "dell.com",
+    "HPQ": "hp.com",
+    "HPE": "hpe.com",
+}
 
-    E.g. "APPLE INC" → ["apple.com"], "JPMORGAN CHASE & CO" → ["jpmorgan.com", "jpmorganchase.com"]
+
+_ISSUER_SUFFIXES = (
+    " INC", " CORP", " CORPORATION", " CO", " COMPANY", " LTD",
+    " LLC", " PLC", " GROUP", " HOLDINGS", " ENTERPRISES",
+    " INTERNATIONAL", " TECHNOLOGIES", " TECHNOLOGY",
+    " THERAPEUTICS", " PHARMACEUTICALS", " PHARMA",
+    " SOLUTIONS", " SYSTEMS", " PARTNERS", " CAPITAL", " FINANCIAL",
+    " BANCORP", " BANCSHARES", " BRANDS", " INDUSTRIES",
+    " CLASS A", " CLASS B", " CLASS C", " CL A", " CL B", " CL C",
+    " COMMON", " NEW", " DEL", " COM", " SHS",
+)
+
+
+def _guess_domains(issuer_name: str, ticker: str = "") -> list[str]:
+    """Guess company domains from 13F issuer name and ticker symbol.
+
+    Uses endswith-based suffix stripping (not replace) to avoid
+    mid-string matches like "AMAZON COM" → "AMAZONM".
     """
+    # 1. Check well-known mapping first
+    if ticker and ticker in _KNOWN_TICKER_DOMAINS:
+        return [_KNOWN_TICKER_DOMAINS[ticker]]
+
+    # 2. Strip corporate suffixes from END of name only (fixes the replace bug)
     name = issuer_name.upper().strip()
-    for suffix in (
-        " INC", " CORP", " CO", " LTD", " LLC", " PLC", " GROUP",
-        " HOLDINGS", " ENTERPRISES", " INTERNATIONAL", " TECHNOLOGIES",
-        " TECHNOLOGY", " THERAPEUTICS", " PHARMACEUTICALS", " PHARMA",
-        " SOLUTIONS", " SYSTEMS", " PARTNERS", " CAPITAL", " FINANCIAL",
-        " BANCORP", " BANCSHARES", " BRANDS", " INDUSTRIES",
-        " CLASS A", " CLASS B", " CLASS C", " CL A", " CL B", " CL C",
-        " COMMON", " NEW", " DEL", " COM",
-    ):
-        name = name.replace(suffix, "")
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _ISSUER_SUFFIXES:
+            if name.endswith(suffix):
+                name = name[: -len(suffix)].strip()
+                changed = True
+                break
+
     # Remove punctuation
     name = _re.sub(r"[^A-Z0-9\s]", "", name).strip()
     words = name.lower().split()
     if not words:
-        return []
-    guesses = [f"{words[0]}.com"]
+        return [f"{ticker.lower()}.com"] if ticker else []
+
+    guesses: list[str] = []
+    # Try first-word.com (e.g., "APPLE" → "apple.com")
+    guesses.append(f"{words[0]}.com")
+    # Try joined-words.com (e.g., "HOME DEPOT" → "homedepot.com")
     if len(words) >= 2:
         guesses.append(f"{''.join(words[:2])}.com")
+        # If 3+ words, also try all words joined
+        if len(words) >= 3:
+            guesses.append(f"{''.join(words[:3])}.com")
+
     return guesses
 
 
 async def _populate_logos_task(limit: int = 200):
-    """Background task: guess domains from issuer names + download from Clearbit.
+    """Background task: guess domains from issuer names + download favicons.
 
-    No yfinance calls — lightweight HTTP only.
+    Uses Google Favicons API.  No yfinance calls — lightweight HTTP only.
     Processes at most ``limit`` new tickers per invocation.
     Insert-only — existing rows in ticker_logos are NEVER modified.
     """
@@ -996,7 +1165,7 @@ async def _populate_logos_task(limit: int = 200):
     status = _logo_populate_status
     status.update({"phase": "collecting", "downloaded": 0, "failed": 0, "total": 0})
 
-    _valid_ticker = _re.compile(r"^[A-Z]{1,5}$")
+    _valid_ticker = _re.compile(r"^[A-Z]{1,6}$")
 
     try:
         # 1. Collect ticker -> issuer_name from 13F holdings
@@ -1025,8 +1194,12 @@ async def _populate_logos_task(limit: int = 200):
             status.update({"phase": "done", "message": "All tickers already processed"})
             return
 
-        # 3. Download logos via Google Favicons API (Clearbit was shut down)
+        # 3. Download logos via Google Favicons API
         _FAVICON_URL = "https://www.google.com/s2/favicons?domain={domain}&sz=128"
+        # Google returns HTTP 404 for unknown domains.
+        # For valid domains, even small favicons (Visa=338B, AMD=183B) are real.
+        # Threshold of 50 bytes filters only truly empty/broken responses.
+        _MIN_LOGO_BYTES = 50
 
         rows_to_insert: list[dict] = []
         downloaded = 0
@@ -1035,15 +1208,13 @@ async def _populate_logos_task(limit: int = 200):
         async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as http:
             for ticker in new_tickers:
                 issuer = ticker_names.get(ticker, "")
-                domains_to_try = _guess_domains(issuer) if issuer else []
+                domains_to_try = _guess_domains(issuer, ticker=ticker)
 
                 found = False
                 for domain in domains_to_try:
                     try:
                         resp = await http.get(_FAVICON_URL.format(domain=domain))
-                        # Google returns a generic globe icon (~200-300 bytes) for
-                        # unknown domains.  Real logos are typically > 400 bytes.
-                        if resp.status_code == 200 and len(resp.content) > 400:
+                        if resp.status_code == 200 and len(resp.content) > _MIN_LOGO_BYTES:
                             b64 = _b64.b64encode(resp.content).decode("ascii")
                             ct = resp.headers.get("content-type", "image/png")
                             rows_to_insert.append({
