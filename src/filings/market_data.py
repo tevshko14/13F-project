@@ -11,9 +11,36 @@ import logging
 import os
 import threading
 import time
+from collections import OrderedDict
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# ── Global yfinance timeout ──────────────────────────────────────────
+# yfinance uses curl_cffi internally and defaults to NO timeout,
+# meaning a hung Yahoo Finance server can permanently block a thread.
+# We enforce a hard timeout on every yfinance request:
+#   - yf.download() → use the built-in `timeout=` parameter
+#   - yf.Ticker()   → pass a curl_cffi Session with default timeout
+_YF_TIMEOUT = 15  # seconds
+
+
+def _make_yf_session():
+    """Create a curl_cffi Session that enforces a timeout on every request."""
+    try:
+        from curl_cffi.requests import Session
+
+        class _TimeoutSession(Session):
+            def request(self, *args, **kwargs):
+                kwargs.setdefault("timeout", _YF_TIMEOUT)
+                return super().request(*args, **kwargs)
+
+        return _TimeoutSession()
+    except Exception:
+        return None
+
+
+_yf_session = _make_yf_session()
 
 # ── Thread lock for all cache reads/writes ────────────────────────────
 _lock = threading.Lock()
@@ -184,7 +211,7 @@ def _ensure_close_df():
     try:
         import yfinance as yf
 
-        df = yf.download(tickers, period="1mo", threads=False, progress=False)
+        df = yf.download(tickers, period="1mo", threads=False, progress=False, timeout=_YF_TIMEOUT)
 
         if df.empty:
             logger.warning("yfinance returned empty DataFrame for S&P 500")
@@ -370,7 +397,7 @@ def get_index_market_data() -> dict:
     try:
         import yfinance as yf
 
-        df = yf.download(symbols, period="1y", threads=False, progress=False)
+        df = yf.download(symbols, period="1y", threads=False, progress=False, timeout=_YF_TIMEOUT)
 
         if df.empty:
             logger.warning("yfinance returned empty DataFrame for indices")
@@ -451,9 +478,10 @@ def get_index_market_data() -> dict:
 # Approximate trading days per period for slicing chart history
 _PERIOD_TRADING_DAYS = {"1D": 2, "1W": 5, "1M": 22, "3M": 66, "1Y": 253}
 
-# Per-symbol on-demand chart cache for extended stock history
-_overview_chart_cache: dict[str, tuple[float, list]] = {}
+# Per-symbol on-demand chart cache for extended stock history (LRU-bounded)
+_overview_chart_cache: OrderedDict[str, tuple[float, list]] = OrderedDict()
 _OVERVIEW_CHART_TTL = 1_800  # 30 min
+_OVERVIEW_CHART_MAX = 200    # max entries — prevent unbounded growth
 
 
 def _slice_history(history: list, period: str) -> list:
@@ -537,6 +565,7 @@ def get_overview_chart_data(symbol: str, period: str = "1M") -> dict | None:
         if cached is not None:
             ts, data = cached
             if time.time() - ts < _OVERVIEW_CHART_TTL:
+                _overview_chart_cache.move_to_end(cache_key)
                 return data
 
     try:
@@ -545,7 +574,7 @@ def get_overview_chart_data(symbol: str, period: str = "1M") -> dict | None:
         yf_periods = {"3M": "3mo", "1Y": "1y"}
         yf_period = yf_periods.get(period, "3mo")
 
-        dl = yf.download([symbol], period=yf_period, threads=False, progress=False)
+        dl = yf.download([symbol], period=yf_period, threads=False, progress=False, timeout=_YF_TIMEOUT)
         if dl.empty:
             return None
 
@@ -588,6 +617,9 @@ def get_overview_chart_data(symbol: str, period: str = "1M") -> dict | None:
 
         with _lock:
             _overview_chart_cache[cache_key] = (time.time(), result)
+            _overview_chart_cache.move_to_end(cache_key)
+            while len(_overview_chart_cache) > _OVERVIEW_CHART_MAX:
+                _overview_chart_cache.popitem(last=False)
         return result
 
     except Exception as e:
@@ -712,7 +744,7 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
         constituents = get_sp500_constituents()
         all_tickers = [c["ticker"] for c in constituents]
 
-        df = yf.download(all_tickers, period="1y", threads=False, progress=False)
+        df = yf.download(all_tickers, period="1y", threads=False, progress=False, timeout=_YF_TIMEOUT)
 
         if df.empty:
             return {}
@@ -806,7 +838,7 @@ def get_current_prices_batch(tickers: list[str]) -> dict[str, float]:
 
             # Limit batch to avoid huge downloads
             batch = missing[:80]
-            df = yf.download(batch, period="1d", threads=False, progress=False)
+            df = yf.download(batch, period="1d", threads=False, progress=False, timeout=_YF_TIMEOUT)
             if not df.empty:
                 close = df.get("Close")
                 if close is not None:

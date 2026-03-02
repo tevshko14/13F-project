@@ -220,23 +220,38 @@ async def lifespan(app: FastAPI):
     except Exception:
         app.state.deployment_cache = {}
 
+    # Track background tasks for clean shutdown
+    _bg_tasks: set[asyncio.Task] = set()
+
+    def _track(coro, name: str):
+        task = asyncio.create_task(coro, name=name)
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
+        return task
+
     # Prefetch S&P 500 market data in background (~30-60s on cold start)
-    asyncio.create_task(_prefetch_market_data(app))
+    _track(_prefetch_market_data(app), "prefetch_market")
 
     # Run retention cleanup in background (keep DB small)
-    asyncio.create_task(asyncio.to_thread(supabase_cache.run_retention_cleanup))
+    _track(asyncio.to_thread(supabase_cache.run_retention_cleanup), "retention_cleanup")
 
     # Self-heal: refresh any stale funds in background
     if _ENABLE_BACKGROUND_REFRESH:
         app.state.refresh_status = "pending"
-        asyncio.create_task(_delayed_refresh_sweep(app))
+        _track(_delayed_refresh_sweep(app), "refresh_sweep")
 
     # Reddit velocity notification scanner (runs every 30 min)
-    asyncio.create_task(_reddit_velocity_scanner())
+    _track(_reddit_velocity_scanner(), "reddit_scanner")
 
     yield
 
     # ── Shutdown cleanup ──────────────────────────────────────────────
+    # Cancel all background tasks so they don't leak on worker recycle
+    for task in _bg_tasks:
+        task.cancel()
+    if _bg_tasks:
+        await asyncio.gather(*_bg_tasks, return_exceptions=True)
+
     global _posthog_http
     if _posthog_http and not _posthog_http.is_closed:
         await _posthog_http.aclose()
@@ -774,7 +789,23 @@ async def _reddit_velocity_scanner() -> None:
 
 @app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
-    return JSONResponse({"status": "ok"})
+    """Health check that also detects thread pool starvation.
+
+    If we can't get a response from the thread pool within 3 seconds,
+    the pool is likely exhausted by hung yfinance/Finnhub calls and
+    the app is effectively dead — return 503 so Railway restarts us.
+    """
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(lambda: True), timeout=3
+        )
+        return JSONResponse({"status": "ok"})
+    except (asyncio.TimeoutError, Exception):
+        logger.error("health_check: thread pool appears starved — returning 503")
+        return JSONResponse(
+            {"status": "unhealthy", "reason": "thread pool exhausted"},
+            status_code=503,
+        )
 
 
 # --- Homepage: dashboard with market data & widgets ---
@@ -2735,7 +2766,8 @@ async def _get_current_price_yf(ticker: str) -> float | None:
 
     def _fetch():
         import yfinance as yf
-        info = yf.Ticker(ticker).info
+        from filings.market_data import _yf_session
+        info = yf.Ticker(ticker, session=_yf_session).info
         p = info.get("currentPrice") or info.get("regularMarketPrice")
         if p and isinstance(p, (int, float)) and p > 0:
             return float(p)
