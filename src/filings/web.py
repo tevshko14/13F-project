@@ -3146,6 +3146,22 @@ async def market_news_api(request: Request):
     )
 
 
+@app.get("/api/retail-sentiment", response_class=HTMLResponse)
+async def retail_sentiment_api(request: Request):
+    """Return retail sentiment HTML partial (lazy-loaded via HTMX)."""
+    data = await asyncio.to_thread(sentiment.get_retail_sentiment_overview)
+    if not data or (data.get("fear_greed") is None and not data.get("top_movers")):
+        return HTMLResponse(
+            '<p class="text-muted" style="text-align:center;padding:2em 0.5em;">'
+            "Sentiment data temporarily unavailable.</p>"
+            '<div hx-get="/api/retail-sentiment" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
+        )
+    return templates.TemplateResponse(
+        "partials/retail_sentiment.html",
+        {"request": request, **data},
+    )
+
+
 @app.get("/api/heatmap", response_class=HTMLResponse)
 async def heatmap(request: Request, period: str = "1D"):
     # Validate period
@@ -3543,6 +3559,7 @@ if _has_limiter:
     market_overview_api = limiter.limit("15/minute")(market_overview_api)
     market_overview_chart_api = limiter.limit("30/minute")(market_overview_chart_api)
     market_news_api = limiter.limit("15/minute")(market_news_api)
+    retail_sentiment_api = limiter.limit("15/minute")(retail_sentiment_api)
     heatmap = limiter.limit("10/minute")(heatmap)
     most_added = limiter.limit("10/minute")(most_added)
     api_activity_feed = limiter.limit("15/minute")(api_activity_feed)

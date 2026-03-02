@@ -979,8 +979,10 @@ if (window.location.hash === '#feedback') {
     var raised = {{ funding_history_raised | tojson }};
     var goal = {{ monthly_goal }};
 
-    var barColors = raised.map(function(v) {
-        return v >= goal ? '#22c55e' : '#d4d4d8';
+    var barGradients = raised.map(function(v) {
+        return v >= goal
+            ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#065f46' }, { offset: 1, color: '#6ee7b7' }])
+            : new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#6b7280' }, { offset: 1, color: '#d1d5db' }]);
     });
 
     var option = {
@@ -1021,7 +1023,7 @@ if (window.location.hash === '#feedback') {
         series: [{
             type: 'bar',
             data: raised.map(function(v, i) {
-                return { value: v, itemStyle: { color: barColors[i], borderRadius: [4, 4, 0, 0] } };
+                return { value: v, itemStyle: { color: barGradients[i], borderRadius: [4, 4, 0, 0] } };
             }),
             barWidth: '50%',
             markLine: {

@@ -5,8 +5,12 @@ A web dashboard for tracking SEC 13F institutional holdings filings from 84 supe
 ## Features
 
 ### Homepage
+- **Bento Grid Layout** - Glassmorphism card design with mesh gradient background
 - **S&P 500 Heatmap** - Interactive treemap showing daily performance grouped by sector (ECharts), with gold borders on stocks held by superinvestors
-- **Most Added by Superinvestors** - Stack-ranked table of stocks most added this quarter, with analyst consensus and 52-week range
+- **Most Added by Superinvestors** - ECharts bar chart with gradient fills, analyst consensus tooltips, and 52-week range
+- **Most Bought by Congress** - ECharts bar chart of trending congressional stock purchases
+- **Trending with Smart Money** - Combined superinvestor + congress stacked bar chart with gradient fills
+- **Retail Sentiment** - CNN Fear & Greed gauge widget with weekly/monthly/yearly comparison
 - **Quick Access Cards** - Retail, Funds, and Insiders overview cards
 - **Support Widget** - Panda Fund progress bar with Stripe Pricing Table embed for direct monthly subscriptions
 
@@ -65,7 +69,9 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 - **Sortable Tables** - Click any column header to sort across all pages
 - **Background Refresh** - Self-healing, request-triggered refresh for stale 13F data with per-fund TTL
 - **Graceful Error Handling** - HTMX-aware inline error partials with Panda Fund CTA on rate limits
-- **Dark Mode** - Light/dark theme toggle (sun/moon pill) in the navbar; persists via `localStorage`; respects system preference on first visit. TradingView widgets rebuild on toggle; Stripe embeds invert via CSS `filter`
+- **Dark Mode** - Light/dark theme toggle (sun/moon pill) in the navbar; persists via `localStorage`; respects system preference on first visit. ECharts axis/label colors auto-update on toggle via `pp-theme-changed` event; Stripe embeds invert via CSS `filter`
+- **Glassmorphism UI** - Site-wide frosted glass card effects (`backdrop-filter: blur`) with theme-aware transparency
+- **Gradient Bar Charts** - Consistent `LinearGradient` fills across all ECharts and Chart.js bar charts (blue, green, red, orange palettes)
 
 ### CLI
 - Search managers, view holdings, and compare quarters from the terminal
@@ -78,7 +84,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 | Package Manager | `uv` |
 | Web Framework | FastAPI + Jinja2 + HTMX |
 | CSS | Pico CSS v2 (classless, CDN) |
-| Charts | Chart.js v4 + ECharts v5 (heatmap) |
+| Charts | Chart.js v4 + ECharts v5 (heatmap, bar charts, gradients) |
 | Search | Fuse.js v7 (weighted fuzzy search) |
 | CLI Output | Rich |
 | SEC Data | `edgartools` (wraps EDGAR API) |
@@ -211,6 +217,14 @@ src/filings/
 | Congress Sync | `python scripts/sync_congress_trades.py` | Every 24h | Incremental scrape of Capitol Trades → Supabase |
 
 Each cron service shares the same Docker image. The `START_COMMAND` env var overrides the default gunicorn web server with the cron script.
+
+#### Utility Commands
+
+| Command | Purpose |
+|---------|---------|
+| `filings-migrate-cold` | Archive older 13F quarters to Supabase cold storage |
+| `filings-insider-backfill` | Backfill historical insider purchase data into cold table |
+| `filings-insider-returns` | Calculate forward returns (30d/90d/180d/365d) for insider trades |
 
 ## Caching Strategy
 

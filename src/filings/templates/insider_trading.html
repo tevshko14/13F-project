@@ -149,24 +149,38 @@
     }
     function mix(a, b, t) { return Math.round(a + (b - a) * t); }
 
+    /* ── Canvas gradient helper for Chart.js ── */
+    function makeVerticalGradient(ctx, colorTop, colorBottom) {
+        var canvas = ctx.canvas || ctx;
+        var gradient = canvas.getContext('2d').createLinearGradient(0, 0, 0, canvas.height);
+        gradient.addColorStop(0, colorTop);
+        gradient.addColorStop(1, colorBottom);
+        return gradient;
+    }
+
     /* ── Simple view: one green bar + one red bar per ticker ── */
     function buildSimpleData(chartData) {
+        var canvas = document.getElementById('insiderMomentumChart');
+        var buyGradient = canvas ? makeVerticalGradient(canvas, '#34d399', '#047857') : '#047857';
+        var sellGradient = canvas ? makeVerticalGradient(canvas, '#b91c1c', '#f87171') : '#b91c1c';
         return {
             labels: chartData.map(function(d) { return d.ticker; }),
             datasets: [
                 {
                     label: 'Purchases',
                     data: chartData.map(function(d) { return d.buy_value; }),
-                    backgroundColor: 'rgba(46, 125, 50, 0.8)',
-                    borderColor: '#1b5e20',
+                    backgroundColor: buyGradient,
+                    borderColor: '#047857',
                     borderWidth: 1,
+                    borderRadius: 4,
                 },
                 {
                     label: 'Sales',
                     data: chartData.map(function(d) { return -d.sell_value; }),
-                    backgroundColor: 'rgba(198, 40, 40, 0.8)',
-                    borderColor: '#b71c1c',
+                    backgroundColor: sellGradient,
+                    borderColor: '#b91c1c',
                     borderWidth: 1,
+                    borderRadius: 4,
                 },
             ],
         };

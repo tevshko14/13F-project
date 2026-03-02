@@ -679,3 +679,88 @@ def build_retail_leaderboard_data(
         _leaderboard_cache = (time.time(), result)
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 6. Retail Sentiment Overview (Homepage Card)
+# ═══════════════════════════════════════════════════════════════════
+
+_sentiment_overview_cache: tuple[float, dict] | None = None
+_SENTIMENT_OVERVIEW_TTL = 900  # 15 minutes
+
+
+def get_retail_sentiment_overview() -> dict:
+    """Aggregate CNN Fear & Greed + ApeWisdom top movers for the homepage card.
+
+    Returns dict with:
+        fear_greed: {score, rating, previous_close, one_week_ago, one_month_ago, one_year_ago} | None
+        top_movers: top 5 tickers by 24h velocity change
+        top_mentioned: top 5 tickers by total mentions
+        metadata: {timestamp}
+    """
+    global _sentiment_overview_cache
+
+    now = time.time()
+    with _lock:
+        if _sentiment_overview_cache is not None:
+            ts, data = _sentiment_overview_cache
+            if now - ts < _SENTIMENT_OVERVIEW_TTL:
+                return data
+
+    try:
+        fear_greed = _get_cnn_fear_greed()
+    except Exception:
+        logger.warning("Failed to fetch CNN Fear & Greed for overview card")
+        fear_greed = None
+
+    try:
+        ape_all = _get_apewisdom_all()
+    except Exception:
+        logger.warning("Failed to fetch ApeWisdom for overview card")
+        ape_all = []
+
+    # ── Build enriched rows with velocity ──
+    rows: list[dict] = []
+    for item in ape_all:
+        ticker = (item.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        mentions = int(item.get("mentions") or 0)
+        mentions_24h = int(item.get("mentions_24h_ago") or 0)
+        upvotes = int(item.get("upvotes") or 0)
+        rank = int(item.get("rank") or 0)
+
+        velocity_pct = (
+            ((mentions - mentions_24h) / max(mentions_24h, 1)) * 100
+            if mentions_24h > 0
+            else 0.0
+        )
+
+        rows.append({
+            "rank": rank,
+            "ticker": ticker,
+            "name": item.get("name") or "",
+            "mentions": mentions,
+            "upvotes": upvotes,
+            "velocity_pct": round(velocity_pct, 1),
+        })
+
+    # Top 5 by absolute velocity
+    top_movers = sorted(rows, key=lambda r: abs(r["velocity_pct"]), reverse=True)[:5]
+
+    # Top 5 by mentions
+    top_mentioned = sorted(rows, key=lambda r: r["mentions"], reverse=True)[:5]
+
+    result = {
+        "fear_greed": fear_greed,
+        "top_movers": top_movers,
+        "top_mentioned": top_mentioned,
+        "metadata": {
+            "timestamp": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+        },
+    }
+
+    with _lock:
+        _sentiment_overview_cache = (now, result)
+
+    return result

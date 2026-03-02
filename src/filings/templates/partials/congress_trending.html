@@ -36,7 +36,7 @@
     var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
 
     chart.setOption({
-        grid: { left: 40, right: 16, top: 10, bottom: 60 },
+        grid: { left: 40, right: 16, top: 30, bottom: 60 },
         xAxis: {
             type: 'category', data: tickers,
             axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor },
@@ -74,12 +74,12 @@
             type: 'bar', data: counts,
             itemStyle: {
                 color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: '#059669' }, { offset: 1, color: '#34d399' }
+                    { offset: 0, color: '#6ee7b7' }, { offset: 1, color: '#065f46' }
                 ]),
                 borderRadius: [4, 4, 0, 0]
             },
             barMaxWidth: 36,
-            label: { show: true, position: 'top', fontSize: 11, fontWeight: 'bold', color: 'rgba(0,0,0,0.5)' }
+            label: { show: true, position: 'top', fontSize: 11, fontWeight: 'bold', color: axisColor }
         }]
     });
 
