@@ -2524,37 +2524,62 @@ def get_all_logos() -> list[dict]:
 
     Returns list of ``{"ticker": ..., "logo_b64": ...}`` dicts.
     Used at startup to populate the in-memory logo cache.
+
+    Paginates in pages of 1000 to work around Supabase PostgREST
+    default row limit.
     """
     client = _get_client()
     if client is None:
         return []
     try:
-        resp = (
-            client.table("ticker_logos")
-            .select("ticker,logo_b64")
-            .neq("logo_b64", "")
-            .limit(10000)
-            .execute()
-        )
-        return resp.data or []
+        all_rows: list[dict] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = (
+                client.table("ticker_logos")
+                .select("ticker,logo_b64")
+                .neq("logo_b64", "")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = resp.data or []
+            all_rows.extend(rows)
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return all_rows
     except Exception as exc:
         logger.warning("get_all_logos failed: %s", exc)
         return []
 
 
 def get_existing_logo_tickers() -> set[str]:
-    """Return the set of tickers that already have a logo stored."""
+    """Return the set of tickers that already have a logo stored.
+
+    Paginates in pages of 1000 to work around Supabase PostgREST
+    default row limit.
+    """
     client = _get_client()
     if client is None:
         return set()
     try:
-        resp = (
-            client.table("ticker_logos")
-            .select("ticker")
-            .limit(10000)
-            .execute()
-        )
-        return {row["ticker"] for row in (resp.data or []) if row.get("ticker")}
+        result: set[str] = set()
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = (
+                client.table("ticker_logos")
+                .select("ticker")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = resp.data or []
+            result.update(row["ticker"] for row in rows if row.get("ticker"))
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return result
     except Exception as exc:
         logger.warning("get_existing_logo_tickers failed: %s", exc)
         return set()
