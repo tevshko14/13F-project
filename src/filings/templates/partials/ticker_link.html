@@ -1,6 +1,6 @@
-{% macro ticker_link(ticker, cusip=None) -%}
+{% macro ticker_link(ticker, cusip=None, show_logo=True) -%}
 {% if ticker %}
-<a href="/stock/{{ ticker }}" class="ticker">{{ ticker }}</a>
+<a href="/stock/{{ ticker }}" class="ticker">{%- if show_logo and logo_tickers is defined and ticker in logo_tickers %}<img src="/api/logo/{{ ticker }}.png" width="18" height="18" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ ticker }}</a>
 {% elif cusip %}
 <a href="/stock/cusip/{{ cusip }}" class="ticker text-muted">[{{ cusip[:6] }}]</a>
 {% else %}

@@ -29,6 +29,7 @@ from fastapi.responses import (
     JSONResponse,
     PlainTextResponse,
     RedirectResponse,
+    Response,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
@@ -176,6 +177,14 @@ async def _get_refresh_lock(cik: str) -> asyncio.Lock:
 _heavy_pool: ThreadPoolExecutor | None = None
 _heavy_sem: asyncio.Semaphore | None = None
 
+# ── Ticker logo cache ─────────────────────────────────────────────
+# Loaded from Supabase at startup.  Keyed by uppercase ticker.
+# Values are raw PNG bytes (decoded from base64 at load time).
+import base64 as _b64
+
+_logo_cache: dict[str, bytes] = {}
+_logo_set: set[str] = set()  # exposed to templates as Jinja global
+
 
 async def _to_heavy(fn, *args):
     """Run *fn* on the heavy thread pool, gated by a semaphore.
@@ -257,6 +266,23 @@ async def lifespan(app: FastAPI):
         )
     except Exception:
         app.state.deployment_cache = {}
+
+    # Load ticker logos from Supabase into memory (~15MB for ~3K tickers)
+    try:
+        logo_rows = await asyncio.wait_for(
+            asyncio.to_thread(supabase_cache.get_all_logos), timeout=30
+        )
+        for row in logo_rows:
+            t = row.get("ticker", "").upper()
+            b64 = row.get("logo_b64", "")
+            if t and b64:
+                _logo_cache[t] = _b64.b64decode(b64)
+        _logo_set.update(_logo_cache.keys())
+        templates.env.globals["logo_tickers"] = _logo_set
+        logger.info("Loaded %d ticker logos into memory", len(_logo_cache))
+    except Exception as exc:
+        logger.warning("Logo cache load failed (%s), logos disabled", exc)
+        templates.env.globals["logo_tickers"] = set()
 
     # Track background tasks for clean shutdown
     _bg_tasks: set[asyncio.Task] = set()
@@ -907,6 +933,162 @@ async def health_check():
         logger.warning("health_check: default pool slow but recovered on retry")
 
     return JSONResponse({"status": "ok"})
+
+
+# --- Ticker logos (self-hosted, served from memory) ---
+
+
+@app.get("/api/logo/{ticker}.png")
+async def serve_logo(ticker: str):
+    """Serve a company logo PNG from the in-memory cache.
+
+    Browser caches for 1 year (immutable).  Returns 404 if logo not found.
+    """
+    data = _logo_cache.get(ticker.upper())
+    if not data:
+        return Response(status_code=404)
+    return Response(
+        content=data,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+@app.get("/api/admin/populate-logos")
+async def populate_logos(request: Request):
+    """One-shot endpoint to download company logos from Clearbit and store in Supabase.
+
+    Collects all unique tickers from fund holdings, insider trades, and congress trades,
+    then downloads logos for any that don't already exist in the ticker_logos table.
+    """
+    import httpx
+
+    # 1. Collect all known tickers
+    all_tickers: set[str] = set()
+
+    # From 13F fund holdings
+    fc = _fund_cache()
+    for fund_data in fc.values():
+        for h in fund_data.get("all_holdings", []):
+            t = h.get("ticker")
+            if t:
+                all_tickers.add(t.upper())
+
+    # From insider trades (Supabase)
+    insider_tickers = await asyncio.to_thread(supabase_cache.get_distinct_insider_tickers)
+    all_tickers.update(t.upper() for t in insider_tickers)
+
+    # From congress trades (Supabase)
+    try:
+        congress_resp = await asyncio.to_thread(
+            lambda: supabase_cache._get_client().table("congress_trades")
+            .select("ticker")
+            .neq("ticker", "")
+            .limit(50000)
+            .execute()
+            if supabase_cache._get_client()
+            else None
+        )
+        if congress_resp and congress_resp.data:
+            all_tickers.update(
+                r["ticker"].upper() for r in congress_resp.data if r.get("ticker")
+            )
+    except Exception:
+        pass
+
+    # 2. Check which already have logos
+    existing = await asyncio.to_thread(supabase_cache.get_existing_logo_tickers)
+    new_tickers = sorted(all_tickers - existing)
+
+    total = len(all_tickers)
+    already = len(existing)
+    downloaded = 0
+    failed = 0
+    failed_list: list[str] = []
+
+    # 3. Download logos for new tickers
+    rows_to_upsert: list[dict] = []
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        for i, ticker in enumerate(new_tickers):
+            # Resolve domain via yfinance
+            try:
+                domain = await _to_heavy(client._resolve_logo_domain, ticker)
+            except Exception:
+                domain = None
+
+            if not domain:
+                # Store empty row so we don't retry this ticker
+                rows_to_upsert.append({
+                    "ticker": ticker,
+                    "logo_b64": "",
+                    "content_type": "image/png",
+                    "logo_domain": "",
+                })
+                failed += 1
+                failed_list.append(ticker)
+                continue
+
+            # Download PNG from Clearbit
+            try:
+                resp = await http.get(
+                    f"https://logo.clearbit.com/{domain}",
+                    follow_redirects=True,
+                )
+                if resp.status_code == 200 and len(resp.content) > 100:
+                    b64 = _b64.b64encode(resp.content).decode("ascii")
+                    ct = resp.headers.get("content-type", "image/png")
+                    rows_to_upsert.append({
+                        "ticker": ticker,
+                        "logo_b64": b64,
+                        "content_type": ct,
+                        "logo_domain": domain,
+                    })
+                    # Also add to in-memory cache immediately
+                    _logo_cache[ticker] = resp.content
+                    _logo_set.add(ticker)
+                    downloaded += 1
+                else:
+                    rows_to_upsert.append({
+                        "ticker": ticker,
+                        "logo_b64": "",
+                        "content_type": "image/png",
+                        "logo_domain": domain,
+                    })
+                    failed += 1
+                    failed_list.append(ticker)
+            except Exception:
+                rows_to_upsert.append({
+                    "ticker": ticker,
+                    "logo_b64": "",
+                    "content_type": "image/png",
+                    "logo_domain": domain,
+                })
+                failed += 1
+                failed_list.append(ticker)
+
+            # Batch upsert every 50 rows
+            if len(rows_to_upsert) >= 50:
+                await asyncio.to_thread(supabase_cache.upsert_logos, rows_to_upsert)
+                rows_to_upsert.clear()
+
+            # Rate limit: 200ms between Clearbit requests
+            await asyncio.sleep(0.2)
+
+    # Final batch upsert
+    if rows_to_upsert:
+        await asyncio.to_thread(supabase_cache.upsert_logos, rows_to_upsert)
+
+    # Update Jinja global
+    templates.env.globals["logo_tickers"] = _logo_set
+
+    return JSONResponse({
+        "total_tickers": total,
+        "already_had_logos": already,
+        "downloaded": downloaded,
+        "failed": failed,
+        "failed_tickers": failed_list[:50],  # truncate for readability
+        "in_memory": len(_logo_cache),
+    })
 
 
 # --- Homepage: dashboard with market data & widgets ---

@@ -52,7 +52,7 @@
         <span class="stat-label">Most Traded</span>
         <span class="stat-value">
             {% if stats.most_traded_ticker %}
-            <a href="/stock/{{ stats.most_traded_ticker }}" style="color: inherit; text-decoration: none; font-weight: 600;">{{ stats.most_traded_ticker }}</a>
+            <a href="/stock/{{ stats.most_traded_ticker }}" style="color: inherit; text-decoration: none; font-weight: 600;">{% if logo_tickers is defined and stats.most_traded_ticker in logo_tickers %}<img src="/api/logo/{{ stats.most_traded_ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ stats.most_traded_ticker }}</a>
             {% else %}—{% endif %}
         </span>
     </div>
@@ -132,7 +132,7 @@
 <div class="activity-cluster{% if loop.index > 10 %} consensus-overflow{% endif %}">
     <div class="cluster-header" onclick="toggleCluster(this)">
         <span class="cluster-ticker">
-            <a href="/stock/{{ c.ticker }}" style="color: inherit;">{{ c.ticker }}</a>
+            <a href="/stock/{{ c.ticker }}" style="color: inherit;">{% if logo_tickers is defined and c.ticker in logo_tickers %}<img src="/api/logo/{{ c.ticker }}.png" width="18" height="18" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ c.ticker }}</a>
         </span>
         <span class="cluster-name">{{ c.issuer_name[:40] }}</span>
         <span class="cluster-sentiment-wrap">
@@ -242,7 +242,7 @@
             </td>
             <td>
                 {% if item.ticker %}
-                <a href="/stock/{{ item.ticker }}"><strong style="font-family: monospace;">{{ item.ticker }}</strong></a>
+                <a href="/stock/{{ item.ticker }}">{% if logo_tickers is defined and item.ticker in logo_tickers %}<img src="/api/logo/{{ item.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}<strong style="font-family: monospace;">{{ item.ticker }}</strong></a>
                 {% else %}<span class="text-muted">—</span>{% endif %}
             </td>
             <td class="text-small">{{ item.asset_name[:30] }}</td>

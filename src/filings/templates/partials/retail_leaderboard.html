@@ -56,7 +56,7 @@
                 <td class="text-right text-muted">{{ s.rank }}</td>
                 <td>
                     <a href="/stock/{{ s.ticker }}" class="ticker" style="text-decoration: none; font-weight: 600;">
-                        {{ s.ticker }}
+                        {% if logo_tickers is defined and s.ticker in logo_tickers %}<img src="/api/logo/{{ s.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ s.ticker }}
                     </a>
                 </td>
                 <td class="text-muted" style="max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">

@@ -42,7 +42,7 @@
             <td>
                 <div class="tag-list">
                     {% for t in summary.top_holdings %}
-                    <a href="/stock/{{ t }}" class="tag">{{ t }}</a>
+                    <a href="/stock/{{ t }}" class="tag">{% if logo_tickers is defined and t in logo_tickers %}<img src="/api/logo/{{ t }}.png" width="14" height="14" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ t }}</a>
                     {% endfor %}
                 </div>
             </td>

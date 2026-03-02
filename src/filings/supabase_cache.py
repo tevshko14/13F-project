@@ -2514,3 +2514,71 @@ def get_latest_congress_sync(limit: int = 5) -> list[dict] | None:
     except Exception as exc:
         logger.warning("get_latest_congress_sync failed: %s", exc)
         return None
+
+
+# ── Ticker logos ─────────────────────────────────────────────────────
+
+
+def get_all_logos() -> list[dict]:
+    """Bulk-read every ticker logo from ``ticker_logos``.
+
+    Returns list of ``{"ticker": ..., "logo_b64": ...}`` dicts.
+    Used at startup to populate the in-memory logo cache.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        resp = (
+            client.table("ticker_logos")
+            .select("ticker,logo_b64")
+            .neq("logo_b64", "")
+            .limit(10000)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_all_logos failed: %s", exc)
+        return []
+
+
+def get_existing_logo_tickers() -> set[str]:
+    """Return the set of tickers that already have a logo stored."""
+    client = _get_client()
+    if client is None:
+        return set()
+    try:
+        resp = (
+            client.table("ticker_logos")
+            .select("ticker")
+            .limit(10000)
+            .execute()
+        )
+        return {row["ticker"] for row in (resp.data or []) if row.get("ticker")}
+    except Exception as exc:
+        logger.warning("get_existing_logo_tickers failed: %s", exc)
+        return set()
+
+
+def upsert_logos(rows: list[dict]) -> int:
+    """Batch upsert rows into ``ticker_logos``.
+
+    Each row should have: ``ticker``, ``logo_b64``, ``content_type``, ``logo_domain``.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    upserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("ticker_logos").upsert(
+                chunk, on_conflict="ticker"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_logos chunk %d failed: %s", i, exc)
+
+    return upserted

@@ -4,7 +4,7 @@
 {# Macro to render a single ticker item (used twice for seamless scroll) #}
 {% macro ticker_item(t) %}
 <a href="/stock/{{ t.ticker }}" class="ticker-tape-item">
-    <span class="tt-symbol">{{ t.ticker }}</span>
+    {% if logo_tickers is defined and t.ticker in logo_tickers %}<img src="/api/logo/{{ t.ticker }}.png" width="14" height="14" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}<span class="tt-symbol">{{ t.ticker }}</span>
     {% if t.spark %}
     <svg class="tt-spark" viewBox="0 0 50 16" preserveAspectRatio="none">
         <polyline
