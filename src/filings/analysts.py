@@ -100,7 +100,8 @@ def _fetch_yfinance(ticker: str) -> list[AnalystRating]:
     try:
         import yfinance as yf
 
-        tk = yf.Ticker(ticker.upper())
+        from filings.market_data import _yf_session
+        tk = yf.Ticker(ticker.upper(), session=_yf_session)
         ud = tk.upgrades_downgrades
     except Exception:
         return []
@@ -201,8 +202,14 @@ def get_analyst_ratings(ticker: str) -> list[AnalystRating]:
     with ThreadPoolExecutor(max_workers=2) as executor:
         f_finnhub = executor.submit(_fetch_finnhub, ticker)
         f_yf = executor.submit(_fetch_yfinance, ticker)
-        finnhub_data = f_finnhub.result()
-        yf_data = f_yf.result()
+        try:
+            finnhub_data = f_finnhub.result(timeout=15)
+        except Exception:
+            finnhub_data = []
+        try:
+            yf_data = f_yf.result(timeout=15)
+        except Exception:
+            yf_data = []
 
     merged = _merge_ratings(finnhub_data, yf_data)
 

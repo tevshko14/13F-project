@@ -1247,8 +1247,9 @@ def _resolve_logo_domain(ticker: str) -> str | None:
     try:
         import yfinance as yf
         from urllib.parse import urlparse
+        from filings.market_data import _yf_session
 
-        tk = yf.Ticker(ticker)
+        tk = yf.Ticker(ticker, session=_yf_session)
         info = tk.info or {}
         website = info.get("website") or ""
         if website:
@@ -1293,8 +1294,9 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
     # 2. Fall back to yfinance for company name
     try:
         import yfinance as yf
+        from filings.market_data import _yf_session
 
-        tk = yf.Ticker(ticker_upper)
+        tk = yf.Ticker(ticker_upper, session=_yf_session)
         info = tk.info or {}
         name = info.get("longName") or info.get("shortName")
 

@@ -433,8 +433,9 @@ def _resolve_company_name(ticker: str) -> str | None:
     """Resolve ticker to company name via yfinance (reuses existing pattern)."""
     try:
         import yfinance as yf
+        from filings.market_data import _yf_session
 
-        tk = yf.Ticker(ticker.upper())
+        tk = yf.Ticker(ticker.upper(), session=_yf_session)
         info = tk.info or {}
         return info.get("longName") or info.get("shortName")
     except Exception as exc:

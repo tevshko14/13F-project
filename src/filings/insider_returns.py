@@ -92,6 +92,7 @@ def _download_prices(
     Returns a Series indexed by date with closing prices, or None on failure.
     """
     try:
+        from filings.market_data import _YF_TIMEOUT
         df = yf.download(
             ticker,
             start=start_date,
@@ -99,6 +100,7 @@ def _download_prices(
             progress=False,
             threads=False,
             auto_adjust=True,
+            timeout=_YF_TIMEOUT,
         )
         if df is None or df.empty:
             return None
