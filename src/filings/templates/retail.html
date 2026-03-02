@@ -231,7 +231,7 @@
         <div class="rt-card-label">Most Mentioned</div>
         <div class="rt-card-value">
             <a href="/stock/{{ top_stocks[0].ticker }}" class="ticker" style="text-decoration: none;">
-                {{ top_stocks[0].ticker }}
+                {% if logo_tickers is defined and top_stocks[0].ticker in logo_tickers %}<img src="/api/logo/{{ top_stocks[0].ticker }}.png" width="20" height="20" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ top_stocks[0].ticker }}
             </a>
         </div>
         <div class="rt-card-sub">{{ "{:,}".format(top_stocks[0].mentions) }} mentions &middot; {{ "{:,}".format(top_stocks[0].upvotes) }} upvotes</div>
@@ -243,7 +243,7 @@
         <div class="rt-card-label">Biggest Rank Mover</div>
         <div class="rt-card-value" style="color: #2e7d32;">
             <a href="/stock/{{ biggest_mover.ticker }}" class="ticker" style="text-decoration: none; color: #2e7d32;">
-                {{ biggest_mover.ticker }}
+                {% if logo_tickers is defined and biggest_mover.ticker in logo_tickers %}<img src="/api/logo/{{ biggest_mover.ticker }}.png" width="20" height="20" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ biggest_mover.ticker }}
             </a>
             <span style="font-size: 0.5em; vertical-align: middle;">
                 &#x25B2; +{{ (biggest_mover.rank_24h_ago or biggest_mover.rank) - biggest_mover.rank }}
@@ -259,7 +259,7 @@
         <div style="display: flex; gap: 0.5em; flex-wrap: wrap; margin-top: 0.3em;">
             {% for s in top_stocks %}
             <a href="/stock/{{ s.ticker }}" class="ticker tag" style="text-decoration: none; font-size: 0.9em;">
-                {{ s.ticker }}
+                {% if logo_tickers is defined and s.ticker in logo_tickers %}<img src="/api/logo/{{ s.ticker }}.png" width="14" height="14" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ s.ticker }}
             </a>
             {% endfor %}
         </div>

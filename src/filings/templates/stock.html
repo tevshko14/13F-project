@@ -21,8 +21,8 @@
 {% block content %}
 <hgroup>
     <h1 style="display: flex; align-items: center; gap: 0.5em;">
-        {% if stock_info.logo_domain %}
-        <img src="https://logo.clearbit.com/{{ stock_info.logo_domain }}"
+        {% if logo_tickers is defined and stock_info.ticker in logo_tickers %}
+        <img src="/api/logo/{{ stock_info.ticker }}.png"
              alt="{{ stock_info.ticker }} logo" width="40" height="40"
              loading="lazy" decoding="async"
              style="border-radius: 6px; object-fit: contain;"

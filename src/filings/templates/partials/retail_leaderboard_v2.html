@@ -61,7 +61,7 @@
                 <td class="text-right text-muted">{{ row.rank }}</td>
                 <td>
                     <a href="/stock/{{ row.ticker }}" class="ticker" style="text-decoration: none; font-weight: 600;">
-                        {{ row.ticker }}
+                        {% if logo_tickers is defined and row.ticker in logo_tickers %}<img src="/api/logo/{{ row.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ row.ticker }}
                     </a>
                     {% if row.name %}
                     <span class="pp-secondary" style="display: block; font-size: 0.75em; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">

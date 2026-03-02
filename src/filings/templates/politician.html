@@ -487,7 +487,7 @@
         <tr>
             <td>
                 {% if pos.ticker %}
-                    <a href="/stock/{{ pos.ticker }}" style="font-weight: 600;">{{ pos.ticker }}</a>
+                    <a href="/stock/{{ pos.ticker }}" style="font-weight: 600;">{% if logo_tickers is defined and pos.ticker in logo_tickers %}<img src="/api/logo/{{ pos.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ pos.ticker }}</a>
                 {% else %}
                     —
                 {% endif %}
@@ -506,7 +506,7 @@
         <tr class="pol-overflow">
             <td>
                 {% if pos.ticker %}
-                    <a href="/stock/{{ pos.ticker }}" style="font-weight: 600;">{{ pos.ticker }}</a>
+                    <a href="/stock/{{ pos.ticker }}" style="font-weight: 600;">{% if logo_tickers is defined and pos.ticker in logo_tickers %}<img src="/api/logo/{{ pos.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ pos.ticker }}</a>
                 {% else %}
                     —
                 {% endif %}
@@ -580,7 +580,7 @@
             <td style="white-space: nowrap; color: var(--pp-text-muted);">{{ t.filing_date }}</td>
             <td>
                 {% if t.ticker %}
-                    <a href="/stock/{{ t.ticker }}" style="font-weight: 600;">{{ t.ticker }}</a>
+                    <a href="/stock/{{ t.ticker }}" style="font-weight: 600;">{% if logo_tickers is defined and t.ticker in logo_tickers %}<img src="/api/logo/{{ t.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ t.ticker }}</a>
                 {% else %}
                     —
                 {% endif %}
