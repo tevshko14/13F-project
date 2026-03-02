@@ -575,16 +575,37 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 
 async def _prefetch_market_data(app: FastAPI):
-    """Prefetch S&P 500 + index/commodity market data on startup."""
+    """Two-phase market data prefetch for fast cold starts.
+
+    Phase 1 (~2-5s): Load from Supabase → set market_data_ready = True
+    immediately so users see (slightly stale) charts right away.
+
+    Phase 2 (~30s, background): Refresh from yfinance → update memory
+    caches + write back to Supabase for the next redeploy.
+    """
+    app.state.market_data_ready = False
+
+    # ── Phase 1: Supabase warm (fast) ──
     try:
-        app.state.market_data_ready = False
+        warmed = await asyncio.to_thread(market_data.warm_from_supabase)
+        if warmed:
+            app.state.market_data_ready = True
+            logger.info("Phase 1 complete: market data ready from Supabase")
+    except Exception as e:
+        logger.warning("Supabase warm-load failed: %s", e)
+
+    # ── Phase 2: yfinance refresh (slow, runs regardless) ──
+    try:
         await asyncio.gather(
             asyncio.to_thread(market_data.get_sp500_market_data),
             asyncio.to_thread(market_data.get_index_market_data),
         )
         app.state.market_data_ready = True
-    except Exception:
-        app.state.market_data_ready = False
+        logger.info("Phase 2 complete: market data refreshed from yfinance")
+    except Exception as e:
+        logger.warning("yfinance prefetch failed: %s", e)
+        if not app.state.market_data_ready:
+            app.state.market_data_ready = False
 
 
 # ── Background 13F Refresh ────────────────────────────────────────────
