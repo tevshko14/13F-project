@@ -236,6 +236,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # ── Shutdown cleanup ──────────────────────────────────────────────
+    global _posthog_http
+    if _posthog_http and not _posthog_http.is_closed:
+        await _posthog_http.aclose()
+        _posthog_http = None
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # App creation
@@ -1654,32 +1660,26 @@ async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get("stripe-signature", "")
 
-    # ── Signature verification ────────────────────────────────────────
-    if _STRIPE_WEBHOOK_SECRET:
-        try:
-            event = stripe.Webhook.construct_event(
-                payload, sig_header, _STRIPE_WEBHOOK_SECRET
-            )
-        except stripe.SignatureVerificationError:
-            logger.warning("stripe_webhook: invalid signature — request rejected")
-            return JSONResponse({"error": "Invalid signature"}, status_code=400)
-        except Exception as exc:
-            logger.warning("stripe_webhook: payload parse error: %s", exc)
-            return JSONResponse({"error": "Bad payload"}, status_code=400)
-    else:
-        # No webhook secret configured — accept but log a warning.
-        # Set STRIPE_WEBHOOK_SECRET in Railway env vars to enable verification.
-        logger.warning(
-            "stripe_webhook: STRIPE_WEBHOOK_SECRET not set — skipping signature check"
+    # ── Signature verification (mandatory) ────────────────────────────
+    if not _STRIPE_WEBHOOK_SECRET:
+        logger.error(
+            "stripe_webhook: STRIPE_WEBHOOK_SECRET not set — rejecting request. "
+            "Set this env var in Railway to enable webhook processing."
         )
-        try:
-            import json as _json
-            event = stripe.Event.construct_from(
-                _json.loads(payload), stripe.api_key
-            )
-        except Exception as exc:
-            logger.warning("stripe_webhook: failed to parse event: %s", exc)
-            return JSONResponse({"error": "Bad payload"}, status_code=400)
+        return JSONResponse(
+            {"error": "Webhook secret not configured"}, status_code=503
+        )
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, _STRIPE_WEBHOOK_SECRET
+        )
+    except stripe.SignatureVerificationError:
+        logger.warning("stripe_webhook: invalid signature — request rejected")
+        return JSONResponse({"error": "Invalid signature"}, status_code=400)
+    except Exception as exc:
+        logger.warning("stripe_webhook: payload parse error: %s", exc)
+        return JSONResponse({"error": "Bad payload"}, status_code=400)
 
     event_type = event.get("type", "")
     event_id = event.get("id", "")
@@ -1781,17 +1781,28 @@ async def stripe_webhook(request: Request):
 _PH_ASSET_HOST = "https://us-assets.i.posthog.com"
 _PH_API_HOST = "https://us.i.posthog.com"
 
+# Shared httpx client for PostHog proxy — enables connection pooling & reuse.
+# Lazy-initialized on first request to avoid import-time side effects.
+import httpx as _httpx
+
+_posthog_http: _httpx.AsyncClient | None = None
+
+
+def _get_posthog_client() -> _httpx.AsyncClient:
+    global _posthog_http
+    if _posthog_http is None or _posthog_http.is_closed:
+        _posthog_http = _httpx.AsyncClient(timeout=10)
+    return _posthog_http
+
 
 @app.api_route("/ingest/static/{path:path}", methods=["GET", "HEAD"])
 async def posthog_asset_proxy(path: str, request: Request):
     """Proxy PostHog's JS bundle through our domain to defeat ad blockers."""
-    import httpx
-
     url = f"{_PH_ASSET_HOST}/static/{path}"
     params = dict(request.query_params)
     try:
-        async with httpx.AsyncClient(timeout=10) as hc:
-            resp = await hc.get(url, params=params)
+        hc = _get_posthog_client()
+        resp = await hc.get(url, params=params)
         headers = {
             k: v for k, v in resp.headers.items()
             if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
@@ -1809,8 +1820,6 @@ async def posthog_asset_proxy(path: str, request: Request):
 @app.api_route("/ingest/{path:path}", methods=["GET", "POST", "OPTIONS"])
 async def posthog_ingest_proxy(path: str, request: Request):
     """Proxy PostHog event ingestion through our domain to defeat ad blockers."""
-    import httpx
-
     url = f"{_PH_API_HOST}/{path}"
     params = dict(request.query_params)
     body = await request.body()
@@ -1819,14 +1828,14 @@ async def posthog_ingest_proxy(path: str, request: Request):
         if k.lower() not in ("host", "content-length", "transfer-encoding", "connection")
     }
     try:
-        async with httpx.AsyncClient(timeout=10) as hc:
-            resp = await hc.request(
-                method=request.method,
-                url=url,
-                params=params,
-                content=body,
-                headers=headers,
-            )
+        hc = _get_posthog_client()
+        resp = await hc.request(
+            method=request.method,
+            url=url,
+            params=params,
+            content=body,
+            headers=headers,
+        )
         resp_headers = {
             k: v for k, v in resp.headers.items()
             if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
@@ -3072,15 +3081,20 @@ async def market_overview_api(request: Request):
         else:
             commodities.append(item)
 
+    # Fetch all mega-cap chart data concurrently (was sequential)
+    _valid_mega = [
+        (sym, (sp_data or {}).get(sym))
+        for sym in _MEGA_CAP_SYMBOLS
+        if isinstance((sp_data or {}).get(sym), dict)
+    ]
+    chart_tasks = [
+        asyncio.to_thread(market_data.get_overview_chart_data, sym)
+        for sym, _ in _valid_mega
+    ]
+    chart_results = await asyncio.gather(*chart_tasks) if chart_tasks else []
+
     mega_caps = []
-    for sym in _MEGA_CAP_SYMBOLS:
-        entry = (sp_data or {}).get(sym)
-        if not entry or not isinstance(entry, dict):
-            continue
-        # Get chart history from close_df
-        chart_data = await asyncio.to_thread(
-            market_data.get_overview_chart_data, sym
-        )
+    for (sym, entry), chart_data in zip(_valid_mega, chart_results):
         mega_caps.append({
             "symbol": sym,
             "name": _MEGA_CAP_NAMES.get(sym, sym),
@@ -3475,9 +3489,22 @@ async def robots_txt():
     return PlainTextResponse(content, media_type="text/plain")
 
 
+# ── Sitemap cache (regenerated at most once per hour) ─────────────────
+_sitemap_cache: dict[str, object] = {"xml": None, "ts": 0.0}
+_SITEMAP_TTL = 3600  # 1 hour
+
+
 @app.get("/sitemap.xml")
 async def sitemap_xml():
-    """Dynamic sitemap: static pages + all superinvestor holdings + stock pages."""
+    """Dynamic sitemap: static pages + all superinvestor holdings + stock pages.
+    Cached for 1 hour to avoid O(n*m) iteration on every crawler request.
+    """
+    now = time_module.monotonic()
+    if _sitemap_cache["xml"] and (now - _sitemap_cache["ts"]) < _SITEMAP_TTL:
+        return PlainTextResponse(
+            _sitemap_cache["xml"], media_type="application/xml"
+        )
+
     base_url = "https://paperpanda.io"
 
     # ── Static pages (no redirects — only real destination URLs) ──
@@ -3519,6 +3546,10 @@ async def sitemap_xml():
         + "\n"
         "</urlset>\n"
     )
+
+    _sitemap_cache["xml"] = xml
+    _sitemap_cache["ts"] = now
+
     return PlainTextResponse(xml, media_type="application/xml")
 
 
