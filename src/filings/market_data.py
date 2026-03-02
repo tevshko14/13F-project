@@ -72,6 +72,49 @@ _news_cache: tuple[float, list[dict]] | None = None
 _NEWS_TTL = 1_800  # 30 minutes
 
 
+# ── Supabase warm-load (survive redeploys) ───────────────────────────
+
+
+def warm_from_supabase() -> bool:
+    """Hydrate memory caches from Supabase for fast cold starts.
+
+    Called once during lifespan startup (before yfinance prefetch).
+    Returns True if at least one cache was successfully loaded.
+    """
+    global _close_df_cache, _index_cache
+    warmed = False
+
+    try:
+        from filings import supabase_cache
+
+        # 1. Close DataFrame (heatmap + ticker tape)
+        cached, _ = supabase_cache.get_cached_with_stale("market:close_df")
+        if cached and "__dates__" in cached:
+            close_data = _dict_to_df(cached)
+            with _lock:
+                _close_df_cache = (time.time(), close_data)
+            logger.info(
+                "Supabase warm: close_df loaded (%d rows x %d tickers)",
+                len(close_data), len(close_data.columns),
+            )
+            warmed = True
+
+        # 2. Index/commodity data (market overview)
+        cached, _ = supabase_cache.get_cached_with_stale("market:indices")
+        if cached and isinstance(cached, dict) and len(cached) > 0:
+            with _lock:
+                _index_cache = (time.time(), cached)
+            logger.info(
+                "Supabase warm: index data loaded (%d symbols)", len(cached),
+            )
+            warmed = True
+
+    except Exception as e:
+        logger.warning("Supabase warm-load failed: %s", e)
+
+    return warmed
+
+
 # ── S&P 500 Constituents ──────────────────────────────────────────────
 
 # Hardcoded fallback for top ~50 S&P 500 names (used if Wikipedia fails)
@@ -191,11 +234,35 @@ def get_sp500_constituents() -> list[dict]:
 # ── Market Data (daily % change) ──────────────────────────────────────
 
 
+def _df_to_dict(df) -> dict:
+    """Serialize a pandas DataFrame to a JSON-safe dict for Supabase storage."""
+    import pandas as pd
+    result = {}
+    dates = [d.isoformat() for d in df.index]
+    result["__dates__"] = dates
+    for col in df.columns:
+        result[col] = [
+            None if pd.isna(v) else round(float(v), 4) for v in df[col]
+        ]
+    return result
+
+
+def _dict_to_df(data: dict):
+    """Deserialize a dict back to a pandas DataFrame."""
+    import pandas as pd
+    dates = pd.DatetimeIndex(data.pop("__dates__"))
+    df = pd.DataFrame(data, index=dates)
+    return df
+
+
 def _ensure_close_df():
     """Download 1-month of S&P 500 close data and cache it.
 
     Returns the close DataFrame (columns = tickers, rows = dates).
     Covers all heatmap timeframes: 1D (last 2 rows), 1W (~5 rows), 1M (all rows).
+
+    On cold start, tries Supabase first (~2-3s) before falling back to
+    yfinance (~15-30s). Writes back to Supabase after a successful download.
     """
     global _close_df_cache
 
@@ -205,6 +272,25 @@ def _ensure_close_df():
             if time.time() - ts < _CLOSE_DF_TTL:
                 return df
 
+    # ── Phase 1: Try Supabase (fast, survives redeploys) ──
+    try:
+        from filings import supabase_cache
+
+        cached, is_fresh = supabase_cache.get_cached_with_stale("market:close_df")
+        if cached and "__dates__" in cached:
+            close_data = _dict_to_df(cached)
+            logger.info(
+                "Warm-loaded close_df from Supabase (%d rows x %d tickers, %s)",
+                len(close_data), len(close_data.columns),
+                "fresh" if is_fresh else "stale",
+            )
+            with _lock:
+                _close_df_cache = (time.time(), close_data)
+            return close_data
+    except Exception as e:
+        logger.debug("Supabase close_df warm-load failed: %s", e)
+
+    # ── Phase 2: Download from yfinance (slow, but authoritative) ──
     constituents = get_sp500_constituents()
     tickers = [c["ticker"] for c in constituents]
 
@@ -233,6 +319,20 @@ def _ensure_close_df():
         )
         with _lock:
             _close_df_cache = (time.time(), close_data)
+
+        # ── Write back to Supabase for next cold start ──
+        try:
+            from filings import supabase_cache
+
+            serialized = _df_to_dict(close_data)
+            supabase_cache.set_cached(
+                "market:close_df", "market_data", serialized,
+                ttl_seconds=_CLOSE_DF_TTL,
+            )
+            logger.info("Persisted close_df to Supabase (%d tickers)", len(close_data.columns))
+        except Exception as e:
+            logger.debug("Supabase close_df write failed: %s", e)
+
         return close_data
 
     except Exception as e:
@@ -392,6 +492,23 @@ def get_index_market_data() -> dict:
             if time.time() - ts < _INDEX_TTL:
                 return data
 
+    # ── Phase 1: Try Supabase (fast, survives redeploys) ──
+    try:
+        from filings import supabase_cache
+
+        cached, is_fresh = supabase_cache.get_cached_with_stale("market:indices")
+        if cached and isinstance(cached, dict) and len(cached) > 0:
+            logger.info(
+                "Warm-loaded index data from Supabase (%d symbols, %s)",
+                len(cached), "fresh" if is_fresh else "stale",
+            )
+            with _lock:
+                _index_cache = (time.time(), cached)
+            return cached
+    except Exception as e:
+        logger.debug("Supabase index warm-load failed: %s", e)
+
+    # ── Phase 2: Download from yfinance (slow, but authoritative) ──
     symbols = list(_INDEX_SYMBOLS.keys())
 
     try:
@@ -468,6 +585,19 @@ def get_index_market_data() -> dict:
         logger.info("Fetched index/commodity data for %d symbols", len(result))
         with _lock:
             _index_cache = (time.time(), result)
+
+        # ── Write back to Supabase for next cold start ──
+        try:
+            from filings import supabase_cache
+
+            supabase_cache.set_cached(
+                "market:indices", "market_data", result,
+                ttl_seconds=_INDEX_TTL,
+            )
+            logger.info("Persisted index data to Supabase (%d symbols)", len(result))
+        except Exception as e:
+            logger.debug("Supabase index write failed: %s", e)
+
         return result
 
     except Exception as e:
