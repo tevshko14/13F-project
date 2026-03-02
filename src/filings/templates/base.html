@@ -1878,8 +1878,16 @@
                 _resizeHandlers.forEach(function(fn) { try { fn(); } catch(e) {} });
             });
 
-            document.addEventListener('htmx:beforeSwap', function() {
+            document.addEventListener('htmx:beforeSwap', function(evt) {
                 if (typeof echarts === 'undefined') return;
+                // Only dispose on full-page hx-boost navigations (target is
+                // <body> or <html>), NOT on partial HTMX content swaps like
+                // bento card loads which would destroy charts still in view.
+                var target = evt.detail && evt.detail.target;
+                if (!target) return;
+                var tag = target.tagName;
+                if (tag !== 'BODY' && tag !== 'HTML') return;
+
                 // Dispose every ECharts instance in the outgoing DOM
                 var containers = document.querySelectorAll('[_echarts_instance_]');
                 containers.forEach(function(el) {
