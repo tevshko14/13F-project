@@ -1312,27 +1312,6 @@ async def logo_status():
     })
 
 
-@app.get("/api/admin/logo-test")
-async def logo_test(domain: str = Query("nvidia.com")):
-    """Test favicon download from the server to diagnose issues."""
-    import httpx
-
-    url = f"https://www.google.com/s2/favicons?domain={domain}&sz=128"
-    try:
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as http:
-            resp = await http.get(url)
-            return JSONResponse({
-                "domain": domain,
-                "url": url,
-                "status": resp.status_code,
-                "size": len(resp.content),
-                "content_type": resp.headers.get("content-type", ""),
-                "ok": resp.status_code == 200 and len(resp.content) > 50,
-            })
-    except Exception as exc:
-        return JSONResponse({"domain": domain, "error": str(exc)})
-
-
 # --- Homepage: dashboard with market data & widgets ---
 
 
