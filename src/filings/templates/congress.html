@@ -49,6 +49,36 @@
     .cg-panel { display: none; opacity: 0; transition: opacity 0.25s ease; }
     .cg-panel.active { display: block; opacity: 1; }
 
+    /* ── Leaderboard toggle pills ── */
+    .cg-lb-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3em;
+        padding: 0.35em 0.85em;
+        border-radius: 999px;
+        font-size: 0.8em;
+        font-weight: 600;
+        text-decoration: none;
+        border: 1.5px solid var(--pico-muted-border-color);
+        color: var(--pico-muted-color);
+        background: transparent;
+        transition: all 0.15s;
+        cursor: pointer;
+    }
+    .cg-lb-pill:hover {
+        border-color: #1976d2;
+        color: #1976d2;
+    }
+    .cg-lb-pill.active {
+        border-color: #1976d2;
+        background: #1976d2;
+        color: #fff;
+    }
+    .cg-lb-pill.active:hover {
+        opacity: 0.85;
+        color: #fff;
+    }
+
     /* ── Stats bar ── */
     .cg-stats {
         display: flex;
@@ -401,65 +431,60 @@
 })();
 </script>
 
-{# ── Trade Frequency — Most Active Traders (Past 12 Months) ── #}
-{% if trade_frequency %}
+{# ── Congress Leaderboard (Trade Frequency + Net Worth toggle) ── #}
+{% if trade_frequency or net_worth_leaderboard %}
 <div class="cg-card" style="margin-top: 1em;">
-    <div class="cg-card-header">Trade Frequency</div>
-    <div class="cg-card-sub">Most active congressional traders in the past 12 months — bars colored by party affiliation</div>
-    <div id="cg-frequency-chart" style="width: 100%; height: 700px;"></div>
+    <div style="display: flex; gap: 0.4rem; margin-bottom: 0.6rem;">
+        <button class="cg-lb-pill active" id="cg-lb-btn-freq" onclick="switchLeaderboard('frequency')">📊 Trade Frequency</button>
+        <button class="cg-lb-pill" id="cg-lb-btn-nw" onclick="switchLeaderboard('networth')">💰 Net Worth</button>
+    </div>
+    <div class="cg-card-header" id="cg-lb-title">Trade Frequency</div>
+    <div class="cg-card-sub" id="cg-lb-sub">Most active congressional traders in the past 12 months — bars colored by party affiliation</div>
+    <div id="cg-leaderboard-chart" style="width: 100%; height: 750px;"></div>
 </div>
 <script>
 (function() {
     var freqData = {{ trade_frequency | tojson }};
-    var el = document.getElementById('cg-frequency-chart');
-    if (!el || !freqData || freqData.length === 0) return;
+    var nwData   = {{ net_worth_leaderboard | tojson }};
+    var el       = document.getElementById('cg-leaderboard-chart');
+    if (!el) return;
 
-    window.requireECharts(function(err) {
-        if (err) { el.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+    var chartInstance = null;
+    var currentView = 'frequency';
+    var esc = window.escHtml || function(s){ return s; };
 
-        var chart = echarts.init(el);
-        var esc = window.escHtml || function(s){ return s; };
+    function makeGradient(colorHex) {
+        var c = (colorHex || '').toLowerCase();
+        if (c === '#2563eb' || c === '#3b82f6')
+            return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#64b5f6' }]);
+        if (c === '#dc2626' || c === '#ef4444')
+            return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#7f1d1d' }, { offset: 1, color: '#fca5a5' }]);
+        return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#4b5563' }, { offset: 1, color: '#9ca3af' }]);
+    }
 
-        var cs = getComputedStyle(document.documentElement);
-        var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
-        var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
-
-        /* Reverse data so highest count is at top of horizontal chart */
+    function buildFreqOption(axisColor, gridColor) {
+        if (!freqData || freqData.length === 0) return null;
         var reversed = freqData.slice().reverse();
-
         var labels = reversed.map(function(d) {
             var parts = (d.name || '').split(' ');
             var lastName = parts.length > 1 ? parts[parts.length - 1] : d.name;
             return lastName + ' (' + d.state + ')';
         });
-        var counts = reversed.map(function(d) { return d.trade_count; });
-        var barGradients = reversed.map(function(d) {
-            var c = (d.color || '').toLowerCase();
-            if (c === '#2563eb' || c === '#3b82f6') // Democrat blue
-                return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#64b5f6' }]);
-            if (c === '#dc2626' || c === '#ef4444') // Republican red
-                return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#7f1d1d' }, { offset: 1, color: '#fca5a5' }]);
-            return new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#4b5563' }, { offset: 1, color: '#9ca3af' }]); // Independent gray
-        });
-
-        chart.setOption({
+        return {
             animation: false,
-            grid: { left: 130, right: 50, top: 10, bottom: 10 },
+            grid: { left: 130, right: 60, top: 10, bottom: 40 },
             yAxis: {
-                type: 'category',
-                data: labels,
-                inverse: false,
+                type: 'category', data: labels, inverse: false,
                 axisLabel: {
                     fontSize: 11, fontWeight: 'bold',
-                    color: function(value, index) { return reversed[index] ? reversed[index].color : axisColor; }
+                    color: function(v, i) { return reversed[i] ? reversed[i].color : axisColor; }
                 },
                 axisLine: { lineStyle: { color: gridColor } },
                 axisTick: { alignWithLabel: true, lineStyle: { color: gridColor } }
             },
             xAxis: {
                 type: 'value', name: 'Trades', nameTextStyle: { fontSize: 10, color: axisColor },
-                nameLocation: 'end',
-                minInterval: 1,
+                nameLocation: 'end', minInterval: 1,
                 axisLabel: { color: axisColor },
                 splitLine: { lineStyle: { color: gridColor } }
             },
@@ -493,27 +518,152 @@
                 }
             },
             series: [{
-                type: 'bar', data: counts,
+                type: 'bar',
+                data: reversed.map(function(d) { return d.trade_count; }),
                 itemStyle: {
-                    color: function(params) { return barGradients[params.dataIndex]; },
+                    color: function(params) { return makeGradient(reversed[params.dataIndex].color); },
                     borderRadius: [0, 4, 4, 0]
                 },
                 barMaxWidth: 20,
                 label: {
                     show: true, position: 'right', fontSize: 10,
                     fontWeight: 'bold', color: axisColor,
-                    formatter: '{c}'
+                    formatter: function(params) {
+                        var d = reversed[params.dataIndex];
+                        var tag = d.chamber === 'Senate' ? '  S' : '  H';
+                        return d.trade_count + tag;
+                    }
                 }
-            }]
-        });
+            }],
+            _reversed: reversed
+        };
+    }
 
-        chart.on('click', function(params) {
+    function buildNwOption(axisColor, gridColor) {
+        if (!nwData || nwData.length === 0) return null;
+        var reversed = nwData.slice().reverse();
+        var labels = reversed.map(function(d) { return d.label; });
+        return {
+            animation: false,
+            grid: { left: 130, right: 90, top: 10, bottom: 40 },
+            yAxis: {
+                type: 'category', data: labels, inverse: false,
+                axisLabel: {
+                    fontSize: 11, fontWeight: 'bold',
+                    color: function(v, i) { return reversed[i] ? reversed[i].color : axisColor; }
+                },
+                axisLine: { lineStyle: { color: gridColor } },
+                axisTick: { alignWithLabel: true, lineStyle: { color: gridColor } }
+            },
+            xAxis: {
+                type: 'value', name: 'Net Worth (USD)',
+                nameTextStyle: { fontSize: 10, color: axisColor },
+                nameLocation: 'end',
+                axisLabel: {
+                    color: axisColor,
+                    formatter: function(v) {
+                        if (v >= 1e9) return '$' + (v / 1e9).toFixed(0) + 'B';
+                        if (v >= 1e6) return '$' + (v / 1e6).toFixed(0) + 'M';
+                        if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K';
+                        return '$' + v;
+                    }
+                },
+                splitLine: { lineStyle: { color: gridColor } }
+            },
+            tooltip: {
+                trigger: 'axis', axisPointer: { type: 'shadow' },
+                formatter: function(params) {
+                    if (!params || params.length === 0) return '';
+                    var d = reversed[params[0].dataIndex]; if (!d) return '';
+                    var html = '<div style="min-width: 220px;">';
+                    html += '<strong style="font-size:1.1em;">' + esc(d.name) + '</strong>';
+                    html += '<br/><span style="color:' + d.color + ';font-weight:600;">'
+                         + esc(d.party) + '</span> — ' + esc(d.chamber) + ', ' + esc(d.state);
+                    html += '<br/><br/>Est. Net Worth: <strong>' + esc(d.net_worth_display) + '</strong>';
+                    if (d.source) html += '<br/><span style="opacity:0.5;font-size:0.85em;">Source: ' + esc(d.source) + (d.year ? ' (' + d.year + ')' : '') + '</span>';
+                    html += '</div>';
+                    return html;
+                }
+            },
+            series: [{
+                type: 'bar',
+                data: reversed.map(function(d) { return d.net_worth; }),
+                itemStyle: {
+                    color: function(params) { return makeGradient(reversed[params.dataIndex].color); },
+                    borderRadius: [0, 4, 4, 0]
+                },
+                barMaxWidth: 20,
+                label: {
+                    show: true, position: 'right', fontSize: 10,
+                    fontWeight: 'bold', color: axisColor,
+                    formatter: function(params) {
+                        var d = reversed[params.dataIndex];
+                        var tag = d.chamber === 'Senate' ? '  S' : '  H';
+                        return d.net_worth_display + tag;
+                    }
+                }
+            }],
+            _reversed: reversed
+        };
+    }
+
+    function render(view) {
+        currentView = view;
+        var cs = getComputedStyle(document.documentElement);
+        var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+        var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
+        var opt = view === 'networth' ? buildNwOption(axisColor, gridColor) : buildFreqOption(axisColor, gridColor);
+        if (!opt) { el.innerHTML = '<p style="text-align:center;padding:2em;opacity:0.5;">No data available</p>'; return; }
+
+        var reversed = opt._reversed;
+        delete opt._reversed;
+
+        /* Adjust chart height based on data count */
+        var rowH = Math.max(22, Math.min(28, 700 / reversed.length));
+        el.style.height = Math.max(400, reversed.length * rowH + 60) + 'px';
+
+        if (!chartInstance) {
+            chartInstance = echarts.init(el);
+        } else {
+            chartInstance.clear();
+            chartInstance.resize();
+        }
+
+        chartInstance.setOption(opt);
+
+        /* Click to navigate */
+        chartInstance.off('click');
+        chartInstance.on('click', function(params) {
             var d = reversed[params.dataIndex];
             if (d && d.member_id) window.location.href = '/politician/' + d.member_id;
         });
 
+        /* Update header + subtitle */
+        var titleEl = document.getElementById('cg-lb-title');
+        var subEl   = document.getElementById('cg-lb-sub');
+        if (view === 'networth') {
+            if (titleEl) titleEl.textContent = 'Net Worth Leaderboard';
+            if (subEl)   subEl.textContent = 'Estimated net worth of top congressional traders \u2014 colored by party, tagged by chamber';
+        } else {
+            if (titleEl) titleEl.textContent = 'Trade Frequency';
+            if (subEl)   subEl.textContent = 'Most active congressional traders in the past 12 months \u2014 bars colored by party affiliation';
+        }
+
+        /* Toggle active button */
+        var btnFreq = document.getElementById('cg-lb-btn-freq');
+        var btnNw   = document.getElementById('cg-lb-btn-nw');
+        if (btnFreq) btnFreq.classList.toggle('active', view === 'frequency');
+        if (btnNw)   btnNw.classList.toggle('active', view === 'networth');
+    }
+
+    window.switchLeaderboard = render;
+
+    window.requireECharts(function(err) {
+        if (err) { el.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>'; return; }
+        render('frequency');
         if (!window._cgCharts) window._cgCharts = {};
-        window._cgCharts['frequency'] = chart;
+        window._cgCharts['leaderboard'] = { resize: function() { if (chartInstance) chartInstance.resize(); } };
     });
 })();
 </script>

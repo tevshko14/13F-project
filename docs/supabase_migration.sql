@@ -428,6 +428,9 @@ CREATE TABLE IF NOT EXISTS congress_members (
     first_trade_date DATE,
     last_trade_date  DATE,
     total_trades     INTEGER NOT NULL DEFAULT 0,
+    net_worth_estimate BIGINT,
+    net_worth_source TEXT NOT NULL DEFAULT '',
+    net_worth_year   INT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );

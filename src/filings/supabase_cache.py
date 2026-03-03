@@ -311,6 +311,11 @@ CREATE POLICY congress_headshots_read_only ON congress_headshots
     FOR SELECT USING (true);
 
 -- ── Feature announcements (manually edited in Supabase dashboard) ──
+-- Net worth estimates for congress members (scraped from public sources)
+ALTER TABLE congress_members ADD COLUMN IF NOT EXISTS net_worth_estimate BIGINT;
+ALTER TABLE congress_members ADD COLUMN IF NOT EXISTS net_worth_source TEXT NOT NULL DEFAULT '';
+ALTER TABLE congress_members ADD COLUMN IF NOT EXISTS net_worth_year INT;
+
 CREATE TABLE IF NOT EXISTS feature_announcements (
     id          TEXT PRIMARY KEY,
     title       TEXT NOT NULL,
@@ -2292,6 +2297,7 @@ _CONGRESS_MEMBER_COLS = (
     "member_id,full_name,first_name,last_name,party,chamber,"
     "state,state_abbr,district,is_current,"
     "first_trade_date,last_trade_date,total_trades,"
+    "net_worth_estimate,net_worth_source,net_worth_year,"
     "created_at,updated_at"
 )
 

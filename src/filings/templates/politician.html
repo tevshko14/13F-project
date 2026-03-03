@@ -314,8 +314,14 @@
     </div>
     <div class="pol-stat-card">
         <div class="pol-stat-value">{{ net_worth_display }}</div>
-        <div class="pol-stat-label">Est. Net Worth</div>
+        <div class="pol-stat-label">Est. Net Worth{% if net_worth_year %} ({{ net_worth_year }}){% endif %}</div>
     </div>
+    {% if net_worth_source and portfolio_value_display and portfolio_value_display != net_worth_display %}
+    <div class="pol-stat-card">
+        <div class="pol-stat-value" style="font-size: 0.95rem; opacity: 0.8;">{{ portfolio_value_display }}</div>
+        <div class="pol-stat-label">Disclosed Trades Value</div>
+    </div>
+    {% endif %}
     <div class="pol-stat-card">
         <div class="pol-stat-value">{{ member.last_trade_date or 'N/A' }}</div>
         <div class="pol-stat-label">Last Trade</div>
