@@ -206,6 +206,19 @@ def _format_compact_amount(low: int | None, high: int | None) -> str:
     return f"{_fmt(low)} - {_fmt(high)}"
 
 
+def _format_net_worth(amount: int) -> str:
+    """Format a single net-worth amount: ``$300M``, ``$16M``, ``$1.6M``."""
+    if amount >= 1_000_000_000:
+        val = amount / 1_000_000_000
+        return f"${val:.1f}B".replace(".0B", "B")
+    if amount >= 1_000_000:
+        val = amount / 1_000_000
+        return f"${val:.1f}M".replace(".0M", "M")
+    if amount >= 1_000:
+        return f"${amount // 1_000}K"
+    return f"${amount:,}"
+
+
 # ── JSON Extraction from Next.js SSR ─────────────────────────────────
 
 # Capitol Trades is a Next.js app that embeds trade data in
@@ -670,13 +683,29 @@ def prepare_politician_display(
             ),
         })
 
+    # Use stored net-worth estimate when available; fall back to trade-range calc
+    stored_nw = member.get("net_worth_estimate")
+    portfolio_display = _format_compact_amount(net_worth_low, net_worth_high)
+
+    if stored_nw and int(stored_nw) > 0:
+        nw_display = _format_net_worth(int(stored_nw))
+        nw_source = member.get("net_worth_source", "")
+        nw_year = member.get("net_worth_year")
+    else:
+        nw_display = portfolio_display
+        nw_source = ""
+        nw_year = None
+
     return {
         "member": member,
         "trades": display_trades,
         "portfolio": portfolio_list,
         "net_worth_low": net_worth_low,
         "net_worth_high": net_worth_high,
-        "net_worth_display": _format_compact_amount(net_worth_low, net_worth_high),
+        "net_worth_display": nw_display,
+        "net_worth_source": nw_source,
+        "net_worth_year": nw_year,
+        "portfolio_value_display": portfolio_display,
         "total_trades": len(sorted_trades),
         "total_buys": total_buys,
         "total_sells": total_sells,
@@ -1558,6 +1587,48 @@ def prepare_trade_frequency(
     return result
 
 
+def prepare_net_worth_leaderboard(members: list[dict], top_n: int = 30) -> list[dict]:
+    """Build a net-worth leaderboard from stored estimates.
+
+    Returns a list of dicts sorted by net_worth_estimate DESC,
+    ready for the horizontal bar chart on /congress.
+    """
+    _PARTY_COLORS = {
+        "Democrat": "#2563eb",
+        "Republican": "#dc2626",
+        "Independent": "#6b7280",
+    }
+
+    candidates = [
+        m for m in (members or [])
+        if m.get("net_worth_estimate") and int(m["net_worth_estimate"]) > 0
+    ]
+    candidates.sort(key=lambda m: int(m["net_worth_estimate"]), reverse=True)
+
+    result: list[dict] = []
+    for m in candidates[:top_n]:
+        nw = int(m["net_worth_estimate"])
+        party = m.get("party", "Independent")
+        parts = (m.get("full_name", "") or "").split()
+        last_name = parts[-1] if len(parts) > 1 else m.get("full_name", "")
+
+        result.append({
+            "name": m.get("full_name", ""),
+            "label": f"{last_name} ({m.get('state_abbr', '')})",
+            "party": party,
+            "chamber": m.get("chamber", ""),
+            "color": _PARTY_COLORS.get(party, "#6b7280"),
+            "net_worth": nw,
+            "net_worth_display": _format_net_worth(nw),
+            "member_id": m.get("member_id", ""),
+            "state": m.get("state_abbr", ""),
+            "source": m.get("net_worth_source", ""),
+            "year": m.get("net_worth_year"),
+        })
+
+    return result
+
+
 def prepare_congress_page_data(
     members: list[dict],
     all_trades: list[dict],
@@ -1592,6 +1663,9 @@ def prepare_congress_page_data(
     # Trade frequency — most active traders in last 12 months
     trade_frequency = prepare_trade_frequency(members or [], recent_trades or [], top_n=25)
 
+    # Net worth leaderboard
+    net_worth_leaderboard = prepare_net_worth_leaderboard(members or [], top_n=30)
+
     # Summary stats
     all_tickers = set()
     for t in (all_trades or []):
@@ -1620,5 +1694,6 @@ def prepare_congress_page_data(
         "momentum": momentum,
         "activity": activity,
         "trade_frequency": trade_frequency,
+        "net_worth_leaderboard": net_worth_leaderboard,
         "stats": stats,
     }
