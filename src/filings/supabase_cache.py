@@ -288,6 +288,38 @@ CREATE INDEX IF NOT EXISTS idx_iph_ticker_trade_date
 CREATE INDEX IF NOT EXISTS idx_iph_pending_returns
     ON insider_purchases_history (ticker, trade_date)
     WHERE returns_updated IS NULL;
+
+-- ── Congress member headshots (mirrors ticker_logos pattern) ──────
+CREATE TABLE IF NOT EXISTS congress_headshots (
+    member_id    TEXT PRIMARY KEY,
+    photo_b64    TEXT NOT NULL DEFAULT '',
+    content_type TEXT NOT NULL DEFAULT 'image/jpeg',
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ── RLS: protect ticker_logos & congress_headshots from public mutation ──
+-- Both tables are written only by the backend (service_role key).
+-- The anon / authenticated roles can SELECT but not INSERT/UPDATE/DELETE.
+ALTER TABLE ticker_logos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ticker_logos_read_only ON ticker_logos;
+CREATE POLICY ticker_logos_read_only ON ticker_logos
+    FOR SELECT USING (true);
+
+ALTER TABLE congress_headshots ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS congress_headshots_read_only ON congress_headshots;
+CREATE POLICY congress_headshots_read_only ON congress_headshots
+    FOR SELECT USING (true);
+
+-- ── Feature announcements (manually edited in Supabase dashboard) ──
+CREATE TABLE IF NOT EXISTS feature_announcements (
+    id          TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    message     TEXT NOT NULL DEFAULT '',
+    icon        TEXT NOT NULL DEFAULT '🐼',
+    toast_type  TEXT NOT NULL DEFAULT 'alert',
+    link        TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 
@@ -2221,6 +2253,39 @@ def cleanup_old_notifications(days: int = 2) -> int:
         return 0
 
 
+# ── Feature announcements ────────────────────────────────────────────
+
+_FEATURE_ANNOUNCEMENT_COLS = "id,title,message,icon,toast_type,link,created_at"
+
+
+def get_recent_feature_announcements(limit: int = 20) -> list[dict]:
+    """Fetch recent feature announcements (newest first, last 7 days).
+
+    Only returns announcements from the last 7 days to avoid
+    re-syncing old entries whose derived notifications have already
+    been cleaned up by ``cleanup_old_notifications``.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=7)
+        ).isoformat()
+        resp = (
+            client.table("feature_announcements")
+            .select(_FEATURE_ANNOUNCEMENT_COLS)
+            .gt("created_at", cutoff)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_recent_feature_announcements failed: %s", exc)
+        return []
+
+
 # ── Congress Trading: member + trade CRUD ─────────────────────────────
 
 _CONGRESS_MEMBER_COLS = (
@@ -2717,5 +2782,101 @@ def insert_logos(rows: list[dict]) -> int:
             inserted += len(chunk)
         except Exception as exc:
             logger.warning("insert_logos chunk %d failed: %s", i, exc)
+
+    return inserted
+
+
+# ── Congress headshots (mirrors ticker_logos pattern) ─────────────
+
+
+def get_all_headshots() -> list[dict]:
+    """Bulk-read every congress headshot from ``congress_headshots``.
+
+    Returns list of ``{"member_id": ..., "photo_b64": ...}`` dicts.
+    Used at startup to populate the in-memory headshot cache.
+
+    Paginates in pages of 1000 to work around Supabase PostgREST
+    default row limit.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        all_rows: list[dict] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = (
+                client.table("congress_headshots")
+                .select("member_id,photo_b64")
+                .neq("photo_b64", "")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = resp.data or []
+            all_rows.extend(rows)
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return all_rows
+    except Exception as exc:
+        logger.warning("get_all_headshots failed: %s", exc)
+        return []
+
+
+def get_existing_headshot_members() -> set[str]:
+    """Return the set of member_ids that already have a headshot stored.
+
+    Paginates in pages of 1000 to work around Supabase PostgREST
+    default row limit.
+    """
+    client = _get_client()
+    if client is None:
+        return set()
+    try:
+        result: set[str] = set()
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = (
+                client.table("congress_headshots")
+                .select("member_id")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = resp.data or []
+            result.update(row["member_id"] for row in rows if row.get("member_id"))
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return result
+    except Exception as exc:
+        logger.warning("get_existing_headshot_members failed: %s", exc)
+        return set()
+
+
+def insert_headshots(rows: list[dict]) -> int:
+    """Insert-only: add new headshots to ``congress_headshots``, never overwrite.
+
+    Uses upsert with ``ignore_duplicates=True`` so rows whose member_id
+    already exists are silently skipped — existing data is NEVER modified.
+
+    Each row should have: ``member_id``, ``photo_b64``, ``content_type``.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    inserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("congress_headshots").upsert(
+                chunk, on_conflict="member_id", ignore_duplicates=True
+            ).execute()
+            inserted += len(chunk)
+        except Exception as exc:
+            logger.warning("insert_headshots chunk %d failed: %s", i, exc)
 
     return inserted

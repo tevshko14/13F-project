@@ -68,6 +68,7 @@
   .notif-page-type--reddit { color: #f97316; }
   .notif-page-type--congress { color: #059669; }
   .notif-page-type--insider { color: #7c3aed; }
+  .notif-page-type--feature { color: #0ea5e9; }
   .notif-empty {
     text-align: center;
     padding: 3em 1em;
@@ -125,6 +126,37 @@
   .notif-chip--reddit { --chip-color: #f97316; }
   .notif-chip--congress { --chip-color: #059669; }
   .notif-chip--insider { --chip-color: #7c3aed; }
+  .notif-chip--feature { --chip-color: #0ea5e9; }
+
+  /* ── Support the Panda CTA ── */
+  .notif-support-cta {
+    display: flex;
+    align-items: center;
+    gap: 0.8em;
+    padding: 1em 0.8em;
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s;
+    background: linear-gradient(135deg, rgba(251,191,36,0.08), rgba(245,158,11,0.04));
+    border-left: 3px solid #f59e0b;
+    border-radius: 6px;
+    margin: 0.5em 0;
+  }
+  .notif-support-cta:hover {
+    background: linear-gradient(135deg, rgba(251,191,36,0.15), rgba(245,158,11,0.08));
+  }
+  .notif-support-cta .notif-page-icon { font-size: 1.8em; }
+  .notif-support-cta .notif-cta-btn {
+    display: inline-block;
+    margin-top: 0.4em;
+    padding: 0.3em 0.8em;
+    font-size: 0.8em;
+    font-weight: 600;
+    border-radius: 6px;
+    background: #f59e0b;
+    color: #fff;
+    text-decoration: none;
+  }
 </style>
 
 <div class="notif-page-header">
@@ -133,8 +165,8 @@
 </div>
 
 <div class="notif-filters">
-  {% set type_labels = {"13f_change": "📊 13F Filings", "youtube": "🎬 YouTube", "reddit_velocity": "🔥 Reddit", "congress_trade": "🏛️ Congress", "insider_trade": "📈 Insider Trades"} %}
-  {% set type_css = {"13f_change": "13f", "youtube": "youtube", "reddit_velocity": "reddit", "congress_trade": "congress", "insider_trade": "insider"} %}
+  {% set type_labels = {"13f_change": "📊 13F Filings", "youtube": "🎬 YouTube", "reddit_velocity": "🔥 Reddit", "congress_trade": "🏛️ Congress", "insider_trade": "📈 Insider Trades", "feature_release": "🐼 New Features"} %}
+  {% set type_css = {"13f_change": "13f", "youtube": "youtube", "reddit_velocity": "reddit", "congress_trade": "congress", "insider_trade": "insider", "feature_release": "feature"} %}
   <a href="/notifications"
      class="notif-chip{% if not active_types %} notif-chip--active{% endif %}">
     All
@@ -150,6 +182,16 @@
 {% if notifications %}
 <div class="notif-page-list">
   {% for n in notifications %}
+  {% if n.is_cta %}
+  <a href="/support" class="notif-support-cta">
+    <span class="notif-page-icon">🐼</span>
+    <div class="notif-page-body">
+      <div class="notif-page-title">{{ n.title }}</div>
+      <div class="notif-page-msg">{{ n.message }}</div>
+      <span class="notif-cta-btn">Support PaperPanda &rarr;</span>
+    </div>
+  </a>
+  {% else %}
   <a href="{{ n.link or '#' }}" class="notif-page-item">
     <span class="notif-page-icon">{{ n.icon }}</span>
     <div class="notif-page-body">
@@ -166,6 +208,8 @@
           <span class="notif-page-type notif-page-type--congress">Congress</span>
         {% elif n.type == 'insider_trade' %}
           <span class="notif-page-type notif-page-type--insider">Insider</span>
+        {% elif n.type == 'feature_release' %}
+          <span class="notif-page-type notif-page-type--feature">New Feature</span>
         {% else %}
           <span class="notif-page-type">{{ n.type }}</span>
         {% endif %}
@@ -173,6 +217,7 @@
       </div>
     </div>
   </a>
+  {% endif %}
   {% endfor %}
 </div>
 
@@ -193,7 +238,7 @@
     <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
   </svg>
   <p>No notifications in the last 48 hours.</p>
-  <p><small>Notifications are created when 13F filings change, high-impact YouTube videos are posted, Reddit tickers spike, or new congressional trades are filed.</small></p>
+  <p><small>Notifications are created when 13F filings change, high-impact YouTube videos are posted, Reddit tickers spike, congressional trades are filed, or new features are released.</small></p>
 </div>
 {% endif %}
 

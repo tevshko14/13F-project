@@ -13,6 +13,7 @@ Notification IDs are deterministic for deduplication:
   - Reddit spikes:   ``reddit-{ticker}-{YYYY-MM-DD}``
   - Congress trades: ``congress-{member_id}-{trade_id}``
   - Insider trades:  ``insider-{filing_date}-{ticker}-{hash8}``
+  - Feature releases: ``release-{announcement_id}``
 """
 
 from __future__ import annotations
@@ -431,4 +432,48 @@ def create_insider_trade_notification(trade: dict) -> dict | None:
             "trade_type": trade_type,
         },
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
+# ── Feature release notifications ──────────────────────────────────
+
+
+def create_feature_release_notification(announcement: dict) -> dict | None:
+    """Create a notification dict for a feature announcement.
+
+    Deterministic ID: ``release-{announcement_id}``
+    Type: ``feature_release``
+
+    The *created_at* is passed through from the announcement row so the
+    notification timestamp matches when the admin created the entry —
+    not when the scanner discovered it.
+    """
+    ann_id = announcement.get("id", "")
+    if not ann_id:
+        return None
+
+    raw_title = _sanitize(announcement.get("title", "New Feature"))
+    # Auto-prefix with NEW FEATURE / NEW UPDATE if not already present
+    upper = raw_title.upper()
+    if "NEW FEATURE" in upper or "NEW UPDATE" in upper:
+        title = raw_title
+    else:
+        title = f"NEW FEATURE: {raw_title}"
+    message = _sanitize(announcement.get("message", ""))
+    icon = announcement.get("icon", "🐼")  # panda by default
+    toast_type = announcement.get("toast_type", "alert")
+    link = announcement.get("link", "")
+    created_at = announcement.get("created_at", "")
+
+    return {
+        "id": f"release-{ann_id}",
+        "type": "feature_release",
+        "title": title,
+        "message": message,
+        "icon": icon,
+        "toast_type": toast_type,
+        "link": link,
+        "metadata": {"announcement_id": ann_id},
+        "created_at": created_at
+        or datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
