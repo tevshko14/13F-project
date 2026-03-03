@@ -267,10 +267,10 @@ async def lifespan(app: FastAPI):
     except Exception:
         app.state.deployment_cache = {}
 
-    # Load ticker logos from Supabase into memory (~15MB for ~3K tickers)
+    # Load ticker logos from Supabase into memory (~20MB for ~4K tickers)
     try:
         logo_rows = await asyncio.wait_for(
-            asyncio.to_thread(supabase_cache.get_all_logos), timeout=30
+            asyncio.to_thread(supabase_cache.get_all_logos), timeout=120
         )
         for row in logo_rows:
             t = row.get("ticker", "").upper()
