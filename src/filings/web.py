@@ -2623,7 +2623,7 @@ async def notification_count(request: Request, since: str = "2000-01-01T00:00:00
     return JSONResponse({"count": count})
 
 
-_NOTIF_TYPES = ["13f_change", "youtube", "reddit_velocity", "congress_trade"]
+_NOTIF_TYPES = ["13f_change", "youtube", "reddit_velocity", "congress_trade", "insider_trade"]
 
 
 @app.get("/notifications", response_class=HTMLResponse)
