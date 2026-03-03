@@ -5,8 +5,9 @@
 -- Tables:
 --   api_cache                  — Universal persistent cache (L2) for API data
 --   sync_logs                  — Cron worker run tracking and error logging
---   insider_trades             — Dedicated table for SEC Form 4 insider trading data
---   insider_purchases_history  — Cold archive of insider buys (delete-protected, write-once returns)
+--   insider_trades             — Dedicated table for SEC Form 4 insider trading data (hot, 30-day)
+--   insider_trades_history     — Cold archive of ALL insider trades (delete/update-protected, permanent)
+--   insider_purchases_history  — Cold archive of insider buys only (delete-protected, write-once returns)
 --   youtube_events             — YouTube calendar: upcoming livestreams + recent uploads
 --   youtube_channels           — YouTube channel metadata (subscribers, views, frequency)
 --   supporters                 — Stripe donation / subscription tracking (Panda Fund)
@@ -78,8 +79,10 @@ CREATE TABLE IF NOT EXISTS sync_logs (
 -- 3. insider_trades — SEC Form 4 insider trading data
 -- ═══════════════════════════════════════════════════════════════════════
 --
--- Populated by insider_sync cron worker (filings-insider-sync) every 30 min.
+-- Hot table: populated by insider_sync cron worker (filings-insider-sync) every 30 min.
+-- 30-day retention window — older trades pruned by run_retention_cleanup().
 -- Each row is a single SEC Form 4 filing transaction, deduplicated by sec_url.
+-- All trades are also bridged to insider_trades_history (permanent cold archive).
 
 CREATE TABLE IF NOT EXISTS insider_trades (
     id              BIGSERIAL PRIMARY KEY,
@@ -255,7 +258,7 @@ CREATE INDEX IF NOT EXISTS idx_supporters_event
 
 CREATE TABLE IF NOT EXISTS notifications (
     id              TEXT PRIMARY KEY,
-    type            TEXT NOT NULL,                -- "13f", "youtube", "reddit", "congress"
+    type            TEXT NOT NULL,                -- "13f", "youtube", "reddit", "congress", "insider_trade"
     title           TEXT NOT NULL,
     message         TEXT NOT NULL DEFAULT '',
     icon            TEXT NOT NULL DEFAULT '',
@@ -308,7 +311,66 @@ CREATE INDEX IF NOT EXISTS idx_iph_pending_returns
 
 
 -- ═══════════════════════════════════════════════════════════════════════
--- 10. congress_trades — STOCK Act disclosures (cold, write-once)
+-- 10. insider_trades_history — Cold archive of ALL insider trades
+-- ═══════════════════════════════════════════════════════════════════════
+--
+-- Permanent write-once archive of all insider trades (buys + sells).
+-- Bridged from the hot insider_trades table by the insider_sync cron worker.
+-- Protected by DELETE and UPDATE triggers. ON CONFLICT DO NOTHING on insert.
+-- Used for date-filtered queries beyond the 30-day hot table window.
+
+CREATE TABLE IF NOT EXISTS insider_trades_history (
+    id              BIGSERIAL PRIMARY KEY,
+    sec_url         TEXT NOT NULL UNIQUE,
+    filing_date     DATE NOT NULL,
+    trade_date      DATE NOT NULL,
+    ticker          TEXT NOT NULL,
+    company_name    TEXT NOT NULL DEFAULT '',
+    insider_name    TEXT NOT NULL,
+    title           TEXT NOT NULL DEFAULT '',
+    trade_type      TEXT NOT NULL DEFAULT '',     -- "Purchase", "Sale", "Sale+OE"
+    price           NUMERIC(12,4),
+    qty             INTEGER,
+    value           NUMERIC(16,2),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_ith_ticker_trade_date
+    ON insider_trades_history (ticker, trade_date DESC);
+CREATE INDEX IF NOT EXISTS idx_ith_filing_date
+    ON insider_trades_history (filing_date DESC);
+CREATE INDEX IF NOT EXISTS idx_ith_trade_type_filing
+    ON insider_trades_history (trade_type, filing_date DESC);
+
+-- Delete protection trigger
+CREATE OR REPLACE FUNCTION prevent_insider_history_delete()
+RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'DELETE on insider_trades_history is not allowed (cold archive)';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_no_delete_insider_history ON insider_trades_history;
+CREATE TRIGGER trg_no_delete_insider_history
+    BEFORE DELETE ON insider_trades_history
+    FOR EACH ROW EXECUTE FUNCTION prevent_insider_history_delete();
+
+-- Update protection trigger
+CREATE OR REPLACE FUNCTION prevent_insider_history_update()
+RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'UPDATE on insider_trades_history is not allowed (write-once archive)';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_no_update_insider_history ON insider_trades_history;
+CREATE TRIGGER trg_no_update_insider_history
+    BEFORE UPDATE ON insider_trades_history
+    FOR EACH ROW EXECUTE FUNCTION prevent_insider_history_update();
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- 11. congress_trades — STOCK Act disclosures (cold, write-once)
 -- ═══════════════════════════════════════════════════════════════════════
 --
 -- Scraped from Capitol Trades (~35K trades, 200+ politicians).
@@ -346,7 +408,7 @@ CREATE INDEX IF NOT EXISTS idx_ct_filing_date
 
 
 -- ═══════════════════════════════════════════════════════════════════════
--- 11. congress_members — Politician profiles
+-- 12. congress_members — Politician profiles
 -- ═══════════════════════════════════════════════════════════════════════
 --
 -- Derived from Capitol Trades data. Updatable (metadata refresh on re-scrapes),
@@ -375,7 +437,7 @@ CREATE INDEX IF NOT EXISTS idx_cm_total_trades
 
 
 -- ═══════════════════════════════════════════════════════════════════════
--- 12. congress_trades_prices — Forward-return enrichment
+-- 13. congress_trades_prices — Forward-return enrichment
 -- ═══════════════════════════════════════════════════════════════════════
 --
 -- Separate join table for price data because congress_trades has UPDATE
