@@ -471,8 +471,8 @@
         /* Sentiment tooltip (native title, styled wrapper for spacing) */
         .cluster-sentiment-wrap { position: relative; }
 
-        /* Insider trades 10-row accordion */
-        .insider-overflow { display: none; }
+        /* Insider trades 10-row accordion (legacy flat table) */
+        .insider-fade:not(.expanded) .insider-overflow { display: none; }
         .insider-fade { position: relative; }
         .insider-fade::after {
             content: ''; position: absolute; bottom: 0; left: 0; right: 0;
@@ -480,6 +480,29 @@
             pointer-events: none; transition: opacity 0.3s ease;
         }
         .insider-fade.expanded::after { opacity: 0; height: 0; }
+
+        /* Insider cluster accordion (grouped by ticker) */
+        .insider-cluster-fade:not(.expanded) .insider-cluster-overflow { display: none; }
+        .insider-cluster-fade { position: relative; }
+        .insider-cluster-fade::after {
+            content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+            height: 60px; background: var(--pp-gradient-fade);
+            pointer-events: none; transition: opacity 0.3s ease;
+        }
+        .insider-cluster-fade.expanded::after { opacity: 0; height: 0; }
+        .insider-cluster-counts { display: inline-flex; gap: 0.3em; align-items: center; }
+
+        /* Insider detail table inside clusters */
+        .insider-detail-table { font-size: 0.82em; }
+        .insider-detail-table thead th {
+            font-size: 0.78em; color: var(--pp-text-faint);
+            text-transform: uppercase; letter-spacing: 0.04em;
+            padding: 0.4em 0.5em; font-weight: 500;
+            border-bottom: 1px solid var(--pp-border-light);
+            white-space: nowrap;
+        }
+        .insider-detail-table td { padding: 0.45em 0.5em; }
+        .insider-detail-table .badge { font-size: 0.82em; }
 
         /* Insider momentum chart */
         #insider-chart-section {

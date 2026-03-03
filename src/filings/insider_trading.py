@@ -145,6 +145,26 @@ class InsiderTrade:
             "value": parse_dollar_value(self.value),
         }
 
+    def to_full_history_row(self) -> dict:
+        """Convert to a dict for ``insider_trades_history`` (cold table).
+
+        Like :meth:`to_history_row` but **includes** ``trade_type`` since
+        this cold table archives all trade types (not just purchases).
+        """
+        return {
+            "sec_url": self.sec_url,
+            "filing_date": self.filing_date,
+            "trade_date": self.trade_date,
+            "ticker": self.ticker.upper(),
+            "company_name": self.company_name,
+            "insider_name": self.insider_name,
+            "title": self.title,
+            "trade_type": self.trade_type,
+            "price": _parse_price(self.price),
+            "qty": _parse_qty(self.qty),
+            "value": parse_dollar_value(self.value),
+        }
+
     @classmethod
     def from_db_row(cls, row: dict) -> InsiderTrade:
         """Reconstruct an ``InsiderTrade`` from a Supabase row dict."""
@@ -182,6 +202,32 @@ class InsiderTrade:
             insider_name=row.get("insider_name", ""),
             title=row.get("title", ""),
             trade_type="Purchase",
+            price=f"${price:,.2f}" if price is not None else "",
+            qty=f"{qty:,}" if qty is not None else "",
+            owned="",
+            delta_own="",
+            value=f"${value:,.0f}" if value is not None else "",
+            sec_url=row.get("sec_url", ""),
+        )
+
+    @classmethod
+    def from_full_history_row(cls, row: dict) -> InsiderTrade:
+        """Reconstruct from ``insider_trades_history`` (all-types cold table).
+
+        Like :meth:`from_history_row` but reads ``trade_type`` from the
+        row instead of hardcoding ``"Purchase"``.
+        """
+        price = row.get("price")
+        qty = row.get("qty")
+        value = row.get("value")
+        return cls(
+            filing_date=str(row.get("filing_date", "")),
+            trade_date=str(row.get("trade_date", "")),
+            ticker=row.get("ticker", ""),
+            company_name=row.get("company_name", ""),
+            insider_name=row.get("insider_name", ""),
+            title=row.get("title", ""),
+            trade_type=row.get("trade_type", ""),
             price=f"${price:,.2f}" if price is not None else "",
             qty=f"{qty:,}" if qty is not None else "",
             owned="",
@@ -352,7 +398,7 @@ def aggregate_top_tickers(
     Args:
         mixed: When ``True`` (Latest tab), selects top N/2 by most
             positive net flow and top N/2 by most negative net flow,
-            sorted ascending from most bearish (left) to most bullish
+            sorted descending from most bullish (left) to most bearish
             (right).  When ``False`` (Purchases / Sales tab), simply
             picks the top N by total dollar volume.
 
@@ -430,8 +476,8 @@ def aggregate_top_tickers(
         elif len(top_sells) < half:
             top_buys = net_positive[: limit - len(top_sells)]
 
-        # Sort ascending by net flow: most bearish (left) → most bullish (right)
-        sorted_tickers = sorted(top_sells + top_buys, key=lambda d: d["_net"])
+        # Sort descending by net flow: most bullish (left) → most bearish (right)
+        sorted_tickers = sorted(top_sells + top_buys, key=lambda d: d["_net"], reverse=True)
 
         # Clean up temp key
         for d in all_tickers:
@@ -596,6 +642,7 @@ def _scrape_and_backfill_ticker(ticker: str) -> list[InsiderTrade]:
 def get_latest_insider_trades(
     trade_type: str = "",  # "p"=purchases, "s"=sales, ""=all
     count: int = 100,
+    since_date: str = "",  # "YYYY-MM-DD" — only trades filed on/after this date
 ) -> list[InsiderTrade]:
     """Fetch latest insider trades -- Supabase-first with scrape fallback.
 
@@ -608,37 +655,78 @@ def get_latest_insider_trades(
     Args:
         trade_type: ``"p"`` for purchases, ``"s"`` for sales, ``""`` for all.
         count: Number of trades to fetch (max 100).
+        since_date: If set, only return trades with filing_date >= this value.
+                    Bypasses L1 cache (always queries Supabase fresh) and
+                    skips L3 OpenInsider fallback (scraper doesn't support dates).
     """
-    cache_key = f"global:{trade_type or 'all'}:{count}"
+    cache_key = f"global:{trade_type or 'all'}:{count}:{since_date or 'all'}"
 
     # ── L1: in-memory fast path (fresh hit) ──
-    stale_data, is_fresh = _get_cached_with_stale(cache_key, _GLOBAL_TTL)
-    if stale_data is not None and is_fresh:
-        return stale_data
+    # Skip L1 when a date filter is active — we need fresh DB results.
+    if not since_date:
+        stale_data, is_fresh = _get_cached_with_stale(cache_key, _GLOBAL_TTL)
+        if stale_data is not None and is_fresh:
+            return stale_data
+    else:
+        stale_data = None
 
-    # ── L2: Supabase dedicated table ──
+    # ── L2: Supabase hot table (30-day window) ──
     db_filter = {"p": "Purchase", "s": "Sale"}.get(trade_type, "")
-    rows = supabase_cache.get_insider_trades(trade_type=db_filter, limit=count)
+    rows = supabase_cache.get_insider_trades(
+        trade_type=db_filter, limit=count, since_date=since_date,
+    )
 
     if rows:
-        trades = [InsiderTrade.from_db_row(r) for r in rows]
-        _set_cached(cache_key, trades)
-        return trades
+        hot_trades = [InsiderTrade.from_db_row(r) for r in rows]
+
+        # If date-filtered and hot table might be incomplete, supplement
+        # from the cold archive to fill gaps beyond the 30-day window.
+        if since_date and len(hot_trades) < count:
+            hot_urls = {t.sec_url for t in hot_trades if t.sec_url}
+            cold_rows = supabase_cache.get_history_trades(
+                trade_type=db_filter, limit=count, since_date=since_date,
+            )
+            if cold_rows:
+                cold_trades = [
+                    InsiderTrade.from_full_history_row(r)
+                    for r in cold_rows
+                    if r.get("sec_url") and r["sec_url"] not in hot_urls
+                ]
+                hot_trades = hot_trades + cold_trades
+                hot_trades.sort(
+                    key=lambda t: (t.filing_date, t.trade_date), reverse=True,
+                )
+                hot_trades = hot_trades[:count]
+
+        _set_cached(cache_key, hot_trades)
+        return hot_trades
+
+    # ── L2.5: Hot table empty — try cold table directly ──
+    if since_date:
+        cold_rows = supabase_cache.get_history_trades(
+            trade_type=db_filter, limit=count, since_date=since_date,
+        )
+        if cold_rows:
+            trades = [InsiderTrade.from_full_history_row(r) for r in cold_rows]
+            _set_cached(cache_key, trades)
+            return trades
 
     # ── L3: Fallback -- scrape OpenInsider directly + backfill to Supabase ──
-    logger.warning("Supabase insider_trades empty/unavailable -- scraping OpenInsider")
-    trades = _scrape_openinsider_global(trade_type, count)
-    if trades:
-        _set_cached(cache_key, trades)
-        # Backfill scraped trades into Supabase so they persist across restarts
-        try:
-            rows = [t.to_db_row() for t in trades if t.sec_url]
-            if rows:
-                upserted = supabase_cache.upsert_insider_trades(rows)
-                logger.info("Backfilled %d global insider trades to Supabase", upserted)
-        except Exception:
-            logger.debug("Global insider backfill upsert failed")
-        return trades
+    # Skip scraper when date-filtered — OpenInsider doesn't support date params.
+    if not since_date:
+        logger.warning("Supabase insider_trades empty/unavailable -- scraping OpenInsider")
+        trades = _scrape_openinsider_global(trade_type, count)
+        if trades:
+            _set_cached(cache_key, trades)
+            # Backfill scraped trades into Supabase so they persist across restarts
+            try:
+                rows = [t.to_db_row() for t in trades if t.sec_url]
+                if rows:
+                    upserted = supabase_cache.upsert_insider_trades(rows)
+                    logger.info("Backfilled %d global insider trades to Supabase", upserted)
+            except Exception:
+                logger.debug("Global insider backfill upsert failed")
+            return trades
 
     # ── L4: Stale L1 data -- never show empty/error to users ──
     if stale_data:
@@ -652,13 +740,17 @@ def get_latest_insider_trades(
     return []
 
 
-def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
+def get_insider_chart_data(
+    limit: int = 10, trade_type: str = "", since_date: str = "",
+) -> list[dict]:
     """Fetch aggregated chart data for the insider momentum chart.
 
     Args:
         limit: Number of tickers to include in the chart (default 10).
         trade_type: ``""`` for Latest (mixed buys+sells), ``"p"`` for
             Purchases only, ``"s"`` for Sales only.
+        since_date: If set, restrict chart data to trades filed on/after
+            this date (ISO ``YYYY-MM-DD``).
 
     When ``trade_type`` is ``""`` (Latest tab), fetches buys and sells
     separately from Supabase and uses ``mixed=True`` aggregation so both
@@ -666,16 +758,22 @@ def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
     the standard table query with ``mixed=False`` (simple top-N sort).
     """
     is_mixed = trade_type == ""
-    cache_key = f"chart:insider_momentum:{trade_type or 'all'}"
+    cache_key = f"chart:insider_momentum:{trade_type or 'all'}:{since_date or 'all'}"
 
     # ── L1: in-memory fast path ──
-    stale_data, is_fresh = _get_cached_with_stale(cache_key, _GLOBAL_TTL)
-    if stale_data is not None and is_fresh:
-        return aggregate_top_tickers(stale_data, limit=limit, mixed=is_mixed)
+    # Skip L1 when a date filter is active — we need fresh DB results.
+    if not since_date:
+        stale_data, is_fresh = _get_cached_with_stale(cache_key, _GLOBAL_TTL)
+        if stale_data is not None and is_fresh:
+            return aggregate_top_tickers(stale_data, limit=limit, mixed=is_mixed)
+    else:
+        stale_data = None
 
     if is_mixed:
         # ── L2: Supabase — separate buy + sell queries (30 days) ──
-        rows = supabase_cache.get_insider_trades_for_chart(days=30, limit_per_type=250)
+        rows = supabase_cache.get_insider_trades_for_chart(
+            days=30, limit_per_type=250, since_date=since_date,
+        )
         if rows:
             trades = [InsiderTrade.from_db_row(r) for r in rows]
             logger.info(
@@ -689,21 +787,29 @@ def get_insider_chart_data(limit: int = 10, trade_type: str = "") -> list[dict]:
 
         # ── L3: Supabase chart query failed -- fetch buys + sells separately ──
         logger.warning("Chart L2 returned None; falling back to separate queries")
-        buy_trades = get_latest_insider_trades(trade_type="p", count=200)
-        sell_trades = get_latest_insider_trades(trade_type="s", count=200)
+        buy_trades = get_latest_insider_trades(
+            trade_type="p", count=200, since_date=since_date,
+        )
+        sell_trades = get_latest_insider_trades(
+            trade_type="s", count=200, since_date=since_date,
+        )
         trades = (buy_trades or []) + (sell_trades or [])
         if trades:
             _set_cached(cache_key, trades)
             return aggregate_top_tickers(trades, limit=limit, mixed=True)
     else:
         # ── L2: Supabase — single-type query (more rows for richer chart) ──
-        trades = get_latest_insider_trades(trade_type=trade_type, count=200)
+        trades = get_latest_insider_trades(
+            trade_type=trade_type, count=200, since_date=since_date,
+        )
         if trades:
             _set_cached(cache_key, trades)
             return aggregate_top_tickers(trades, limit=limit, mixed=False)
 
         # ── L3: Fall back to smaller fetch ──
-        trades = get_latest_insider_trades(trade_type=trade_type, count=100)
+        trades = get_latest_insider_trades(
+            trade_type=trade_type, count=100, since_date=since_date,
+        )
         if trades:
             return aggregate_top_tickers(trades, limit=limit, mixed=False)
 

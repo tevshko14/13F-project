@@ -74,7 +74,26 @@
         color: #1976d2;
         border-bottom-color: #1976d2;
     }
+
+    /* Date period pills */
+    .insider-period-bar { display: flex; gap: 0.5em; margin-bottom: 1.5em; flex-wrap: wrap; }
+    .insider-period {
+        background: var(--pp-surface-alt); border: 1px solid var(--pp-border);
+        border-radius: 20px; padding: 0.3em 1em; cursor: pointer;
+        font-size: 0.82em; font-weight: 500; color: var(--pp-text-muted);
+        transition: all 0.15s ease;
+    }
+    .insider-period:hover { border-color: var(--pp-text-faint); color: var(--pp-text-secondary); }
+    .insider-period.active { background: #1976d2; color: #fff; border-color: #1976d2; }
 </style>
+
+{# -- Date period filter pills -- #}
+<div class="insider-period-bar">
+    <button class="insider-period active" data-period="" onclick="switchInsiderPeriod('')">This Quarter</button>
+    <button class="insider-period" data-period="today" onclick="switchInsiderPeriod('today')">Today</button>
+    <button class="insider-period" data-period="week" onclick="switchInsiderPeriod('week')">Last 7 Days</button>
+    <button class="insider-period" data-period="month" onclick="switchInsiderPeriod('month')">Last 30 Days</button>
+</div>
 
 {# -- Insider Momentum Chart -- #}
 <article id="insider-chart-section" style="display: none;">
@@ -114,6 +133,8 @@
 <script>
 (function() {
     var currentFilter = 'all';
+    var currentPeriod = '';
+    var activeCacheKey = 'all:';   /* composite key the tooltip reads from */
     var cache = {};
     var chartDataCache = {};
     var insiderChart = null;
@@ -309,14 +330,14 @@
                     callbacks: {
                         title: function(items) {
                             var idx = items[0].dataIndex;
-                            var cd = chartDataCache[currentFilter];
+                            var cd = chartDataCache[activeCacheKey];
                             if (!cd || !cd[idx]) return '';
                             return cd[idx].ticker + ' - ' + cd[idx].company_name;
                         },
                         label: function() { return null; },
                         afterBody: function(items) {
                             var idx = items[0].dataIndex;
-                            var cd = chartDataCache[currentFilter];
+                            var cd = chartDataCache[activeCacheKey];
                             if (!cd || !cd[idx]) return [];
                             var d = cd[idx];
                             var insiders = d.insider_details || [];
@@ -425,14 +446,16 @@
         }
         /* Force full recreate by clearing lastViewType */
         lastViewType = null;
-        if (chartDataCache[currentFilter]) {
-            renderChart(chartDataCache[currentFilter]);
+        if (chartDataCache[activeCacheKey]) {
+            renderChart(chartDataCache[activeCacheKey]);
         }
     };
 
     /* ── Tab switching ── */
     function loadTrades(filter) {
         currentFilter = filter;
+        var cacheKey = filter + ':' + currentPeriod;
+        activeCacheKey = cacheKey;
 
         document.querySelectorAll('.insider-tab').forEach(function(btn) {
             btn.classList.remove('active');
@@ -440,9 +463,9 @@
         document.getElementById('insider-tab-' + filter + '-btn').classList.add('active');
 
         /* Check cache */
-        if (cache[filter]) {
-            document.getElementById('insider-trades-content').innerHTML = cache[filter];
-            renderChart(chartDataCache[filter] || []);
+        if (cache[cacheKey]) {
+            document.getElementById('insider-trades-content').innerHTML = cache[cacheKey];
+            renderChart(chartDataCache[cacheKey] || []);
             if (window.initSortableTables) window.initSortableTables();
             return;
         }
@@ -452,27 +475,28 @@
             '<p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading insider trades...</p>';
 
         var url = '/api/insider-trades?filter=' + filter;
+        if (currentPeriod) url += '&period=' + currentPeriod;
         fetch(url)
             .then(function(resp) {
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 return resp.text();
             })
             .then(function(html) {
-                cache[filter] = html;
+                cache[cacheKey] = html;
                 document.getElementById('insider-trades-content').innerHTML = html;
 
                 /* Extract chart data from embedded script tag */
                 var match = html.match(/var\s+__chartData\s*=\s*(\[[\s\S]*?\]);/);
                 if (match) {
-                    try { chartDataCache[filter] = JSON.parse(match[1]); } catch(e) {}
+                    try { chartDataCache[cacheKey] = JSON.parse(match[1]); } catch(e) {}
                 }
-                renderChart(chartDataCache[filter] || []);
+                renderChart(chartDataCache[cacheKey] || []);
                 if (window.initSortableTables) window.initSortableTables();
             })
             .catch(function() {
                 /* Retry once after a short delay before showing the error */
-                if (!retried[filter]) {
-                    retried[filter] = true;
+                if (!retried[cacheKey]) {
+                    retried[cacheKey] = true;
                     setTimeout(function() { loadTrades(filter); }, 1500);
                     return;
                 }
@@ -484,12 +508,21 @@
 
     window.switchInsiderTab = loadTrades;
 
+    /* ── Date period switching ── */
+    window.switchInsiderPeriod = function(period) {
+        currentPeriod = period;
+        document.querySelectorAll('.insider-period').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.period === period);
+        });
+        loadTrades(currentFilter);
+    };
+
     /* Re-render chart when theme changes so axis/grid colors update */
     document.addEventListener('pp-theme-changed', function() {
         if (insiderChart) {
             lastViewType = null;  /* force full recreate */
-            if (chartDataCache[currentFilter]) {
-                renderChart(chartDataCache[currentFilter]);
+            if (chartDataCache[activeCacheKey]) {
+                renderChart(chartDataCache[activeCacheKey]);
             }
         }
     });

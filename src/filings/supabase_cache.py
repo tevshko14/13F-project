@@ -55,6 +55,12 @@ _HISTORY_COLS = (
     "returns_updated"
 )
 
+# Projection for the all-types cold history table (raw numerics, no _fmt cols)
+_FULL_HISTORY_COLS = (
+    "sec_url,filing_date,trade_date,ticker,company_name,"
+    "insider_name,title,trade_type,price,qty,value"
+)
+
 # Lean projection for chart aggregation — only the 6 columns needed
 # by aggregate_top_tickers().  ~40% less network transfer vs _INSIDER_COLS.
 _CHART_COLS = (
@@ -905,6 +911,7 @@ _VALID_INSIDER_TRADE_TYPES = frozenset({"Purchase", "Sale"})
 def get_insider_trades(
     trade_type: str = "",
     limit: int = 100,
+    since_date: str = "",
 ) -> list[dict] | None:
     """Query ``insider_trades`` table for latest trades.
 
@@ -913,6 +920,8 @@ def get_insider_trades(
                     ``""`` for all.  Must be one of the values in
                     ``_VALID_INSIDER_TRADE_TYPES`` or empty.
         limit: Max rows to return.
+        since_date: If set, only return trades with ``trade_date >= since_date``
+                    (ISO format ``YYYY-MM-DD``).
 
     Returns list of row dicts, or ``None`` if Supabase is unavailable.
     """
@@ -929,12 +938,14 @@ def get_insider_trades(
         query = (
             client.table("insider_trades")
             .select(_INSIDER_COLS)
-            .order("filing_date", desc=True)
             .order("trade_date", desc=True)
+            .order("filing_date", desc=True)
             .limit(limit)
         )
         if trade_type:
             query = query.eq("trade_type", trade_type)
+        if since_date:
+            query = query.gte("trade_date", since_date)
 
         resp = query.execute()
         return resp.data
@@ -946,6 +957,7 @@ def get_insider_trades(
 def get_insider_trades_for_chart(
     days: int = 30,
     limit_per_type: int = 250,
+    since_date: str = "",
 ) -> list[dict] | None:
     """Query ``insider_trades`` over a time window for chart aggregation.
 
@@ -958,6 +970,8 @@ def get_insider_trades_for_chart(
         days: How many days back to look (default 30).
         limit_per_type: Max rows per trade type (default 250 →
             up to 500 total).
+        since_date: If set, overrides ``days`` with an explicit cutoff
+                    (ISO ``YYYY-MM-DD``).
 
     Returns list of row dicts, or ``None`` if Supabase is unavailable.
     """
@@ -966,9 +980,9 @@ def get_insider_trades_for_chart(
         return None
 
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
-            "%Y-%m-%d"
-        )
+        cutoff = since_date or (
+            datetime.now(timezone.utc) - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
 
         buys = (
             client.table("insider_trades")
@@ -1055,11 +1069,12 @@ def get_history_purchases_by_ticker(
         return None
 
 
-def _get_existing_insider_urls(days: int = 7) -> set[str]:
+def get_existing_insider_urls(days: int = 7) -> set[str]:
     """Fetch sec_url values from recent insider_trades (lightweight).
 
     Only fetches the unique key column — no row data.  Used to skip
-    re-uploading trades that already exist in Supabase.
+    re-uploading trades that already exist in Supabase, and to identify
+    genuinely new trades for notification emission.
     """
     client = _get_client()
     if client is None:
@@ -1100,7 +1115,7 @@ def upsert_insider_trades(rows: list[dict]) -> int:
         return 0
 
     # Filter out rows that already exist in Supabase
-    existing_urls = _get_existing_insider_urls()
+    existing_urls = get_existing_insider_urls()
     new_rows = [r for r in rows if r.get("sec_url") not in existing_urls]
 
     if not new_rows:
@@ -1199,6 +1214,100 @@ def upsert_history_purchases(rows: list[dict]) -> int:
         "History purchases: %d inserted out of %d provided", inserted, len(rows)
     )
     return inserted
+
+
+# ── Insider trades history (all-types cold table) ────────────────
+
+
+def upsert_history_trades(rows: list[dict]) -> int:
+    """Insert rows into ``insider_trades_history`` (cold, write-once).
+
+    Uses ``ON CONFLICT (sec_url) DO NOTHING`` — existing rows are never
+    overwritten.  Archives ALL trade types (purchases + sales).
+
+    Deduplicates by sec_url within the batch before inserting.
+    Returns the number of rows inserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    # Deduplicate by sec_url within the batch
+    seen: dict[str, dict] = {}
+    for row in rows:
+        url = row.get("sec_url", "")
+        if url and url not in seen:
+            seen[url] = row
+    deduped = list(seen.values())
+
+    if not deduped:
+        return 0
+
+    inserted = 0
+    CHUNK = 50
+    for i in range(0, len(deduped), CHUNK):
+        chunk = deduped[i : i + CHUNK]
+        try:
+            client.table("insider_trades_history").upsert(
+                chunk,
+                on_conflict="sec_url",
+                ignore_duplicates=True,
+            ).execute()
+            inserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_history_trades chunk %d failed: %s", i, exc)
+
+    logger.info(
+        "History trades (all types): %d inserted out of %d provided",
+        inserted, len(rows),
+    )
+    return inserted
+
+
+def get_history_trades(
+    trade_type: str = "",
+    limit: int = 100,
+    since_date: str = "",
+) -> list[dict] | None:
+    """Query ``insider_trades_history`` cold table.
+
+    Same interface as :func:`get_insider_trades` but reads from the
+    permanent cold archive.  Used when the date filter extends beyond
+    the 30-day hot table window.
+
+    Args:
+        trade_type: ``"Purchase"`` for buys, ``"Sale"`` for sells,
+                    ``""`` for all.
+        limit: Max rows to return.
+        since_date: If set, only return trades with ``trade_date >= since_date``.
+
+    Returns list of row dicts, or ``None`` if Supabase is unavailable.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+
+    try:
+        query = (
+            client.table("insider_trades_history")
+            .select(_FULL_HISTORY_COLS)
+            .order("trade_date", desc=True)
+            .order("filing_date", desc=True)
+            .limit(limit)
+        )
+        if trade_type:
+            if trade_type == "Sale":
+                query = query.in_("trade_type", ["Sale", "Sale+OE"])
+            else:
+                query = query.eq("trade_type", trade_type)
+        if since_date:
+            query = query.gte("trade_date", since_date)
+
+        resp = query.execute()
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_history_trades failed: %s", exc)
+        return None
 
 
 # ── Insider Insights: forward-return queries ─────────────────────
