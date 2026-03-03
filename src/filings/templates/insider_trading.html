@@ -394,12 +394,17 @@
     }
 
     /* ── Render chart (guarded: Chart.js may still be loading on first cold load) ── */
+    var _chartRetries = 0;
     function renderChart(chartData) {
         if (typeof Chart === 'undefined') {
-            /* Chart.js CDN not yet ready — retry once it is */
-            setTimeout(function() { renderChart(chartData); }, 100);
+            /* Chart.js CDN not yet ready — retry with backoff up to 3s */
+            if (_chartRetries < 10) {
+                _chartRetries++;
+                setTimeout(function() { renderChart(chartData); }, 300);
+            }
             return;
         }
+        _chartRetries = 0;
 
         var section = document.getElementById('insider-chart-section');
         if (!chartData || chartData.length === 0) {
@@ -530,9 +535,11 @@
     /* Wait for DOMContentLoaded so deferred Chart.js is ready */
     document.addEventListener('DOMContentLoaded', function() {
         /* If server already rendered data (SSR for SEO), seed the cache and render chart */
+        var initCacheKey = currentFilter + ':' + currentPeriod;
         if (typeof __chartData !== 'undefined' && __chartData.length > 0) {
-            cache['all'] = document.getElementById('insider-trades-content').innerHTML;
-            chartDataCache['all'] = __chartData;
+            cache[initCacheKey] = document.getElementById('insider-trades-content').innerHTML;
+            chartDataCache[initCacheKey] = __chartData;
+            activeCacheKey = initCacheKey;
             renderChart(__chartData);
             if (window.initSortableTables) window.initSortableTables();
         } else {
