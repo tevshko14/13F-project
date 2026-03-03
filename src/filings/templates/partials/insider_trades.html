@@ -1,96 +1,124 @@
 {# Embed chart data for JS extraction #}
 <script>var __chartData = {{ chart_data_json | safe }};</script>
 
-{% if trades %}
+{% if grouped %}
 <p class="text-muted text-small">
-    Showing {{ trades | length }} recent insider trades &middot; Source: SEC Form 4 filings via
+    Showing {{ trades | length }} trades across {{ grouped | length }} tickers &middot; Source: SEC Form 4 filings via
     <a href="http://openinsider.com" target="_blank" rel="noopener">OpenInsider</a>
 </p>
 
-<div class="insider-fade{% if trades | length <= 10 %} expanded{% endif %}" id="insider-table-wrap">
-<div class="pp-table-wrap">
-<table class="pp-table" id="insider-trades-table">
-    <thead>
-        <tr>
-            <th data-sort="text">Insider Name</th>
-            <th>Title</th>
-            <th data-sort="text">Ticker</th>
-            <th>Type</th>
-            <th class="text-right" data-sort="number">Shares</th>
-            <th class="text-right">Price</th>
-            <th class="text-right" data-sort="number" data-sort-default="desc">Total $ Value</th>
-            <th data-sort="date">Trade Date</th>
-            <th style="text-align: center;">Filing</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for t in trades %}
-        <tr{% if loop.index > 10 %} class="insider-overflow"{% endif %}>
-            <td class="pp-primary">{{ t.insider_name }}</td>
-            <td class="pp-secondary">{{ t.title }}</td>
-            <td>
-                <a href="/stock/{{ t.ticker }}" class="ticker">{% if logo_tickers is defined and t.ticker in logo_tickers %}<img src="/api/logo/{{ t.ticker }}.png" width="18" height="18" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ t.ticker }}</a>
-                {% if t.company_name %}
-                <small class="pp-secondary" style="display: block;">{{ t.company_name }}</small>
-                {% endif %}
-            </td>
-            <td>
-                {% if "Purchase" in t.trade_type %}
-                    <span class="badge badge-add">{{ t.trade_type }}</span>
-                {% elif "Sale" in t.trade_type %}
-                    <span class="badge badge-reduce">{{ t.trade_type }}</span>
-                {% else %}
-                    <span class="badge" style="background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">{{ t.trade_type }}</span>
-                {% endif %}
-            </td>
-            <td class="text-right">{{ t.qty }}</td>
-            <td class="text-right">{{ t.price }}</td>
-            <td class="text-right pp-primary">{{ t.value }}</td>
-            <td style="white-space: nowrap;">{{ t.trade_date }}</td>
-            <td style="text-align: center;">
-                {% if t.sec_url %}
-                <a href="{{ t.sec_url }}" target="_blank" rel="noopener" title="View SEC Form 4">&#128279;</a>
-                {% else %}
-                <span class="text-muted">-</span>
-                {% endif %}
-            </td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+<div class="insider-cluster-fade{% if grouped | length <= 10 %} expanded{% endif %}" id="insider-cluster-wrap">
+{% for g in grouped %}
+{% set net = g.buy_value - g.sell_value %}
+<div class="activity-cluster{% if loop.index > 10 %} insider-cluster-overflow{% endif %}">
+    <div class="cluster-header" onclick="toggleCluster(this)">
+        <span class="cluster-ticker" style="display: inline-flex; align-items: center; gap: 0.4em;">
+            <img src="/api/logo/{{ g.ticker }}.png" width="20" height="20" loading="lazy" decoding="async"
+                 onerror="this.style.display='none'" style="border-radius: 4px;">
+            <a href="/stock/{{ g.ticker }}" class="ticker" onclick="event.stopPropagation()">{{ g.ticker }}</a>
+        </span>
+        <span class="cluster-name">{{ g.company_name }}</span>
+        <span class="insider-cluster-counts">
+            {% if g.buy_count > 0 %}
+                <span class="badge badge-add" style="font-size: 0.78em;">{{ g.buy_count }} Buy{{ 's' if g.buy_count != 1 }}</span>
+            {% endif %}
+            {% if g.sell_count > 0 %}
+                <span class="badge badge-reduce" style="font-size: 0.78em;">{{ g.sell_count }} Sale{{ 's' if g.sell_count != 1 }}</span>
+            {% endif %}
+        </span>
+        <span class="cluster-flow {% if net > 0 %}bullish{% elif net < 0 %}bearish{% endif %}">
+            {% if net >= 1e9 or net <= -1e9 %}
+                {% if net >= 0 %}+{% endif %}${{ "%.1f"|format(net / 1e9) }}B
+            {% elif net >= 1e6 or net <= -1e6 %}
+                {% if net >= 0 %}+{% endif %}${{ "%.0f"|format(net / 1e6) }}M
+            {% elif net >= 1e3 or net <= -1e3 %}
+                {% if net >= 0 %}+{% endif %}${{ "{:,.0f}".format(net) }}
+            {% else %}
+                {% if net >= 0 %}+{% endif %}${{ "{:,.0f}".format(net) }}
+            {% endif %}
+        </span>
+        <span class="cluster-expand">&#9656;</span>
+    </div>
+    <div class="cluster-detail" style="display:none">
+        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch;">
+        <table class="cluster-table insider-detail-table">
+            <thead>
+                <tr>
+                    <th>Insider</th>
+                    <th>Title</th>
+                    <th>Type</th>
+                    <th class="text-right">Shares</th>
+                    <th class="text-right">Price</th>
+                    <th class="text-right">Value</th>
+                    <th>Date</th>
+                    <th class="text-center">SEC</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for t in g.trades %}
+            <tr>
+                <td class="pp-primary">{{ t.insider_name }}</td>
+                <td class="pp-secondary">{{ t.title }}</td>
+                <td>
+                    {% if "Purchase" in t.trade_type %}
+                        <span class="badge badge-add">Buy</span>
+                    {% elif "Sale" in t.trade_type %}
+                        <span class="badge badge-reduce">Sell</span>
+                    {% else %}
+                        <span class="badge" style="background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">{{ t.trade_type }}</span>
+                    {% endif %}
+                </td>
+                <td class="text-right">{{ t.qty }}</td>
+                <td class="text-right">{{ t.price }}</td>
+                <td class="text-right pp-primary" style="white-space: nowrap;">{{ t.value }}</td>
+                <td style="white-space: nowrap;">{{ t.trade_date }}</td>
+                <td class="text-center">
+                    {% if t.sec_url %}
+                    <a href="{{ t.sec_url }}" target="_blank" rel="noopener" title="SEC Form 4">&#128279;</a>
+                    {% else %}
+                    <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </div>
 </div>
+{% endfor %}
 </div>
-{% if trades | length > 10 %}
-<button class="gp-expand-btn" id="insider-expand-btn" onclick="toggleInsiderAccordion(this)">
-    <span>View All ({{ trades | length }} trades)</span>
+
+{% if grouped | length > 10 %}
+<button class="gp-expand-btn" id="insider-expand-btn" onclick="toggleInsiderClusterAccordion(this)">
+    <span>View All ({{ grouped | length }} tickers)</span>
     <span class="gp-expand-arrow">&#9660;</span>
 </button>
 {% endif %}
 
 <script>
-window.toggleInsiderAccordion = function(btn) {
-    var rows = document.querySelectorAll('.insider-overflow');
-    var wrap = document.getElementById('insider-table-wrap');
+/* Toggle individual cluster open/close */
+if (!window.toggleCluster) {
+    window.toggleCluster = function(header) {
+        var detail = header.nextElementSibling;
+        header.classList.toggle('open');
+        detail.style.display = detail.style.display === 'none' ? '' : 'none';
+    };
+}
+
+/* Toggle outer 10-row accordion for clusters */
+window.toggleInsiderClusterAccordion = function(btn) {
+    var wrap = document.getElementById('insider-cluster-wrap');
     var arrow = btn.querySelector('.gp-expand-arrow');
     var label = btn.querySelector('span:first-child');
-    var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+    var expanded = wrap.classList.contains('expanded');
 
-    rows.forEach(function(row) {
-        row.style.display = expanded ? 'none' : '';
-    });
     wrap.classList.toggle('expanded', !expanded);
     arrow.classList.toggle('expanded', !expanded);
 
-    var thead = document.querySelector('#insider-trades-table thead');
-    if (thead) {
-        thead.classList.toggle('sticky-head', !expanded);
-    }
-
     label.textContent = expanded
-        ? 'View All ({{ trades | length }} trades)'
+        ? 'View All ({{ grouped | length }} tickers)'
         : 'Collapse';
-
-    if (window.initSortableTables) window.initSortableTables();
 };
 </script>
 

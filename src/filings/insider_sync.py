@@ -17,7 +17,7 @@ import uuid
 
 import httpx
 
-from filings import insider_trading, supabase_cache
+from filings import insider_trading, notifications, supabase_cache
 
 # ── Logging ──────────────────────────────────────────────────────────
 
@@ -37,6 +37,9 @@ logger = logging.getLogger(__name__)
 
 # Delay between OpenInsider requests (seconds) -- be polite
 _OI_DELAY = 3.0
+
+# Max insider trade notifications per sync cycle (prevent flood)
+_INSIDER_NOTIF_MAX = 10
 
 
 # ── Scrape logic ─────────────────────────────────────────────────────
@@ -122,19 +125,35 @@ def sync_insider_trades() -> dict:
         supabase_cache.complete_sync_log(run_id, 0, 1, 0, ["No trades scraped"])
         return {"scraped": 0, "upserted": 0, "errors": 1}
 
+    # Identify genuinely new trades before upserting (for notifications)
+    existing_urls = supabase_cache.get_existing_insider_urls()
+    new_trades = [t for t in trades if t.sec_url and t.sec_url not in existing_urls]
+    logger.info("New trades (not in Supabase): %d", len(new_trades))
+
     # Build row dicts and upsert to hot table
     rows = [t.to_db_row() for t in trades if t.sec_url]
     upserted = supabase_cache.upsert_insider_trades(rows)
 
-    # Bridge: also populate cold history table with purchases so
-    # insights stay current without requiring manual backfill runs.
+    # Bridge: populate cold history tables.
     # ON CONFLICT DO NOTHING means existing rows are harmlessly skipped.
-    purchase_trades = [t for t in trades if t.sec_url and "Purchase" in t.trade_type]
+    trades_with_url = [t for t in trades if t.sec_url]
+
+    # 1. All-types cold table (insider_trades_history) — full archive
+    if trades_with_url:
+        full_history_rows = [t.to_full_history_row() for t in trades_with_url]
+        full_upserted = supabase_cache.upsert_history_trades(full_history_rows)
+        logger.info(
+            "Cold table (all types): %d trades → %d upserted",
+            len(full_history_rows), full_upserted,
+        )
+
+    # 2. Purchases-only cold table (insider_purchases_history) — for insights
+    purchase_trades = [t for t in trades_with_url if "Purchase" in t.trade_type]
     if purchase_trades:
         history_rows = [t.to_history_row() for t in purchase_trades]
         history_upserted = supabase_cache.upsert_history_purchases(history_rows)
         logger.info(
-            "Cold table bridge: %d purchases → %d upserted",
+            "Cold table (purchases): %d → %d upserted",
             len(history_rows), history_upserted,
         )
 
@@ -156,6 +175,10 @@ def sync_insider_trades() -> dict:
         upserted,
     )
 
+    # Emit notifications for notable new trades
+    if new_trades:
+        _emit_insider_notifications(new_trades)
+
     # Run retention cleanup after successful sync
     try:
         cleanup = supabase_cache.run_retention_cleanup()
@@ -164,6 +187,35 @@ def sync_insider_trades() -> dict:
         logger.debug("Retention cleanup failed (non-fatal)")
 
     return {"scraped": len(trades), "upserted": upserted, "errors": len(errors)}
+
+
+# ── Notifications ────────────────────────────────────────────────────
+
+
+def _emit_insider_notifications(
+    new_trades: list[insider_trading.InsiderTrade],
+) -> None:
+    """Create notifications for notable new insider trades.
+
+    Only trades meeting the value thresholds in
+    :func:`notifications.create_insider_trade_notification` generate
+    notifications.  Capped at ``_INSIDER_NOTIF_MAX`` per sync cycle.
+    """
+    notif_rows: list[dict] = []
+    for trade in new_trades:
+        row = trade.to_db_row()
+        notif = notifications.create_insider_trade_notification(row)
+        if notif:
+            notif_rows.append(notif)
+
+    # Cap to prevent notification flood
+    notif_rows = notif_rows[:_INSIDER_NOTIF_MAX]
+
+    if notif_rows:
+        n = supabase_cache.upsert_notifications(notif_rows)
+        logger.info("Created %d insider trade notifications", n)
+    else:
+        logger.info("No notable insider trades for notifications")
 
 
 # ── Entry point ──────────────────────────────────────────────────────

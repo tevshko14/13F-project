@@ -19,7 +19,8 @@ import os
 import re as _re
 import time as time_module
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import uvicorn
@@ -1995,11 +1996,15 @@ async def insider_trading_page(request: Request):
         chart_data_json = json_module.dumps(_chart or [])
     except Exception:
         pass  # Graceful fallback — JS will retry via fetch()
+
+    grouped = _group_insider_trades(trades)
+
     return templates.TemplateResponse(
         "insider_trading.html",
         {
             "request": request,
             "trades": trades,
+            "grouped": grouped,
             "chart_data_json": chart_data_json,
         },
     )
@@ -2871,18 +2876,75 @@ async def retail_calendar_data(request: Request):
     return JSONResponse(content=calendar_data)
 
 
+def _group_insider_trades(trades: list) -> list[dict]:
+    """Group insider trades by ticker for the accordion view."""
+    ticker_groups: dict[str, dict] = {}
+    for t in trades:
+        key = (t.ticker or "").upper()
+        if not key:
+            continue
+        if key not in ticker_groups:
+            ticker_groups[key] = {
+                "ticker": t.ticker,
+                "company_name": t.company_name,
+                "trades": [],
+                "buy_count": 0,
+                "sell_count": 0,
+                "buy_value": 0.0,
+                "sell_value": 0.0,
+            }
+        g = ticker_groups[key]
+        g["trades"].append(t)
+        val = insider_trading.parse_dollar_value(t.value)
+        if "Purchase" in t.trade_type:
+            g["buy_count"] += 1
+            g["buy_value"] += val
+        else:
+            g["sell_count"] += 1
+            g["sell_value"] += val
+    return sorted(
+        ticker_groups.values(),
+        key=lambda g: g["buy_value"] + g["sell_value"],
+        reverse=True,
+    )
+
+
 @app.get("/api/insider-trades", response_class=HTMLResponse)
-async def insider_trades_api(request: Request, filter: str = "all"):
+async def insider_trades_api(
+    request: Request, filter: str = "all", period: str = "",
+):
+    # Convert period to a trade_date cutoff.
+    # SEC trade dates are US Eastern — use ET so "today" matches user intent.
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if period == "today":
+        since_date = now_et.strftime("%Y-%m-%d")
+    elif period == "week":
+        since_date = (now_et - timedelta(days=7)).strftime("%Y-%m-%d")
+    elif period == "month":
+        since_date = (now_et - timedelta(days=30)).strftime("%Y-%m-%d")
+    else:
+        # Default: current quarter (Q1=Jan, Q2=Apr, Q3=Jul, Q4=Oct)
+        q_month = ((now_et.month - 1) // 3) * 3 + 1
+        since_date = f"{now_et.year}-{q_month:02d}-01"
+
     trade_type = {"buys": "p", "sells": "s", "all": ""}.get(filter, "")
     trades, chart_data = await asyncio.gather(
-        asyncio.to_thread(insider_trading.get_latest_insider_trades, trade_type),
-        asyncio.to_thread(insider_trading.get_insider_chart_data, 10, trade_type),
+        asyncio.to_thread(
+            insider_trading.get_latest_insider_trades, trade_type, 100, since_date,
+        ),
+        asyncio.to_thread(
+            insider_trading.get_insider_chart_data, 10, trade_type, since_date,
+        ),
     )
+
+    grouped = _group_insider_trades(trades)
+
     return templates.TemplateResponse(
         "partials/insider_trades.html",
         {
             "request": request,
             "trades": trades,
+            "grouped": grouped,
             "chart_data_json": json_module.dumps(chart_data),
         },
     )

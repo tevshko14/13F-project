@@ -1,19 +1,23 @@
 """Notification engine for PaperPanda.
 
-Detects new 13F filings, YouTube events, and Reddit velocity spikes —
-then creates notification rows for the Supabase ``notifications`` table.
+Detects new 13F filings, YouTube events, Reddit velocity spikes, and
+notable insider trades — then creates notification rows for the
+Supabase ``notifications`` table.
 
 The notifications table is *global* (no per-user rows).  Dismiss state
 is tracked client-side via ``localStorage('pp-notifications-last-seen')``.
 
 Notification IDs are deterministic for deduplication:
-  - 13F changes:   ``13f-{cik}-{filing_date}-{cusip}``
-  - YouTube:        ``yt-{video_id}``
-  - Reddit spikes:  ``reddit-{ticker}-{YYYY-MM-DD}``
+  - 13F changes:    ``13f-{cik}-{filing_date}-{cusip}``
+  - YouTube:         ``yt-{video_id}``
+  - Reddit spikes:   ``reddit-{ticker}-{YYYY-MM-DD}``
+  - Congress trades: ``congress-{member_id}-{trade_id}``
+  - Insider trades:  ``insider-{filing_date}-{ticker}-{hash8}``
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from datetime import date, datetime, timezone
@@ -342,6 +346,89 @@ def create_congress_trade_notification(trade: dict) -> dict | None:
             "ticker": trade.get("ticker"),
             "party": party,
             "member_id": member_id,
+        },
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
+# ── Insider trade notifications ──────────────────────────────────────
+
+
+def _parse_dollar_value(s: str) -> float:
+    """Parse formatted dollar string like ``'$1,234,567'`` → ``1234567.0``."""
+    try:
+        return float(
+            s.replace("$", "").replace(",", "").replace("+", "").strip()
+        )
+    except (ValueError, AttributeError):
+        return 0.0
+
+
+def create_insider_trade_notification(trade: dict) -> dict | None:
+    """Create a notification for a notable insider trade.
+
+    Deterministic ID: ``insider-{filing_date}-{ticker}-{hash8}``
+    Type: ``insider_trade``
+
+    Notable trade criteria:
+      - Purchases with value >= $100,000
+      - Sales with value >= $1,000,000
+
+    Args:
+        trade: Dict with keys from ``insider_trades`` table row
+               (uses ``value_fmt``, ``trade_type``, ``ticker``, etc.).
+
+    Returns:
+        A notification dict matching the Supabase schema, or None.
+    """
+    ticker = trade.get("ticker", "")
+    insider_name = trade.get("insider_name", "")
+    trade_type = trade.get("trade_type", "")
+    filing_date = trade.get("filing_date", "")
+    if not ticker or not insider_name or not filing_date:
+        return None
+
+    # Parse formatted value string (e.g. "$1,234,567")
+    value_str = trade.get("value_fmt", "") or ""
+    value_num = _parse_dollar_value(value_str)
+
+    # Filter: only notable trades
+    is_purchase = "Purchase" in trade_type
+    is_sale = "Sale" in trade_type
+    if is_purchase and value_num < 100_000:
+        return None
+    if is_sale and value_num < 1_000_000:
+        return None
+    if not is_purchase and not is_sale:
+        return None
+
+    action = "bought" if is_purchase else "sold"
+    icon = "📈" if is_purchase else "📉"
+    toast = "bullish" if is_purchase else "bearish"
+
+    title_str = trade.get("title", "")
+    name = _sanitize(insider_name)
+
+    # Deterministic ID — sec_url + insider_name guarantees uniqueness
+    sec_url = trade.get("sec_url", "")
+    id_hash = hashlib.md5(f"{sec_url}{insider_name}".encode()).hexdigest()[:8]
+
+    message = f"{value_str}" if value_str else ""
+    if title_str:
+        message += f" — {title_str}" if message else title_str
+
+    return {
+        "id": f"insider-{filing_date}-{ticker}-{id_hash}",
+        "type": "insider_trade",
+        "title": f"{icon} {name} {action} ${ticker}",
+        "message": _sanitize(message),
+        "icon": icon,
+        "toast_type": toast,
+        "link": f"/stock/{ticker}",
+        "metadata": {
+            "ticker": ticker,
+            "insider_name": insider_name,
+            "trade_type": trade_type,
         },
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
