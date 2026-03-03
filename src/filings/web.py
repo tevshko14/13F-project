@@ -1168,19 +1168,29 @@ async def _populate_logos_task(limit: int = 200):
     _valid_ticker = _re.compile(r"^[A-Z]{1,6}$")
 
     try:
-        # 1. Collect ticker -> issuer_name from 13F holdings
+        # 1. Collect ticker -> issuer_name + count how many funds hold each
         ticker_names: dict[str, str] = {}
+        ticker_fund_count: dict[str, int] = {}  # popularity score
         fc = _fund_cache()
         for fund_data in fc.values():
+            seen_this_fund: set[str] = set()
             for h in fund_data.get("all_holdings", []):
                 t = h.get("ticker")
                 name = h.get("issuer")
                 if t and name and _valid_ticker.match(t.upper()):
-                    ticker_names.setdefault(t.upper(), name)
+                    tu = t.upper()
+                    ticker_names.setdefault(tu, name)
+                    if tu not in seen_this_fund:
+                        ticker_fund_count[tu] = ticker_fund_count.get(tu, 0) + 1
+                        seen_this_fund.add(tu)
 
-        # 2. Skip tickers already in Supabase
+        # 2. Skip tickers already in Supabase, sort by popularity (most held first)
         existing = await asyncio.to_thread(supabase_cache.get_existing_logo_tickers)
-        all_new = sorted(set(ticker_names.keys()) - existing)
+        all_new = sorted(
+            set(ticker_names.keys()) - existing,
+            key=lambda t: ticker_fund_count.get(t, 0),
+            reverse=True,
+        )
         new_tickers = all_new[:limit]
 
         status.update({
