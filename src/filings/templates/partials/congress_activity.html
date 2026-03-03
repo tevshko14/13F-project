@@ -161,7 +161,7 @@
             {% for item in c.trades %}
             <tr>
                 <td>
-                    <a href="/politician/{{ item.member_id }}">{{ item.politician_name }}</a>
+                    <a href="/politician/{{ item.member_id }}">{% if headshot_members is defined and item.member_id in headshot_members %}<img src="/api/headshot/{{ item.member_id }}.jpg" width="20" height="20" loading="lazy" decoding="async" onerror="this.style.display='none'" style="border-radius:50%;vertical-align:middle;margin-right:4px;object-fit:cover;">{% endif %}{{ item.politician_name }}</a>
                     <small class="fund-aum">
                         {% if item.party_short == 'D' %}<span style="color:#2563eb;">Democrat</span>{% elif item.party_short == 'R' %}<span style="color:#dc2626;">Republican</span>{% else %}Independent{% endif %}
                         · {{ item.chamber }}, {{ item.state }}
@@ -218,7 +218,7 @@
         <tr{% if loop.index > 12 %} class="activity-overflow"{% endif %}>
             <td>
                 <a href="/politician/{{ item.member_id }}">
-                    <strong>{{ item.politician_name }}</strong>
+                    {% if headshot_members is defined and item.member_id in headshot_members %}<img src="/api/headshot/{{ item.member_id }}.jpg" width="20" height="20" loading="lazy" decoding="async" onerror="this.style.display='none'" style="border-radius:50%;vertical-align:middle;margin-right:4px;object-fit:cover;">{% endif %}<strong>{{ item.politician_name }}</strong>
                 </a>
                 <small class="fund-aum">{{ item.chamber }} · {{ item.state }}</small>
             </td>

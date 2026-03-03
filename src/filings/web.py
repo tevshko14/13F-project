@@ -186,6 +186,9 @@ import base64 as _b64
 _logo_cache: dict[str, bytes] = {}
 _logo_set: set[str] = set()  # exposed to templates as Jinja global
 
+_headshot_cache: dict[str, bytes] = {}
+_headshot_set: set[str] = set()  # exposed to templates as Jinja global
+
 
 async def _to_heavy(fn, *args):
     """Run *fn* on the heavy thread pool, gated by a semaphore.
@@ -285,6 +288,23 @@ async def lifespan(app: FastAPI):
         logger.warning("Logo cache load failed (%s), logos disabled", exc)
         templates.env.globals["logo_tickers"] = set()
 
+    # Load congress headshots from Supabase into memory (~5MB for ~535 members)
+    try:
+        headshot_rows = await asyncio.wait_for(
+            asyncio.to_thread(supabase_cache.get_all_headshots), timeout=120
+        )
+        for row in headshot_rows:
+            mid = row.get("member_id", "")
+            b64 = row.get("photo_b64", "")
+            if mid and b64:
+                _headshot_cache[mid] = _b64.b64decode(b64)
+        _headshot_set.update(_headshot_cache.keys())
+        templates.env.globals["headshot_members"] = _headshot_set
+        logger.info("Loaded %d congress headshots into memory", len(_headshot_cache))
+    except Exception as exc:
+        logger.warning("Headshot cache load failed (%s), headshots disabled", exc)
+        templates.env.globals["headshot_members"] = set()
+
     # Track background tasks for clean shutdown
     _bg_tasks: set[asyncio.Task] = set()
 
@@ -307,6 +327,9 @@ async def lifespan(app: FastAPI):
 
     # Reddit velocity notification scanner (runs every 30 min)
     _track(_reddit_velocity_scanner(), "reddit_scanner")
+
+    # Feature announcement → notification scanner (runs every 10 min)
+    _track(_feature_announcement_scanner(), "feature_announce_scanner")
 
     yield
 
@@ -886,6 +909,37 @@ async def _reddit_velocity_scanner() -> None:
         await asyncio.sleep(_REDDIT_SCAN_INTERVAL)
 
 
+# ── Feature announcement → notification scanner ─────────────────────
+
+_FEATURE_ANNOUNCE_INTERVAL = 10 * 60  # 10 minutes
+
+
+async def _feature_announcement_scanner() -> None:
+    """Periodically check feature_announcements and create notifications."""
+    await asyncio.sleep(45)  # let startup settle
+    while True:
+        try:
+            announcements = await asyncio.to_thread(
+                supabase_cache.get_recent_feature_announcements
+            )
+            if announcements:
+                notif_rows: list[dict] = []
+                for ann in announcements:
+                    notif = notifications.create_feature_release_notification(ann)
+                    if notif is not None:
+                        notif_rows.append(notif)
+                if notif_rows:
+                    n = await asyncio.to_thread(
+                        supabase_cache.upsert_notifications, notif_rows
+                    )
+                    if n:
+                        logger.info("Synced %d feature release notifications", n)
+        except Exception as exc:
+            logger.error("Feature announcement scan failed: %s", exc)
+
+        await asyncio.sleep(_FEATURE_ANNOUNCE_INTERVAL)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Pages
 # ═══════════════════════════════════════════════════════════════════════
@@ -1310,6 +1364,327 @@ async def logo_status():
     return JSONResponse({
         "in_memory": len(_logo_cache),
         **_logo_populate_status,
+    })
+
+
+# --- Congress headshots (self-hosted, served from memory) ----------
+
+
+@app.get("/api/headshot/{member_id}.jpg")
+async def serve_headshot(member_id: str):
+    """Serve a congress member headshot JPEG from the in-memory cache.
+
+    Browser caches for 1 year (immutable).  Returns 404 if not found.
+    """
+    data = _headshot_cache.get(member_id)
+    if not data:
+        return Response(status_code=404)
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+_headshot_populate_status: dict = {}  # shared progress dict
+
+
+async def _fetch_wikipedia_headshot(
+    http, member_name: str, min_bytes: int = 500,
+    chamber: str = "", state: str = "",
+) -> bytes | None:
+    """Try to fetch a headshot from Wikipedia by member name.
+
+    Strategy (tries in order):
+      1. Exact title: ``<Name> (politician)`` then ``<Name>``
+      2. Search API: ``<Name> <state> <role>`` — resolves disambiguation
+         and verifies the page is categorised as a politician.
+
+    Returns raw image bytes, or None on failure.
+    """
+    import urllib.parse as _urlparse
+
+    _TITLE_API = (
+        "https://en.wikipedia.org/w/api.php"
+        "?action=query&titles={title}&prop=pageimages"
+        "&format=json&pithumbsize=300&redirects=1"
+    )
+    _SEARCH_API = (
+        "https://en.wikipedia.org/w/api.php"
+        "?action=query&list=search&srsearch={q}"
+        "&srnamespace=0&srlimit=5&format=json"
+    )
+    _PAGE_API = (
+        "https://en.wikipedia.org/w/api.php"
+        "?action=query&pageids={pid}&prop=pageimages|categories"
+        "&format=json&pithumbsize=300"
+    )
+    _POL_KEYWORDS = ("politician", "congress", "senator", "representative", "member")
+
+    async def _download_thumb(thumb_url: str) -> bytes | None:
+        try:
+            img_resp = await http.get(thumb_url)
+            if img_resp.status_code == 200 and len(img_resp.content) > min_bytes:
+                return img_resp.content
+        except Exception:
+            pass
+        return None
+
+    try:
+        # ── Strategy 1: exact title match ──
+        for suffix in (" (politician)", ""):
+            title = _urlparse.quote(member_name + suffix)
+            resp = await http.get(_TITLE_API.format(title=title))
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            pages = data.get("query", {}).get("pages", {})
+            for page in pages.values():
+                thumb_url = page.get("thumbnail", {}).get("source")
+                if thumb_url:
+                    img = await _download_thumb(thumb_url)
+                    if img:
+                        return img
+            await asyncio.sleep(0.1)
+
+        # ── Strategy 2: search API with state/role disambiguation ──
+        role = "senator" if chamber == "Senate" else "representative"
+        queries = []
+        if state:
+            queries.append(f"{member_name} {state} {role}")
+            queries.append(f"{member_name} {state} politician")
+        queries.append(f"{member_name} congressman")
+
+        for q in queries:
+            resp = await http.get(_SEARCH_API.format(q=_urlparse.quote(q)))
+            if resp.status_code != 200:
+                continue
+            results = resp.json().get("query", {}).get("search", [])
+            for r in results:
+                pid = str(r["pageid"])
+                resp2 = await http.get(_PAGE_API.format(pid=pid))
+                if resp2.status_code != 200:
+                    continue
+                page = resp2.json().get("query", {}).get("pages", {}).get(pid, {})
+                thumb_url = page.get("thumbnail", {}).get("source")
+                if not thumb_url:
+                    continue
+                # Verify this is actually a politician page
+                cats = [c.get("title", "").lower() for c in page.get("categories", [])]
+                is_pol = any(kw in cat for cat in cats for kw in _POL_KEYWORDS)
+                if is_pol:
+                    img = await _download_thumb(thumb_url)
+                    if img:
+                        return img
+            await asyncio.sleep(0.1)
+
+    except Exception:
+        pass
+    return None
+
+
+async def _populate_headshots_task(limit: int = 200):
+    """Background task: download congress member headshots.
+
+    Source chain (tries in order):
+      1. GitHub Pages: unitedstates.github.io/images/congress/225x275/{id}.jpg
+      2. GitHub Pages: unitedstates.github.io/images/congress/original/{id}.jpg
+      3. Wikipedia API: pageimages thumbnail by member name
+
+    Processes at most ``limit`` new members per invocation.
+    Insert-only — existing rows in congress_headshots are NEVER modified.
+    """
+    import httpx
+
+    status = _headshot_populate_status
+    status.update({"phase": "collecting", "downloaded": 0, "failed": 0, "total": 0})
+
+    _GH_225 = "https://unitedstates.github.io/images/congress/225x275/{member_id}.jpg"
+    _GH_ORIG = "https://unitedstates.github.io/images/congress/original/{member_id}.jpg"
+    _MIN_PHOTO_BYTES = 500  # real headshots are ~10-30KB
+
+    try:
+        # 1. Get all known member_ids from congress_members table
+        all_members = await asyncio.to_thread(supabase_cache.get_all_congress_members)
+        if not all_members:
+            status.update({"phase": "done", "message": "No congress members found"})
+            return
+
+        member_ids = [m["member_id"] for m in all_members if m.get("member_id")]
+        member_lookup = {m["member_id"]: m for m in all_members}
+
+        # 2. Skip members already in Supabase, prioritise current members
+        existing = await asyncio.to_thread(supabase_cache.get_existing_headshot_members)
+        all_new = sorted(
+            set(member_ids) - existing,
+            key=lambda mid: (
+                not member_lookup.get(mid, {}).get("is_current", False),
+                -(member_lookup.get(mid, {}).get("total_trades", 0)),
+            ),
+        )
+        new_members = all_new[:limit]
+
+        status.update({
+            "phase": "downloading",
+            "total": len(new_members),
+            "already_in_db": len(existing),
+            "remaining_after_this": max(0, len(all_new) - limit),
+        })
+
+        if not new_members:
+            status.update({"phase": "done", "message": "All members already processed"})
+            return
+
+        # 3. Download headshots — try GitHub Pages, then Wikipedia
+        rows_to_insert: list[dict] = []
+        downloaded = 0
+        failed = 0
+        wiki_hits = 0
+
+        _HEADERS = {"User-Agent": "PaperPanda/1.0 (headshot-fetcher; +https://paperpanda.io)"}
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=_HEADERS) as http:
+            for member_id in new_members:
+                photo_bytes: bytes | None = None
+                source = ""
+
+                # Try GitHub Pages 225x275
+                try:
+                    resp = await http.get(_GH_225.format(member_id=member_id))
+                    if resp.status_code == 200 and len(resp.content) > _MIN_PHOTO_BYTES:
+                        photo_bytes = resp.content
+                        source = "github-225"
+                except Exception:
+                    pass
+
+                # Try GitHub Pages original
+                if not photo_bytes:
+                    try:
+                        resp = await http.get(_GH_ORIG.format(member_id=member_id))
+                        if resp.status_code == 200 and len(resp.content) > _MIN_PHOTO_BYTES:
+                            photo_bytes = resp.content
+                            source = "github-orig"
+                    except Exception:
+                        pass
+
+                # Try Wikipedia API by full name + chamber/state
+                if not photo_bytes:
+                    member_data = member_lookup.get(member_id, {})
+                    full_name = member_data.get("full_name", "")
+                    if full_name:
+                        photo_bytes = await _fetch_wikipedia_headshot(
+                            http, full_name, _MIN_PHOTO_BYTES,
+                            chamber=member_data.get("chamber", ""),
+                            state=member_data.get("state", ""),
+                        )
+                        if photo_bytes:
+                            source = "wikipedia"
+                            wiki_hits += 1
+
+                if photo_bytes:
+                    b64 = _b64.b64encode(photo_bytes).decode("ascii")
+                    ct = "image/jpeg"
+                    rows_to_insert.append({
+                        "member_id": member_id,
+                        "photo_b64": b64,
+                        "content_type": ct,
+                    })
+                    _headshot_cache[member_id] = photo_bytes
+                    _headshot_set.add(member_id)
+                    downloaded += 1
+                    if downloaded <= 5 or source == "wikipedia":
+                        logger.info("Headshot OK: %s source=%s", member_id, source)
+                else:
+                    failed += 1
+                    if failed <= 5:
+                        name = member_lookup.get(member_id, {}).get("full_name", "?")
+                        logger.info("Headshot miss (all sources): %s (%s)", member_id, name)
+
+                # Batch insert every 25
+                if len(rows_to_insert) >= 25:
+                    await asyncio.to_thread(supabase_cache.insert_headshots, rows_to_insert)
+                    rows_to_insert.clear()
+
+                status.update({"downloaded": downloaded, "failed": failed, "wiki_hits": wiki_hits})
+                await asyncio.sleep(0.05)
+
+        if rows_to_insert:
+            await asyncio.to_thread(supabase_cache.insert_headshots, rows_to_insert)
+
+        templates.env.globals["headshot_members"] = _headshot_set
+
+        status.update({
+            "phase": "done",
+            "downloaded": downloaded,
+            "failed": failed,
+            "wiki_hits": wiki_hits,
+            "in_memory": len(_headshot_cache),
+        })
+        logger.info(
+            "Headshot populate done: %d downloaded (%d from wiki), %d failed, %d in memory",
+            downloaded, wiki_hits, failed, len(_headshot_cache),
+        )
+
+    except Exception as exc:
+        status.update({"phase": "error", "error": str(exc)})
+        logger.error("Headshot populate failed: %s", exc)
+
+
+@app.get("/api/admin/populate-headshots")
+async def populate_headshots(request: Request, limit: int = Query(200, ge=1, le=600)):
+    """Kick off background headshot population. Returns immediately with status.
+
+    ?limit=N controls how many new members to process (default 200, max 600).
+    Call repeatedly to process all members in chunks.
+    Existing headshots are NEVER overwritten (insert-only).
+    """
+    if _headshot_populate_status.get("phase") in ("collecting", "downloading"):
+        return JSONResponse({
+            "status": "already_running",
+            **_headshot_populate_status,
+        })
+
+    _headshot_populate_status.clear()
+    asyncio.create_task(_populate_headshots_task(limit=limit), name="populate_headshots")
+
+    return JSONResponse({
+        "status": "started",
+        "message": "Headshot population started in background. Check /api/admin/headshot-status for progress.",
+    })
+
+
+@app.get("/api/admin/headshot-status")
+async def headshot_status():
+    """Check the progress of the background headshot population task."""
+    return JSONResponse({
+        "in_memory": len(_headshot_cache),
+        **_headshot_populate_status,
+    })
+
+
+@app.get("/api/admin/sync-announcements")
+async def sync_announcements():
+    """Manually trigger feature announcement → notification sync.
+
+    Use after adding a row in the Supabase dashboard to push it
+    immediately instead of waiting for the 10-minute scanner.
+    """
+    announcements = await asyncio.to_thread(
+        supabase_cache.get_recent_feature_announcements
+    )
+    notif_rows: list[dict] = []
+    for ann in announcements:
+        notif = notifications.create_feature_release_notification(ann)
+        if notif is not None:
+            notif_rows.append(notif)
+    n = 0
+    if notif_rows:
+        n = await asyncio.to_thread(
+            supabase_cache.upsert_notifications, notif_rows
+        )
+    return JSONResponse({
+        "status": "ok",
+        "announcements_found": len(announcements),
+        "notifications_synced": n,
     })
 
 
@@ -2605,6 +2980,10 @@ async def notification_recent(request: Request, since: str = "2000-01-01T00:00:0
         n["time_ago"] = _time_ago(n.get("created_at", ""))
         n["is_new"] = n.get("created_at", "") > since
 
+    # Append a single "Support the Panda" CTA at the end of the dropdown
+    if display_notifs:
+        display_notifs = _inject_support_ctas(display_notifs, interval=len(display_notifs))
+
     return templates.TemplateResponse(
         "partials/notification_dropdown.html",
         {
@@ -2623,7 +3002,40 @@ async def notification_count(request: Request, since: str = "2000-01-01T00:00:00
     return JSONResponse({"count": count})
 
 
-_NOTIF_TYPES = ["13f_change", "youtube", "reddit_velocity", "congress_trade", "insider_trade"]
+_NOTIF_TYPES = ["13f_change", "youtube", "reddit_velocity", "congress_trade", "insider_trade", "feature_release"]
+
+
+def _inject_support_ctas(notifs: list[dict], interval: int = 10) -> list[dict]:
+    """Inject synthetic 'Support the Panda' CTAs into a notification list.
+
+    Inserts a CTA after every *interval* real notifications.
+    The CTA is NOT stored in the database — it is purely a render-time
+    injection.
+    """
+    if not notifs or interval < 1:
+        return notifs
+
+    _cta = {
+        "id": "__support_cta__",
+        "type": "support_cta",
+        "title": "Support the Panda 🐼",
+        "message": "Paper Panda is free and ad-free. Help keep it running!",
+        "icon": "🐼",
+        "toast_type": "",
+        "link": "/support",
+        "metadata": {},
+        "created_at": "",
+        "time_ago": "",
+        "is_new": False,
+        "is_cta": True,
+    }
+
+    result: list[dict] = []
+    for i, n in enumerate(notifs):
+        result.append(n)
+        if (i + 1) % interval == 0:
+            result.append(_cta)
+    return result
 
 
 @app.get("/notifications", response_class=HTMLResponse)
@@ -2651,6 +3063,9 @@ async def notifications_page(
 
     for n in page_notifs:
         n["time_ago"] = _time_ago(n.get("created_at", ""))
+
+    # Inject "Support the Panda" CTAs every 10th notification
+    page_notifs = _inject_support_ctas(page_notifs, interval=10)
 
     return templates.TemplateResponse(
         "notifications.html",

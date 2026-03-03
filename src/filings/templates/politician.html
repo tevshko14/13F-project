@@ -53,6 +53,26 @@
     .party-badge--rep { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
     .party-badge--ind { background: rgba(107, 114, 128, 0.12); color: #6b7280; }
 
+    /* ── Headshot ── */
+    .pol-header-content { display: flex; align-items: flex-start; gap: 1.2em; }
+    .pol-headshot {
+        width: 80px; height: 80px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 3px solid var(--pp-overlay-8, rgba(255,255,255,0.08));
+        flex-shrink: 0;
+    }
+    .pol-headshot-fallback {
+        width: 80px; height: 80px;
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 700; font-size: 1.8em; color: #fff;
+        flex-shrink: 0;
+    }
+    .pol-headshot-fallback--dem { background: #2563eb; }
+    .pol-headshot-fallback--rep { background: #dc2626; }
+    .pol-headshot-fallback--ind { background: #6b7280; }
+
     /* ── Stats Grid ── */
     .pol-stats {
         display: grid;
@@ -246,23 +266,36 @@
 
 {# ── Header ── #}
 <div class="pol-header">
-    <h1>
-        {{ member.full_name }}
-        {% if member.party == 'Democrat' %}
-            <span class="party-badge party-badge--dem">{{ member.party }}</span>
-        {% elif member.party == 'Republican' %}
-            <span class="party-badge party-badge--rep">{{ member.party }}</span>
+    <div class="pol-header-content">
+        {% set party_key = 'dem' if member.party == 'Democrat' else ('rep' if member.party == 'Republican' else 'ind') %}
+        {% if headshot_members is defined and member.member_id in headshot_members %}
+            <img src="/api/headshot/{{ member.member_id }}.jpg"
+                 alt="{{ member.full_name }}"
+                 class="pol-headshot"
+                 loading="eager" decoding="async"
+                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+            <div class="pol-headshot-fallback pol-headshot-fallback--{{ party_key }}" style="display:none">
+                {{ member.first_name[0] if member.first_name else '?' }}
+            </div>
         {% else %}
-            <span class="party-badge party-badge--ind">{{ member.party }}</span>
+            <div class="pol-headshot-fallback pol-headshot-fallback--{{ party_key }}">
+                {{ member.first_name[0] if member.first_name else '?' }}
+            </div>
         {% endif %}
-    </h1>
-    <p class="pol-header-meta">
-        {{ member.chamber }}
-        {% if member.state %} &middot; {{ member.state }}{% endif %}
-        {% if member.district %} ({{ member.district }}){% endif %}
-        {% if member.is_current %} &middot; <strong>Current Member</strong>{% else %} &middot; Former Member{% endif %}
-        {% if years_active %} &middot; Active: {{ years_active }}{% endif %}
-    </p>
+        <div>
+            <h1>
+                {{ member.full_name }}
+                <span class="party-badge party-badge--{{ party_key }}">{{ member.party }}</span>
+            </h1>
+            <p class="pol-header-meta">
+                {{ member.chamber }}
+                {% if member.state %} &middot; {{ member.state }}{% endif %}
+                {% if member.district %} ({{ member.district }}){% endif %}
+                {% if member.is_current %} &middot; <strong>Current Member</strong>{% else %} &middot; Former Member{% endif %}
+                {% if years_active %} &middot; Active: {{ years_active }}{% endif %}
+            </p>
+        </div>
+    </div>
 </div>
 
 {# ── Stats Grid ── #}

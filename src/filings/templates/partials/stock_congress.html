@@ -60,6 +60,7 @@
     .congress-pol-avatar--dem { background: #2563eb; }
     .congress-pol-avatar--rep { background: #dc2626; }
     .congress-pol-avatar--ind { background: #6b7280; }
+    .congress-pol-avatar img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; }
     .congress-pol-info { flex: 1; min-width: 0; }
     .congress-pol-name { font-weight: 600; font-size: 0.9em; }
     .congress-pol-meta { font-size: 0.75em; color: var(--pp-text-muted); }
@@ -149,9 +150,17 @@
 <div class="congress-pol-grid">
     {% for pol in politicians[:12] %}
     <a href="/politician/{{ pol.member_id }}" class="congress-pol-card">
-        <div class="congress-pol-avatar congress-pol-avatar--{{ 'dem' if pol.party == 'Democrat' else ('rep' if pol.party == 'Republican' else 'ind') }}">
+        {% set pk = 'dem' if pol.party == 'Democrat' else ('rep' if pol.party == 'Republican' else 'ind') %}
+        {% if headshot_members is defined and pol.member_id in headshot_members %}
+        <div class="congress-pol-avatar">
+            <img src="/api/headshot/{{ pol.member_id }}.jpg" alt="{{ pol.name }}" loading="lazy" decoding="async"
+                 onerror="this.parentElement.className='congress-pol-avatar congress-pol-avatar--{{ pk }}';this.parentElement.textContent='{{ pol.party_short }}';">
+        </div>
+        {% else %}
+        <div class="congress-pol-avatar congress-pol-avatar--{{ pk }}">
             {{ pol.party_short }}
         </div>
+        {% endif %}
         <div class="congress-pol-info">
             <div class="congress-pol-name">{{ pol.name }}</div>
             <div class="congress-pol-meta">{{ pol.chamber }} &middot; {{ pol.state }}</div>
