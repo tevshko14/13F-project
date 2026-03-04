@@ -2084,7 +2084,7 @@
             toast.style.cursor = 'pointer';
             toast.addEventListener('click', function(e) {
                 if (!e.target.classList.contains('pp-toast-close')) {
-                    window.location.href = opts.link;
+                    window.location.href = '/notifications';
                 }
             });
         }
@@ -2369,14 +2369,16 @@
         var isExpanded = sidebar.classList.toggle('expanded');
         localStorage.setItem('pp-sidebar-expanded', isExpanded ? '1' : '0');
     };
-    // Restore saved expand state on load
-    (function() {
+    // Restore saved expand state on load and after HTMX navigation
+    function ppRestoreExpandState() {
         var saved = localStorage.getItem('pp-sidebar-expanded');
         if (saved === '1') {
             var sidebar = document.getElementById('pp-sidebar');
             if (sidebar) sidebar.classList.add('expanded');
         }
-    })();
+    }
+    ppRestoreExpandState();
+    document.addEventListener('htmx:afterSettle', ppRestoreExpandState);
     </script>
 {% block extra_scripts %}{% endblock %}
 </body>
