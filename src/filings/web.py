@@ -3152,6 +3152,15 @@ _FINANCE_YOUTUBERS = [
 ]
 
 
+@app.get("/alternative-signals", response_class=HTMLResponse)
+async def alternative_signals_page(request: Request):
+    """Alternative signals page — placeholder for upcoming data sources."""
+    return templates.TemplateResponse(
+        "alternative_signals.html",
+        {"request": request},
+    )
+
+
 @app.get("/retail", response_class=HTMLResponse)
 async def retail_page(request: Request, view: str = "sentiment"):
     if view not in ("sentiment", "leaderboard", "calendar"):

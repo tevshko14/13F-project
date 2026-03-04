@@ -1292,6 +1292,7 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
                 )
 
     # 2. Fall back to yfinance for company name
+    name = None
     try:
         import yfinance as yf
         from filings.market_data import _yf_session
@@ -1299,18 +1300,24 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
         tk = yf.Ticker(ticker_upper, session=_yf_session)
         info = tk.info or {}
         name = info.get("longName") or info.get("shortName")
-
-        return StockInfo(
-            ticker=ticker_upper,
-            issuer_name=name,
-            cusip=None,
-            logo_domain=logo_domain,
-        )
     except Exception as e:
         logger.warning("yfinance lookup failed for %s: %s", ticker_upper, e)
-        return StockInfo(
-            ticker=ticker_upper,
-            issuer_name=None,
-            cusip=None,
-            logo_domain=logo_domain,
-        )
+
+    # 3. Fall back to hardcoded S&P 500 list if yfinance returned nothing
+    if not name:
+        try:
+            from filings.market_data import _FALLBACK_SP500
+
+            for entry in _FALLBACK_SP500:
+                if entry["ticker"].upper() == ticker_upper:
+                    name = entry["name"]
+                    break
+        except Exception:
+            pass
+
+    return StockInfo(
+        ticker=ticker_upper,
+        issuer_name=name,
+        cusip=None,
+        logo_domain=logo_domain,
+    )

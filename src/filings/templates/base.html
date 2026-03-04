@@ -10,6 +10,10 @@
         var theme = (stored === 'light' || stored === 'dark') ? stored
             : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         document.documentElement.setAttribute('data-theme', theme);
+        // Sidebar expanded state — prevent layout shift
+        if (localStorage.getItem('pp-sidebar-expanded') === '1') {
+            document.documentElement.classList.add('pp-sidebar-is-expanded');
+        }
     })();
     </script>
     <title>{% block title %}PaperPanda — Superinvestor 13F Portfolio Tracker{% endblock %}</title>
@@ -182,6 +186,17 @@
             --pp-glass-border: rgba(255, 255, 255, 0.3);
             --pp-glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
             --pp-glass-blur: 12px;
+            --pp-sidebar-width: 240px;
+            --pp-sidebar-collapsed: 60px;
+            --pp-sidebar-active-bg: rgba(25, 118, 210, 0.08);
+            --pp-sidebar-active-text: #1976d2;
+            --pp-bento-inset: 12px;
+            --pp-bento-gap: 12px;
+            --pp-bento-radius: 20px;
+            --pp-bento-body-bg: #d8dbe0;
+            --pp-bento-card-bg: rgba(255, 255, 255, 0.92);
+            --pp-bento-card-border: rgba(0, 0, 0, 0.06);
+            --pp-bento-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
         }
         :root[data-theme="dark"] {
             --pp-surface: #1a1a1e;
@@ -236,7 +251,20 @@
             --pp-glass-border: rgba(255, 255, 255, 0.08);
             --pp-glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
             --pp-glass-blur: 12px;
+            --pp-sidebar-width: 240px;
+            --pp-sidebar-collapsed: 60px;
+            --pp-sidebar-active-bg: rgba(25, 118, 210, 0.15);
+            --pp-sidebar-active-text: #64b5f6;
+            --pp-bento-inset: 12px;
+            --pp-bento-gap: 12px;
+            --pp-bento-radius: 20px;
+            --pp-bento-body-bg: #0e0e10;
+            --pp-bento-card-bg: rgba(24, 24, 27, 0.92);
+            --pp-bento-card-border: rgba(255, 255, 255, 0.06);
+            --pp-bento-card-shadow: 0 2px 12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.04);
         }
+
+        body { background: var(--pp-bento-body-bg) !important; }
 
         .htmx-indicator { display: none; }
         .htmx-request .htmx-indicator,
@@ -594,66 +622,341 @@
         }
         .cache-info small { opacity: 0.6; }
 
-        /* ── Sticky nav bar ── */
-        nav.site-nav {
-            position: sticky;
-            top: 0;
-            z-index: 999;
-            background: var(--pp-nav-bg);
+        /* ── Sidebar Navigation ── */
+        .pp-sidebar {
+            position: fixed;
+            top: var(--pp-bento-inset);
+            left: var(--pp-bento-inset);
+            bottom: var(--pp-bento-inset);
+            width: var(--pp-sidebar-collapsed);
+            background: var(--pp-bento-card-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--pp-bento-card-border);
+            border-radius: var(--pp-bento-radius);
+            box-shadow: var(--pp-bento-card-shadow);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            overflow: visible;
+            transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .pp-sidebar.expanded {
+            width: var(--pp-sidebar-width);
+        }
+
+        /* Logo area */
+        .pp-sidebar-logo {
+            padding: 0.85em 0 0.5em;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            min-height: 60px;
+        }
+        .pp-sidebar-logo a { display: flex; align-items: center; }
+        /* Full logo — hidden when collapsed */
+        .pp-sidebar-logo .pp-logo-full { display: none; width: 180px; height: auto; }
+        .pp-sidebar.expanded .pp-logo-full { display: block; }
+        /* Panda head — shown when collapsed */
+        .pp-sidebar-logo .pp-logo-icon { display: block; width: 34px; height: 34px; border-radius: 8px; }
+        .pp-sidebar.expanded .pp-logo-icon { display: none; }
+
+        .pp-sidebar-nav {
+            flex: 1;
+            padding: 0.25em 0.5em;
+            overflow-y: auto;
+        }
+        .pp-nav-group { margin-bottom: 0.15em; }
+        /* Group labels — hidden when collapsed */
+        .pp-nav-group-label {
+            display: none;
+            font-size: 0.6em;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            font-weight: 700;
+            color: var(--pp-text-faint);
+            padding: 1em 0.75em 0.4em;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+        .pp-sidebar.expanded .pp-nav-group-label { display: block; }
+
+        .pp-nav-link {
+            display: flex;
+            align-items: center;
+            gap: 0.65em;
+            padding: 0.5em 0.75em;
+            border-radius: 8px;
+            font-size: 0.85em;
+            font-weight: 400;
+            color: var(--pp-text-muted);
+            text-decoration: none;
+            transition: background 0.15s, color 0.15s;
+            margin-bottom: 1px;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+        /* Center icons when collapsed */
+        .pp-sidebar:not(.expanded) .pp-nav-link {
+            justify-content: center;
+            padding: 0.55em;
+        }
+        .pp-nav-link:hover {
+            background: var(--pp-surface-hover);
+            color: var(--pp-text);
+            text-decoration: none;
+        }
+        .pp-nav-link.active {
+            background: var(--pp-sidebar-active-bg);
+            color: var(--pp-sidebar-active-text);
+            font-weight: 600;
+        }
+        .pp-nav-link svg {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            opacity: 0.5;
+            stroke-width: 1.5;
+        }
+        .pp-nav-link.active svg { opacity: 1; }
+        .pp-nav-link:hover svg { opacity: 0.8; }
+        /* Hide text labels when collapsed */
+        .pp-nav-link span {
+            opacity: 1;
+            transition: opacity 0.15s;
+        }
+        .pp-sidebar:not(.expanded) .pp-nav-link span { display: none; }
+
+        /* Sidebar footer (pinned bottom) */
+        .pp-sidebar-footer {
+            flex-shrink: 0;
+            padding: 0.5em;
+            border-top: 1px solid var(--pp-nav-border);
+            display: flex;
+            flex-direction: column;
+            gap: 0.4em;
+        }
+        .pp-sidebar-actions-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5em;
+            padding: 0 0.25em;
+        }
+        .pp-sidebar.expanded .pp-sidebar-actions-row {
+            justify-content: space-between;
+        }
+        /* Stack bell and theme toggle vertically when collapsed */
+        .pp-sidebar:not(.expanded) .pp-sidebar-actions-row {
+            flex-direction: column;
+            gap: 0.3em;
+        }
+        /* Compact circle theme toggle when collapsed */
+        .pp-sidebar:not(.expanded) .theme-toggle {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            justify-content: center;
+            padding: 0;
+        }
+        .pp-sidebar:not(.expanded) .theme-toggle-thumb {
+            transform: none !important;
+        }
+
+        .pp-sidebar-support-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5em;
+            padding: 0.55em 1em;
+            font-size: 0.82em;
+            font-weight: 600;
+            border-radius: 10px;
+            text-decoration: none;
+            background: rgba(25, 118, 210, 0.25);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--pp-nav-border);
-        }
-        nav.site-nav > .container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding-top: 0;
-            padding-bottom: 0;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        /* ── Nav left (logo) ── */
-        .nav-left {
-            display: flex;
-            align-items: center;
-            flex-shrink: 0;
-        }
-        .nav-left a {
-            display: flex;
-            align-items: center;
-        }
-
-        /* ── Nav right (links + auth) ── */
-        .nav-right {
-            display: flex;
-            align-items: center;
-            gap: 2em;
-            list-style: none;
-            margin: 0;
-            padding: 0;
-        }
-        .nav-right > li {
-            display: flex;
-            align-items: center;
-            margin: 0;
-            padding: 0;
-        }
-
-        /* Nav links */
-        .nav-right > li > a,
-        .nav-dropdown-toggle {
-            font-size: 0.9em;
-            font-weight: 500;
-            color: var(--pico-color, #333);
-            text-decoration: none;
-            transition: color 0.2s ease;
+            color: var(--pp-support-btn-text) !important;
+            border: 1px solid rgba(25, 118, 210, 0.3);
+            transition: background 0.2s, box-shadow 0.2s;
             white-space: nowrap;
+            overflow: hidden;
         }
-        .nav-right > li > a:hover,
-        .nav-dropdown-toggle:hover {
-            color: var(--pico-primary, #1a73e8);
+        .pp-sidebar-support-btn:hover {
+            background: rgba(25, 118, 210, 0.4);
+            box-shadow: 0 0 12px rgba(25, 118, 210, 0.3);
+            text-decoration: none;
+        }
+        .pp-sidebar-support-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        /* When collapsed, show only heart icon */
+        .pp-sidebar:not(.expanded) .pp-sidebar-support-btn span { display: none; }
+        .pp-sidebar:not(.expanded) .pp-sidebar-support-btn { padding: 0.55em; }
+        [data-theme="light"] .pp-sidebar-support-btn {
+            background: rgba(24, 24, 27, 0.75);
+            border: 1px solid rgba(24, 24, 27, 0.2);
+        }
+        [data-theme="light"] .pp-sidebar-support-btn:hover {
+            background: rgba(24, 24, 27, 0.9);
+            box-shadow: 0 0 12px rgba(0, 0, 0, 0.15);
+        }
+
+        /* Expand/collapse toggle button — vertical pill on sidebar edge */
+        .pp-sidebar-toggle {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            right: -15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 20px;
+            height: 40px;
+            padding: 0;
+            background: var(--pp-bento-card-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--pp-bento-card-border);
+            border-radius: 9999px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            cursor: pointer;
+            color: #ef4444;
+            transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+            z-index: 1001;
+            margin: 0;
+        }
+        .pp-sidebar-toggle:hover { color: #ef4444; background: var(--pp-surface-hover); box-shadow: 0 2px 12px rgba(239, 68, 68, 0.3); }
+        .pp-sidebar-toggle svg { width: 12px; height: 12px; stroke-width: 3; transition: transform 0.25s; }
+        .pp-sidebar.expanded .pp-sidebar-toggle svg { transform: rotate(180deg); }
+
+        /* Content wrapper — Bento card pushed right by sidebar */
+        .pp-content-wrapper {
+            margin: var(--pp-bento-inset) var(--pp-bento-inset) var(--pp-bento-inset) calc(var(--pp-sidebar-collapsed) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
+            min-height: calc(100vh - var(--pp-bento-inset) * 2);
+            padding-top: 1em;
+            background: var(--pp-bento-card-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--pp-bento-card-border);
+            border-radius: var(--pp-bento-radius);
+            box-shadow: var(--pp-bento-card-shadow);
+            overflow: hidden;
+            position: relative;
+            transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .pp-sidebar.expanded ~ .pp-notif-dropdown--sidebar ~ .pp-content-wrapper,
+        .pp-sidebar.expanded ~ .pp-content-wrapper {
+            margin-left: calc(var(--pp-sidebar-width) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
+        }
+        /* FOUC prevention: use html class set before body renders (desktop only) */
+        @media (min-width: 1024px) {
+            html.pp-sidebar-is-expanded .pp-content-wrapper {
+                margin-left: calc(var(--pp-sidebar-width) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
+            }
+        }
+
+        /* Mobile top bar */
+        .pp-mobile-header { display: none; }
+        .pp-sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .pp-sidebar-overlay.visible { display: block; opacity: 1; }
+
+        /* Hamburger */
+        .pp-hamburger {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 5px;
+            width: 36px;
+            height: 36px;
+            padding: 6px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            margin: 0;
+        }
+        .pp-hamburger span {
+            display: block;
+            height: 2px;
+            background: var(--pp-text);
+            border-radius: 2px;
+            transition: transform 0.3s, opacity 0.3s;
+        }
+        .pp-hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+        .pp-hamburger.open span:nth-child(2) { opacity: 0; }
+        .pp-hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+        /* Mobile responsive (<1024px) — reset Bento insets */
+        @media (max-width: 1023px) {
+            .pp-sidebar {
+                transform: translateX(-110%);
+                z-index: 1001;
+                width: 280px;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                border-radius: 0 var(--pp-bento-radius) var(--pp-bento-radius) 0;
+                box-shadow: none;
+            }
+            .pp-sidebar.open { transform: translateX(0); box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3); }
+            .pp-content-wrapper {
+                margin: 0 !important;
+                border-radius: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                min-height: 100vh !important;
+            }
+            .pp-sidebar-toggle { display: none; }
+            .pp-mobile-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                padding: 0.5em 1em;
+                position: sticky;
+                top: 0;
+                z-index: 998;
+                background: var(--pp-nav-bg);
+                backdrop-filter: blur(12px);
+                -webkit-backdrop-filter: blur(12px);
+                border-bottom: 1px solid var(--pp-nav-border);
+            }
+            .pp-mobile-logo img { height: 50px; }
+            .pp-mobile-actions {
+                display: flex;
+                align-items: center;
+                gap: 0.5em;
+            }
+        }
+
+        /* Notification dropdown — positioned next to sidebar */
+        .pp-notif-dropdown--sidebar {
+            position: fixed !important;
+            bottom: calc(var(--pp-bento-inset) + 60px) !important;
+            left: calc(var(--pp-sidebar-collapsed) + var(--pp-bento-inset) + 8px) !important;
+            right: auto !important;
+            top: auto !important;
+            width: 360px;
+            max-height: 70vh;
+            z-index: 1100;
+            transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .pp-sidebar.expanded ~ .pp-notif-dropdown--sidebar {
+            left: calc(var(--pp-sidebar-width) + var(--pp-bento-inset) + 8px) !important;
+        }
+        @media (max-width: 1023px) {
+            .pp-notif-dropdown--sidebar {
+                left: 8px !important;
+                bottom: 80px !important;
+                width: calc(100vw - 16px);
+                max-width: 360px;
+            }
         }
 
         /* ── Notification bell ── */
@@ -820,88 +1123,6 @@
         th[data-sort]:hover { background: var(--pp-surface-hover); }
         .sort-indicator { font-size: 0.7em; vertical-align: middle; margin-left: 0.2em; color: var(--pp-text-faint); }
 
-        /* ── Nav dropdown ── */
-        .nav-dropdown {
-            position: relative;
-        }
-        .nav-dropdown-toggle {
-            display: flex;
-            align-items: center;
-            gap: 0.35em;
-            cursor: pointer;
-        }
-
-        /* Chevron icon (SVG) - rotates on hover */
-        .nav-chevron {
-            width: 12px;
-            height: 12px;
-            opacity: 0.5;
-            transition: transform 0.25s ease, opacity 0.2s ease;
-            flex-shrink: 0;
-        }
-        .nav-dropdown:hover .nav-chevron {
-            transform: rotate(180deg);
-            opacity: 0.8;
-        }
-
-        /* Dropdown menu - uses padding-top bridge to eliminate dead zone */
-        .nav-dropdown-menu {
-            display: none;
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--pp-dropdown-bg);
-            border: 1px solid var(--pp-overlay-8);
-            border-radius: 10px;
-            box-shadow: var(--pp-dropdown-shadow);
-            padding: 0.5em 0;
-            margin: 0;
-            min-width: 190px;
-            z-index: 1002;
-            list-style: none;
-            /* Bridge the gap between trigger and menu */
-            margin-top: 0;
-        }
-        /* Invisible bridge to prevent dead zone */
-        .nav-dropdown::after {
-            content: '';
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            height: 8px;
-            display: none;
-        }
-        .nav-dropdown:hover::after,
-        .nav-dropdown:focus-within::after {
-            display: block;
-        }
-        .nav-dropdown:hover .nav-dropdown-menu,
-        .nav-dropdown:focus-within .nav-dropdown-menu {
-            display: block;
-        }
-        .nav-dropdown-menu li {
-            padding: 0;
-            margin: 0;
-        }
-        .nav-dropdown-menu li a {
-            display: block;
-            padding: 0.55em 1.1em;
-            font-size: 0.85em;
-            font-weight: 450;
-            white-space: nowrap;
-            text-decoration: none;
-            color: var(--pp-text-secondary);
-            transition: background 0.15s ease, padding-left 0.15s ease;
-            border-radius: 0;
-        }
-        .nav-dropdown-menu li a:hover {
-            background: var(--pp-dropdown-item-hover);
-            padding-left: 1.3em;
-            color: var(--pp-text);
-        }
-
         /* Footer */
         .site-footer {
             border-top: 1px solid var(--pp-overlay-10);
@@ -912,38 +1133,6 @@
             text-align: center;
         }
         .site-footer a { color: inherit; }
-
-        /* Support the Panda CTA button in nav */
-        a.nav-support-btn {
-            display: inline-block;
-            padding: 0.4em 1.1em;
-            font-size: 0.85em;
-            font-weight: 600;
-            border-radius: 8px;
-            white-space: nowrap;
-            cursor: pointer;
-            margin: 0;
-            background: rgba(25, 118, 210, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            color: var(--pp-support-btn-text) !important;
-            border: 1px solid rgba(25, 118, 210, 0.3);
-            text-decoration: none;
-            transition: background 0.2s, box-shadow 0.2s, border-color 0.2s;
-        }
-        a.nav-support-btn:hover {
-            background: rgba(25, 118, 210, 0.4);
-            border-color: rgba(25, 118, 210, 0.5);
-            box-shadow: 0 0 12px rgba(25, 118, 210, 0.3), 0 0 0 1px rgba(25, 118, 210, 0.15);
-        }
-        [data-theme="light"] a.nav-support-btn {
-            background: rgba(24, 24, 27, 0.75);
-            border: 1px solid rgba(24, 24, 27, 0.2);
-        }
-        [data-theme="light"] a.nav-support-btn:hover {
-            background: rgba(24, 24, 27, 0.9);
-            box-shadow: 0 0 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.08);
-        }
 
         /* ── Theme Toggle Button ── */
         .theme-toggle {
@@ -978,7 +1167,7 @@
             transform: translateX(24px);
         }
         .theme-icon-sun, .theme-icon-moon { display: none; }
-        :root[data-theme="light"] .theme-icon-sun { display: block; color: #1976d2; }
+        :root[data-theme="light"] .theme-icon-sun { display: block; color: #ef4444; }
         :root[data-theme="dark"] .theme-icon-moon { display: block; }
 
         /* ── Logo: swap light/dark based on theme ── */
@@ -992,11 +1181,16 @@
         /*  Global Mesh Gradient Background                         */
         /* ══════════════════════════════════════════════════════════ */
         .mesh-bg {
-            position: fixed;
+            position: absolute;
             inset: 0;
-            z-index: -1;
+            z-index: 0;
             overflow: hidden;
             pointer-events: none;
+        }
+        .pp-content-wrapper > main.container,
+        .pp-content-wrapper > .site-footer {
+            position: relative;
+            z-index: 1;
         }
         .mesh-blob {
             position: absolute;
@@ -1139,74 +1333,162 @@
     {% endif %}
 </head>
 <body hx-boost="true">
-    <nav class="site-nav">
-        <div class="container">
-            <div class="nav-left">
-                <a href="/">
+    {# ── Mobile top bar (visible <1024px) ── #}
+    <div class="pp-mobile-header">
+        <button class="pp-hamburger" onclick="ppToggleSidebar()" aria-label="Toggle menu">
+            <span></span><span></span><span></span>
+        </button>
+        <a href="/" class="pp-mobile-logo">
+            <picture class="logo-light">
+                <source srcset="/static/logo-nav.webp" type="image/webp">
+                <img src="/static/logo-nav.png" alt="PaperPanda" height="50" decoding="async">
+            </picture>
+            <picture class="logo-dark">
+                <source srcset="/static/logo-nav-dark.webp" type="image/webp">
+                <img src="/static/logo-nav-dark.png" alt="PaperPanda" height="50" decoding="async">
+            </picture>
+        </a>
+        <div class="pp-mobile-actions">
+            <button id="theme-toggle-mobile" class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">
+                <span class="theme-toggle-thumb">
+                    <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                </span>
+            </button>
+            <div class="pp-notif-wrap">
+                <div id="pp-notif-bell-mobile"
+                     hx-get="/api/notifications/bell"
+                     hx-trigger="load, every 120s"
+                     hx-swap="innerHTML">
+                </div>
+                <div id="pp-notif-dropdown-mobile" class="pp-notif-dropdown" style="display:none;">
+                    <div class="pp-notif-header">
+                        <span>Notifications</span>
+                        <a href="/notifications">View All</a>
+                    </div>
+                    <div id="pp-notif-dropdown-content-mobile"
+                         hx-trigger="none"
+                         hx-get="/api/notifications/recent"
+                         hx-swap="innerHTML">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Sidebar overlay (mobile) ── #}
+    <div class="pp-sidebar-overlay" onclick="ppToggleSidebar()"></div>
+
+    {# ── Sidebar navigation ── #}
+    <aside class="pp-sidebar" id="pp-sidebar">
+        <div class="pp-sidebar-logo">
+            <a href="/">
+                <img class="pp-logo-icon" src="/static/apple-touch-icon.png" alt="PaperPanda" decoding="async">
+                <div class="pp-logo-full">
                     <picture class="logo-light">
                         <source srcset="/static/logo-nav.webp" type="image/webp">
-                        <img src="/static/logo-nav.png" alt="PaperPanda" width="202" height="110" decoding="async" style="height: 110px;">
+                        <img src="/static/logo-nav.png" alt="PaperPanda" decoding="async">
                     </picture>
                     <picture class="logo-dark">
                         <source srcset="/static/logo-nav-dark.webp" type="image/webp">
-                        <img src="/static/logo-nav-dark.png" alt="PaperPanda" width="202" height="110" decoding="async" style="height: 110px;">
+                        <img src="/static/logo-nav-dark.png" alt="PaperPanda" decoding="async">
                     </picture>
+                </div>
+            </a>
+        </div>
+
+        <button class="pp-sidebar-toggle" onclick="ppToggleExpand()" title="Expand sidebar" aria-label="Toggle sidebar">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+
+        <nav class="pp-sidebar-nav">
+            <div class="pp-nav-group">
+                <span class="pp-nav-group-label">Overview</span>
+                <a href="/" class="pp-nav-link {% if request.url.path == '/' %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    <span>Home</span>
                 </a>
             </div>
-            <ul class="nav-right">
-                <li><a href="/">Home</a></li>
-                <li><a href="/funds">Funds</a></li>
 
-                <li><a href="/insider-trading">Insiders</a></li>
-                <li><a href="/congress">Congress</a></li>
-                <li><a href="/retail">Retail</a></li>
-                <li>
-                    <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">
-                        <span class="theme-toggle-thumb">
-                            <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-                            <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-                        </span>
-                    </button>
-                </li>
-                {# ── Notification Bell ── #}
-                <li class="nav-notif-li">
-                    <div class="pp-notif-wrap">
-                        <div id="pp-notif-bell"
-                             hx-get="/api/notifications/bell"
-                             hx-trigger="load, every 120s"
-                             hx-swap="innerHTML">
-                        </div>
-                        <div id="pp-notif-dropdown" class="pp-notif-dropdown" style="display:none;">
-                            <div class="pp-notif-header">
-                                <span>Notifications</span>
-                                <a href="/notifications">View All</a>
-                            </div>
-                            <div id="pp-notif-dropdown-content"
-                                 hx-trigger="none"
-                                 hx-get="/api/notifications/recent"
-                                 hx-swap="innerHTML">
-                            </div>
-                        </div>
+            <div class="pp-nav-group">
+                <span class="pp-nav-group-label">Market Data</span>
+                <a href="/funds" class="pp-nav-link {% if request.url.path == '/funds' or request.url.path.startswith('/holdings/') or request.url.path == '/grand-portfolio' or request.url.path == '/activity' or request.url.path == '/superinvestors' %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg>
+                    <span>Funds</span>
+                </a>
+            </div>
+
+            <div class="pp-nav-group">
+                <span class="pp-nav-group-label">Signals</span>
+                <a href="/insider-trading" class="pp-nav-link {% if request.url.path.startswith('/insider') %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <span>Insiders</span>
+                </a>
+                <a href="/congress" class="pp-nav-link {% if request.url.path.startswith('/congress') or request.url.path.startswith('/politician/') %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="22" x2="21" y2="22"/><line x1="6" y1="18" x2="6" y2="11"/><line x1="10" y1="18" x2="10" y2="11"/><line x1="14" y1="18" x2="14" y2="11"/><line x1="18" y1="18" x2="18" y2="11"/><polygon points="12 2 20 7 4 7"/></svg>
+                    <span>Congress</span>
+                </a>
+                <a href="/retail" class="pp-nav-link {% if request.url.path.startswith('/retail') %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                    <span>Retail</span>
+                </a>
+                <a href="/alternative-signals" class="pp-nav-link {% if request.url.path.startswith('/alternative') %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <span>Alt Signals</span>
+                </a>
+            </div>
+        </nav>
+
+        <div class="pp-sidebar-footer">
+            <div class="pp-sidebar-actions-row">
+                <div class="pp-notif-wrap">
+                    <div id="pp-notif-bell"
+                         hx-get="/api/notifications/bell"
+                         hx-trigger="load, every 120s"
+                         hx-swap="innerHTML">
                     </div>
-                </li>
-                <li>
-                    <a href="/support" class="nav-support-btn" role="button">Support the Panda</a>
-                </li>
-            </ul>
+                </div>
+                <button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">
+                    <span class="theme-toggle-thumb">
+                        <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                        <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    </span>
+                </button>
+            </div>
+            <a href="/support" class="pp-sidebar-support-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                <span>Support the Panda</span>
+            </a>
         </div>
-    </nav>
-    {# ── Animated Mesh Gradient Background (global) ── #}
-    <div class="mesh-bg" aria-hidden="true">
-        <div class="mesh-blob mesh-blob-1"></div>
-        <div class="mesh-blob mesh-blob-2"></div>
-        <div class="mesh-blob mesh-blob-3"></div>
+    </aside>
+
+    {# ── Notification dropdown (outside sidebar to avoid overflow clipping) ── #}
+    <div id="pp-notif-dropdown" class="pp-notif-dropdown pp-notif-dropdown--sidebar" style="display:none;">
+        <div class="pp-notif-header">
+            <span>Notifications</span>
+            <a href="/notifications">View All</a>
+        </div>
+        <div id="pp-notif-dropdown-content"
+             hx-trigger="none"
+             hx-get="/api/notifications/recent"
+             hx-swap="innerHTML">
+        </div>
     </div>
 
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
+    {# ── Content wrapper (pushed right by sidebar) ── #}
+    <div class="pp-content-wrapper">
+        {# ── Animated Mesh Gradient Background (global) ── #}
+        <div class="mesh-bg" aria-hidden="true">
+            <div class="mesh-blob mesh-blob-1"></div>
+            <div class="mesh-blob mesh-blob-2"></div>
+            <div class="mesh-blob mesh-blob-3"></div>
+        </div>
 
-    <footer class="container site-footer">
+        <main class="container">
+            {% block content %}{% endblock %}
+        </main>
+
+        <footer class="container site-footer">
         <p>
             Data sourced from <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=13F" target="_blank">SEC EDGAR</a>,
             <a href="https://finance.yahoo.com" target="_blank">Yahoo Finance</a>,
@@ -1218,6 +1500,7 @@
         </p>
         <p>&copy; {{ current_year }} PaperPanda</p>
     </footer>
+    </div>{# ── end .pp-content-wrapper ── #}
 
     <script>
     // ── Sortable tables engine ──
@@ -1844,18 +2127,23 @@
             if (window.htmx) htmx.process(bell);
         }
 
-        // Toggle dropdown on bell click
-        window.ppToggleNotifDropdown = function() {
-            var dropdown = document.getElementById('pp-notif-dropdown');
+        // Toggle dropdown on bell click (supports sidebar + mobile bells)
+        window.ppToggleNotifDropdown = function(bellEl) {
+            // Determine which dropdown to use: mobile bell uses mobile dropdown, otherwise sidebar dropdown
+            var isMobile = bellEl && bellEl.closest('#pp-notif-bell-mobile');
+            var dropdown = isMobile
+                ? document.getElementById('pp-notif-dropdown-mobile')
+                : document.getElementById('pp-notif-dropdown');
             if (!dropdown) return;
 
             var isVisible = dropdown.style.display !== 'none';
-            if (isVisible) {
-                dropdown.style.display = 'none';
-                return;
-            }
 
-            // Show dropdown
+            // Close ALL dropdowns first
+            document.querySelectorAll('.pp-notif-dropdown').forEach(function(dd) { dd.style.display = 'none'; });
+
+            if (isVisible) return; // was open, now closed
+
+            // Show this dropdown
             dropdown.style.display = 'block';
 
             // Update last-seen to NOW
@@ -1863,26 +2151,30 @@
             localStorage.setItem('pp-notifications-last-seen', now);
 
             // Load dropdown content via HTMX
-            var content = document.getElementById('pp-notif-dropdown-content');
+            var content = dropdown.querySelector('[id^="pp-notif-dropdown-content"]');
             if (content && window.htmx) {
-                var since = lastSeen;  // Use the PREVIOUS last-seen for "is_new" marking
-                htmx.ajax('GET', '/api/notifications/recent?since=' + encodeURIComponent(since), {target: '#pp-notif-dropdown-content', swap: 'innerHTML'});
+                var since = lastSeen;
+                htmx.ajax('GET', '/api/notifications/recent?since=' + encodeURIComponent(since), {target: '#' + content.id, swap: 'innerHTML'});
             }
 
-            // Update the bell's since param for next poll (will clear the badge)
+            // Update all bells' since param for next poll
             lastSeen = now;
-            if (bell) {
-                bell.setAttribute('hx-get', '/api/notifications/bell?since=' + encodeURIComponent(now));
-            }
+            var sinceUrl = '/api/notifications/bell?since=' + encodeURIComponent(now);
+            if (bell) bell.setAttribute('hx-get', sinceUrl);
+            var bellMobile = document.getElementById('pp-notif-bell-mobile');
+            if (bellMobile) bellMobile.setAttribute('hx-get', sinceUrl);
         };
 
         // Close dropdown when clicking outside
         document.addEventListener('click', function(e) {
-            var wrap = document.querySelector('.pp-notif-wrap');
-            var dropdown = document.getElementById('pp-notif-dropdown');
-            if (wrap && dropdown && !wrap.contains(e.target)) {
-                dropdown.style.display = 'none';
-            }
+            var dropdowns = document.querySelectorAll('.pp-notif-dropdown');
+            dropdowns.forEach(function(dd) {
+                if (dd.style.display === 'none') return;
+                // Check if click is inside the dropdown or on a bell button
+                if (!dd.contains(e.target) && !e.target.closest('.pp-bell-btn')) {
+                    dd.style.display = 'none';
+                }
+            });
         });
 
         // Listen for HX-Trigger toast events from the bell poll
@@ -2035,6 +2327,55 @@
                 chart.setOption(Object.assign({ xAxis: opt.xAxis, yAxis: opt.yAxis, series: opt.series }, legendPatch));
             });
         });
+    })();
+    </script>
+    {# ── Sidebar Toggle (mobile drawer) ── #}
+    <script>
+    window.ppToggleSidebar = function() {
+        var sidebar = document.getElementById('pp-sidebar');
+        var overlay = document.querySelector('.pp-sidebar-overlay');
+        var hamburger = document.querySelector('.pp-hamburger');
+        if (!sidebar) return;
+        var isOpen = sidebar.classList.contains('open');
+        if (isOpen) {
+            sidebar.classList.remove('open');
+            if (overlay) overlay.classList.remove('visible');
+            if (hamburger) hamburger.classList.remove('open');
+            document.body.style.overflow = '';
+        } else {
+            sidebar.classList.add('open');
+            if (overlay) overlay.classList.add('visible');
+            if (hamburger) hamburger.classList.add('open');
+            document.body.style.overflow = 'hidden';
+        }
+    };
+    // Close sidebar on Escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            var sidebar = document.getElementById('pp-sidebar');
+            if (sidebar && sidebar.classList.contains('open')) ppToggleSidebar();
+        }
+    });
+    // Close sidebar on HTMX navigation
+    document.addEventListener('htmx:beforeRequest', function() {
+        var sidebar = document.getElementById('pp-sidebar');
+        if (sidebar && sidebar.classList.contains('open')) ppToggleSidebar();
+    });
+
+    // ── Expand / Collapse sidebar (desktop) ──
+    window.ppToggleExpand = function() {
+        var sidebar = document.getElementById('pp-sidebar');
+        if (!sidebar) return;
+        var isExpanded = sidebar.classList.toggle('expanded');
+        localStorage.setItem('pp-sidebar-expanded', isExpanded ? '1' : '0');
+    };
+    // Restore saved expand state on load
+    (function() {
+        var saved = localStorage.getItem('pp-sidebar-expanded');
+        if (saved === '1') {
+            var sidebar = document.getElementById('pp-sidebar');
+            if (sidebar) sidebar.classList.add('expanded');
+        }
     })();
     </script>
 {% block extra_scripts %}{% endblock %}
