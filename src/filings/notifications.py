@@ -421,7 +421,7 @@ def create_insider_trade_notification(trade: dict) -> dict | None:
     return {
         "id": f"insider-{filing_date}-{ticker}-{id_hash}",
         "type": "insider_trade",
-        "title": f"{icon} {name} {action} ${ticker}",
+        "title": f"{name} {action} ${ticker}",
         "message": _sanitize(message),
         "icon": icon,
         "toast_type": toast,
