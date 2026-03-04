@@ -2367,6 +2367,7 @@
         var sidebar = document.getElementById('pp-sidebar');
         if (!sidebar) return;
         var isExpanded = sidebar.classList.toggle('expanded');
+        document.documentElement.classList.toggle('pp-sidebar-is-expanded', isExpanded);
         localStorage.setItem('pp-sidebar-expanded', isExpanded ? '1' : '0');
     };
     // Restore saved expand state on load and after HTMX navigation
