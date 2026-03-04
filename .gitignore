@@ -30,3 +30,8 @@ notifications.json
 
 # Claude Code
 .claude/
+
+# Next.js (apps/web)
+apps/web/.next/
+apps/web/node_modules/
+apps/web/.env.local

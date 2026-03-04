@@ -1300,38 +1300,9 @@
             overflow: hidden;
         }
     </style>
-    {% if supabase_anon_key %}
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"
-            integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB"
-            crossorigin="anonymous" defer></script>
-    <script>
-        // Wait for deferred Supabase SDK to load before initialising
-        document.addEventListener('DOMContentLoaded', function() {
-            if (!window.supabase) return;
-            window._supabase = window.supabase.createClient(
-                '{{ supabase_url }}',
-                '{{ supabase_anon_key }}'
-            );
-
-            // Sync Supabase auth tokens to HttpOnly cookies via server endpoints
-            window._supabase.auth.onAuthStateChange(function(event, session) {
-                if (session) {
-                    fetch('/api/auth/set-session', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            access_token: session.access_token,
-                            refresh_token: session.refresh_token,
-                            expires_in: session.expires_in
-                        })
-                    });
-                } else {
-                    fetch('/api/auth/clear-session', { method: 'POST' });
-                }
-            });
-        });
-    </script>
-    {% endif %}
+    {# Auth is now handled by Clerk on the Next.js app (port 3000).
+       The supabase-js client-side SDK and onAuthStateChange listener
+       have been removed. Clerk manages its own __session cookie. #}
 </head>
 <body hx-boost="true">
     {# ── Mobile top bar (visible <1024px) ── #}
@@ -1456,6 +1427,17 @@
                     </span>
                 </button>
             </div>
+            {% if request.state.user %}
+            <a href="/dashboard" class="pp-sidebar-support-btn" style="background: var(--pp-overlay-5); border-color: var(--pp-border);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span>Dashboard</span>
+            </a>
+            {% else %}
+            <a href="/auth/sign-in" class="pp-sidebar-support-btn" style="background: var(--pp-overlay-5); border-color: var(--pp-border);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                <span>Sign In</span>
+            </a>
+            {% endif %}
             <a href="/support" class="pp-sidebar-support-btn">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                 <span>Support the Panda</span>
