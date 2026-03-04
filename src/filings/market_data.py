@@ -774,6 +774,113 @@ def get_overview_chart_data(symbol: str, period: str = "1M") -> dict | None:
         return None
 
 
+# ── OHLCV candlestick data (self-hosted stock chart) ─────────────────
+
+_ohlcv_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
+_OHLCV_TTL = 1_800   # 30 min
+_OHLCV_MAX = 200      # max entries
+
+_OHLCV_YF_PERIODS = {
+    "1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "5Y": "5y",
+}
+
+
+def get_stock_ohlcv(ticker: str, period: str = "1Y") -> dict | None:
+    """Return OHLCV candlestick data for a stock ticker.
+
+    Returns ``{"ticker", "name", "price", "pct_change",
+               "ohlcv": [[epoch_ms, open, high, low, close, volume], ...]}``
+    or *None* if data is unavailable.
+    """
+    if period not in _OHLCV_YF_PERIODS:
+        period = "1Y"
+
+    cache_key = f"{ticker}:{period}"
+    with _lock:
+        cached = _ohlcv_cache.get(cache_key)
+        if cached is not None:
+            ts, data = cached
+            if time.time() - ts < _OHLCV_TTL:
+                _ohlcv_cache.move_to_end(cache_key)
+                return data
+
+    try:
+        import yfinance as yf
+
+        yf_period = _OHLCV_YF_PERIODS[period]
+        dl = yf.download(
+            [ticker], period=yf_period,
+            threads=False, progress=False, timeout=_YF_TIMEOUT,
+        )
+        if dl.empty:
+            return None
+
+        # Normalise MultiIndex columns from yfinance
+        if hasattr(dl.columns, "get_level_values"):
+            levels = dl.columns.get_level_values(0).unique().tolist()
+            needed = {"Open", "High", "Low", "Close", "Volume"}
+            if not needed.issubset(set(levels)):
+                return None
+        else:
+            return None
+
+        # Extract per-ticker series (handle single-ticker sub-column)
+        def _col(name: str):
+            col = dl[name]
+            if hasattr(col, "columns") and ticker in col.columns:
+                return col[ticker].dropna()
+            if hasattr(col, "columns") and len(col.columns) == 1:
+                return col.iloc[:, 0].dropna()
+            return col.squeeze().dropna()
+
+        o, h, l, c, v = _col("Open"), _col("High"), _col("Low"), _col("Close"), _col("Volume")
+        if len(c) < 2:
+            return None
+
+        ohlcv: list[list] = []
+        for idx in c.index:
+            epoch_ms = int(idx.timestamp() * 1000)
+            ohlcv.append([
+                epoch_ms,
+                round(float(o.get(idx, 0)), 2),
+                round(float(h.get(idx, 0)), 2),
+                round(float(l.get(idx, 0)), 2),
+                round(float(c[idx]), 2),
+                int(float(v.get(idx, 0))),
+            ])
+
+        # Resolve name
+        constituents = get_sp500_constituents()
+        name = ticker
+        for cst in constituents:
+            if cst["ticker"] == ticker:
+                name = cst["name"]
+                break
+
+        price = ohlcv[-1][4]
+        start_price = ohlcv[0][4]
+        pct = round((price - start_price) / start_price * 100, 2) if start_price else 0.0
+
+        result = {
+            "ticker": ticker,
+            "name": name,
+            "price": price,
+            "pct_change": pct,
+            "ohlcv": ohlcv,
+        }
+
+        with _lock:
+            _ohlcv_cache[cache_key] = (time.time(), result)
+            _ohlcv_cache.move_to_end(cache_key)
+            while len(_ohlcv_cache) > _OHLCV_MAX:
+                _ohlcv_cache.popitem(last=False)
+        return result
+
+    except Exception as e:
+        logger.warning("OHLCV download failed for %s (%s): %s", ticker, period, e)
+        return None
+
+
 # ── Market News ──────────────────────────────────────────────────────
 
 
