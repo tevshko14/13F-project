@@ -558,15 +558,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "script-src 'self' 'unsafe-inline' "
             "https://cdn.jsdelivr.net https://unpkg.com "
             "https://us.i.posthog.com https://us-assets.i.posthog.com "
-            "https://js.stripe.com https://s3.tradingview.com; "
+            "https://js.stripe.com; "
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "img-src 'self' data: https: blob:; "
             "font-src 'self' data:; "
             "connect-src 'self' "
             "https://us.i.posthog.com https://us-assets.i.posthog.com "
             "https://*.supabase.co "
-            "https://js.stripe.com https://*.tradingview.com; "
-            "frame-src https://js.stripe.com https://*.tradingview.com https://tally.so; "
+            "https://js.stripe.com https://api.tickertick.com; "
+            "frame-src https://js.stripe.com https://tally.so; "
             "object-src 'none'; "
             "base-uri 'self'"
         )
@@ -3419,6 +3419,20 @@ async def politician_page(request: Request, member_id: str):
         "politician.html",
         {"request": request, **display},
     )
+
+
+@app.get("/api/stock/{ticker}/ohlcv")
+async def stock_ohlcv_api(
+    ticker: str,
+    period: str = Query("1Y", pattern="^(1M|3M|6M|1Y|5Y)$"),
+):
+    """Return OHLCV candlestick data for a stock ticker."""
+    if not _valid_ticker(ticker):
+        return JSONResponse({"error": "Invalid ticker"}, status_code=400)
+    data = await _to_heavy(market_data.get_stock_ohlcv, ticker.upper(), period)
+    if data is None:
+        return JSONResponse({"error": "Data unavailable"}, status_code=404)
+    return JSONResponse(data)
 
 
 @app.get("/api/stock/{ticker}/congress", response_class=HTMLResponse)

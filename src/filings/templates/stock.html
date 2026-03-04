@@ -20,19 +20,22 @@
 {% endblock %}
 {% block content %}
 <hgroup>
-    <h1 style="display: flex; align-items: center; gap: 0.5em;">
-        {% if logo_tickers is defined and stock_info.ticker in logo_tickers %}
-        <img src="/api/logo/{{ stock_info.ticker }}.png"
-             alt="{{ stock_info.ticker }} logo" width="40" height="40"
-             loading="lazy" decoding="async"
-             style="border-radius: 6px; object-fit: contain;"
-             onerror="this.style.display='none'">
-        {% endif %}
-        {% if stock_info.ticker %}
-        <span class="ticker">{{ stock_info.ticker }}</span> &mdash;
-        {% endif %}
-        {{ stock_info.issuer_name or "Unknown Company" }}
-    </h1>
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75em;">
+        <h1 style="display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; margin-bottom: 0; min-width: 0;">
+            {% if logo_tickers is defined and stock_info.ticker in logo_tickers %}
+            <img src="/api/logo/{{ stock_info.ticker }}.png"
+                 alt="{{ stock_info.ticker }} logo" width="40" height="40"
+                 loading="lazy" decoding="async"
+                 style="border-radius: 6px; object-fit: contain;"
+                 onerror="this.style.display='none'">
+            {% endif %}
+            {% if stock_info.ticker %}
+            <span class="ticker">{{ stock_info.ticker }}</span> &mdash;
+            {% endif %}
+            {{ stock_info.issuer_name or "Unknown Company" }}
+        </h1>
+        <div id="pp-header-price" style="display: none; flex-direction: column; align-items: flex-end; white-space: nowrap; padding-top: 0.15em;"></div>
+    </div>
     <p>
         {% if stock_info.cusip %}CUSIP: {{ stock_info.cusip }} &middot; {% endif %}
         {% if stock and stock.num_holders > 0 %}
@@ -185,66 +188,37 @@
         transform: rotate(180deg);
     }
 
-    /* ── Chart container: responsive 21:9 aspect ratio ── */
+    /* ── Chart container ── */
     .chart-container {
         width: 100%;
         min-height: 500px;
         aspect-ratio: 21 / 9;
         margin-bottom: 2em;
     }
-    .chart-container .tradingview-widget-container,
-    .chart-container .tradingview-widget-container__widget {
-        width: 100% !important;
-        height: 100% !important;
+    .pp-period-row {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.3em;
+        margin-bottom: 0.5em;
     }
-
-    /* ── Financials container: tall enough for rows to breathe ── */
-    .financials-container {
-        width: 100%;
-        height: 800px;          /* tall explicit height so TradingView iframe rows aren't compressed */
-        max-height: none;       /* remove any inherited max-height */
-        overflow: visible;      /* never clip content */
-    }
-    .financials-container .tradingview-widget-container {
-        width: 100% !important;
-        height: 100% !important;
-        overflow: visible !important;
-    }
-    .financials-container .tradingview-widget-container__widget {
-        width: 100% !important;
-        height: 100% !important;
-        overflow: visible !important;
-    }
-    /* Ensure the iframe itself gets full space */
-    .financials-container iframe {
-        width: 100% !important;
-        height: 100% !important;
-        min-height: 780px;
-        border: none;
-    }
-
-    /* ── Full-width tab panels ── */
-    .overview-subpanel { display: none; width: 100%; }
-    .overview-subpanel.active { display: block; }
-
-    /* Overview subtabs (Financials / News) */
-    .overview-subtab {
-        background: none;
-        border: none;
-        border-bottom: 2px solid transparent;
-        padding: 0.5em 1.2em;
-        margin: 0;
-        margin-bottom: -2px;
-        cursor: pointer;
-        font-size: 0.9em;
+    .pp-period-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.3em 0.7em;
+        border-radius: 999px;
+        font-size: 0.78em;
         font-weight: 600;
-        color: var(--pp-overlay-50);
-        transition: color 0.15s, border-color 0.15s;
+        border: 1.5px solid var(--pico-muted-border-color);
+        color: var(--pico-muted-color);
+        background: transparent;
+        cursor: pointer;
+        transition: all 0.15s;
     }
-    .overview-subtab:hover { color: var(--pp-text-secondary); }
-    .overview-subtab.active {
-        color: #1976d2;
-        border-bottom-color: #1976d2;
+    .pp-period-btn:hover { border-color: #1976d2; color: #1976d2; }
+    .pp-period-btn.active {
+        border-color: #1976d2;
+        background: #1976d2;
+        color: #fff;
     }
 
     /* ── Table spacing: proper padding, line-height, min font ── */
@@ -297,68 +271,65 @@
         box-sizing: border-box;
     }
 
-    /* TickerTick news styling */
-    .news-item {
-        padding: 1em 0;
-        border-bottom: 1px solid var(--pp-nav-border);
-    }
-    .news-item:last-child { border-bottom: none; }
-    .news-item a {
-        font-weight: 600;
-        color: var(--pp-text-secondary);
-        text-decoration: none;
-        line-height: 1.5;
-        font-size: 1.02em;
-    }
-    .news-item a:hover { text-decoration: underline; }
-    .news-meta {
-        font-size: 0.85em;
-        color: var(--pp-overlay-50);
-        margin-top: 0.4em;
+    /* ── Ticker news cards (matches homepage mn-card style) ── */
+    .tn-card {
         display: flex;
-        align-items: center;
-        gap: 0.5em;
+        gap: 0.7em;
+        padding: 0.65em 0;
+        border-bottom: 1px solid var(--pp-border-light, var(--pp-nav-border));
+        cursor: pointer;
+        transition: background 0.15s;
+        border-radius: 6px;
     }
-    .news-meta img {
-        vertical-align: middle;
-        border-radius: 2px;
+    .tn-card:last-child { border-bottom: none; }
+    .tn-card:hover { background: var(--pp-surface-hover, rgba(255,255,255,0.04)); }
+    .tn-card-icon {
+        width: 20px; height: 20px;
+        border-radius: 3px; flex-shrink: 0;
+        margin-top: 0.15em;
     }
+    .tn-card-body { flex: 1; min-width: 0; }
+    .tn-headline {
+        font-weight: 600; font-size: 0.88em; line-height: 1.35;
+        display: -webkit-box; -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical; overflow: hidden;
+        color: var(--pp-text-secondary, inherit);
+    }
+    .tn-meta {
+        font-size: 0.74em; color: var(--pp-text-muted, var(--pp-overlay-50));
+        margin-top: 0.2em;
+    }
+    .tn-meta .tn-source { font-weight: 600; }
+    .tn-meta .tn-dot { margin: 0 0.25em; }
 
     /* ── News pagination ── */
     .news-pagination {
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 0.5em;
-        padding: 1.2em 0 0.5em;
-        margin-top: 0.5em;
-        border-top: 1px solid var(--pp-overlay-8);
+        gap: 0.8em;
+        padding: 0.45em 0;
+        border-top: 1px solid var(--pp-border-light, var(--pp-overlay-8));
     }
     .news-pagination button {
-        background: none;
-        border: 1px solid var(--pp-overlay-10);
-        border-radius: 6px;
-        padding: 0.35em 0.9em;
-        cursor: pointer;
-        font-size: 0.85em;
-        font-weight: 600;
+        background: transparent;
+        border: 1px solid var(--pp-border-light, var(--pp-overlay-10));
+        border-radius: 4px;
+        padding: 0.15em 0.5em;
+        font-size: 0.9em; font-weight: 600;
         color: var(--pp-text-muted);
-        transition: background 0.15s, color 0.15s;
-        margin: 0;
+        cursor: pointer; margin: 0; line-height: 1.2;
+        transition: color 0.15s, border-color 0.15s;
     }
     .news-pagination button:hover:not(:disabled) {
-        background: var(--pp-overlay-5);
-        color: var(--pp-text-secondary);
+        color: var(--pp-text);
+        border-color: var(--pp-text-muted);
     }
-    .news-pagination button:disabled {
-        opacity: 0.35;
-        cursor: default;
-    }
+    .news-pagination button:disabled { opacity: 0.3; cursor: default; }
     .news-pagination .page-info {
-        font-size: 0.85em;
-        color: var(--pp-overlay-50);
-        min-width: 80px;
-        text-align: center;
+        font-size: 0.75em;
+        color: var(--pp-text-muted);
+        font-weight: 500;
     }
 
     /* ── Responsive: stack on mobile, full-width on desktop ── */
@@ -391,13 +362,9 @@
     }
     @media (min-width: 769px) {
         #tab-overview,
-        #tab-ownership,
-        .overview-subpanel {
+        #tab-ownership {
             width: 100%;
             max-width: 100%;
-        }
-        .financials-container {
-            height: 800px;
         }
     }
 </style>
@@ -408,125 +375,238 @@
 <div id="tab-overview" class="tab-content active">
 
 {% if stock_info.ticker %}
-    {# ── TradingView Advanced Price Chart (responsive 21:9) ── #}
+    {# ── Self-hosted OHLCV Candlestick Chart (ECharts) ── #}
     <div class="chart-container">
-        <div id="tv-advanced-chart-wrap" style="width: 100%; height: 100%;"></div>
-    </div>
-
-    {# ── Subtabs: Financials / News (full-width) ── #}
-    <nav>
-        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid var(--pp-overlay-10);">
-            <li>
-                <button class="overview-subtab active" onclick="switchOverviewSubtab('financials')">
-                    Financials
-                </button>
-            </li>
-            <li>
-                <button class="overview-subtab" onclick="switchOverviewSubtab('news')">
-                    News
-                </button>
-            </li>
-        </ul>
-    </nav>
-
-    {# ── Financials panel (TradingView) ── #}
-    <div id="overview-sub-financials" class="overview-subpanel active">
-        <div class="financials-container">
-            <div id="tv-financials-wrap"></div>
+        <div class="pp-period-row">
+            <button class="pp-period-btn" data-period="1M" onclick="ppChartPeriod('1M')">1M</button>
+            <button class="pp-period-btn" data-period="3M" onclick="ppChartPeriod('3M')">3M</button>
+            <button class="pp-period-btn" data-period="6M" onclick="ppChartPeriod('6M')">6M</button>
+            <button class="pp-period-btn active" data-period="1Y" onclick="ppChartPeriod('1Y')">1Y</button>
+            <button class="pp-period-btn" data-period="5Y" onclick="ppChartPeriod('5Y')">5Y</button>
         </div>
+        <div id="pp-ohlcv-chart" style="width: 100%; height: calc(100% - 2em);"></div>
     </div>
 
-    {# ── News panel (TickerTick API) ── #}
-    <div id="overview-sub-news" class="overview-subpanel">
-        <div id="ticker-news-container">
-            <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-                Loading news...
-            </p>
-        </div>
+    {# ── News section ── #}
+    <h4 style="margin-top: 0.5em;">Latest News</h4>
+    <div id="ticker-news-container">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading news...
+        </p>
     </div>
 
-    {# ── TradingView dynamic theme rendering ── #}
+    {# ── ECharts OHLCV candlestick chart ── #}
     <script>
     (function() {
-        function tvEmbed(containerId, scriptUrl, config) {
-            var wrap = document.getElementById(containerId);
-            if (!wrap) return;
-            wrap.innerHTML = '';
-            var outer = document.createElement('div');
-            outer.className = 'tradingview-widget-container';
-            outer.style.cssText = 'width:100%;height:100%';
-            var inner = document.createElement('div');
-            inner.className = 'tradingview-widget-container__widget';
-            inner.style.cssText = 'width:100%;height:100%';
-            outer.appendChild(inner);
-            var script = document.createElement('script');
-            script.type = 'text/javascript';
-            script.src = scriptUrl;
-            script.async = true;
-            script.textContent = JSON.stringify(config);
-            outer.appendChild(script);
-            wrap.appendChild(outer);
-        }
-        function currentTheme() {
-            return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-        }
-        function renderTV() {
-            var theme = currentTheme();
-            var isDark = theme === 'dark';
-            tvEmbed('tv-advanced-chart-wrap',
-                'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js',
-                {
-                    symbol: "{{ stock_info.ticker }}",
-                    width: "100%",
-                    height: "100%",
-                    theme: theme,
-                    style: "1",
-                    locale: "en",
-                    allow_symbol_change: false,
-                    calendar: false,
-                    hide_volume: false,
-                    support_host: "https://www.tradingview.com"
+        var TICKER = "{{ stock_info.ticker }}";
+        var chartEl = document.getElementById('pp-ohlcv-chart');
+        if (!chartEl) return;
+
+        requireECharts(function(err) {
+            if (err) { chartEl.innerHTML = '<p style="text-align:center;padding:3em 0;color:var(--pico-muted-color)">Chart unavailable</p>'; return; }
+
+            var chart = echarts.init(chartEl);
+            var _lastData = null;
+
+            function themeColors() {
+                var cs = getComputedStyle(document.documentElement);
+                var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                return {
+                    axis: cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a',
+                    grid: cs.getPropertyValue('--pp-chart-grid').trim() || (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'),
+                    bg: 'transparent',
+                    upColor: '#1976d2',
+                    upBorder: '#1565c0',
+                    downColor: '#dc2626',
+                    downBorder: '#b91c1c',
+                    tooltip: isDark ? 'rgba(30,30,40,0.95)' : 'rgba(255,255,255,0.97)',
+                    tooltipText: isDark ? '#e4e4e7' : '#27272a',
+                };
+            }
+
+            var _currentPeriod = '1Y';
+
+            function updateHeaderPrice(data) {
+                var el = document.getElementById('pp-header-price');
+                if (!el || data.price == null) return;
+                var pct = data.pct_change || 0;
+                var isUp = pct >= 0;
+                var color = isUp ? '#16a34a' : '#dc2626';
+                var arrow = isUp ? '▲' : '▼';
+                var sign = isUp ? '+' : '';
+                el.innerHTML =
+                    '<span style="font-size: 1.9em; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em;">$' + data.price.toFixed(2) + '</span>' +
+                    '<span style="font-size: 0.85em; font-weight: 600; color:' + color + ';">' +
+                    arrow + ' ' + sign + pct.toFixed(2) + '% <span style="opacity:0.6; font-weight:500;">(' + _currentPeriod + ')</span></span>';
+                el.style.display = 'flex';
+            }
+
+            function renderChart(data) {
+                _lastData = data;
+                updateHeaderPrice(data);
+                var tc = themeColors();
+                var dates = [], candleData = [], volumes = [], rawDates = [];
+                var n = data.ohlcv.length;
+                var prevMonth = -1;
+
+                for (var i = 0; i < n; i++) {
+                    var d = data.ohlcv[i];
+                    // d = [epoch_ms, O, H, L, C, V]
+                    var dt = new Date(d[0]);
+                    rawDates.push(dt);
+                    var m = dt.getMonth();
+                    if (n <= 35) {
+                        // 1M: show day number, add month name at month boundary
+                        if (m !== prevMonth) {
+                            dates.push(dt.toLocaleDateString('en-US', {month:'short'}) + ' ' + dt.getDate());
+                        } else {
+                            dates.push(String(dt.getDate()));
+                        }
+                    } else if (n <= 70) {
+                        // 3M: "Feb 3" format
+                        dates.push(dt.toLocaleDateString('en-US', {month:'short', day:'numeric'}));
+                    } else {
+                        // 6M/1Y/5Y: "Mar '25" format
+                        dates.push(dt.toLocaleDateString('en-US', {month:'short', year:'2-digit'}));
+                    }
+                    prevMonth = m;
+                    // ECharts candlestick: [open, close, low, high]
+                    candleData.push([d[1], d[4], d[3], d[2]]);
+                    var isUp = d[4] >= d[1];
+                    volumes.push({
+                        value: d[5],
+                        itemStyle: { color: isUp ? 'rgba(25,118,210,0.35)' : 'rgba(220,38,38,0.35)' }
+                    });
+                }
+
+                chart.setOption({
+                    animation: false,
+                    backgroundColor: tc.bg,
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'cross', crossStyle: { color: tc.axis } },
+                        backgroundColor: tc.tooltip,
+                        borderColor: tc.grid,
+                        textStyle: { color: tc.tooltipText, fontSize: 12 },
+                        formatter: function(params) {
+                            if (!params || !params.length) return '';
+                            var c = params[0];
+                            if (!c || c.data == null) return '';
+                            var idx = c.dataIndex;
+                            var ds = rawDates[idx] ? rawDates[idx].toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : c.name;
+                            // data = [open, close, low, high]
+                            var vals = Array.isArray(c.data) ? c.data : c.value;
+                            var html = '<b>' + ds + '</b><br/>';
+                            html += 'O: <b>' + vals[0].toFixed(2) + '</b> ';
+                            html += 'H: <b>' + vals[3].toFixed(2) + '</b><br/>';
+                            html += 'L: <b>' + vals[2].toFixed(2) + '</b> ';
+                            html += 'C: <b>' + vals[1].toFixed(2) + '</b>';
+                            if (params[1] && params[1].data != null) {
+                                var vol = typeof params[1].data === 'object' ? params[1].data.value : params[1].data;
+                                if (vol) html += '<br/>Vol: <b>' + (vol >= 1e6 ? (vol/1e6).toFixed(1)+'M' : vol >= 1e3 ? (vol/1e3).toFixed(0)+'K' : vol) + '</b>';
+                            }
+                            return html;
+                        }
+                    },
+                    grid: [
+                        { left: 60, right: 15, top: 15, bottom: '28%' },
+                        { left: 60, right: 15, height: '15%', bottom: 30 }
+                    ],
+                    xAxis: [
+                        {
+                            type: 'category', gridIndex: 0, data: dates, boundaryGap: true,
+                            axisLine: { lineStyle: { color: tc.grid } },
+                            axisTick: { show: false },
+                            axisLabel: { show: false },
+                            axisPointer: { label: { show: false } },
+                            splitLine: { show: false }
+                        },
+                        {
+                            type: 'category', gridIndex: 1, data: dates, boundaryGap: true,
+                            axisLine: { lineStyle: { color: tc.grid } },
+                            axisTick: { show: false },
+                            axisLabel: {
+                                color: tc.axis, fontSize: 11,
+                                interval: function(idx) {
+                                    var n = dates.length;
+                                    if (n <= 25) return true;
+                                    if (n <= 70) return idx % 5 === 0;
+                                    if (n <= 150) return idx % 10 === 0;
+                                    return idx % 20 === 0;
+                                }
+                            },
+                            axisPointer: { label: { show: false } },
+                            splitLine: { show: false }
+                        }
+                    ],
+                    yAxis: [
+                        { type: 'value', gridIndex: 0, scale: true, splitLine: { lineStyle: { color: tc.grid } }, axisLabel: { color: tc.axis, fontSize: 11 }, axisLine: { show: false }, axisTick: { show: false }, axisPointer: { label: { show: false } } },
+                        { type: 'value', gridIndex: 1, scale: true, show: false, splitLine: { show: false } }
+                    ],
+                    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }],
+                    series: [
+                        {
+                            type: 'candlestick',
+                            data: candleData,
+                            itemStyle: {
+                                color: tc.upColor,
+                                color0: tc.downColor,
+                                borderColor: tc.upBorder,
+                                borderColor0: tc.downBorder,
+                            },
+                            xAxisIndex: 0,
+                            yAxisIndex: 0,
+                        },
+                        {
+                            type: 'bar',
+                            data: volumes,
+                            xAxisIndex: 1,
+                            yAxisIndex: 1,
+                            barMaxWidth: 6,
+                        }
+                    ],
+                }, true);
+            }
+
+            function fetchOHLCV(period) {
+                _currentPeriod = period;
+                chartEl.style.opacity = '0.5';
+                fetch('/api/stock/' + TICKER + '/ohlcv?period=' + period)
+                    .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                    .then(function(data) { chartEl.style.opacity = '1'; renderChart(data); })
+                    .catch(function() {
+                        chartEl.style.opacity = '1';
+                        chartEl.innerHTML = '<p style="text-align:center;padding:3em 0;color:var(--pico-muted-color)">Price data unavailable for ' + TICKER + '</p>';
+                    });
+            }
+
+            window.ppChartPeriod = function(period) {
+                document.querySelectorAll('.pp-period-btn').forEach(function(b) {
+                    b.classList.toggle('active', b.getAttribute('data-period') === period);
                 });
-            tvEmbed('tv-financials-wrap',
-                'https://s3.tradingview.com/external-embedding/embed-widget-financials.js',
-                {
-                    symbol: "{{ stock_info.ticker }}",
-                    colorTheme: theme,
-                    isTransparent: !isDark,
-                    largeChartUrl: "",
-                    displayMode: "regular",
-                    width: "100%",
-                    height: 780,
-                    locale: "en"
-                });
-        }
-        renderTV();
-        document.addEventListener('pp-theme-changed', renderTV);
+                fetchOHLCV(period);
+            };
+
+            // Initial load
+            fetchOHLCV('1Y');
+
+            // Theme change
+            document.addEventListener('pp-theme-changed', function() { if (_lastData) renderChart(_lastData); });
+
+            // Responsive resize
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
+        });
     })();
     </script>
 
     <script>
     (function() {
-        var newsLoaded = false;
         var allStories = [];
         var currentPage = 0;
         var perPage = 10;
 
-        window.switchOverviewSubtab = function(sub) {
-            document.querySelectorAll('.overview-subtab').forEach(function(btn) {
-                btn.classList.remove('active');
-            });
-            document.querySelectorAll('.overview-subpanel').forEach(function(p) {
-                p.classList.remove('active');
-            });
-            event.target.classList.add('active');
-            document.getElementById('overview-sub-' + sub).classList.add('active');
-
-            if (sub === 'news' && !newsLoaded) {
-                newsLoaded = true;
-                loadTickerNews('{{ stock_info.ticker }}');
-            }
-        };
+        // Auto-load news
+        loadTickerNews('{{ stock_info.ticker }}');
 
         function loadTickerNews(ticker) {
             var container = document.getElementById('ticker-news-container');
@@ -563,25 +643,26 @@
                 var story = pageStories[i];
                 var date = new Date(story.time);
                 var timeAgo = getTimeAgo(date);
-                html += '<div class="news-item">' +
-                    '<a href="' + escapeHtml(story.url) + '" target="_blank" rel="noopener">' +
-                    escapeHtml(story.title) + '</a>' +
-                    '<div class="news-meta">' +
-                    '<img src="' + escapeHtml(story.favicon_url || '') + '" width="14" height="14" ' +
-                    'onerror="this.style.display=\'none\'">' +
-                    '<span>' + escapeHtml(story.site || '') + '</span>' +
-                    '<span>&middot;</span>' +
-                    '<span>' + timeAgo + '</span>' +
-                    '</div></div>';
+                html += '<a class="tn-card" href="' + escapeHtml(story.url) + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">';
+                if (story.favicon_url) {
+                    html += '<img class="tn-card-icon" src="' + escapeHtml(story.favicon_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+                }
+                html += '<div class="tn-card-body">';
+                html += '<div class="tn-headline">' + escapeHtml(story.title) + '</div>';
+                html += '<div class="tn-meta">';
+                html += '<span class="tn-source">' + escapeHtml(story.site || '') + '</span>';
+                html += '<span class="tn-dot">&middot;</span>';
+                html += '<span>' + timeAgo + '</span>';
+                html += '</div></div></a>';
             }
 
-            // Pagination controls
+            // Pagination
             html += '<div class="news-pagination">' +
-                '<button onclick="window._newsPrev()" ' +
-                (currentPage === 0 ? 'disabled' : '') + '>&laquo; Prev</button>' +
-                '<span class="page-info">Page ' + (currentPage + 1) + ' of ' + totalPages + '</span>' +
-                '<button onclick="window._newsNext()" ' +
-                (currentPage >= totalPages - 1 ? 'disabled' : '') + '>Next &raquo;</button>' +
+                '<button onclick="event.preventDefault();window._newsPrev()" ' +
+                (currentPage === 0 ? 'disabled' : '') + '>&lsaquo;</button>' +
+                '<span class="page-info">' + (currentPage + 1) + ' / ' + totalPages + '</span>' +
+                '<button onclick="event.preventDefault();window._newsNext()" ' +
+                (currentPage >= totalPages - 1 ? 'disabled' : '') + '>&rsaquo;</button>' +
                 '</div>';
 
             container.innerHTML = html;
@@ -1313,6 +1394,15 @@ window.toggleHolders = function(btn) {
     }
     function mix(a, b, t) { return Math.round(a + (b - a) * t); }
 
+    // ── Gradient helper for Chart.js bars ───────────────────────
+    function makeBarGradient(canvas, topColor, bottomColor) {
+        const ctx2d = canvas.getContext('2d');
+        const g = ctx2d.createLinearGradient(0, 0, 0, canvas.height);
+        g.addColorStop(0, topColor);
+        g.addColorStop(1, bottomColor);
+        return g;
+    }
+
     // ── Chart creation ──────────────────────────────────────────
     let currentView = "simple";
     let chart = null;
@@ -1322,6 +1412,23 @@ window.toggleHolders = function(btn) {
 
         const ctx = document.getElementById("activityChart");
         if (!ctx) return;
+
+        // Apply gradients to simple-view datasets
+        if (currentView === "simple") {
+            for (const ds of viewData.datasets) {
+                if (ds.label === "Total Adds") {
+                    ds.backgroundColor = makeBarGradient(ctx, '#047857', '#34d399');
+                    ds.borderColor = '#047857';
+                    ds.borderWidth = 0;
+                    ds.borderRadius = 4;
+                } else if (ds.label === "Total Reduces") {
+                    ds.backgroundColor = makeBarGradient(ctx, '#f87171', '#b91c1c');
+                    ds.borderColor = '#b91c1c';
+                    ds.borderWidth = 0;
+                    ds.borderRadius = 4;
+                }
+            }
+        }
 
         const cs = getComputedStyle(document.documentElement);
         const axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
