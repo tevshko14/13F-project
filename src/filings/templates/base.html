@@ -65,8 +65,12 @@
     <link rel="dns-prefetch" href="https://www.google.com">
     <link rel="dns-prefetch" href="https://finnhub.io">
     <link rel="stylesheet"
-          href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
+          href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+          integrity="sha384-L1dWfspMTHU/ApYnFiMz2QID/PlP1xCW9visvBdbEkOLkSSWsP6ZJWhPw6apiXxU"
+          crossorigin="anonymous">
+    <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"
+            integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
+            crossorigin="anonymous" defer></script>
     {% block extra_head_scripts %}{% endblock %}
     <script>
     /* Lazy-load ECharts on demand (~800 KB saved on pages that don't use charts) */
@@ -122,7 +126,9 @@
         observer.observe(container);
     };
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"
+            integrity="sha384-PCSoOZTpbkikBEtd/+uV3WNdc676i9KUf01KOA8CnJotvlx8rRrETbDuwdjqTYvt"
+            crossorigin="anonymous" defer></script>
     {% if posthog_key %}
     <script>
         !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey getNextSurveyStep identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
@@ -1195,26 +1201,29 @@
         .mesh-blob {
             position: absolute;
             border-radius: 50%;
-            filter: blur(100px);
-            will-change: transform, opacity;
+            filter: blur(60px);
+            will-change: transform;
         }
         .mesh-blob-1 {
             width: 600px; height: 600px;
             background: radial-gradient(circle, #0d47a1, #0d47a1 40%, transparent 70%);
             top: -10%; left: -5%;
-            animation: meshDrift1 18s ease-in-out infinite, meshBreathe1 4s ease-in-out infinite;
+            opacity: 0.22;
+            animation: meshDrift1 24s ease-in-out infinite;
         }
         .mesh-blob-2 {
             width: 500px; height: 500px;
             background: radial-gradient(circle, #4a148c, #4a148c 40%, transparent 70%);
             top: 40%; right: -8%;
-            animation: meshDrift2 22s ease-in-out infinite, meshBreathe2 5s ease-in-out infinite;
+            opacity: 0.20;
+            animation: meshDrift2 28s ease-in-out infinite;
         }
         .mesh-blob-3 {
             width: 450px; height: 450px;
             background: radial-gradient(circle, #004d40, #004d40 40%, transparent 70%);
             bottom: -5%; left: 30%;
-            animation: meshDrift3 20s ease-in-out infinite, meshBreathe3 4.5s ease-in-out infinite;
+            opacity: 0.21;
+            animation: meshDrift3 26s ease-in-out infinite;
         }
         @keyframes meshDrift1 {
             0%, 100% { transform: translate(0, 0) scale(1); }
@@ -1231,32 +1240,22 @@
             33%      { transform: translate(50px, -40px) scale(1.05); }
             66%      { transform: translate(-70px, 20px) scale(0.97); }
         }
-        @keyframes meshBreathe1 { 0%, 100% { opacity: 0.18; } 50% { opacity: 0.28; } }
-        @keyframes meshBreathe2 { 0%, 100% { opacity: 0.16; } 50% { opacity: 0.26; } }
-        @keyframes meshBreathe3 { 0%, 100% { opacity: 0.17; } 50% { opacity: 0.27; } }
+        [data-theme="light"] .mesh-blob-1 { opacity: 0.10; }
+        [data-theme="light"] .mesh-blob-2 { opacity: 0.09; }
+        [data-theme="light"] .mesh-blob-3 { opacity: 0.10; }
 
         @media (prefers-reduced-motion: reduce) {
-            .mesh-blob { animation: none !important; opacity: 0.18 !important; }
+            .mesh-blob { animation: none !important; }
         }
         @media (max-width: 768px) {
-            .mesh-blob { animation: none !important; filter: blur(60px); opacity: 0.12; }
+            .mesh-blob { animation: none !important; filter: blur(40px); opacity: 0.12; }
             .mesh-blob-1 { width: 300px; height: 300px; }
             .mesh-blob-2 { width: 250px; height: 250px; }
             .mesh-blob-3 { width: 200px; height: 200px; }
+            [data-theme="light"] .mesh-blob { opacity: 0.07; }
         }
         @media (min-width: 769px) and (max-width: 1023px) {
-            .mesh-blob-1 { animation: meshDrift1 18s ease-in-out infinite; filter: blur(80px); }
-            .mesh-blob-2 { animation: meshDrift2 22s ease-in-out infinite; filter: blur(80px); }
-            .mesh-blob-3 { animation: meshDrift3 20s ease-in-out infinite; filter: blur(80px); }
-        }
-        [data-theme="light"] .mesh-blob-1 { animation: meshDrift1 18s ease-in-out infinite, meshBreatheLight1 4s ease-in-out infinite; }
-        [data-theme="light"] .mesh-blob-2 { animation: meshDrift2 22s ease-in-out infinite, meshBreatheLight2 5s ease-in-out infinite; }
-        [data-theme="light"] .mesh-blob-3 { animation: meshDrift3 20s ease-in-out infinite, meshBreatheLight3 4.5s ease-in-out infinite; }
-        @keyframes meshBreatheLight1 { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.14; } }
-        @keyframes meshBreatheLight2 { 0%, 100% { opacity: 0.07; } 50% { opacity: 0.13; } }
-        @keyframes meshBreatheLight3 { 0%, 100% { opacity: 0.08; } 50% { opacity: 0.14; } }
-        @media (max-width: 768px) {
-            [data-theme="light"] .mesh-blob { animation: none !important; opacity: 0.07; }
+            .mesh-blob { filter: blur(50px); }
         }
 
         /* ══════════════════════════════════════════════════════════ */
@@ -1302,7 +1301,9 @@
         }
     </style>
     {% if supabase_anon_key %}
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"
+            integrity="sha384-Sm2s7OXxsAMTyJ4iIyRBgVpeGUvMPk2lRQnnZhE78Wej7oggIoolKt+SCt0XJbUB"
+            crossorigin="anonymous" defer></script>
     <script>
         // Wait for deferred Supabase SDK to load before initialising
         document.addEventListener('DOMContentLoaded', function() {
@@ -1626,7 +1627,10 @@
         window.initSortableTables = initSortableTables;
 
         document.addEventListener("DOMContentLoaded", initSortableTables);
-        document.addEventListener("htmx:afterSwap", initSortableTables);
+        if (!window._ppSortListenerBound) {
+            window._ppSortListenerBound = true;
+            document.addEventListener("htmx:afterSwap", initSortableTables);
+        }
     })();
     </script>
 
@@ -1976,14 +1980,17 @@
             }
         };
 
-        // Close dropdown on outside click
-        document.addEventListener("click", function(e) {
-            var search = document.getElementById("ticker-search");
-            var results = document.getElementById("ticker-search-results");
-            if (search && results && !search.contains(e.target)) {
-                results.style.display = "none";
-            }
-        });
+        // Close dropdown on outside click (guard: register once across HTMX swaps)
+        if (!window._ppSearchClickBound) {
+            window._ppSearchClickBound = true;
+            document.addEventListener("click", function(e) {
+                var search = document.getElementById("ticker-search");
+                var results = document.getElementById("ticker-search-results");
+                if (search && results && !search.contains(e.target)) {
+                    results.style.display = "none";
+                }
+            });
+        }
     })();
     </script>
 
@@ -2240,6 +2247,9 @@
         // the DOM node.  A single global resize handler replaces the per-chart
         // ones to avoid listener accumulation across navigations.
         (function() {
+            if (window._ppEChartsCleanupBound) return;
+            window._ppEChartsCleanupBound = true;
+
             var _resizeHandlers = [];
 
             // Global registry: charts register their resize callback here
@@ -2274,7 +2284,9 @@
             });
         })();
 
-        // ── Re-theme ECharts on toggle ──
+        // ── Re-theme ECharts on toggle (guard: register once) ──
+        if (!window._ppThemeChangeBound) {
+        window._ppThemeChangeBound = true;
         document.addEventListener('pp-theme-changed', function() {
             if (typeof echarts === 'undefined') return;
             var cs = getComputedStyle(document.documentElement);
@@ -2327,6 +2339,7 @@
                 chart.setOption(Object.assign({ xAxis: opt.xAxis, yAxis: opt.yAxis, series: opt.series }, legendPatch));
             });
         });
+        } // end _ppThemeChangeBound guard
     })();
     </script>
     {# ── Sidebar Toggle (mobile drawer) ── #}
@@ -2349,18 +2362,20 @@
             document.body.style.overflow = 'hidden';
         }
     };
-    // Close sidebar on Escape
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
+    // Close sidebar on Escape + HTMX nav (guard: register once across swaps)
+    if (!window._ppSidebarListenersBound) {
+        window._ppSidebarListenersBound = true;
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                var sidebar = document.getElementById('pp-sidebar');
+                if (sidebar && sidebar.classList.contains('open')) ppToggleSidebar();
+            }
+        });
+        document.addEventListener('htmx:beforeRequest', function() {
             var sidebar = document.getElementById('pp-sidebar');
             if (sidebar && sidebar.classList.contains('open')) ppToggleSidebar();
-        }
-    });
-    // Close sidebar on HTMX navigation
-    document.addEventListener('htmx:beforeRequest', function() {
-        var sidebar = document.getElementById('pp-sidebar');
-        if (sidebar && sidebar.classList.contains('open')) ppToggleSidebar();
-    });
+        });
+    }
 
     // ── Expand / Collapse sidebar (desktop) ──
     window.ppToggleExpand = function() {
@@ -2379,7 +2394,10 @@
         }
     }
     ppRestoreExpandState();
-    document.addEventListener('htmx:afterSettle', ppRestoreExpandState);
+    if (!window._ppExpandListenerBound) {
+        window._ppExpandListenerBound = true;
+        document.addEventListener('htmx:afterSettle', ppRestoreExpandState);
+    }
     </script>
 {% block extra_scripts %}{% endblock %}
 </body>

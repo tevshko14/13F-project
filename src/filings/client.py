@@ -1146,7 +1146,8 @@ def build_stock_history(
 
     lookup_upper = lookup.upper().strip()
 
-    # Build a set of CUSIPs that match this stock (across all funds)
+    # ── Phase 1: Build matching CUSIP set in a single pass ──
+    # Index holdings by ticker and cusip for O(1) lookups
     matching_cusips: set[str] = set()
     for cik, fund_data in cache_data.items():
         for h in fund_data.get("all_holdings", []):
@@ -1157,18 +1158,17 @@ def build_stock_history(
                 h_ticker = h.get("ticker")
                 if h_ticker and h_ticker.upper() == lookup_upper:
                     matching_cusips.add(h["cusip"])
-
-    # Also check quarterly_changes for CUSIPs (stock may have been sold)
-    for cik, fund_data in cache_data.items():
-        for qc in fund_data.get("quarterly_changes", []):
-            for ch in qc.get("changes", []):
-                if by_cusip and ch["cusip"].upper() == lookup_upper:
-                    matching_cusips.add(ch["cusip"])
+        # Also check quarterly_changes for CUSIPs (stock may have been sold)
+        if by_cusip:
+            for qc in fund_data.get("quarterly_changes", []):
+                for ch in qc.get("changes", []):
+                    if ch["cusip"].upper() == lookup_upper:
+                        matching_cusips.add(ch["cusip"])
 
     if not matching_cusips:
         return []
 
-    # Collect entries grouped by period
+    # ── Phase 2: Build quarters in a single pass with CUSIP set lookup (O(1)) ──
     quarters: dict[str, dict] = {}  # period -> {"report_date": ..., "entries": [...]}
 
     for cik, fund_data in cache_data.items():
@@ -1242,24 +1242,48 @@ def build_stock_history(
     return result
 
 
-def _resolve_logo_domain(ticker: str) -> str | None:
-    """Resolve a ticker to its company website domain for logo lookup."""
+# ── yfinance info cache (single fetch per ticker, 1-hour TTL) ──
+import time as _time
+import threading as _threading
+
+_yf_info_cache: dict[str, tuple[float, dict]] = {}
+_yf_info_lock = _threading.Lock()
+_YF_INFO_TTL = 3600  # 1 hour
+
+
+def _get_yfinance_info(ticker: str) -> dict:
+    """Fetch yfinance info for a ticker with TTL cache. Single network call."""
+    now = _time.monotonic()
+    with _yf_info_lock:
+        cached = _yf_info_cache.get(ticker)
+        if cached and now - cached[0] < _YF_INFO_TTL:
+            return cached[1]
+
     try:
         import yfinance as yf
-        from urllib.parse import urlparse
         from filings.market_data import _yf_session
 
         tk = yf.Ticker(ticker, session=_yf_session)
         info = tk.info or {}
-        website = info.get("website") or ""
-        if website:
-            parsed = urlparse(website)
-            domain = parsed.netloc or parsed.path
-            if domain.startswith("www."):
-                domain = domain[4:]
-            return domain or None
     except Exception:
-        pass
+        info = {}
+
+    with _yf_info_lock:
+        _yf_info_cache[ticker] = (now, info)
+    return info
+
+
+def _resolve_logo_domain_from_info(info: dict) -> str | None:
+    """Extract company website domain from yfinance info dict."""
+    from urllib.parse import urlparse
+
+    website = info.get("website") or ""
+    if website:
+        parsed = urlparse(website)
+        domain = parsed.netloc or parsed.path
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain or None
     return None
 
 
@@ -1276,8 +1300,9 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
     logger = logging.getLogger(__name__)
     ticker_upper = ticker.upper().strip()
 
-    # Try to resolve logo domain (yfinance caches internally)
-    logo_domain = _resolve_logo_domain(ticker_upper)
+    # Single yfinance fetch (cached with 1h TTL)
+    yf_info = _get_yfinance_info(ticker_upper)
+    logo_domain = _resolve_logo_domain_from_info(yf_info)
 
     # 1. Try to find in 13F cache (any fund's holdings)
     for fund_data in cache_data.values():
@@ -1291,17 +1316,8 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
                     logo_domain=logo_domain,
                 )
 
-    # 2. Fall back to yfinance for company name
-    name = None
-    try:
-        import yfinance as yf
-        from filings.market_data import _yf_session
-
-        tk = yf.Ticker(ticker_upper, session=_yf_session)
-        info = tk.info or {}
-        name = info.get("longName") or info.get("shortName")
-    except Exception as e:
-        logger.warning("yfinance lookup failed for %s: %s", ticker_upper, e)
+    # 2. Fall back to yfinance for company name (already fetched, no extra call)
+    name = yf_info.get("longName") or yf_info.get("shortName")
 
     # 3. Fall back to hardcoded S&P 500 list if yfinance returned nothing
     if not name:

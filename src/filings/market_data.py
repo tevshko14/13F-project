@@ -200,7 +200,8 @@ def get_sp500_constituents() -> list[dict]:
         import pandas as pd
 
         tables = pd.read_html(
-            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            storage_options={"timeout": 10},
         )
         df = tables[0]
 
@@ -303,7 +304,7 @@ def _ensure_close_df():
     try:
         import yfinance as yf
 
-        df = yf.download(tickers, period="1mo", threads=False, progress=False, timeout=_YF_TIMEOUT)
+        df = yf.download(tickers, period="1mo", threads=True, progress=False, timeout=_YF_TIMEOUT)
 
         if df.empty:
             logger.warning("yfinance returned empty DataFrame for S&P 500")
@@ -531,7 +532,7 @@ def get_index_market_data() -> dict:
     try:
         import yfinance as yf
 
-        df = yf.download(symbols, period="1y", threads=False, progress=False, timeout=_YF_TIMEOUT)
+        df = yf.download(symbols, period="1y", threads=True, progress=False, timeout=_YF_TIMEOUT)
 
         if df.empty:
             logger.warning("yfinance returned empty DataFrame for indices")
@@ -721,7 +722,7 @@ def get_overview_chart_data(symbol: str, period: str = "1M") -> dict | None:
         yf_periods = {"3M": "3mo", "1Y": "1y"}
         yf_period = yf_periods.get(period, "3mo")
 
-        dl = yf.download([symbol], period=yf_period, threads=False, progress=False, timeout=_YF_TIMEOUT)
+        dl = yf.download([symbol], period=yf_period, threads=True, progress=False, timeout=_YF_TIMEOUT)
         if dl.empty:
             return None
 
@@ -998,7 +999,7 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
         constituents = get_sp500_constituents()
         all_tickers = [c["ticker"] for c in constituents]
 
-        df = yf.download(all_tickers, period="1y", threads=False, progress=False, timeout=_YF_TIMEOUT)
+        df = yf.download(all_tickers, period="1y", threads=True, progress=False, timeout=_YF_TIMEOUT)
 
         if df.empty:
             return {}
@@ -1092,7 +1093,7 @@ def get_current_prices_batch(tickers: list[str]) -> dict[str, float]:
 
             # Limit batch to avoid huge downloads
             batch = missing[:80]
-            df = yf.download(batch, period="1d", threads=False, progress=False, timeout=_YF_TIMEOUT)
+            df = yf.download(batch, period="1d", threads=True, progress=False, timeout=_YF_TIMEOUT)
             if not df.empty:
                 close = df.get("Close")
                 if close is not None:
