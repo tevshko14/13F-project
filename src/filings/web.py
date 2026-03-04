@@ -372,7 +372,8 @@ app.mount(
 templates.env.globals["current_year"] = datetime.now().year
 templates.env.globals["supabase_url"] = auth.SUPABASE_URL
 templates.env.globals["supabase_anon_key"] = auth.SUPABASE_ANON_KEY
-templates.env.globals["auth_enabled"] = bool(auth.SUPABASE_ANON_KEY)
+templates.env.globals["auth_enabled"] = bool(auth.CLERK_DOMAIN or auth.SUPABASE_ANON_KEY)
+templates.env.globals["clerk_domain"] = auth.CLERK_DOMAIN
 templates.env.globals["posthog_key"] = _POSTHOG_KEY
 
 # Attach rate limiter
@@ -597,11 +598,14 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
-# Auth middleware (only when JWT secret is configured)
-if auth.JWT_SECRET:
+# Auth middleware (Clerk JWKS or legacy Supabase JWT)
+if auth.CLERK_DOMAIN or auth.JWT_SECRET:
     AuthMiddleware = auth._build_auth_middleware()
     app.add_middleware(AuthMiddleware)
-    logger.info("Auth middleware enabled (Supabase JWT validation)")
+    if auth.CLERK_DOMAIN:
+        logger.info("Auth middleware enabled (Clerk JWKS: %s)", auth.CLERK_DOMAIN)
+    else:
+        logger.info("Auth middleware enabled (Supabase JWT validation)")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -4381,86 +4385,31 @@ async def most_added(request: Request):
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    if not auth.SUPABASE_ANON_KEY:
-        return RedirectResponse(url="/", status_code=302)
-    return templates.TemplateResponse("login.html", {"request": request})
+@app.get("/login")
+async def login_page():
+    """Redirect to Clerk sign-in on the Next.js app."""
+    return RedirectResponse(url="/auth/sign-in", status_code=302)
 
 
-@app.get("/signup", response_class=HTMLResponse)
-async def signup_page(request: Request):
-    if not auth.SUPABASE_ANON_KEY:
-        return RedirectResponse(url="/", status_code=302)
-    return templates.TemplateResponse("signup.html", {"request": request})
+@app.get("/signup")
+async def signup_page():
+    """Redirect to Clerk sign-up on the Next.js app."""
+    return RedirectResponse(url="/auth/sign-up", status_code=302)
 
 
-@app.get("/reset-password", response_class=HTMLResponse)
-async def reset_password_page(request: Request):
-    if not auth.SUPABASE_ANON_KEY:
-        return RedirectResponse(url="/", status_code=302)
-    return templates.TemplateResponse("reset_password.html", {"request": request})
+@app.get("/reset-password")
+async def reset_password_page():
+    """Redirect to Clerk sign-in (handles password reset)."""
+    return RedirectResponse(url="/auth/sign-in", status_code=302)
 
 
 @app.get("/logout")
 async def logout(request: Request):
     response = RedirectResponse(url="/", status_code=302)
+    # Clear both legacy Supabase and Clerk cookies
     response.delete_cookie("sb-access-token", path="/")
     response.delete_cookie("sb-refresh-token", path="/")
-    return response
-
-
-@app.post("/api/auth/set-session")
-async def set_session(request: Request):
-    """Set auth cookies server-side with HttpOnly + Secure flags."""
-    csrf_err = _check_csrf_origin(request)
-    if csrf_err:
-        return csrf_err
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "invalid json"}, status_code=400)
-
-    access_token = body.get("access_token", "")
-    refresh_token = body.get("refresh_token", "")
-    expires_in = body.get("expires_in", 3600)
-
-    if not access_token or not isinstance(access_token, str):
-        return JSONResponse({"error": "missing access_token"}, status_code=400)
-    if not refresh_token or not isinstance(refresh_token, str):
-        return JSONResponse({"error": "missing refresh_token"}, status_code=400)
-
-    response = JSONResponse({"ok": True})
-    response.set_cookie(
-        "sb-access-token",
-        access_token,
-        max_age=int(expires_in),
-        path="/",
-        httponly=True,
-        secure=True,
-        samesite="lax",
-    )
-    response.set_cookie(
-        "sb-refresh-token",
-        refresh_token,
-        max_age=604800,
-        path="/",
-        httponly=True,
-        secure=True,
-        samesite="lax",
-    )
-    return response
-
-
-@app.post("/api/auth/clear-session")
-async def clear_session(request: Request):
-    """Clear auth cookies server-side."""
-    csrf_err = _check_csrf_origin(request)
-    if csrf_err:
-        return csrf_err
-    response = JSONResponse({"ok": True})
-    response.delete_cookie("sb-access-token", path="/")
-    response.delete_cookie("sb-refresh-token", path="/")
+    response.delete_cookie("__session", path="/")
     return response
 
 
