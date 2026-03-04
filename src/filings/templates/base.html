@@ -188,8 +188,8 @@
             --pp-glass-blur: 12px;
             --pp-sidebar-width: 240px;
             --pp-sidebar-collapsed: 60px;
-            --pp-sidebar-active-bg: rgba(25, 118, 210, 0.08);
-            --pp-sidebar-active-text: #1976d2;
+            --pp-sidebar-active-bg: rgba(239, 68, 68, 0.08);
+            --pp-sidebar-active-text: #ef4444;
             --pp-bento-inset: 12px;
             --pp-bento-gap: 12px;
             --pp-bento-radius: 20px;
@@ -253,8 +253,8 @@
             --pp-glass-blur: 12px;
             --pp-sidebar-width: 240px;
             --pp-sidebar-collapsed: 60px;
-            --pp-sidebar-active-bg: rgba(25, 118, 210, 0.15);
-            --pp-sidebar-active-text: #64b5f6;
+            --pp-sidebar-active-bg: rgba(239, 68, 68, 0.15);
+            --pp-sidebar-active-text: #ef4444;
             --pp-bento-inset: 12px;
             --pp-bento-gap: 12px;
             --pp-bento-radius: 20px;
@@ -774,18 +774,18 @@
             font-weight: 600;
             border-radius: 10px;
             text-decoration: none;
-            background: rgba(25, 118, 210, 0.25);
+            background: rgba(239, 68, 68, 0.85);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
-            color: var(--pp-support-btn-text) !important;
-            border: 1px solid rgba(25, 118, 210, 0.3);
+            color: #fff !important;
+            border: 1px solid rgba(239, 68, 68, 0.9);
             transition: background 0.2s, box-shadow 0.2s;
             white-space: nowrap;
             overflow: hidden;
         }
         .pp-sidebar-support-btn:hover {
-            background: rgba(25, 118, 210, 0.4);
-            box-shadow: 0 0 12px rgba(25, 118, 210, 0.3);
+            background: rgba(239, 68, 68, 1);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
             text-decoration: none;
         }
         .pp-sidebar-support-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
@@ -793,12 +793,12 @@
         .pp-sidebar:not(.expanded) .pp-sidebar-support-btn span { display: none; }
         .pp-sidebar:not(.expanded) .pp-sidebar-support-btn { padding: 0.55em; }
         [data-theme="light"] .pp-sidebar-support-btn {
-            background: rgba(24, 24, 27, 0.75);
-            border: 1px solid rgba(24, 24, 27, 0.2);
+            background: rgba(239, 68, 68, 0.85);
+            border: 1px solid rgba(239, 68, 68, 0.9);
         }
         [data-theme="light"] .pp-sidebar-support-btn:hover {
-            background: rgba(24, 24, 27, 0.9);
-            box-shadow: 0 0 12px rgba(0, 0, 0, 0.15);
+            background: rgba(239, 68, 68, 1);
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
         }
 
         /* Expand/collapse toggle button — vertical pill on sidebar edge */
