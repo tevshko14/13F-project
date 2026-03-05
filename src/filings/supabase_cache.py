@@ -2974,7 +2974,7 @@ def get_short_interest_history(ticker: str, limit: int = 24) -> list[dict]:
         return []
 
 
-def get_latest_short_interest_all(limit: int = 600) -> list[dict]:
+def get_latest_short_interest_all(limit: int = 1600) -> list[dict]:
     """Fetch the most recent short interest row per ticker.
 
     Used by the sync worker to build the leaderboard.
@@ -3029,7 +3029,7 @@ def get_latest_short_interest_all(limit: int = 600) -> list[dict]:
 
 def build_leaderboard_from_db(
     ticker_map: dict[str, list[str]] | None = None,
-    limit: int = 600,
+    limit: int = 1600,
 ) -> dict | None:
     """Build a short-interest leaderboard snapshot directly from the DB.
 
