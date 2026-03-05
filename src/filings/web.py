@@ -4388,19 +4388,19 @@ async def most_added(request: Request):
 @app.get("/login")
 async def login_page(request: Request):
     """Redirect to Clerk sign-in on the Next.js app."""
-    return RedirectResponse(url="/auth/sign-in", status_code=302)
+    return RedirectResponse(url="https://app.paperpanda.io/auth/sign-in", status_code=302)
 
 
 @app.get("/signup")
 async def signup_page(request: Request):
     """Redirect to Clerk sign-up on the Next.js app."""
-    return RedirectResponse(url="/auth/sign-up", status_code=302)
+    return RedirectResponse(url="https://app.paperpanda.io/auth/sign-up", status_code=302)
 
 
 @app.get("/reset-password")
 async def reset_password_page(request: Request):
     """Redirect to Clerk sign-in (handles password reset)."""
-    return RedirectResponse(url="/auth/sign-in", status_code=302)
+    return RedirectResponse(url="https://app.paperpanda.io/auth/sign-in", status_code=302)
 
 
 @app.get("/logout")
