@@ -1300,6 +1300,36 @@
             box-shadow: var(--pp-glass-shadow) !important;
             overflow: hidden;
         }
+
+        /* ── Pill switcher (segmented control) — shared across pages ── */
+        .pp-pill-nav {
+            display: inline-flex;
+            gap: 0.25em;
+            background: var(--pp-overlay-5);
+            border-radius: 10px;
+            padding: 0.25em;
+            margin-bottom: 1.5em;
+        }
+        .pp-pill-btn {
+            padding: 0.45em 1.15em;
+            border-radius: 7px;
+            font-size: 0.86em;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            color: var(--pp-sub-text);
+            transition: background 0.15s, color 0.15s;
+            white-space: nowrap;
+        }
+        .pp-pill-btn.active {
+            background: var(--pp-surface);
+            color: var(--pp-text);
+            box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+        }
+        .pp-pill-btn:hover:not(.active) { color: var(--pp-text); }
+        .pp-pill-panel { display: none; }
+        .pp-pill-panel.active { display: block; }
     </style>
     {# ── ClerkJS SDK (popup/modal auth, no redirect) ── #}
     {% if clerk_publishable_key %}

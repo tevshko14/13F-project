@@ -202,3 +202,8 @@ class AnalystRating:
     from_grade: str  # e.g. "Hold", "" if N/A
     to_grade: str  # e.g. "Buy"
     date: str  # ISO date string "2025-01-15"
+    # Optional price target fields (populated when available from data sources)
+    current_price_target: float | None = None
+    prior_price_target: float | None = None
+    price_target_action: str | None = None
+    source: str = "yfinance"

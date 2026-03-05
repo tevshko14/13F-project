@@ -163,17 +163,17 @@
         animation: gt-spin 0.6s linear infinite;
     }
     @keyframes gt-spin { to { transform: rotate(360deg); } }
+
+    /* Pill switcher styles live in base.html (.pp-pill-nav / .pp-pill-btn / .pp-pill-panel) */
 </style>
 
-{# ═══ Tab Navigation ═══ #}
+{# ═══ Outer Tab Navigation ═══ #}
 <div class="alt-tabs" role="tablist">
     <button class="alt-tab active" data-tab="short-interest" role="tab" aria-selected="true">Short Interest</button>
-    <button class="alt-tab" data-tab="trending" role="tab">Trending Now</button>
-    <button class="alt-tab" data-tab="macro" role="tab">Macro Trends</button>
-    <button class="alt-tab" data-tab="lookup" role="tab">Ticker Lookup</button>
+    <button class="alt-tab" data-tab="google-trends" role="tab" aria-selected="false">Google Trends</button>
 </div>
 
-{# ═══ Panel 0: Short Interest Leaderboard ═══ #}
+{# ═══ Panel: Short Interest Leaderboard ═══ #}
 <div class="alt-panel active" id="panel-short-interest">
     <div hx-get="/api/alt-signals/short-interest" hx-trigger="load" hx-swap="innerHTML">
         <div class="gt-loading">
@@ -187,115 +187,129 @@
     </div>
 </div>
 
-{# ═══ Panel 1: Trending Searches → Ticker Mapping ═══ #}
-<div class="alt-panel" id="panel-trending">
-    <div class="glass-card" style="padding: 1.5em;">
-        <div class="gt-card-header">
-            <h3>Trending Searches</h3>
-            <span class="gt-source">via Google Trends Daily</span>
-        </div>
-        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
-            Today's trending Google searches, automatically matched to tickers when possible.
-            A trending search linked to a stock can signal incoming retail attention or a news catalyst.
-        </p>
-        <div hx-get="/api/google-trends/trending"
-             hx-trigger="load"
-             hx-swap="innerHTML">
-            <div class="gt-loading">
-                <div class="gt-loading-spinner"></div>
-                <div style="margin-top: 0.5em; font-size: 0.85em;">Loading trending searches...</div>
-            </div>
-        </div>
-    </div>
-</div>
+{# ═══ Panel: Google Trends (with inner pill switcher) ═══ #}
+<div class="alt-panel" id="panel-google-trends">
 
-{# ═══ Panel 2: Macro Trends Dashboard ═══ #}
-<div class="alt-panel" id="panel-macro">
-    <div class="glass-card" style="padding: 1.5em;">
-        <div class="gt-card-header">
-            <h3>Macro Sentiment Trends</h3>
-            <span class="gt-source">via Google Trends</span>
-        </div>
-        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1.2em;">
-            Search interest for market-moving macro keywords over the last 3 months.
-            Rising interest in "recession" or "stock market crash" often precedes volatility.
-        </p>
-        <div class="gt-macro-grid">
-            {% for cat_name, keywords in macro_categories.items() %}
-            <div class="gt-macro-card">
-                <h4>{{ cat_name }}</h4>
-                <div class="gt-macro-keywords">
-                    {% for kw in keywords %}
-                    <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
-                    {% endfor %}
-                </div>
-                <div style="margin-top: 0.8em;">
-                    <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
-                         hx-trigger="revealed"
-                         hx-swap="innerHTML">
-                        <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
-                            <div class="gt-loading-spinner"></div>
+    {# ── Inner pill nav ── #}
+    <div class="pp-pill-nav" role="tablist">
+        <button class="pp-pill-btn active" data-gt-tab="macro" role="tab">Macro</button>
+        <button class="pp-pill-btn" data-gt-tab="trending" role="tab">Trending</button>
+        <button class="pp-pill-btn" data-gt-tab="lookup" role="tab">Ticker Lookup</button>
+    </div>
+
+    {# ── Sub-panel: Macro Sentiment ── #}
+    <div class="pp-pill-panel active" id="gt-panel-macro">
+        <div class="glass-card" style="padding: 1.5em;">
+            <div class="gt-card-header">
+                <h3>Macro Sentiment Trends</h3>
+                <span class="gt-source">via Google Trends</span>
+            </div>
+            <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1.2em;">
+                Search interest for market-moving macro keywords over the last 3 months.
+                Rising interest in "recession" or "stock market crash" often precedes volatility.
+            </p>
+            <div class="gt-macro-grid">
+                {% for cat_name, keywords in macro_categories.items() %}
+                <div class="gt-macro-card">
+                    <h4>{{ cat_name }}</h4>
+                    <div class="gt-macro-keywords">
+                        {% for kw in keywords %}
+                        <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
+                        {% endfor %}
+                    </div>
+                    <div style="margin-top: 0.8em;">
+                        <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
+                             hx-trigger="revealed"
+                             hx-swap="innerHTML">
+                            <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
+                                <div class="gt-loading-spinner"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
+                {% endfor %}
             </div>
-            {% endfor %}
-        </div>
-        <div class="gt-footer">
-            Data from Google Trends (relative search interest 0-100). Updated daily.
-            Use these macro signals alongside individual stock signals for a fuller picture.
-        </div>
-    </div>
-</div>
-
-{# ═══ Panel 3: Per-Ticker Keyword Lookup ═══ #}
-<div class="alt-panel" id="panel-lookup">
-    <div class="glass-card" style="padding: 1.5em;">
-        <div class="gt-card-header">
-            <h3>Search Interest by Ticker</h3>
-            <span class="gt-source">via Google Trends</span>
-        </div>
-        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
-            Look up auto-generated search keywords for any ticker. We generate intent-based,
-            product-specific, and comparison terms tailored to each company type.
-        </p>
-
-        <div style="display: flex; gap: 0.7em; margin-bottom: 1.5em; flex-wrap: wrap;">
-            <input type="text" id="gt-ticker-input"
-                   placeholder="Enter ticker (e.g. HOOD, NKE, AAPL)"
-                   style="flex: 1; min-width: 200px; padding: 0.6em 1em; border-radius: 8px;
-                          border: 1px solid var(--pp-overlay-15); background: var(--pp-surface);
-                          color: var(--pp-text); font-size: 0.95em;"
-                   maxlength="10">
-            <button id="gt-lookup-btn"
-                    style="padding: 0.6em 1.5em; border-radius: 8px; background: var(--pp-accent, #1976d2);
-                           color: white; border: none; font-weight: 600; cursor: pointer; font-size: 0.9em;">
-                Look Up
-            </button>
-        </div>
-
-        <div id="gt-ticker-result"></div>
-
-        {# Quick-access buttons for popular tickers #}
-        <div style="margin-top: 1em;">
-            <span style="font-size: 0.78em; color: var(--pp-sub-text-light); margin-right: 0.5em;">Quick lookup:</span>
-            {% for t in quick_tickers %}
-            <button class="gt-pill gt-quick-ticker" data-ticker="{{ t }}"
-                    style="cursor: pointer; border: none; margin: 0.15em;">
-                {{ t }}
-            </button>
-            {% endfor %}
+            <div class="gt-footer">
+                Data from Google Trends (relative search interest 0-100). Updated daily.
+                Use these macro signals alongside individual stock signals for a fuller picture.
+            </div>
         </div>
     </div>
+
+    {# ── Sub-panel: Trending Market Searches ── #}
+    <div class="pp-pill-panel" id="gt-panel-trending">
+        <div class="glass-card" style="padding: 1.5em;">
+            <div class="gt-card-header">
+                <h3>Trending Market Searches</h3>
+                <span class="gt-source">via Google Trends Daily</span>
+            </div>
+            <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
+                Today's trending Google searches filtered to stocks, markets, and crypto.
+                A trending search linked to a ticker can signal incoming retail attention or a news catalyst.
+            </p>
+            <div hx-get="/api/google-trends/trending"
+                 hx-trigger="revealed"
+                 hx-swap="innerHTML">
+                <div class="gt-loading">
+                    <div class="gt-loading-spinner"></div>
+                    <div style="margin-top: 0.5em; font-size: 0.85em;">Loading trending searches...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Sub-panel: Ticker Lookup ── #}
+    <div class="pp-pill-panel" id="gt-panel-lookup">
+        <div class="glass-card" style="padding: 1.5em;">
+            <div class="gt-card-header">
+                <h3>Search Interest by Ticker</h3>
+                <span class="gt-source">via Google Trends</span>
+            </div>
+            <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
+                Look up auto-generated search keywords for any ticker. We generate intent-based,
+                product-specific, and comparison terms tailored to each company type.
+            </p>
+
+            <div style="display: flex; gap: 0.7em; margin-bottom: 1.5em; flex-wrap: wrap;">
+                <input type="text" id="gt-ticker-input"
+                       placeholder="Enter ticker (e.g. HOOD, NKE, AAPL)"
+                       style="flex: 1; min-width: 200px; padding: 0.6em 1em; border-radius: 8px;
+                              border: 1px solid var(--pp-overlay-15); background: var(--pp-surface);
+                              color: var(--pp-text); font-size: 0.95em;"
+                       maxlength="10">
+                <button id="gt-lookup-btn"
+                        style="padding: 0.6em 1.5em; border-radius: 8px; background: var(--pp-accent, #1976d2);
+                               color: white; border: none; font-weight: 600; cursor: pointer; font-size: 0.9em;">
+                    Look Up
+                </button>
+            </div>
+
+            <div id="gt-ticker-result"></div>
+
+            <div style="margin-top: 1em;">
+                <span style="font-size: 0.78em; color: var(--pp-sub-text-light); margin-right: 0.5em;">Quick lookup:</span>
+                {% for t in quick_tickers %}
+                <button class="gt-pill gt-quick-ticker" data-ticker="{{ t }}"
+                        style="cursor: pointer; border: none; margin: 0.15em;">
+                    {{ t }}
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
 </div>
 
-{# ═══ Tab switching + lookup logic ═══ #}
+{# ═══ Tab switching + pill switching + lookup logic ═══ #}
 <script>
 (function() {
-    // Tab switching
+    // ── Outer tab switching ──
     document.querySelectorAll('.alt-tab').forEach(function(tab) {
         tab.addEventListener('click', function() {
-            document.querySelectorAll('.alt-tab').forEach(function(t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+            document.querySelectorAll('.alt-tab').forEach(function(t) {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
+            });
             document.querySelectorAll('.alt-panel').forEach(function(p) { p.classList.remove('active'); });
             tab.classList.add('active');
             tab.setAttribute('aria-selected', 'true');
@@ -303,7 +317,20 @@
         });
     });
 
-    // Ticker lookup
+    // ── Inner Google Trends pill switcher ──
+    document.querySelectorAll('.pp-pill-btn').forEach(function(pill) {
+        pill.addEventListener('click', function() {
+            document.querySelectorAll('.pp-pill-btn').forEach(function(p) { p.classList.remove('active'); });
+            document.querySelectorAll('.pp-pill-panel').forEach(function(p) { p.classList.remove('active'); });
+            pill.classList.add('active');
+            var subPanel = document.getElementById('gt-panel-' + pill.dataset.gtTab);
+            subPanel.classList.add('active');
+            // Nudge HTMX to re-check revealed triggers inside the newly visible panel
+            if (window.htmx) htmx.process(subPanel);
+        });
+    });
+
+    // ── Ticker lookup ──
     function lookupTicker(ticker) {
         ticker = ticker.trim().toUpperCase();
         if (!ticker) return;

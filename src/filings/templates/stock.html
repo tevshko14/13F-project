@@ -101,13 +101,6 @@
                     Insider Trading
                 </button>
             </li>
-            <li>
-                <button id="tab-congress-btn"
-                        class="stock-tab"
-                        onclick="switchTab('congress')">
-                    Congress
-                </button>
-            </li>
         </ul>
     </nav>
 </div>
@@ -720,6 +713,15 @@
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="tab-ownership" class="tab-content">
 
+{# ── Ownership pill nav: Funds / Congress ── #}
+<div class="pp-pill-nav" id="ownership-pill-nav">
+    <button class="pp-pill-btn active" data-own-tab="funds">Funds</button>
+    <button class="pp-pill-btn" data-own-tab="congress">Congress</button>
+</div>
+
+{# ── Sub-panel: Funds (superinvestor holdings — pre-rendered) ── #}
+<div class="pp-pill-panel active" id="own-panel-funds">
+
 {% if stock and stock.holders %}
 
 {% if history %}
@@ -917,6 +919,17 @@
     </article>
 {% endif %}
 
+</div>{# end own-panel-funds #}
+
+{# ── Sub-panel: Congress (lazy-loaded on first pill click) ── #}
+<div class="pp-pill-panel" id="own-panel-congress">
+    <div id="congress-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading congressional trading data...
+        </p>
+    </div>
+</div>
+
 </div>{# end tab-ownership #}
 
 {# ── Analyst Ratings Tab ── #}
@@ -965,16 +978,6 @@
     </div>
 </div>
 
-{# ── Congress Tab ── #}
-<div id="tab-congress" class="tab-content">
-    <div id="congress-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading congressional trading data...
-        </p>
-    </div>
-</div>
-
-
 {# ── Quarter Tab Switching ── #}
 <script>
 window.switchQuarterTab = function(idx) {
@@ -1020,7 +1023,6 @@ window.toggleHolders = function(btn) {
     var vitalsLoaded = false;
     var filingsLoaded = false;
     var insiderLoaded = false;
-    var congressLoaded = false;
 
     var _tabBtns = document.querySelectorAll('.stock-tab');
     var _tabPanels = document.querySelectorAll('.tab-content');
@@ -1212,40 +1214,52 @@ window.toggleHolders = function(btn) {
             }
         }
 
-        // Lazy-load congressional trading on first click
-        if (tab === 'congress' && !congressLoaded) {
-            congressLoaded = true;
-            {% if stock_info.ticker %}
-            var congressUrl = '/api/stock/{{ stock_info.ticker }}/congress';
-            {% else %}
-            var congressUrl = null;
-            {% endif %}
-
-            if (congressUrl) {
-                fetch(congressUrl)
-                    .then(function(resp) {
-                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                        return resp.text();
-                    })
-                    .then(function(html) {
-                        var el = document.getElementById('congress-content');
-                        el.innerHTML = html;
-                        activateScripts(el);
-                        if (window.initSortableTables) window.initSortableTables();
-                    })
-                    .catch(function() {
-                        document.getElementById('congress-content').innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'Failed to load congressional trading data. Please try again later.</p>';
-                    });
-            } else {
-                document.getElementById('congress-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Congressional trading data requires a ticker symbol.</p>';
-            }
-        }
-
     };
+
+    // ── Ownership inner pill switcher (Funds / Congress) ──
+    var congressLoaded = false;
+    document.getElementById('ownership-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
+        pill.addEventListener('click', function() {
+            document.getElementById('ownership-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(p) { p.classList.remove('active'); });
+            document.getElementById('tab-ownership').querySelectorAll('.pp-pill-panel').forEach(function(p) { p.classList.remove('active'); });
+            pill.classList.add('active');
+            document.getElementById('own-panel-' + pill.dataset.ownTab).classList.add('active');
+
+            // Lazy-load congress on first pill click
+            if (pill.dataset.ownTab === 'congress' && !congressLoaded) {
+                congressLoaded = true;
+                {% if stock_info.ticker %}
+                var congressUrl = '/api/stock/{{ stock_info.ticker }}/congress';
+                {% else %}
+                var congressUrl = null;
+                {% endif %}
+                if (congressUrl) {
+                    fetch(congressUrl)
+                        .then(function(resp) {
+                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                            return resp.text();
+                        })
+                        .then(function(html) {
+                            var el = document.getElementById('congress-content');
+                            el.innerHTML = html;
+                            activateScripts(el);
+                            if (window.initSortableTables) window.initSortableTables();
+                        })
+                        .catch(function() {
+                            document.getElementById('congress-content').innerHTML =
+                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                                'Failed to load congressional trading data. Please try again later.</p>';
+                        });
+                } else {
+                    document.getElementById('congress-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Congressional trading data requires a ticker symbol.</p>';
+                }
+            }
+
+            if (window.initSortableTables) window.initSortableTables();
+        });
+    });
 })();
 </script>
 
