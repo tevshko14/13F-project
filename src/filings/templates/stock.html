@@ -74,10 +74,10 @@
                 </button>
             </li>
             <li>
-                <button id="tab-sentiment-btn"
+                <button id="tab-signals-btn"
                         class="stock-tab"
-                        onclick="switchTab('sentiment')">
-                    Sentiment
+                        onclick="switchTab('signals')">
+                    Signals
                 </button>
             </li>
             <li>
@@ -106,13 +106,6 @@
                         class="stock-tab"
                         onclick="switchTab('congress')">
                     Congress
-                </button>
-            </li>
-            <li>
-                <button id="tab-webtraffic-btn"
-                        class="stock-tab"
-                        onclick="switchTab('webtraffic')">
-                    Web Traffic
                 </button>
             </li>
         </ul>
@@ -935,11 +928,11 @@
     </div>
 </div>
 
-{# ── Sentiment Tab ── #}
-<div id="tab-sentiment" class="tab-content">
-    <div id="sentiment-content">
+{# ── Signals Tab (Sentiment + Search Interest + Web Traffic) ── #}
+<div id="tab-signals" class="tab-content">
+    <div id="signals-content">
         <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading sentiment data...
+            Loading signals data...
         </p>
     </div>
 </div>
@@ -981,13 +974,6 @@
     </div>
 </div>
 
-<div id="tab-webtraffic" class="tab-content">
-    <div id="webtraffic-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading web traffic data...
-        </p>
-    </div>
-</div>
 
 {# ── Quarter Tab Switching ── #}
 <script>
@@ -1030,12 +1016,11 @@ window.toggleHolders = function(btn) {
     }
 
     var analystLoaded = false;
-    var sentimentLoaded = false;
+    var signalsLoaded = false;
     var vitalsLoaded = false;
     var filingsLoaded = false;
     var insiderLoaded = false;
     var congressLoaded = false;
-    var webtrafficLoaded = false;
 
     var _tabBtns = document.querySelectorAll('.stock-tab');
     var _tabPanels = document.querySelectorAll('.tab-content');
@@ -1085,33 +1070,33 @@ window.toggleHolders = function(btn) {
             }
         }
 
-        // Lazy-load sentiment data on first click
-        if (tab === 'sentiment' && !sentimentLoaded) {
-            sentimentLoaded = true;
+        // Lazy-load signals data (sentiment + search interest + web traffic) on first click
+        if (tab === 'signals' && !signalsLoaded) {
+            signalsLoaded = true;
             {% if stock_info.ticker %}
-            var sentimentUrl = '/api/sentiment/{{ stock_info.ticker }}';
+            var signalsUrl = '/api/signals/{{ stock_info.ticker }}';
             {% else %}
-            var sentimentUrl = null;
+            var signalsUrl = null;
             {% endif %}
 
-            if (sentimentUrl) {
-                fetch(sentimentUrl)
+            if (signalsUrl) {
+                fetch(signalsUrl)
                     .then(function(resp) { return resp.text(); })
                     .then(function(html) {
-                        var el = document.getElementById('sentiment-content');
+                        var el = document.getElementById('signals-content');
                         el.innerHTML = html;
                         activateScripts(el);
                         if (window.initSortableTables) window.initSortableTables();
                     })
                     .catch(function() {
-                        document.getElementById('sentiment-content').innerHTML =
+                        document.getElementById('signals-content').innerHTML =
                             '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'Failed to load sentiment data. Please try again later.</p>';
+                            'Failed to load signals data. Please try again later.</p>';
                     });
             } else {
-                document.getElementById('sentiment-content').innerHTML =
+                document.getElementById('signals-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Sentiment data requires a ticker symbol.</p>';
+                    'Signals data requires a ticker symbol.</p>';
             }
         }
 
@@ -1260,37 +1245,6 @@ window.toggleHolders = function(btn) {
             }
         }
 
-        // Lazy-load web traffic data on first click
-        if (tab === 'webtraffic' && !webtrafficLoaded) {
-            webtrafficLoaded = true;
-            {% if stock_info.ticker %}
-            var webtrafficUrl = '/api/web-traffic/{{ stock_info.ticker }}';
-            {% else %}
-            var webtrafficUrl = null;
-            {% endif %}
-
-            if (webtrafficUrl) {
-                fetch(webtrafficUrl)
-                    .then(function(resp) {
-                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                        return resp.text();
-                    })
-                    .then(function(html) {
-                        var el = document.getElementById('webtraffic-content');
-                        el.innerHTML = html;
-                        activateScripts(el);
-                    })
-                    .catch(function() {
-                        document.getElementById('webtraffic-content').innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'Failed to load web traffic data. Please try again later.</p>';
-                    });
-            } else {
-                document.getElementById('webtraffic-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Web traffic data requires a ticker symbol.</p>';
-            }
-        }
     };
 })();
 </script>
