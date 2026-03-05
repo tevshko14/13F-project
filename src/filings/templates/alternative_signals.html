@@ -8,7 +8,7 @@
 {% block content %}
 <hgroup>
     <h1>Alternative Signals</h1>
-    <p>Search interest, trending topics, and macro sentiment from Google Trends</p>
+    <p>Short interest rankings, search interest, trending topics &amp; macro sentiment</p>
 </hgroup>
 
 <style>
@@ -167,13 +167,28 @@
 
 {# ═══ Tab Navigation ═══ #}
 <div class="alt-tabs" role="tablist">
-    <button class="alt-tab active" data-tab="trending" role="tab" aria-selected="true">Trending Now</button>
+    <button class="alt-tab active" data-tab="short-interest" role="tab" aria-selected="true">Short Interest</button>
+    <button class="alt-tab" data-tab="trending" role="tab">Trending Now</button>
     <button class="alt-tab" data-tab="macro" role="tab">Macro Trends</button>
     <button class="alt-tab" data-tab="lookup" role="tab">Ticker Lookup</button>
 </div>
 
+{# ═══ Panel 0: Short Interest Leaderboard ═══ #}
+<div class="alt-panel active" id="panel-short-interest">
+    <div hx-get="/api/alt-signals/short-interest" hx-trigger="load" hx-swap="innerHTML">
+        <div class="gt-loading">
+            <div class="gt-loading-spinner"></div>
+            <div style="margin-top: 0.5em; font-size: 0.85em;">Loading short interest data...</div>
+        </div>
+    </div>
+    <div class="gt-footer" style="margin-top: 1.5em;">
+        Short interest reported by FINRA twice monthly. Data sourced from Yahoo Finance,
+        covering all tickers held by tracked superinvestors (~500+ stocks).
+    </div>
+</div>
+
 {# ═══ Panel 1: Trending Searches → Ticker Mapping ═══ #}
-<div class="alt-panel active" id="panel-trending">
+<div class="alt-panel" id="panel-trending">
     <div class="glass-card" style="padding: 1.5em;">
         <div class="gt-card-header">
             <h3>Trending Searches</h3>

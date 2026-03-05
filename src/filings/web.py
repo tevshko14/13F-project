@@ -2303,6 +2303,9 @@ async def sentiment_data(request: Request, ticker: str):
             "finnhub": data.get("finnhub"),
             "apewisdom": data.get("apewisdom"),
             "alphavantage": data.get("alphavantage"),
+            "google_trends": data.get("google_trends"),
+            "short_interest": data.get("short_interest"),
+            "short_interest_history": data.get("short_interest_history"),
             "has_finnhub_key": sentiment.has_finnhub_key(),
             "has_alphavantage_key": sentiment.has_alphavantage_key(),
         },
@@ -3130,7 +3133,7 @@ _FINANCE_YOUTUBERS = [
 
 @app.get("/alternative-signals", response_class=HTMLResponse)
 async def alternative_signals_page(request: Request):
-    """Alternative signals page — Google Trends dashboard."""
+    """Alternative signals page — Google Trends + short interest dashboard."""
     quick_tickers = [
         "HOOD", "NKE", "AAPL", "TSLA", "COIN", "AMZN", "NFLX", "NVDA",
         "META", "LULU", "PLTR", "SOFI",
@@ -3185,6 +3188,29 @@ async def gt_ticker_api(request: Request, ticker: str):
             "request": request,
             "keywords": summary.get("keywords"),
             "trend": summary.get("trend"),
+        },
+    )
+
+
+@app.get("/api/alt-signals/short-interest", response_class=HTMLResponse)
+async def alt_signals_short_interest(request: Request):
+    """HTMX partial: short interest leaderboard tables."""
+    data = supabase_cache.get_cached("short_interest_leaderboard")
+    if not data:
+        return HTMLResponse(
+            '<div style="text-align: center; padding: 2em 0;">'
+            '<p style="color: var(--pp-text-muted); font-size: 0.95em;">'
+            "Short interest data is being processed. "
+            "The sync worker needs to run at least once to populate this page."
+            "</p></div>"
+        )
+    return templates.TemplateResponse(
+        "partials/short_interest_leaderboard.html",
+        {
+            "request": request,
+            "highest_short": data.get("highest_short", []),
+            "trending_short": data.get("trending_short", []),
+            "metadata": data.get("metadata", {}),
         },
     )
 
@@ -4714,6 +4740,7 @@ if _has_limiter:
     insider_insights_api = limiter.limit("30/minute")(insider_insights_api)
     # Expensive aggregate / external-API endpoints
     ticker_search_index = limiter.limit("20/minute")(ticker_search_index)
+    alt_signals_short_interest = limiter.limit("15/minute")(alt_signals_short_interest)
     retail_leaderboard_api = limiter.limit("15/minute")(retail_leaderboard_api)
     retail_leaderboard_data = limiter.limit("15/minute")(retail_leaderboard_data)
     retail_calendar_api = limiter.limit("15/minute")(retail_calendar_api)

@@ -243,6 +243,291 @@
 </article>
 {% endif %}
 
+{# ── Google Trends: Search Interest ── #}
+{% if google_trends %}
+{% set gt = google_trends %}
+{% set trend_diff = gt.current - gt.one_month_ago %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>Search Interest</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Google Trends · {{ ticker }} · past 12 months
+        </span>
+    </header>
+    <div style="display: flex; gap: 2em; align-items: flex-start; flex-wrap: wrap;">
+        {# Current score #}
+        <div style="text-align: center; min-width: 80px;">
+            <div style="font-size: 1.8em; font-weight: 700;
+                {% if gt.current >= 75 %}color: #1b5e20;
+                {% elif gt.current >= 50 %}color: #2e7d32;
+                {% elif gt.current >= 25 %}color: #616161;
+                {% else %}color: #9e9e9e;{% endif %}">
+                {{ gt.current }}
+            </div>
+            <div style="font-size: 0.75em; color: var(--pp-sub-text);">/100 now</div>
+            <div style="margin-top: 0.4em; font-size: 0.82em;">
+                {% if trend_diff > 0 %}
+                    <span style="color: #2e7d32;">&#x25B2; +{{ trend_diff }} vs last month</span>
+                {% elif trend_diff < 0 %}
+                    <span style="color: #c62828;">&#x25BC; {{ trend_diff }} vs last month</span>
+                {% else %}
+                    <span class="text-muted">&#x25C4; flat vs last month</span>
+                {% endif %}
+            </div>
+            <div style="font-size: 0.78em; color: var(--pp-sub-text); margin-top: 0.2em;">
+                Peak: {{ gt.peak }}
+            </div>
+        </div>
+
+        {# SVG sparkline #}
+        {% if gt.sparkline %}
+        {% set spark = gt.sparkline %}
+        {% set spark_max = spark | map(attribute='value') | max %}
+        {% set spark_min = spark | map(attribute='value') | min %}
+        {% set spark_range = [spark_max - spark_min, 1] | max %}
+        {% set w = 260 %}
+        {% set h = 56 %}
+        {% set n = spark | length %}
+        <div style="flex: 1; min-width: 200px;">
+            <svg width="{{ w }}" height="{{ h }}" viewBox="0 0 {{ w }} {{ h }}"
+                 style="display: block; overflow: visible;">
+                {# Gradient fill #}
+                <defs>
+                    <linearGradient id="trends-fill-{{ ticker }}" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#2e7d32" stop-opacity="0.3"/>
+                        <stop offset="100%" stop-color="#2e7d32" stop-opacity="0"/>
+                    </linearGradient>
+                </defs>
+                {# Build fill polygon #}
+                {% set pts = namespace(v="") %}
+                {% for item in spark %}
+                    {% set ix = (loop.index0 / (n - 1) * w) | round(1) %}
+                    {% set iy = (h - (item.value - spark_min) / spark_range * (h - 6) - 3) | round(1) %}
+                    {% set pts.v = pts.v ~ ix ~ "," ~ iy ~ " " %}
+                {% endfor %}
+                <polygon points="0,{{ h }} {{ pts.v }} {{ w }},{{ h }}"
+                         fill="url(#trends-fill-{{ ticker }})"/>
+                {# Line #}
+                <polyline
+                    points="{{ pts.v }}"
+                    fill="none"
+                    stroke="#2e7d32"
+                    stroke-width="1.8"
+                    stroke-linejoin="round"
+                    stroke-linecap="round"/>
+                {# Last point dot #}
+                {% set last = spark[-1] %}
+                {% set lx = w %}
+                {% set ly = (h - (last.value - spark_min) / spark_range * (h - 6) - 3) | round(1) %}
+                <circle cx="{{ lx }}" cy="{{ ly }}" r="3" fill="#2e7d32"/>
+            </svg>
+            <div style="display: flex; justify-content: space-between; font-size: 0.7em; color: var(--pp-sub-text-light); margin-top: 0.1em;">
+                <span>{{ spark[0].date[:7] }}</span>
+                <span>{{ spark[-1].date[:7] }}</span>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</article>
+{% else %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>Search Interest</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Google Trends
+        </span>
+    </header>
+    <p class="text-muted" style="text-align: center; padding: 1em 0;">
+        Search interest data temporarily unavailable.
+    </p>
+</article>
+{% endif %}
+
+{# ── Short Interest: yfinance / FINRA ── #}
+{% if short_interest %}
+{% set si = short_interest %}
+<article style="margin-bottom: 1.5em;">
+    <header>
+        <strong>Short Interest</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            FINRA · {{ ticker }}
+        </span>
+        {% if si.short_pct_float >= 0.20 %}
+        <span class="badge badge-reduce" style="font-size: 0.78em; padding: 0.15em 0.5em; margin-left: 0.5em;">
+            Heavily Shorted
+        </span>
+        {% elif si.short_pct_float >= 0.10 %}
+        <span class="badge" style="font-size: 0.78em; padding: 0.15em 0.5em; margin-left: 0.5em; background: var(--pp-neutral-orange-bg, #fff3e0); color: #e65100;">
+            Elevated
+        </span>
+        {% endif %}
+    </header>
+    <div style="display: flex; gap: 2.5em; align-items: flex-start; flex-wrap: wrap;">
+        {# % of float — big hero number #}
+        <div style="text-align: center; min-width: 90px;">
+            <div style="font-size: 1.8em; font-weight: 700;
+                {% if si.short_pct_float >= 0.20 %}color: #c62828;
+                {% elif si.short_pct_float >= 0.10 %}color: #e65100;
+                {% elif si.short_pct_float >= 0.05 %}color: #616161;
+                {% else %}color: #9e9e9e;{% endif %}">
+                {{ "%.1f"|format(si.short_pct_float * 100) }}%
+            </div>
+            <div style="font-size: 0.75em; color: var(--pp-sub-text);">of float shorted</div>
+        </div>
+
+        {# Key metrics #}
+        <div style="display: flex; gap: 2em; flex-wrap: wrap;">
+            <div style="text-align: center;">
+                <div style="font-size: 1.3em; font-weight: 700;">{{ "%.1f"|format(si.short_ratio) }}</div>
+                <div style="font-size: 0.75em; color: var(--pp-sub-text);">Days to Cover</div>
+            </div>
+            <div style="text-align: center;">
+                <div style="font-size: 1.3em; font-weight: 700;">{{ "{:,.0f}".format(si.shares_short) }}</div>
+                <div style="font-size: 0.75em; color: var(--pp-sub-text);">Shares Short</div>
+            </div>
+            <div style="text-align: center;">
+                {% if si.short_change > 0 %}
+                <div style="font-size: 1.3em; font-weight: 700; color: #c62828;">
+                    &#x25B2; +{{ "{:,.0f}".format(si.short_change) }}
+                </div>
+                {% elif si.short_change < 0 %}
+                <div style="font-size: 1.3em; font-weight: 700; color: #2e7d32;">
+                    &#x25BC; {{ "{:,.0f}".format(si.short_change) }}
+                </div>
+                {% else %}
+                <div style="font-size: 1.3em; font-weight: 700; color: var(--pp-sub-text);">&#x2014;</div>
+                {% endif %}
+                <div style="font-size: 0.75em; color: var(--pp-sub-text);">
+                    vs Prior Month
+                    {% if si.short_change_pct != 0 %}
+                    ({{ "%+.1f"|format(si.short_change_pct) }}%)
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% if si.report_date %}
+    <footer class="text-muted text-small" style="margin-top: 0.8em;">
+        FINRA report: <span id="si-report-date"></span>
+        <script>
+        (function(){
+            var d = new Date({{ si.report_date }} * 1000);
+            document.getElementById('si-report-date').textContent = d.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
+        })();
+        </script>
+    </footer>
+    {% endif %}
+
+    {# ── Historical Short Interest Chart ── #}
+    {% if short_interest_history and short_interest_history|length >= 2 %}
+    <div style="margin-top: 1.2em; border-top: 1px solid var(--pp-border); padding-top: 1em;">
+        <div style="font-size: 0.82em; font-weight: 600; color: var(--pp-text-muted); margin-bottom: 0.5em;">
+            Short Interest Over Time
+        </div>
+        <div id="si-history-chart" style="width: 100%; height: 220px;"></div>
+        <script>
+        (function() {
+            var rawData = {{ short_interest_history | tojson }};
+            // Sort by date ascending for chart
+            rawData.sort(function(a, b) {
+                return a.report_date < b.report_date ? -1 : 1;
+            });
+
+            window.requireECharts(function(echarts) {
+                var container = document.getElementById('si-history-chart');
+                if (!container) return;
+                var chart = echarts.init(container);
+
+                var dates = rawData.map(function(d) { return d.report_date; });
+                var pctValues = rawData.map(function(d) {
+                    return d.short_pct_float ? +(d.short_pct_float * 100).toFixed(2) : null;
+                });
+                var shareValues = rawData.map(function(d) { return d.shares_short || null; });
+
+                // Determine color based on trend
+                var lastPct = pctValues[pctValues.length - 1] || 0;
+                var prevPct = pctValues.length > 1 ? (pctValues[pctValues.length - 2] || 0) : lastPct;
+                var lineColor = lastPct > prevPct ? '#c62828' : '#2e7d32';
+
+                var rootStyle = getComputedStyle(document.documentElement);
+                var textColor = rootStyle.getPropertyValue('--pp-chart-axis-label').trim() || '#666';
+                var gridColor = rootStyle.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
+                chart.setOption({
+                    tooltip: {
+                        trigger: 'axis',
+                        backgroundColor: 'rgba(30,30,30,0.95)',
+                        borderColor: 'transparent',
+                        textStyle: { color: '#fff', fontSize: 12 },
+                        formatter: function(params) {
+                            var p = params[0];
+                            if (!p) return '';
+                            var dateStr = new Date(p.axisValue + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+                            var pct = p.value != null ? p.value + '%' : 'N/A';
+                            var idx = dates.indexOf(p.axisValue);
+                            var shares = idx >= 0 && shareValues[idx] ? shareValues[idx].toLocaleString() : 'N/A';
+                            return '<b>' + dateStr + '</b><br/>' +
+                                   '% of Float: <b>' + pct + '</b><br/>' +
+                                   'Shares Short: <b>' + shares + '</b>';
+                        }
+                    },
+                    grid: { left: 50, right: 16, top: 12, bottom: 28 },
+                    xAxis: {
+                        type: 'category',
+                        data: dates,
+                        axisLabel: {
+                            color: textColor,
+                            fontSize: 10,
+                            formatter: function(v) {
+                                var d = new Date(v + 'T00:00:00');
+                                return d.toLocaleDateString('en-US', {month:'short', year:'2-digit'});
+                            }
+                        },
+                        axisLine: { lineStyle: { color: gridColor } },
+                        axisTick: { show: false }
+                    },
+                    yAxis: {
+                        type: 'value',
+                        axisLabel: {
+                            color: textColor,
+                            fontSize: 10,
+                            formatter: '{value}%'
+                        },
+                        splitLine: { lineStyle: { color: gridColor } },
+                        axisLine: { show: false }
+                    },
+                    series: [{
+                        type: 'line',
+                        data: pctValues,
+                        showSymbol: true,
+                        symbolSize: 8,
+                        smooth: false,
+                        lineStyle: { width: 2.5, color: lineColor },
+                        itemStyle: { color: lineColor },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: lineColor.replace(')', ',0.18)').replace('rgb', 'rgba') },
+                                { offset: 1, color: 'rgba(0,0,0,0)' }
+                            ])
+                        }
+                    }]
+                });
+
+                // Responsive resize
+                var ro = new ResizeObserver(function() { chart.resize(); });
+                ro.observe(container);
+            });
+        })();
+        </script>
+    </div>
+    {% elif not short_interest_history or short_interest_history|length < 2 %}
+    <div style="margin-top: 0.8em; font-size: 0.78em; color: var(--pp-text-faint); font-style: italic;">
+        Historical chart builds automatically with each FINRA report (2x/month).
+    </div>
+    {% endif %}
+</article>
+{% endif %}
+
 {# ── News Articles: Alpha Vantage ── #}
 {% if alphavantage and alphavantage.articles %}
 <article>
@@ -320,7 +605,7 @@
 {% endif %}
 
 {# ── Fallback: nothing available ── #}
-{% if not cnn and not finnhub and not apewisdom and not alphavantage %}
+{% if not cnn and not finnhub and not apewisdom and not alphavantage and not google_trends and not short_interest %}
 <article>
     <p class="text-muted" style="text-align: center; padding: 2em 0;">
         No sentiment data available for <strong>{{ ticker }}</strong>.

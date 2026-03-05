@@ -325,6 +325,28 @@ CREATE TABLE IF NOT EXISTS feature_announcements (
     link        TEXT NOT NULL DEFAULT '',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ── Short interest history (FINRA bi-monthly reports, archived over time) ──
+CREATE TABLE IF NOT EXISTS short_interest_history (
+    id                  BIGSERIAL PRIMARY KEY,
+    ticker              TEXT NOT NULL,
+    report_date         DATE NOT NULL,
+    shares_short        BIGINT NOT NULL,
+    shares_short_prior  BIGINT DEFAULT 0,
+    short_pct_float     NUMERIC(8,6) DEFAULT 0,
+    short_ratio         NUMERIC(8,2) DEFAULT 0,
+    float_shares        BIGINT DEFAULT 0,
+    shares_outstanding  BIGINT DEFAULT 0,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(ticker, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_si_ticker_date
+    ON short_interest_history (ticker, report_date DESC);
+CREATE INDEX IF NOT EXISTS idx_si_pct_float
+    ON short_interest_history (short_pct_float DESC)
+    WHERE short_pct_float > 0;
+CREATE INDEX IF NOT EXISTS idx_si_report_date
+    ON short_interest_history (report_date DESC);
 """
 
 
@@ -2886,3 +2908,106 @@ def insert_headshots(rows: list[dict]) -> int:
             logger.warning("insert_headshots chunk %d failed: %s", i, exc)
 
     return inserted
+
+
+# ── Short Interest History ──────────────────────────────────────────
+
+
+def upsert_short_interest_rows(rows: list[dict]) -> int:
+    """Batch upsert rows into ``short_interest_history``.
+
+    Each row should have at minimum ``ticker`` and ``report_date`` (ISO
+    date string).  On conflict (same ticker + report_date) the row is
+    updated with the latest values.
+
+    Returns the number of rows upserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None:
+        return 0
+
+    if not rows:
+        return 0
+
+    upserted = 0
+    CHUNK = 100
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("short_interest_history").upsert(
+                chunk, on_conflict="ticker,report_date"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_short_interest_rows chunk %d failed: %s", i, exc)
+
+    return upserted
+
+
+def get_short_interest_history(ticker: str, limit: int = 24) -> list[dict]:
+    """Fetch historical short interest data for *ticker*, newest first.
+
+    Returns up to *limit* rows (default 24 = ~12 months of bi-monthly
+    FINRA reports) as a list of dicts.  Returns empty list on error.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+
+    try:
+        resp = (
+            client.table("short_interest_history")
+            .select(
+                "report_date,shares_short,short_pct_float,"
+                "short_ratio,float_shares,shares_outstanding"
+            )
+            .eq("ticker", ticker.upper())
+            .order("report_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_short_interest_history(%s) failed: %s", ticker, exc)
+        return []
+
+
+def get_latest_short_interest_all(limit: int = 600) -> list[dict]:
+    """Fetch the most recent short interest row per ticker.
+
+    Used by the sync worker to build the leaderboard.
+    Returns list of dicts sorted by short_pct_float DESC.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+
+    try:
+        # Get the latest report date in the table
+        resp = (
+            client.table("short_interest_history")
+            .select("report_date")
+            .order("report_date", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not resp.data:
+            return []
+        latest_date = resp.data[0]["report_date"]
+
+        # Fetch all rows for that report date
+        resp = (
+            client.table("short_interest_history")
+            .select(
+                "ticker,report_date,shares_short,shares_short_prior,"
+                "short_pct_float,short_ratio,float_shares,shares_outstanding"
+            )
+            .eq("report_date", latest_date)
+            .order("short_pct_float", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_latest_short_interest_all failed: %s", exc)
+        return []
