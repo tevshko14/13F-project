@@ -2354,17 +2354,48 @@ async def analyst_ratings(request: Request, ticker: str):
     consensus = analysts.get_consensus_summary_from_raw(ratings, data_view)
     from filings import analyst_scraper as _as
 
+    # Fetch current stock price for upside/downside calculation
+    current_price = None
+    try:
+        from filings import market_data
+
+        prices = await asyncio.to_thread(
+            market_data.get_current_prices_batch, [ticker]
+        )
+        current_price = prices.get(ticker)
+    except Exception:
+        pass
+
+    # Pre-group ratings by firm (ordered by most recent rating date per firm)
+    # Each group: {firm, logo_url, latest: <most recent rating dict>, ratings: [...all desc]}
+    firm_groups: dict[str, dict] = {}
+    firm_order: list[str] = []
+    for r in ratings[:200]:
+        firm_key = (r.get("firm") or "").strip().lower() or "unknown"
+        if firm_key not in firm_groups:
+            firm_groups[firm_key] = {
+                "firm": r.get("firm") or "Unknown",
+                "logo_url": _as.get_firm_logo_url(r.get("firm") or ""),
+                "latest": r,  # first encountered = most recent (ratings are date-desc sorted)
+                "ratings": [],
+            }
+            firm_order.append(firm_key)
+        firm_groups[firm_key]["ratings"].append(r)
+    grouped_ratings = [firm_groups[k] for k in firm_order]
+
     return templates.TemplateResponse(
         "partials/analyst_ratings.html",
         {
             "request": request,
-            "ratings": ratings[:100],
+            "ratings": ratings[:100],      # kept for consensus (not rendered directly)
+            "grouped_ratings": grouped_ratings,
             "profiles": profiles,
             "consensus": consensus,
             "ticker": ticker,
             "data_view": data_view,
             "analyst_photo_set": _analyst_photo_set,
             "get_firm_logo_url": _as.get_firm_logo_url,
+            "current_price": current_price,
         },
     )
 

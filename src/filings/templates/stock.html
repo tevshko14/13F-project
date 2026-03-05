@@ -1058,7 +1058,9 @@ window.toggleHolders = function(btn) {
                 fetch(url)
                     .then(function(resp) { return resp.text(); })
                     .then(function(html) {
-                        document.getElementById('analyst-ratings-content').innerHTML = html;
+                        var el = document.getElementById('analyst-ratings-content');
+                        el.innerHTML = html;
+                        activateScripts(el);
                     })
                     .catch(function() {
                         document.getElementById('analyst-ratings-content').innerHTML =

@@ -649,7 +649,10 @@ def get_consensus_summary_from_raw(
 ) -> dict:
     """Compute consensus from raw rating dicts (individual or firm view).
 
-    Returns dict with keys: buy, hold, sell, other, total, mean_price_target
+    Returns dict with keys:
+        buy, hold, sell, other, total,
+        mean_price_target, high_price_target, low_price_target,
+        consensus_label  ("Strong Buy", "Buy", "Hold", "Sell", "Strong Sell")
     """
     # Deduplicate: take most recent per (analyst_id or firm)
     seen: dict[str, dict] = {}
@@ -695,6 +698,27 @@ def get_consensus_summary_from_raw(
     counts["mean_price_target"] = (
         round(sum(price_targets) / len(price_targets), 2) if price_targets else None
     )
+    counts["high_price_target"] = max(price_targets) if price_targets else None
+    counts["low_price_target"] = min(price_targets) if price_targets else None
+
+    # Derive consensus label from buy/hold/sell ratio
+    total_rated = counts["buy"] + counts["hold"] + counts["sell"]
+    if total_rated > 0:
+        buy_pct = counts["buy"] / total_rated
+        sell_pct = counts["sell"] / total_rated
+        if buy_pct >= 0.7:
+            counts["consensus_label"] = "Strong Buy"
+        elif buy_pct >= 0.45:
+            counts["consensus_label"] = "Buy"
+        elif sell_pct >= 0.7:
+            counts["consensus_label"] = "Strong Sell"
+        elif sell_pct >= 0.45:
+            counts["consensus_label"] = "Sell"
+        else:
+            counts["consensus_label"] = "Hold"
+    else:
+        counts["consensus_label"] = "N/A"
+
     return counts
 
 
