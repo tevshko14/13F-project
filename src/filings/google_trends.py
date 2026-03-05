@@ -34,6 +34,12 @@ from urllib.parse import quote
 
 import httpx
 
+try:
+    from pytrends.request import TrendReq
+    _PYTRENDS_AVAILABLE = True
+except ImportError:
+    _PYTRENDS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # ── Thread lock & caches ────────────────────────────────────────────
@@ -373,19 +379,33 @@ def _keywords_from_profile(ticker: str, profile: dict) -> dict:
 # Google Trends data fetching
 # ═════════════════════════════════════════════════════════════════════
 #
-# Uses the public explore/widget JSON endpoints.  These return the same
-# data that the Google Trends website renders.  No API key is needed,
-# but aggressive rate-limiting applies.
+# Uses pytrends (unofficial Google Trends API client) which handles
+# session/cookie negotiation.  Falls back to direct HTTP for the
+# daily trending endpoint which doesn't require auth.
 
-_GT_EXPLORE = "https://trends.google.com/trends/api/explore"
-_GT_MULTILINE = "https://trends.google.com/trends/api/widgetdata/multiline"
-_GT_RELATED = "https://trends.google.com/trends/api/widgetdata/relatedsearches"
 _GT_TRENDING = "https://trends.google.com/trends/api/dailytrends"
+
+# Reusable pytrends session (created lazily)
+_pytrends_instance: TrendReq | None = None
+
+
+def _get_pytrends() -> TrendReq | None:
+    """Get or create a pytrends session."""
+    global _pytrends_instance
+    if not _PYTRENDS_AVAILABLE:
+        logger.warning("pytrends not installed — Google Trends data unavailable")
+        return None
+    if _pytrends_instance is None:
+        try:
+            _pytrends_instance = TrendReq(hl="en-US", tz=240, retries=3, backoff_factor=1.0)
+        except Exception as e:
+            logger.warning("Failed to create pytrends session: %s", e)
+            return None
+    return _pytrends_instance
 
 
 def _parse_gt_json(text: str) -> dict | None:
     """Parse Google Trends JSON response (strip XSSI prefix)."""
-    # Google prefixes responses with ")]}'\n" to prevent XSSI
     cleaned = text.lstrip()
     if cleaned.startswith(")]}'"):
         cleaned = cleaned[cleaned.index("\n") + 1:]
@@ -403,7 +423,7 @@ def fetch_interest_over_time(
 ) -> dict | None:
     """Fetch Google Trends interest-over-time for up to 5 keywords.
 
-    Returns dict with:
+    Uses pytrends for session management. Returns dict with:
       - keywords: list of queried keywords
       - timeframe: the timeframe string used
       - data: list of {date, values: {keyword: score}} dicts
@@ -422,78 +442,47 @@ def fetch_interest_over_time(
         if cached and time.time() - cached[0] < _INTEREST_TTL:
             return cached[1]
 
-    # Step 1: Get explore tokens
-    params = {
-        "hl": "en-US",
-        "tz": "240",
-        "req": json.dumps({
-            "comparisonItem": [
-                {"keyword": kw, "geo": geo, "time": timeframe}
-                for kw in keywords
-            ],
-            "category": 0,
-            "property": "",
-        }),
-    }
-
-    resp = _gt_get(f"{_GT_EXPLORE}?hl={params['hl']}&tz={params['tz']}&req={quote(params['req'])}")
-    if not resp:
+    pt = _get_pytrends()
+    if not pt:
         return None
 
-    explore_data = _parse_gt_json(resp.text)
-    if not explore_data:
+    _rate_limit()
+
+    try:
+        pt.build_payload(keywords, cat=0, timeframe=timeframe, geo=geo, gprop="")
+        df = pt.interest_over_time()
+    except Exception as e:
+        logger.warning("pytrends interest_over_time failed for %s: %s", keywords, e)
+        # Reset session on failure (stale cookie)
+        global _pytrends_instance
+        _pytrends_instance = None
         return None
 
-    widgets = explore_data.get("widgets", [])
-    timeline_widget = None
-    for w in widgets:
-        if w.get("id") == "TIMESERIES":
-            timeline_widget = w
-            break
-
-    if not timeline_widget:
-        logger.warning("No TIMESERIES widget in GT explore response")
+    if df is None or df.empty:
         return None
 
-    # Step 2: Fetch the actual time series data
-    token = timeline_widget.get("token", "")
-    req_obj = timeline_widget.get("request", {})
-
-    ts_url = (
-        f"{_GT_MULTILINE}?hl=en-US&tz=240"
-        f"&req={quote(json.dumps(req_obj))}"
-        f"&token={token}"
-    )
-
-    ts_resp = _gt_get(ts_url)
-    if not ts_resp:
-        return None
-
-    ts_data = _parse_gt_json(ts_resp.text)
-    if not ts_data:
-        return None
-
-    # Parse the timeline data
-    timeline = ts_data.get("default", {}).get("timelineData", [])
-    if not timeline:
-        return None
+    # Drop the "isPartial" column if present
+    if "isPartial" in df.columns:
+        df = df.drop(columns=["isPartial"])
 
     data_points = []
-    sums: dict[str, int] = {kw: 0 for kw in keywords}
+    sums: dict[str, float] = {kw: 0.0 for kw in keywords}
     count = 0
 
-    for point in timeline:
-        date_str = point.get("formattedTime", "")
-        values = point.get("value", [])
-        row: dict[str, int] = {}
-        for i, kw in enumerate(keywords):
-            val = values[i] if i < len(values) else 0
-            row[kw] = val
+    for idx, row in df.iterrows():
+        date_str = idx.strftime("%b %d, %Y")
+        values: dict[str, int] = {}
+        for kw in keywords:
+            val = int(row.get(kw, 0)) if kw in row.index else 0
+            values[kw] = val
             sums[kw] += val
-        data_points.append({"date": date_str, "values": row})
+        data_points.append({"date": date_str, "values": values})
         count += 1
 
-    averages = {kw: round(s / count, 1) if count else 0 for kw, s in sums.items()}
+    if count == 0:
+        return None
+
+    averages = {kw: round(s / count, 1) for kw, s in sums.items()}
 
     result = {
         "keywords": keywords,
