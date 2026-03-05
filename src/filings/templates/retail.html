@@ -18,7 +18,7 @@
 </script>
 {% endblock %}
 {% block extra_head_scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+{# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
 {% endblock %}
 {% block content %}
 <hgroup>
@@ -439,6 +439,10 @@
     /* ══════════════════════════════════════════════════════════════ */
     function renderBubbleChart(data) {
         if (!data || data.length === 0) return;
+        if (typeof Chart === 'undefined') {
+            window.requireChartJS(function() { renderBubbleChart(data); });
+            return;
+        }
         var ctx = document.getElementById('retail-bubble-chart');
         if (!ctx) return;
         if (bubbleChart) { bubbleChart.destroy(); bubbleChart = null; }
@@ -694,20 +698,23 @@
             });
     }
 
-    /* Wait for DOMContentLoaded so deferred scripts (Chart.js) are ready */
-    document.addEventListener('DOMContentLoaded', function() {
-        /* Auto-load leaderboard if it's the active tab on page load */
+    /* ── Initialize: run immediately if DOM ready (hx-boost), else on DOMContentLoaded ── */
+    function _initRetailPage() {
         {% if view == 'leaderboard' %}
         leaderboardLoaded = true;
         loadLeaderboard();
         {% endif %}
 
-        /* Auto-load calendar if it's the active tab on page load */
         {% if view == 'calendar' %}
         calendarLoaded = true;
         loadCalendar();
         {% endif %}
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _initRetailPage);
+    } else {
+        _initRetailPage();
+    }
 
     /* Handle browser back/forward */
     window.addEventListener('popstate', function() {

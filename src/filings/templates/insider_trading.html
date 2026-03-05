@@ -18,7 +18,7 @@
 </script>
 {% endblock %}
 {% block extra_head_scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+{# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
 {% endblock %}
 {% block content %}
 <hgroup>
@@ -393,18 +393,13 @@
         };
     }
 
-    /* ── Render chart (guarded: Chart.js may still be loading on first cold load) ── */
-    var _chartRetries = 0;
+    /* ── Render chart (guarded: Chart.js may still be loading) ── */
     function renderChart(chartData) {
         if (typeof Chart === 'undefined') {
-            /* Chart.js CDN not yet ready — retry with backoff up to 3s */
-            if (_chartRetries < 10) {
-                _chartRetries++;
-                setTimeout(function() { renderChart(chartData); }, 300);
-            }
+            /* Lazy-load Chart.js on demand (works with hx-boost navigation) */
+            window.requireChartJS(function() { renderChart(chartData); });
             return;
         }
-        _chartRetries = 0;
 
         var section = document.getElementById('insider-chart-section');
         if (!chartData || chartData.length === 0) {
@@ -532,9 +527,8 @@
         }
     });
 
-    /* Wait for DOMContentLoaded so deferred Chart.js is ready */
-    document.addEventListener('DOMContentLoaded', function() {
-        /* If server already rendered data (SSR for SEO), seed the cache and render chart */
+    /* ── Initialize: run immediately if DOM ready (hx-boost), else on DOMContentLoaded ── */
+    function _initInsiderCharts() {
         var initCacheKey = currentFilter + ':' + currentPeriod;
         if (typeof __chartData !== 'undefined' && __chartData.length > 0) {
             cache[initCacheKey] = document.getElementById('insider-trades-content').innerHTML;
@@ -545,7 +539,12 @@
         } else {
             loadTrades('all');
         }
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _initInsiderCharts);
+    } else {
+        _initInsiderCharts();
+    }
 })();
 </script>
 {% endblock %}

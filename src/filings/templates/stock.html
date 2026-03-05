@@ -1523,14 +1523,23 @@ window.toggleHolders = function(btn) {
     });
 
     // ── Initialize with simple view (wait for deferred Chart.js) ──
-    document.addEventListener('DOMContentLoaded', function() {
+    function _initActivityChart() {
+        if (typeof Chart === 'undefined') {
+            window.requireChartJS(function() { _initActivityChart(); });
+            return;
+        }
         createChart(buildSimpleData());
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _initActivityChart);
+    } else {
+        _initActivityChart();
+    }
 })();
 </script>
 {% endif %}
 {% endblock %}
 
 {% block extra_head_scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
+{# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
 {% endblock %}
