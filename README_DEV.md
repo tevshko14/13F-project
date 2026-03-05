@@ -245,7 +245,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── search.html               # Fund manager search
         ├── investor.html             # Individual fund page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
-        ├── stock.html                # Stock detail (7 tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
+        ├── stock.html                # Stock detail (8 tabs: Overview, Ownership, Analysts, Signals, Vitals, Filings, Insider, Congress)
         ├── support.html              # Panda Fund: progress bar, Stripe Buy Button + Pricing Table, cost breakdown, funding history chart
         ├── deployment.html           # Capital Deployed standalone page (/deployment)
         ├── notifications.html        # Notification history page
@@ -263,7 +263,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── most_added.html         # Most-added-by-superinvestors table (lazy-loaded)
             ├── ticker_search.html      # Nav autocomplete search input (Fuse.js fuzzy search)
             ├── analyst_ratings.html    # Analyst consensus + ratings table (lazy-loaded)
-            ├── sentiment.html          # Market/news sentiment cards (CNN, Finnhub, Reddit, Alpha Vantage)
+            ├── sentiment.html          # Market/news sentiment cards (CNN, Finnhub, Reddit, Alpha Vantage) — standalone, used by /retail
+            ├── signals.html            # Unified Signals tab: sentiment + search interest (Google Trends) + web traffic (Cloudflare, Tranco, Wikipedia)
             ├── vitals.html             # Employee pulse, culture, product sentiment (3-card grid)
             ├── company_filings.html    # SEC filing links (lazy-loaded)
             ├── insider_trades.html     # Insider trading table — global screener (lazy-loaded)
@@ -1193,6 +1194,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only | `stock.html` |
 | GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (live, 5-min cache) | `partials/analyst_ratings.html` |
 | GET | `/api/sentiment/{ticker}` | `sentiment_data` | CNN, Finnhub, ApeWisdom, Alpha Vantage | `partials/sentiment.html` |
+| GET | `/api/signals/{ticker}` | `signals_data` | Sentiment + Google Trends + Web Traffic (parallel) | `partials/signals.html` |
 | GET | `/api/vitals/{ticker}` | `vitals_data` | Glassdoor, PDL, Apple iTunes | `partials/vitals.html` |
 | GET | `/api/company-filings/{ticker}` | `company_filings_tab` | SEC EDGAR | `partials/company_filings.html` |
 | GET | `/api/insider-trades` | `insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/insider_trades.html` |
@@ -1361,10 +1363,10 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   │     └── lazy-loads partials/deployment_card.html via HTMX (/api/deployment/{cik})
   ├── activity.html
   │     └── imports partials/ticker_link.html (macro)
-  ├── stock.html (7 Tabs: Overview, Ownership, Analysts, Sentiment, Vitals, Filings, Insider)
+  ├── stock.html (8 Tabs: Overview, Ownership, Analysts, Signals, Vitals, Filings, Insider, Congress)
   │     ├── includes partials/watchlist_star.html
   │     ├── lazy-loads partials/analyst_ratings.html via fetch(/api/analysts/{ticker})
-  │     ├── lazy-loads partials/sentiment.html via fetch(/api/sentiment/{ticker})
+  │     ├── lazy-loads partials/signals.html via fetch(/api/signals/{ticker}) — parallel fetch of sentiment + Google Trends + web traffic
   │     ├── lazy-loads partials/vitals.html via fetch(/api/vitals/{ticker})
   │     ├── lazy-loads partials/company_filings.html via fetch(/api/company-filings/{ticker})
   │     └── lazy-loads partials/stock_insider_trades.html via fetch(/api/insider-trades/{ticker})

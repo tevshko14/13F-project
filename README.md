@@ -50,14 +50,18 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 - **Fuzzy Ticker Search** - Fuse.js-powered autocomplete with ~8,000 NYSE/NASDAQ listings, weighted by superinvestor holdings and S&P 500 membership
 - **Fund Manager Search** - Search SEC EDGAR for any institutional investor by name
 
-### Stock Pages (7 Tabs)
+### Stock Pages (8 Tabs)
 - **Overview** - Which superinvestors hold this stock, quarterly activity chart (Chart.js), star/watchlist button
 - **Ownership** - Detailed holder list with position sizes and portfolio percentages
 - **Analyst Ratings** - Wall Street consensus with firm-level upgrades/downgrades (Finnhub + yfinance)
-- **Sentiment** - Market mood (CNN Fear & Greed), news sentiment (Finnhub), Reddit buzz (ApeWisdom), NLP news (Alpha Vantage)
+- **Signals** - Unified alternative data tab combining sentiment, search interest, and web traffic:
+  - *Sentiment* — Market mood (CNN Fear & Greed), news sentiment (Finnhub), Reddit buzz (ApeWisdom), NLP news (Alpha Vantage)
+  - *Search Interest* — Google Trends keyword tracking (intent, product, comparison) with 3-month interest chart
+  - *Web Traffic* — Domain popularity (Cloudflare Radar + Tranco), Wikipedia event detector with daily views chart
 - **Vitals** - Employee headcount (People Data Labs), culture ratings (Glassdoor), App Store ratings (Apple iTunes)
 - **SEC Filings** - Direct links to the company's SEC filings
 - **Insider Trading** - Full insider trade history with quarterly groups, insider cards with hover tooltips, buy/sell timeline chart, per-insider filter, and SEC-resolved officer titles (CEO, CFO, etc.)
+- **Congress** - Congressional stock trading activity (STOCK Act disclosures)
 
 ### Investor Pages
 - **Holdings Tab** - Full portfolio with activity badges and percentage allocations
@@ -91,6 +95,8 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 | Market Data | `yfinance` + NASDAQ Trader (all US listings) |
 | Analyst Data | `yfinance` (free) + `finnhub-python` (optional) |
 | Sentiment | CNN, Finnhub, ApeWisdom, Alpha Vantage |
+| Search Interest | Google Trends (pytrends) |
+| Web Traffic | Cloudflare Radar, Tranco, Wikipedia Page Views |
 | Vitals | People Data Labs, Glassdoor (RapidAPI), Apple iTunes |
 | Insider Data | OpenInsider (scraped, full history) + SEC Form 4 XML (title resolution) + Supabase `insider_trades` table |
 | Congress Data | Capitol Trades (scraped, STOCK Act disclosures) + Supabase cold archive (~35K trades, 200+ politicians) |
