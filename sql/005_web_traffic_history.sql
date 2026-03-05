@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS web_traffic_history (
     id              BIGSERIAL PRIMARY KEY,
     ticker          TEXT NOT NULL,
     snapshot_date   DATE NOT NULL,
-    source          TEXT NOT NULL,        -- 'similarweb', 'wikipedia'
+    source          TEXT NOT NULL,        -- 'cloudflare_radar', 'tranco', 'wikipedia'
     data            JSONB NOT NULL,       -- full response payload
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(ticker, snapshot_date, source) -- one snapshot per source per day
