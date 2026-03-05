@@ -1,17 +1,14 @@
-"""Authentication helpers -- Clerk + legacy Supabase JWT validation for FastAPI.
+"""Authentication helpers -- Clerk JWT validation for FastAPI.
 
 Provides middleware that extracts and validates JWTs from cookies on every
 request, attaching ``request.state.user`` (JWT claims) and
 ``request.state.profile`` (profiles table row) for downstream use.
 
-Supports two providers:
-  1. **Clerk** (primary): RS256 JWTs verified via JWKS from Clerk's domain.
-     Token read from ``__session`` cookie or ``Authorization: Bearer`` header.
-  2. **Supabase** (legacy): HS256 JWTs verified with a shared secret.
-     Token read from ``sb-access-token`` cookie. Kept for migration period.
+Uses **Clerk** RS256 JWTs verified via JWKS from Clerk's domain.
+Token read from ``__session`` cookie or ``Authorization: Bearer`` header.
 
-When neither ``CLERK_DOMAIN`` nor ``SUPABASE_JWT_SECRET`` is set the
-middleware is never added and the app behaves as anonymous-only.
+When ``CLERK_DOMAIN`` is not set the middleware is never added and the
+app behaves as anonymous-only.
 """
 
 from __future__ import annotations
@@ -25,7 +22,6 @@ import time
 logger = logging.getLogger(__name__)
 
 # ── Configuration (read once at import time) ────────────────────────
-JWT_SECRET: str = os.environ.get("SUPABASE_JWT_SECRET", "")
 SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
 SUPABASE_ANON_KEY: str = os.environ.get("SUPABASE_ANON_KEY", "")
 
@@ -132,46 +128,6 @@ def decode_clerk_token(token: str) -> dict | None:
         return None
 
 
-def decode_supabase_token(token: str) -> dict | None:
-    """Decode and validate a legacy Supabase JWT (HS256).
-
-    Returns the claims dict on success, or ``None`` on any failure.
-    """
-    if not JWT_SECRET:
-        return None
-    try:
-        import jwt  # PyJWT
-
-        return jwt.decode(
-            token,
-            JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-    except Exception:
-        return None
-
-
-def decode_token(token: str) -> dict | None:
-    """Decode a JWT -- tries Clerk (RS256) first, then legacy Supabase (HS256).
-
-    Returns the claims dict on success, or ``None`` on any failure.
-    """
-    # Try Clerk first (primary provider)
-    if CLERK_DOMAIN:
-        result = decode_clerk_token(token)
-        if result:
-            return result
-
-    # Fall back to legacy Supabase
-    if JWT_SECRET:
-        result = decode_supabase_token(token)
-        if result:
-            return result
-
-    return None
-
-
 def get_user_from_request(request) -> dict | None:
     """Return the user claims dict attached by AuthMiddleware, or None."""
     return getattr(request.state, "user", None)
@@ -257,15 +213,12 @@ def _build_auth_middleware():
             # Skip static/health paths
             path = request.url.path
             if not any(path.startswith(p) for p in _SKIP_PREFIXES):
-                # Try Clerk __session cookie first, then legacy sb-access-token,
-                # then Authorization: Bearer header
                 token = (
                     request.cookies.get("__session")
-                    or request.cookies.get("sb-access-token")
                     or _extract_bearer(request)
                 )
                 if token:
-                    claims = decode_token(token)
+                    claims = decode_clerk_token(token)
                     if claims:
                         request.state.user = claims
                         request.state.profile = await asyncio.to_thread(
