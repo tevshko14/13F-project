@@ -123,8 +123,10 @@ def sync_all(*, dry_run: bool = False) -> dict:
     stats = {
         "tickers_checked": 0,
         "tickers_relevant": 0,
-        "similarweb_ok": 0,
-        "similarweb_fail": 0,
+        "cloudflare_ok": 0,
+        "cloudflare_fail": 0,
+        "tranco_ok": 0,
+        "tranco_fail": 0,
         "wikipedia_ok": 0,
         "wikipedia_fail": 0,
     }
@@ -140,22 +142,37 @@ def sync_all(*, dry_run: bool = False) -> dict:
         stats["tickers_relevant"] += 1
         logger.info("Syncing %s — %s", ticker, reason)
 
-        # SimilarWeb
+        # Cloudflare Radar
         try:
-            sw_data = web_traffic.fetch_similarweb(ticker)
-            if sw_data:
-                ok = _upsert_snapshot(ticker, "similarweb", sw_data, today, dry_run=dry_run)
+            cf_data = web_traffic.fetch_cloudflare_rank(ticker)
+            if cf_data:
+                ok = _upsert_snapshot(ticker, "cloudflare_radar", cf_data, today, dry_run=dry_run)
                 if ok:
-                    stats["similarweb_ok"] += 1
+                    stats["cloudflare_ok"] += 1
                 else:
-                    stats["similarweb_fail"] += 1
+                    stats["cloudflare_fail"] += 1
             else:
-                stats["similarweb_fail"] += 1
+                stats["cloudflare_fail"] += 1
         except Exception as e:
-            logger.warning("SimilarWeb error for %s: %s", ticker, e)
-            stats["similarweb_fail"] += 1
+            logger.warning("Cloudflare Radar error for %s: %s", ticker, e)
+            stats["cloudflare_fail"] += 1
 
         time.sleep(_FETCH_DELAY)
+
+        # Tranco List
+        try:
+            tranco_data = web_traffic.fetch_tranco_rank(ticker)
+            if tranco_data:
+                ok = _upsert_snapshot(ticker, "tranco", tranco_data, today, dry_run=dry_run)
+                if ok:
+                    stats["tranco_ok"] += 1
+                else:
+                    stats["tranco_fail"] += 1
+            else:
+                stats["tranco_fail"] += 1
+        except Exception as e:
+            logger.warning("Tranco error for %s: %s", ticker, e)
+            stats["tranco_fail"] += 1
 
         # Wikipedia
         try:
@@ -194,12 +211,14 @@ def main() -> None:
     elapsed = time.time() - t0
     logger.info(
         "=== Sync complete in %.1fs: %d tickers checked, %d relevant, "
-        "SW %d ok / %d fail, Wiki %d ok / %d fail ===",
+        "CF %d ok / %d fail, Tranco %d ok / %d fail, Wiki %d ok / %d fail ===",
         elapsed,
         stats["tickers_checked"],
         stats["tickers_relevant"],
-        stats["similarweb_ok"],
-        stats["similarweb_fail"],
+        stats["cloudflare_ok"],
+        stats["cloudflare_fail"],
+        stats["tranco_ok"],
+        stats["tranco_fail"],
         stats["wikipedia_ok"],
         stats["wikipedia_fail"],
     )
