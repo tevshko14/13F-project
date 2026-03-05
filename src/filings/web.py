@@ -3197,11 +3197,24 @@ async def alt_signals_short_interest(request: Request):
     """HTMX partial: short interest leaderboard tables."""
     data = supabase_cache.get_cached("short_interest_leaderboard")
     if not data:
+        # Cron hasn't run yet — build leaderboard on-the-fly from the history table.
+        # Also attach guru overlap so the table is fully populated.
+        try:
+            fund_cache = await asyncio.to_thread(cache.load_cache_from_supabase)
+            ticker_map = client.build_ticker_ownership_map(
+                fund_cache or {}, SUPERINVESTORS_BY_CIK
+            )
+        except Exception:
+            ticker_map = {}
+        data = await asyncio.to_thread(
+            supabase_cache.build_leaderboard_from_db, ticker_map
+        )
+    if not data:
         return HTMLResponse(
             '<div style="text-align: center; padding: 2em 0;">'
             '<p style="color: var(--pp-text-muted); font-size: 0.95em;">'
-            "Short interest data is being processed. "
-            "The sync worker needs to run at least once to populate this page."
+            "Short interest data is not yet available. "
+            "Please check back shortly."
             "</p></div>"
         )
     return templates.TemplateResponse(
