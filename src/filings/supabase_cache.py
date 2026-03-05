@@ -3025,3 +3025,67 @@ def get_latest_short_interest_all(limit: int = 600) -> list[dict]:
     except Exception as exc:
         logger.warning("get_latest_short_interest_all failed: %s", exc)
         return []
+
+
+def build_leaderboard_from_db(
+    ticker_map: dict[str, list[str]] | None = None,
+    limit: int = 600,
+) -> dict | None:
+    """Build a short-interest leaderboard snapshot directly from the DB.
+
+    Used as a fallback when the cron worker hasn't run yet and the
+    ``short_interest_leaderboard`` cache key is empty.  Computes
+    ``short_change`` / ``short_change_pct`` from the stored
+    ``shares_short`` / ``shares_short_prior`` columns.
+
+    Returns the same dict shape that ``short_interest_sync._build_leaderboard``
+    produces, or ``None`` if no data is available.
+    """
+    import time
+
+    rows = get_latest_short_interest_all(limit=limit)
+    if not rows:
+        return None
+
+    ticker_map = ticker_map or {}
+    enriched = []
+    for r in rows:
+        ss = r.get("shares_short") or 0
+        ss_prior = r.get("shares_short_prior") or 0
+        short_change = ss - ss_prior
+        short_change_pct = round((short_change / ss_prior * 100), 1) if ss_prior else 0.0
+        guru_names = ticker_map.get(r["ticker"], [])
+        enriched.append({
+            "ticker": r["ticker"],
+            "short_pct_float": r.get("short_pct_float") or 0,
+            "short_ratio": r.get("short_ratio") or 0,
+            "shares_short": ss,
+            "shares_short_prior": ss_prior,
+            "short_change": short_change,
+            "short_change_pct": short_change_pct,
+            "float_shares": r.get("float_shares") or 0,
+            "report_date": r.get("report_date", ""),
+            "guru_count": len(guru_names),
+            "guru_names": guru_names[:5],
+        })
+
+    highest = sorted(
+        enriched,
+        key=lambda x: x.get("short_pct_float") or 0,
+        reverse=True,
+    )[:50]
+
+    trending = sorted(
+        [e for e in enriched if e.get("short_change_pct", 0) > 0],
+        key=lambda x: x.get("short_change_pct") or 0,
+        reverse=True,
+    )[:50]
+
+    return {
+        "highest_short": highest,
+        "trending_short": trending,
+        "metadata": {
+            "count": len(rows),
+            "timestamp": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+        },
+    }
