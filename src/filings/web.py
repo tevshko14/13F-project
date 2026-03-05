@@ -109,6 +109,8 @@ if _sentry_dsn:
 # ── Analytics (optional) ─────────────────────────────────────────────
 # NOTE: Set POSTHOG_KEY in production (Railway) to enable analytics.
 _POSTHOG_KEY = os.environ.get("POSTHOG_KEY", "")
+_CLERK_PUBLISHABLE_KEY = os.environ.get("CLERK_PUBLISHABLE_KEY", "")
+_CLERK_WEBHOOK_SECRET = os.environ.get("CLERK_WEBHOOK_SECRET", "")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -375,6 +377,7 @@ templates.env.globals["supabase_anon_key"] = auth.SUPABASE_ANON_KEY
 templates.env.globals["auth_enabled"] = bool(auth.CLERK_DOMAIN or auth.SUPABASE_ANON_KEY)
 templates.env.globals["clerk_domain"] = auth.CLERK_DOMAIN
 templates.env.globals["posthog_key"] = _POSTHOG_KEY
+templates.env.globals["clerk_publishable_key"] = _CLERK_PUBLISHABLE_KEY
 
 # Attach rate limiter
 if _has_limiter:
@@ -4385,22 +4388,22 @@ async def most_added(request: Request):
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@app.get("/login")
+@app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    """Redirect to Clerk sign-in on the Next.js app."""
-    return RedirectResponse(url="https://app.paperpanda.io/auth/sign-in", status_code=302)
+    """Render page that auto-opens Clerk sign-in modal."""
+    return templates.TemplateResponse("login.html", {"request": request})
 
 
-@app.get("/signup")
+@app.get("/signup", response_class=HTMLResponse)
 async def signup_page(request: Request):
-    """Redirect to Clerk sign-up on the Next.js app."""
-    return RedirectResponse(url="https://app.paperpanda.io/auth/sign-up", status_code=302)
+    """Render page that auto-opens Clerk sign-up modal."""
+    return templates.TemplateResponse("signup.html", {"request": request})
 
 
 @app.get("/reset-password")
 async def reset_password_page(request: Request):
-    """Redirect to Clerk sign-in (handles password reset)."""
-    return RedirectResponse(url="https://app.paperpanda.io/auth/sign-in", status_code=302)
+    """Redirect to login (Clerk handles password reset in its sign-in modal)."""
+    return RedirectResponse(url="/login", status_code=302)
 
 
 @app.get("/logout")
@@ -4411,6 +4414,80 @@ async def logout(request: Request):
     response.delete_cookie("sb-refresh-token", path="/")
     response.delete_cookie("__session", path="/")
     return response
+
+
+@app.post("/api/webhooks/clerk")
+async def clerk_webhook(request: Request):
+    """Handle Clerk user lifecycle webhooks (user.created/updated/deleted).
+
+    Verifies signature via svix, then upserts/deletes the profiles table row.
+    """
+    if not _CLERK_WEBHOOK_SECRET:
+        return JSONResponse({"error": "Webhook secret not configured"}, status_code=500)
+
+    svix_id = request.headers.get("svix-id")
+    svix_timestamp = request.headers.get("svix-timestamp")
+    svix_signature = request.headers.get("svix-signature")
+
+    if not svix_id or not svix_timestamp or not svix_signature:
+        return JSONResponse({"error": "Missing svix headers"}, status_code=400)
+
+    body = await request.body()
+
+    try:
+        from svix.webhooks import Webhook
+        wh = Webhook(_CLERK_WEBHOOK_SECRET)
+        payload = wh.verify(body, {
+            "svix-id": svix_id,
+            "svix-timestamp": svix_timestamp,
+            "svix-signature": svix_signature,
+        })
+    except Exception as exc:
+        logger.warning("Clerk webhook verification failed: %s", exc)
+        return JSONResponse({"error": "Invalid signature"}, status_code=400)
+
+    event_type = payload.get("type", "")
+    data = payload.get("data", {})
+
+    if event_type in ("user.created", "user.updated"):
+        user_id = data.get("id")
+        email_addresses = data.get("email_addresses", [])
+        email = email_addresses[0]["email_address"] if email_addresses else None
+        first_name = data.get("first_name") or ""
+        last_name = data.get("last_name") or ""
+        display_name = " ".join(filter(None, [first_name, last_name])) or None
+        avatar_url = data.get("image_url")
+
+        try:
+            client = supabase_cache._get_client()
+            if client:
+                row = {
+                    "id": user_id,
+                    "email": email,
+                    "display_name": display_name,
+                    "avatar_url": avatar_url,
+                }
+                await asyncio.to_thread(
+                    lambda: client.table("profiles").upsert(row, on_conflict="id").execute()
+                )
+        except Exception as exc:
+            logger.error("Profile upsert failed: %s", exc)
+            return JSONResponse({"error": "Database error"}, status_code=500)
+
+    elif event_type == "user.deleted":
+        user_id = data.get("id")
+        if user_id:
+            try:
+                client = supabase_cache._get_client()
+                if client:
+                    await asyncio.to_thread(
+                        lambda: client.table("profiles").delete().eq("id", user_id).execute()
+                    )
+            except Exception as exc:
+                logger.error("Profile delete failed: %s", exc)
+                return JSONResponse({"error": "Database error"}, status_code=500)
+
+    return JSONResponse({"status": "ok"}, status_code=200)
 
 
 # ═══════════════════════════════════════════════════════════════════════

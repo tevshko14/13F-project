@@ -3,142 +3,22 @@
 {% block title %}Sign In — PaperPanda{% endblock %}
 
 {% block content %}
-<style>
-    .auth-container {
-        max-width: 420px;
-        margin: 2em auto;
-    }
-    .auth-card {
-        border: 1px solid rgba(0,0,0,0.08);
-        border-radius: 12px;
-        padding: 2em;
-        background: #fff;
-    }
-    .auth-card h2 {
-        margin: 0 0 0.3em;
-        font-size: 1.4em;
-    }
-    .auth-card p.subtitle {
-        color: #888;
-        font-size: 0.9em;
-        margin-bottom: 1.5em;
-    }
-    .auth-error {
-        background: #ffebee;
-        color: #c62828;
-        padding: 0.75em 1em;
-        border-radius: 6px;
-        font-size: 0.88em;
-        margin-bottom: 1em;
-        display: none;
-    }
-    .auth-success {
-        background: #e8f5e9;
-        color: #2e7d32;
-        padding: 0.75em 1em;
-        border-radius: 6px;
-        font-size: 0.88em;
-        margin-bottom: 1em;
-        display: none;
-    }
-    .auth-links {
-        text-align: center;
-        margin-top: 1.5em;
-        font-size: 0.88em;
-    }
-    .auth-links a {
-        color: #1976d2;
-    }
-    .auth-divider {
-        display: flex;
-        align-items: center;
-        gap: 1em;
-        margin: 1.5em 0;
-        font-size: 0.82em;
-        color: #aaa;
-    }
-    .auth-divider::before, .auth-divider::after {
-        content: '';
-        flex: 1;
-        height: 1px;
-        background: rgba(0,0,0,0.1);
-    }
-</style>
-
-<div class="auth-container">
-    <div class="auth-card">
-        <h2>Welcome back</h2>
-        <p class="subtitle">Sign in to your PaperPanda account</p>
-
-        <div id="auth-error" class="auth-error"></div>
-        <div id="auth-success" class="auth-success"></div>
-
-        {% if supabase_anon_key %}
-        <form id="login-form" onsubmit="return handleLogin(event)">
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" placeholder="you@example.com" required autofocus>
-
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" placeholder="Your password" required>
-
-            <button type="submit" id="login-btn" style="width: 100%; margin-top: 0.5em;">Sign In</button>
-        </form>
-
-        <div class="auth-links">
-            <a href="/reset-password">Forgot password?</a>
-            <br><br>
-            Don't have an account? <a href="/signup">Sign up</a>
-        </div>
-
-        <script>
-        async function handleLogin(e) {
-            e.preventDefault();
-            var errorEl = document.getElementById('auth-error');
-            var btn = document.getElementById('login-btn');
-            errorEl.style.display = 'none';
-            btn.setAttribute('aria-busy', 'true');
-            btn.disabled = true;
-
-            var email = document.getElementById('email').value;
-            var password = document.getElementById('password').value;
-
-            try {
-                var result = await _supabase.auth.signInWithPassword({
-                    email: email,
-                    password: password
-                });
-
-                if (result.error) {
-                    errorEl.textContent = result.error.message;
-                    errorEl.style.display = 'block';
-                    btn.removeAttribute('aria-busy');
-                    btn.disabled = false;
-                    return false;
-                }
-
-                // Success — cookie is set by onAuthStateChange in base.html
-                // Redirect to homepage (or previous page)
-                var redirectTo = new URLSearchParams(window.location.search).get('next') || '/';
-                // Prevent open redirect — only allow relative paths on same origin
-                if (!redirectTo.startsWith('/') || redirectTo.startsWith('//')) {
-                    redirectTo = '/';
-                }
-                window.location.href = redirectTo;
-            } catch (err) {
-                errorEl.textContent = 'An unexpected error occurred. Please try again.';
-                errorEl.style.display = 'block';
-                btn.removeAttribute('aria-busy');
-                btn.disabled = false;
-            }
-            return false;
-        }
-        </script>
-        {% else %}
-        <p class="text-muted" style="text-align: center; padding: 2em 0;">
-            Authentication is not configured yet.
-            <br><small>Set <code>SUPABASE_ANON_KEY</code> to enable sign-in.</small>
-        </p>
-        {% endif %}
-    </div>
+<div style="text-align: center; padding: 4em 1em;">
+    <p style="color: var(--pp-text-muted);">Opening sign-in...</p>
 </div>
+<script>
+(function() {
+    function tryOpen() {
+        if (window.Clerk && window.Clerk.loaded) {
+            window.Clerk.openSignIn({
+                afterSignInUrl: new URLSearchParams(window.location.search).get('next') || '/',
+                afterSignUpUrl: '/',
+            });
+        } else {
+            setTimeout(tryOpen, 100);
+        }
+    }
+    tryOpen();
+})();
+</script>
 {% endblock %}
