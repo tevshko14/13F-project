@@ -1,0 +1,405 @@
+{# ── Web Traffic Tab: Revenue Proxy Signals for Digital-First Companies ── #}
+
+<style>
+    .wt-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1.5em;
+    }
+    @media (min-width: 769px) {
+        .wt-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+        .wt-grid .wt-card-full {
+            grid-column: 1 / -1;
+        }
+    }
+    .wt-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 10px;
+        padding: 1.5em;
+        background: var(--pp-surface);
+    }
+    .wt-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1em;
+        padding-bottom: 0.6em;
+        border-bottom: 1px solid var(--pp-overlay-8);
+    }
+    .wt-card-header h3 {
+        font-size: 1.05em;
+        font-weight: 700;
+        margin: 0;
+        color: var(--pp-text);
+    }
+    .wt-card-header .wt-source {
+        font-size: 0.75em;
+        color: var(--pp-sub-text-light);
+        font-weight: 400;
+    }
+    .wt-stat-row {
+        display: flex;
+        gap: 2em;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .wt-stat {
+        text-align: center;
+        min-width: 80px;
+    }
+    .wt-stat .value {
+        font-size: 1.6em;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .wt-stat .label {
+        font-size: 0.75em;
+        color: var(--pp-sub-text);
+        margin-top: 0.2em;
+    }
+    .wt-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4em;
+        padding: 0.4em 0.9em;
+        border-radius: 20px;
+        font-size: 0.82em;
+        font-weight: 600;
+    }
+    .wt-badge-high {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+    .wt-traffic-bar {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--pp-overlay-10);
+        overflow: hidden;
+        margin-bottom: 0.5em;
+    }
+    .wt-traffic-bar .fill {
+        height: 100%;
+        border-radius: 3px;
+        transition: width 0.3s ease;
+    }
+    .wt-footer {
+        font-size: 0.78em;
+        color: var(--pp-sub-text-light);
+        margin-top: 0.8em;
+        padding-top: 0.5em;
+        border-top: 1px solid var(--pp-overlay-5);
+    }
+    .wt-empty {
+        text-align: center;
+        padding: 1.5em 1em;
+        color: var(--pp-sub-text-light);
+    }
+    .wt-chart-container {
+        width: 100%;
+        height: 200px;
+        position: relative;
+    }
+</style>
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# Revenue Proxy Badge                                                 #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+{% if relevance %}
+<div style="margin-bottom: 1.2em;">
+    <div class="wt-badge wt-badge-high" title="{{ relevance.reason }}">
+        <span>&#x1f4c8;</span>
+        {{ relevance.label }}
+    </div>
+    <div style="font-size: 0.78em; color: var(--pp-sub-text-light); margin-top: 0.4em; margin-left: 0.2em;">
+        {{ relevance.reason }}
+    </div>
+</div>
+{% endif %}
+
+<div class="wt-grid">
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# Card 1: SimilarWeb Traffic Overview                                 #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+{% if similarweb %}
+<div class="wt-card wt-card-full">
+    <div class="wt-card-header">
+        <h3>Website Traffic</h3>
+        <span class="wt-source">via SimilarWeb</span>
+    </div>
+
+    <div class="wt-stat-row">
+        {% if similarweb.total_visits %}
+        <div class="wt-stat">
+            <div class="value" style="color: #1976d2;">
+                {% if similarweb.total_visits >= 1000000000 %}
+                    {{ "%.1f" | format(similarweb.total_visits / 1000000000) }}B
+                {% elif similarweb.total_visits >= 1000000 %}
+                    {{ "%.1f" | format(similarweb.total_visits / 1000000) }}M
+                {% elif similarweb.total_visits >= 1000 %}
+                    {{ "%.0f" | format(similarweb.total_visits / 1000) }}K
+                {% else %}
+                    {{ similarweb.total_visits }}
+                {% endif %}
+            </div>
+            <div class="label">Monthly Visits</div>
+        </div>
+        {% endif %}
+
+        {% if similarweb.global_rank %}
+        <div class="wt-stat">
+            <div class="value" style="font-size: 1.2em; color: var(--pp-text-secondary);">
+                #{{ "{:,}".format(similarweb.global_rank) }}
+            </div>
+            <div class="label">Global Rank</div>
+        </div>
+        {% endif %}
+
+        {% if similarweb.avg_visit_duration %}
+        <div class="wt-stat">
+            <div class="value" style="font-size: 1.2em; color: var(--pp-text-secondary);">
+                {% set mins = (similarweb.avg_visit_duration // 60)|int %}
+                {% set secs = (similarweb.avg_visit_duration % 60)|int %}
+                {{ mins }}:{{ "%02d" | format(secs) }}
+            </div>
+            <div class="label">Avg. Duration</div>
+        </div>
+        {% endif %}
+
+        {% if similarweb.pages_per_visit %}
+        <div class="wt-stat">
+            <div class="value" style="font-size: 1.2em; color: var(--pp-text-secondary);">
+                {{ "%.1f" | format(similarweb.pages_per_visit) }}
+            </div>
+            <div class="label">Pages/Visit</div>
+        </div>
+        {% endif %}
+
+        {% if similarweb.bounce_rate is not none %}
+        <div class="wt-stat">
+            <div class="value" style="font-size: 1.2em; color: {% if similarweb.bounce_rate < 0.4 %}#2e7d32{% elif similarweb.bounce_rate < 0.6 %}#e65100{% else %}#c62828{% endif %};">
+                {{ "%.0f" | format(similarweb.bounce_rate * 100) }}%
+            </div>
+            <div class="label">Bounce Rate</div>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Traffic Sources Breakdown #}
+    {% if similarweb.traffic_sources %}
+    <div style="margin-top: 1.2em; padding-top: 0.8em; border-top: 1px solid var(--pp-overlay-8);">
+        <div style="font-size: 0.78em; font-weight: 600; color: var(--pp-sub-text-light); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.6em;">
+            Traffic Sources
+        </div>
+        {% set sources = [
+            ("Direct", similarweb.traffic_sources.direct, "#1976d2"),
+            ("Organic Search", similarweb.traffic_sources.organic_search, "#2e7d32"),
+            ("Paid Search", similarweb.traffic_sources.paid_search, "#e65100"),
+            ("Social", similarweb.traffic_sources.social, "#7b1fa2"),
+            ("Referral", similarweb.traffic_sources.referral, "#00838f"),
+            ("Mail", similarweb.traffic_sources.mail, "#455a64"),
+            ("Display Ads", similarweb.traffic_sources.display_ads, "#c62828"),
+        ] %}
+        {% for name, val, color in sources %}
+        {% if val is not none and val > 0.001 %}
+        <div style="margin-bottom: 0.5em;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.82em; margin-bottom: 0.15em;">
+                <span style="color: var(--pp-text-secondary);">{{ name }}</span>
+                <strong style="color: {{ color }};">{{ "%.1f" | format(val * 100) }}%</strong>
+            </div>
+            <div class="wt-traffic-bar">
+                <div class="fill" style="width: {{ (val * 100)|round }}%; background: {{ color }};"></div>
+            </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="wt-footer">
+        &#x1f310; {{ similarweb.domain }}
+        {% if similarweb.category %}
+        &middot; {{ similarweb.category }}
+        {% endif %}
+    </div>
+</div>
+{% elif relevance %}
+<div class="wt-card wt-card-full">
+    <div class="wt-card-header">
+        <h3>Website Traffic</h3>
+        <span class="wt-source">via SimilarWeb</span>
+    </div>
+    <div class="wt-empty">
+        Traffic data temporarily unavailable for <strong>{{ ticker }}</strong>.
+        <br>
+        <small class="text-muted">Data refreshes daily — check back soon.</small>
+    </div>
+</div>
+{% endif %}
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# Card 2: Wikipedia Page Views (Public Attention)                     #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+{% if wikipedia %}
+<div class="wt-card wt-card-full">
+    <div class="wt-card-header">
+        <h3>Public Attention</h3>
+        <span class="wt-source">via Wikipedia Page Views</span>
+    </div>
+
+    <div class="wt-stat-row" style="margin-bottom: 1em;">
+        <div class="wt-stat">
+            <div class="value" style="color: #1976d2;">
+                {{ "{:,}".format(wikipedia.avg_daily_views) }}
+            </div>
+            <div class="label">Avg. Daily Views</div>
+        </div>
+
+        <div class="wt-stat">
+            <div class="value" style="font-size: 1.2em; color: var(--pp-text-secondary);">
+                {% if wikipedia.total_views >= 1000000 %}
+                    {{ "%.1f" | format(wikipedia.total_views / 1000000) }}M
+                {% elif wikipedia.total_views >= 1000 %}
+                    {{ "%.0f" | format(wikipedia.total_views / 1000) }}K
+                {% else %}
+                    {{ wikipedia.total_views }}
+                {% endif %}
+            </div>
+            <div class="label">Total ({{ wikipedia.days }}d)</div>
+        </div>
+
+        <div class="wt-stat">
+            <div class="value" style="font-size: 1.2em; color: #e65100;">
+                {{ "{:,}".format(wikipedia.max_daily_views) }}
+            </div>
+            <div class="label">Peak Day</div>
+        </div>
+    </div>
+
+    {# Mini chart using Chart.js (already loaded in base.html) #}
+    <div class="wt-chart-container">
+        <canvas id="wiki-views-chart"></canvas>
+    </div>
+
+    <div class="wt-footer">
+        Wikipedia page views track public attention spikes — sudden increases often
+        correlate with news events, earnings, or viral moments that move the stock.
+    </div>
+</div>
+
+<script>
+(function() {
+    const ctx = document.getElementById('wiki-views-chart');
+    if (!ctx || typeof Chart === 'undefined') return;
+
+    const rawData = {{ wikipedia.daily_views | tojson }};
+    const labels = rawData.map(d => {
+        const s = d.date;
+        return s.substring(4,6) + '/' + s.substring(6,8);
+    });
+    const values = rawData.map(d => d.views);
+
+    // Compute 7-day moving average
+    const ma7 = values.map((_, i) => {
+        if (i < 6) return null;
+        let sum = 0;
+        for (let j = i - 6; j <= i; j++) sum += values[j];
+        return Math.round(sum / 7);
+    });
+
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Daily Views',
+                    data: values,
+                    borderColor: 'rgba(25, 118, 210, 0.3)',
+                    backgroundColor: 'rgba(25, 118, 210, 0.05)',
+                    fill: true,
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    tension: 0.3,
+                },
+                {
+                    label: '7-Day Avg',
+                    data: ma7,
+                    borderColor: 'rgba(25, 118, 210, 1)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: false,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            return ctx.dataset.label + ': ' + (ctx.parsed.y || 0).toLocaleString();
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    ticks: { maxTicksLimit: 10, font: { size: 10 }, color: '#999' },
+                    grid: { display: false },
+                },
+                y: {
+                    display: true,
+                    ticks: {
+                        font: { size: 10 },
+                        color: '#999',
+                        callback: function(v) {
+                            return v >= 1000 ? (v/1000).toFixed(0) + 'K' : v;
+                        }
+                    },
+                    grid: { color: 'rgba(0,0,0,0.05)' },
+                }
+            }
+        }
+    });
+})();
+</script>
+{% elif relevance %}
+<div class="wt-card wt-card-full">
+    <div class="wt-card-header">
+        <h3>Public Attention</h3>
+        <span class="wt-source">via Wikipedia Page Views</span>
+    </div>
+    <div class="wt-empty">
+        Wikipedia page view data not available for <strong>{{ ticker }}</strong>.
+    </div>
+</div>
+{% endif %}
+
+</div>{# end wt-grid #}
+
+{# ── Not relevant fallback ── #}
+{% if not relevance %}
+<div class="wt-card" style="max-width: 600px;">
+    <div class="wt-empty">
+        <div style="margin-bottom: 0.5em; font-size: 1.2em;">&#x1f4ca;</div>
+        Web traffic tracking is not enabled for <strong>{{ ticker }}</strong>.
+        <br>
+        <small class="text-muted" style="line-height: 1.6;">
+            Web traffic data is collected for digital-first companies where
+            online engagement is a high-confidence proxy for revenue
+            (e-commerce, SaaS, fintech, ad-driven platforms, online marketplaces).
+        </small>
+    </div>
+</div>
+{% endif %}
