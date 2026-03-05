@@ -55,6 +55,7 @@ from filings import (
     auth,
     youtube,
     aum_data,
+    web_traffic,
 )
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
@@ -2325,6 +2326,24 @@ async def vitals_data(request: Request, ticker: str):
             "glassdoor_age": vitals.get_glassdoor_age_str(ticker),
             "glassdoor_quota_exhausted": vitals.get_glassdoor_quota_info()["exhausted"],
             "pdl_quota_exhausted": vitals.get_pdl_quota_info()["exhausted"],
+        },
+    )
+
+
+@app.get("/api/web-traffic/{ticker}", response_class=HTMLResponse)
+async def web_traffic_data(request: Request, ticker: str):
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+
+    data = await _to_heavy(web_traffic.get_web_traffic_data, ticker)
+    return templates.TemplateResponse(
+        "partials/web_traffic.html",
+        {
+            "request": request,
+            "ticker": ticker.upper(),
+            "relevance": data.get("relevance"),
+            "similarweb": data.get("similarweb"),
+            "wikipedia": data.get("wikipedia"),
         },
     )
 

@@ -108,6 +108,13 @@
                     Congress
                 </button>
             </li>
+            <li>
+                <button id="tab-webtraffic-btn"
+                        class="stock-tab"
+                        onclick="switchTab('webtraffic')">
+                    Web Traffic
+                </button>
+            </li>
         </ul>
     </nav>
 </div>
@@ -974,6 +981,14 @@
     </div>
 </div>
 
+<div id="tab-webtraffic" class="tab-content">
+    <div id="webtraffic-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading web traffic data...
+        </p>
+    </div>
+</div>
+
 {# ── Quarter Tab Switching ── #}
 <script>
 window.switchQuarterTab = function(idx) {
@@ -1020,6 +1035,7 @@ window.toggleHolders = function(btn) {
     var filingsLoaded = false;
     var insiderLoaded = false;
     var congressLoaded = false;
+    var webtrafficLoaded = false;
 
     var _tabBtns = document.querySelectorAll('.stock-tab');
     var _tabPanels = document.querySelectorAll('.tab-content');
@@ -1241,6 +1257,38 @@ window.toggleHolders = function(btn) {
                 document.getElementById('congress-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                     'Congressional trading data requires a ticker symbol.</p>';
+            }
+        }
+
+        // Lazy-load web traffic data on first click
+        if (tab === 'webtraffic' && !webtrafficLoaded) {
+            webtrafficLoaded = true;
+            {% if stock_info.ticker %}
+            var webtrafficUrl = '/api/web-traffic/{{ stock_info.ticker }}';
+            {% else %}
+            var webtrafficUrl = null;
+            {% endif %}
+
+            if (webtrafficUrl) {
+                fetch(webtrafficUrl)
+                    .then(function(resp) {
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                        return resp.text();
+                    })
+                    .then(function(html) {
+                        var el = document.getElementById('webtraffic-content');
+                        el.innerHTML = html;
+                        activateScripts(el);
+                    })
+                    .catch(function() {
+                        document.getElementById('webtraffic-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load web traffic data. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('webtraffic-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Web traffic data requires a ticker symbol.</p>';
             }
         }
     };
