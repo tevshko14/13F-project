@@ -1,25 +1,314 @@
 {% extends "base.html" %}
-{% block title %}Alternative Signals — Dark Pool, Options Flow & More | PaperPanda{% endblock %}
-{% block meta_description %}Explore alternative market signals — dark pool prints, options flow, unusual volume, short interest, and more. Coming soon to PaperPanda.{% endblock %}
+{% block title %}Alternative Signals — Google Trends, Search Interest & More | PaperPanda{% endblock %}
+{% block meta_description %}Explore alternative market signals — Google Trends search interest, trending searches linked to tickers, macro sentiment keywords, and more.{% endblock %}
 {% block og_title %}Alternative Signals | PaperPanda{% endblock %}
-{% block og_description %}Alternative market signals — dark pool prints, options flow, unusual volume, short interest.{% endblock %}
+{% block og_description %}Alternative market signals — Google Trends, search interest, macro sentiment, trending searches.{% endblock %}
 {% block twitter_title %}Alternative Signals | PaperPanda{% endblock %}
-{% block twitter_description %}Alternative market signals — dark pool, options flow, short interest & more.{% endblock %}
+{% block twitter_description %}Alternative market signals — Google Trends, search interest & macro sentiment.{% endblock %}
 {% block content %}
 <hgroup>
     <h1>Alternative Signals</h1>
-    <p>Unusual market activity from dark pools, options flow, short interest, and more</p>
+    <p>Search interest, trending topics, and macro sentiment from Google Trends</p>
 </hgroup>
 
-<div class="glass-card" style="padding: 3em 2em; text-align: center; margin: 2em 0;">
-    <div style="font-size: 3em; margin-bottom: 0.3em;">🔭</div>
-    <h2 style="margin-bottom: 0.5em;">Coming Soon</h2>
-    <p style="color: var(--pp-text-muted); max-width: 500px; margin: 0 auto; line-height: 1.6;">
-        We're building out alternative signal tracking including dark pool activity,
-        unusual options flow, short interest changes, and institutional accumulation patterns.
-    </p>
-    <p style="color: var(--pp-text-faint); font-size: 0.85em; margin-top: 1.5em;">
-        Want this sooner? <a href="/support">Support PaperPanda</a> to help us prioritize development.
-    </p>
+<style>
+    .alt-tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 2px solid var(--pp-overlay-8);
+        margin-bottom: 1.5em;
+        overflow-x: auto;
+    }
+    .alt-tab {
+        padding: 0.7em 1.3em;
+        font-size: 0.9em;
+        font-weight: 600;
+        color: var(--pp-sub-text);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        white-space: nowrap;
+        transition: color 0.15s, border-color 0.15s;
+        background: none;
+        border-top: none;
+        border-left: none;
+        border-right: none;
+    }
+    .alt-tab:hover { color: var(--pp-text); }
+    .alt-tab.active {
+        color: var(--pp-accent, #1976d2);
+        border-bottom-color: var(--pp-accent, #1976d2);
+    }
+    .alt-panel { display: none; }
+    .alt-panel.active { display: block; }
+    .gt-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 10px;
+        padding: 1.5em;
+        background: var(--pp-surface);
+        margin-bottom: 1.2em;
+    }
+    .gt-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1em;
+        padding-bottom: 0.6em;
+        border-bottom: 1px solid var(--pp-overlay-8);
+    }
+    .gt-card-header h3 {
+        font-size: 1.05em;
+        font-weight: 700;
+        margin: 0;
+        color: var(--pp-text);
+    }
+    .gt-card-header .gt-source {
+        font-size: 0.75em;
+        color: var(--pp-sub-text-light);
+        font-weight: 400;
+    }
+    .gt-keyword-pills {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4em;
+        margin-bottom: 1em;
+    }
+    .gt-pill {
+        display: inline-block;
+        padding: 0.25em 0.7em;
+        border-radius: 14px;
+        font-size: 0.78em;
+        font-weight: 500;
+        background: var(--pp-tag-bg, #f0f0f0);
+        color: var(--pp-tag-text, #555);
+    }
+    .gt-pill-intent { background: #e3f2fd; color: #1565c0; }
+    .gt-pill-product { background: #f3e5f5; color: #7b1fa2; }
+    .gt-pill-comparison { background: #fff3e0; color: #e65100; }
+    .gt-chart-container {
+        width: 100%;
+        height: 220px;
+        position: relative;
+    }
+    .gt-trending-row {
+        display: flex;
+        align-items: center;
+        gap: 1em;
+        padding: 0.8em 0;
+        border-bottom: 1px solid var(--pp-overlay-5);
+    }
+    .gt-trending-row:last-child { border-bottom: none; }
+    .gt-trending-query {
+        font-weight: 600;
+        font-size: 0.95em;
+        flex: 1;
+        min-width: 0;
+    }
+    .gt-trending-traffic {
+        font-size: 0.82em;
+        color: var(--pp-sub-text);
+        white-space: nowrap;
+    }
+    .gt-trending-ticker {
+        display: inline-block;
+        padding: 0.2em 0.55em;
+        border-radius: 6px;
+        font-size: 0.78em;
+        font-weight: 700;
+        background: #e8f5e9;
+        color: #2e7d32;
+        text-decoration: none;
+    }
+    .gt-trending-ticker:hover { background: #c8e6c9; }
+    .gt-macro-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1em;
+    }
+    .gt-macro-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 10px;
+        padding: 1.2em;
+        background: var(--pp-surface);
+    }
+    .gt-macro-card h4 {
+        font-size: 0.95em;
+        font-weight: 700;
+        margin: 0 0 0.3em 0;
+    }
+    .gt-macro-keywords {
+        font-size: 0.78em;
+        color: var(--pp-sub-text-light);
+        line-height: 1.5;
+    }
+    .gt-footer {
+        font-size: 0.78em;
+        color: var(--pp-sub-text-light);
+        margin-top: 0.8em;
+        padding-top: 0.5em;
+        border-top: 1px solid var(--pp-overlay-5);
+    }
+    .gt-loading {
+        text-align: center;
+        padding: 2em;
+        color: var(--pp-sub-text-light);
+    }
+    .gt-loading-spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid var(--pp-overlay-15);
+        border-top-color: var(--pp-accent, #1976d2);
+        border-radius: 50%;
+        animation: gt-spin 0.6s linear infinite;
+    }
+    @keyframes gt-spin { to { transform: rotate(360deg); } }
+</style>
+
+{# ═══ Tab Navigation ═══ #}
+<div class="alt-tabs" role="tablist">
+    <button class="alt-tab active" data-tab="trending" role="tab" aria-selected="true">Trending Now</button>
+    <button class="alt-tab" data-tab="macro" role="tab">Macro Trends</button>
+    <button class="alt-tab" data-tab="lookup" role="tab">Ticker Lookup</button>
 </div>
+
+{# ═══ Panel 1: Trending Searches → Ticker Mapping ═══ #}
+<div class="alt-panel active" id="panel-trending">
+    <div class="glass-card" style="padding: 1.5em;">
+        <div class="gt-card-header">
+            <h3>Trending Searches</h3>
+            <span class="gt-source">via Google Trends Daily</span>
+        </div>
+        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
+            Today's trending Google searches, automatically matched to tickers when possible.
+            A trending search linked to a stock can signal incoming retail attention or a news catalyst.
+        </p>
+        <div hx-get="/api/google-trends/trending"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="gt-loading">
+                <div class="gt-loading-spinner"></div>
+                <div style="margin-top: 0.5em; font-size: 0.85em;">Loading trending searches...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{# ═══ Panel 2: Macro Trends Dashboard ═══ #}
+<div class="alt-panel" id="panel-macro">
+    <div class="glass-card" style="padding: 1.5em;">
+        <div class="gt-card-header">
+            <h3>Macro Sentiment Trends</h3>
+            <span class="gt-source">via Google Trends</span>
+        </div>
+        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1.2em;">
+            Search interest for market-moving macro keywords over the last 3 months.
+            Rising interest in "recession" or "stock market crash" often precedes volatility.
+        </p>
+        <div class="gt-macro-grid">
+            {% for cat_name, keywords in macro_categories.items() %}
+            <div class="gt-macro-card">
+                <h4>{{ cat_name }}</h4>
+                <div class="gt-macro-keywords">
+                    {% for kw in keywords %}
+                    <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
+                    {% endfor %}
+                </div>
+                <div style="margin-top: 0.8em;">
+                    <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
+                         hx-trigger="revealed"
+                         hx-swap="innerHTML">
+                        <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
+                            <div class="gt-loading-spinner"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        <div class="gt-footer">
+            Data from Google Trends (relative search interest 0-100). Updated daily.
+            Use these macro signals alongside individual stock signals for a fuller picture.
+        </div>
+    </div>
+</div>
+
+{# ═══ Panel 3: Per-Ticker Keyword Lookup ═══ #}
+<div class="alt-panel" id="panel-lookup">
+    <div class="glass-card" style="padding: 1.5em;">
+        <div class="gt-card-header">
+            <h3>Search Interest by Ticker</h3>
+            <span class="gt-source">via Google Trends</span>
+        </div>
+        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
+            Look up auto-generated search keywords for any ticker. We generate intent-based,
+            product-specific, and comparison terms tailored to each company type.
+        </p>
+
+        <div style="display: flex; gap: 0.7em; margin-bottom: 1.5em; flex-wrap: wrap;">
+            <input type="text" id="gt-ticker-input"
+                   placeholder="Enter ticker (e.g. HOOD, NKE, AAPL)"
+                   style="flex: 1; min-width: 200px; padding: 0.6em 1em; border-radius: 8px;
+                          border: 1px solid var(--pp-overlay-15); background: var(--pp-surface);
+                          color: var(--pp-text); font-size: 0.95em;"
+                   maxlength="10">
+            <button id="gt-lookup-btn"
+                    style="padding: 0.6em 1.5em; border-radius: 8px; background: var(--pp-accent, #1976d2);
+                           color: white; border: none; font-weight: 600; cursor: pointer; font-size: 0.9em;">
+                Look Up
+            </button>
+        </div>
+
+        <div id="gt-ticker-result"></div>
+
+        {# Quick-access buttons for popular tickers #}
+        <div style="margin-top: 1em;">
+            <span style="font-size: 0.78em; color: var(--pp-sub-text-light); margin-right: 0.5em;">Quick lookup:</span>
+            {% for t in quick_tickers %}
+            <button class="gt-pill gt-quick-ticker" data-ticker="{{ t }}"
+                    style="cursor: pointer; border: none; margin: 0.15em;">
+                {{ t }}
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{# ═══ Tab switching + lookup logic ═══ #}
+<script>
+(function() {
+    // Tab switching
+    document.querySelectorAll('.alt-tab').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            document.querySelectorAll('.alt-tab').forEach(function(t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+            document.querySelectorAll('.alt-panel').forEach(function(p) { p.classList.remove('active'); });
+            tab.classList.add('active');
+            tab.setAttribute('aria-selected', 'true');
+            document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+        });
+    });
+
+    // Ticker lookup
+    function lookupTicker(ticker) {
+        ticker = ticker.trim().toUpperCase();
+        if (!ticker) return;
+        var result = document.getElementById('gt-ticker-result');
+        result.innerHTML = '<div class="gt-loading"><div class="gt-loading-spinner"></div><div style="margin-top: 0.5em; font-size: 0.85em;">Loading keywords for ' + ticker + '...</div></div>';
+        htmx.ajax('GET', '/api/google-trends/ticker/' + encodeURIComponent(ticker), {target: '#gt-ticker-result', swap: 'innerHTML'});
+    }
+
+    document.getElementById('gt-lookup-btn').addEventListener('click', function() {
+        lookupTicker(document.getElementById('gt-ticker-input').value);
+    });
+    document.getElementById('gt-ticker-input').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') lookupTicker(this.value);
+    });
+    document.querySelectorAll('.gt-quick-ticker').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.getElementById('gt-ticker-input').value = this.dataset.ticker;
+            lookupTicker(this.dataset.ticker);
+        });
+    });
+})();
+</script>
 {% endblock %}

@@ -1,0 +1,131 @@
+{# ── Per-ticker keyword lookup result (loaded via hx-get) ── #}
+
+{% if keywords %}
+<div class="gt-card" style="margin-bottom: 0;">
+    <div class="gt-card-header">
+        <h3>{{ keywords.name }} ({{ keywords.ticker }})</h3>
+        <span class="gt-source">Type: {{ keywords.type }}</span>
+    </div>
+
+    {# Intent keywords #}
+    {% if keywords.intent %}
+    <div style="margin-bottom: 1em;">
+        <div style="font-size: 0.82em; font-weight: 600; color: #1565c0; margin-bottom: 0.4em;">
+            Intent Keywords
+            <span style="font-weight: 400; color: var(--pp-sub-text-light);">
+                — signals active user acquisition / engagement
+            </span>
+        </div>
+        <div class="gt-keyword-pills">
+            {% for kw in keywords.intent %}
+            <span class="gt-pill gt-pill-intent">{{ kw }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# Product keywords #}
+    {% if keywords.product %}
+    <div style="margin-bottom: 1em;">
+        <div style="font-size: 0.82em; font-weight: 600; color: #7b1fa2; margin-bottom: 0.4em;">
+            Product Keywords
+            <span style="font-weight: 400; color: var(--pp-sub-text-light);">
+                — signals product demand / launches
+            </span>
+        </div>
+        <div class="gt-keyword-pills">
+            {% for kw in keywords.product %}
+            <span class="gt-pill gt-pill-product">{{ kw }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# Comparison keywords #}
+    {% if keywords.comparison %}
+    <div style="margin-bottom: 1em;">
+        <div style="font-size: 0.82em; font-weight: 600; color: #e65100; margin-bottom: 0.4em;">
+            Comparison Keywords
+            <span style="font-weight: 400; color: var(--pp-sub-text-light);">
+                — signals competitive dynamics / shopping intent
+            </span>
+        </div>
+        <div class="gt-keyword-pills">
+            {% for kw in keywords.comparison %}
+            <span class="gt-pill gt-pill-comparison">{{ kw }}</span>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    {# Trend chart (if available) #}
+    {% if trend and trend.data %}
+    <div style="margin-top: 1.2em;">
+        <div style="font-size: 0.82em; font-weight: 600; color: var(--pp-text); margin-bottom: 0.5em;">
+            Search Interest (3 months)
+        </div>
+        <div class="gt-chart-container">
+            <canvas id="gt-ticker-chart"></canvas>
+        </div>
+        <script>
+        (function() {
+            var ctx = document.getElementById('gt-ticker-chart');
+            if (!ctx || typeof Chart === 'undefined') return;
+
+            var raw = {{ trend.data | tojson }};
+            var keywords = {{ trend.keywords | tojson }};
+            var colors = ['#1976d2', '#e65100', '#2e7d32', '#7b1fa2', '#c62828'];
+
+            var labels = raw.map(function(d) { return d.date; });
+            var datasets = keywords.map(function(kw, i) {
+                return {
+                    label: kw,
+                    data: raw.map(function(d) { return d.values[kw] || 0; }),
+                    borderColor: colors[i % colors.length],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: false,
+                };
+            });
+
+            new Chart(ctx, {
+                type: 'line',
+                data: { labels: labels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, padding: 10 } },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) { return ctx.dataset.label + ': ' + ctx.parsed.y; }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { display: true, ticks: { maxTicksLimit: 8, font: { size: 10 }, color: '#999' }, grid: { display: false } },
+                        y: { display: true, min: 0, max: 100, ticks: { font: { size: 10 }, color: '#999' }, grid: { color: 'rgba(0,0,0,0.05)' } }
+                    }
+                }
+            });
+        })();
+        </script>
+    </div>
+    {% elif trend is none %}
+    <div style="text-align: center; padding: 1em; color: var(--pp-sub-text-light); font-size: 0.85em; border: 1px dashed var(--pp-overlay-8); border-radius: 8px; margin-top: 1em;">
+        Search interest data temporarily unavailable (rate limited). Keywords above are ready for tracking.
+    </div>
+    {% endif %}
+
+    <div class="gt-footer">
+        Keywords are auto-generated based on company type ({{ keywords.type }}).
+        Interest scores are relative (0-100) within the queried timeframe.
+    </div>
+</div>
+{% else %}
+<div style="text-align: center; padding: 2em; color: var(--pp-sub-text-light);">
+    Could not generate keywords for this ticker. Try a different one.
+</div>
+{% endif %}

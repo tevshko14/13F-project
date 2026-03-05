@@ -1,0 +1,36 @@
+{# ── Trending searches partial (loaded via hx-get) ── #}
+
+{% if trending %}
+<div>
+    {% for item in trending %}
+    <div class="gt-trending-row">
+        <div style="font-size: 0.85em; color: var(--pp-sub-text-light); min-width: 1.5em;">{{ loop.index }}</div>
+        <div class="gt-trending-query">
+            {{ item.query }}
+            {% if item.ticker %}
+                <a href="/stock/{{ item.ticker }}" class="gt-trending-ticker" title="View {{ item.ticker }} detail">
+                    {{ item.ticker }}
+                </a>
+            {% endif %}
+        </div>
+        <div class="gt-trending-traffic">{{ item.traffic }}</div>
+    </div>
+    {% if item.related_queries %}
+    <div style="padding: 0 0 0.6em 2.5em;">
+        {% for rq in item.related_queries[:3] %}
+        <span class="gt-pill" style="font-size: 0.72em; margin: 0.1em;">{{ rq }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
+<div class="gt-footer">
+    Trending searches from the last 24-48 hours. Ticker matches are automatic
+    based on company name recognition. Not all matches indicate direct relevance.
+</div>
+{% else %}
+<div style="text-align: center; padding: 2em; color: var(--pp-sub-text-light);">
+    Trending search data is temporarily unavailable. Google Trends may be rate-limiting requests.
+    <br><small>Data refreshes every hour — check back soon.</small>
+</div>
+{% endif %}

@@ -56,6 +56,7 @@ from filings import (
     youtube,
     aum_data,
     web_traffic,
+    google_trends,
 )
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
@@ -523,6 +524,7 @@ _HTMX_PARTIAL_CACHE: dict[str, int] = {
     "/api/heatmap-data": 120,
     "/api/retail-sentiment": 120,
     "/api/trending-combined": 120,
+    "/api/google-trends/trending": 300,
 }
 
 
@@ -3088,10 +3090,62 @@ _FINANCE_YOUTUBERS = [
 
 @app.get("/alternative-signals", response_class=HTMLResponse)
 async def alternative_signals_page(request: Request):
-    """Alternative signals page — placeholder for upcoming data sources."""
+    """Alternative signals page — Google Trends dashboard."""
+    quick_tickers = [
+        "HOOD", "NKE", "AAPL", "TSLA", "COIN", "AMZN", "NFLX", "NVDA",
+        "META", "LULU", "PLTR", "SOFI",
+    ]
     return templates.TemplateResponse(
         "alternative_signals.html",
-        {"request": request},
+        {
+            "request": request,
+            "macro_categories": google_trends.MACRO_CATEGORIES,
+            "quick_tickers": quick_tickers,
+        },
+    )
+
+
+# ── Google Trends API endpoints ─────────────────────────────────────
+
+
+@app.get("/api/google-trends/trending", response_class=HTMLResponse)
+async def gt_trending_api(request: Request):
+    """Fetch trending Google searches with ticker matching."""
+    trending = await _to_heavy(google_trends.fetch_trending_searches)
+    return templates.TemplateResponse(
+        "partials/google_trends_trending.html",
+        {"request": request, "trending": trending or []},
+    )
+
+
+@app.get("/api/google-trends/macro", response_class=HTMLResponse)
+async def gt_macro_api(request: Request, category: str = ""):
+    """Fetch macro trend chart for a category."""
+    cat = category if category in google_trends.MACRO_CATEGORIES else None
+    trend_data = await _to_heavy(google_trends.fetch_macro_trends, cat)
+    # Create a safe chart ID from the category name
+    chart_id = (category or "overview").lower().replace(" ", "-").replace("/", "-")
+    return templates.TemplateResponse(
+        "partials/google_trends_macro.html",
+        {"request": request, "trend_data": trend_data, "chart_id": chart_id},
+    )
+
+
+@app.get("/api/google-trends/ticker/{ticker}", response_class=HTMLResponse)
+async def gt_ticker_api(request: Request, ticker: str):
+    """Fetch Google Trends keywords and interest data for a ticker."""
+    ticker = ticker.upper().strip()
+    if not ticker or len(ticker) > 10:
+        return HTMLResponse("<div>Invalid ticker.</div>", status_code=400)
+
+    summary = await _to_heavy(google_trends.get_trends_summary, ticker)
+    return templates.TemplateResponse(
+        "partials/google_trends_ticker.html",
+        {
+            "request": request,
+            "keywords": summary.get("keywords"),
+            "trend": summary.get("trend"),
+        },
     )
 
 
@@ -4634,6 +4688,10 @@ if _has_limiter:
     api_activity_feed = limiter.limit("15/minute")(api_activity_feed)
     portfolio_chart_data = limiter.limit("15/minute")(portfolio_chart_data)
     compare_api = limiter.limit("15/minute")(compare_api)
+    # Google Trends endpoints (GT rate-limits are strict, be conservative)
+    gt_trending_api = limiter.limit("10/minute")(gt_trending_api)
+    gt_macro_api = limiter.limit("10/minute")(gt_macro_api)
+    gt_ticker_api = limiter.limit("10/minute")(gt_ticker_api)
     # Auth pages (bot/scraper prevention)
     login_page = limiter.limit("10/minute")(login_page)
     signup_page = limiter.limit("10/minute")(signup_page)
