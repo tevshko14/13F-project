@@ -4622,9 +4622,7 @@ if _has_limiter:
     login_page = limiter.limit("10/minute")(login_page)
     signup_page = limiter.limit("10/minute")(signup_page)
     reset_password_page = limiter.limit("5/minute")(reset_password_page)
-    # Auth session cookie endpoints
-    set_session = limiter.limit("10/minute")(set_session)
-    clear_session = limiter.limit("10/minute")(clear_session)
+    # Auth session cookie endpoints (removed — Clerk manages sessions)
     # Infrastructure monitoring
     health_detail = limiter.limit("5/minute")(health_detail)
     # Notification endpoints (polled frequently — generous limits)
