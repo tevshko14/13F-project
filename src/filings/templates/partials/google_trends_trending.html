@@ -1,6 +1,11 @@
 {# ── Trending searches partial (loaded via hx-get) ── #}
 
-{% if trending %}
+{% if trending is none %}
+<div style="text-align: center; padding: 2em; color: var(--pp-sub-text-light);">
+    Trending search data is temporarily unavailable. Google Trends may be rate-limiting requests.
+    <br><small>Data refreshes every hour — check back soon.</small>
+</div>
+{% elif trending %}
 <div>
     {% for item in trending %}
     <div class="gt-trending-row">
@@ -25,12 +30,12 @@
     {% endfor %}
 </div>
 <div class="gt-footer">
-    Trending searches from the last 24-48 hours. Ticker matches are automatic
-    based on company name recognition. Not all matches indicate direct relevance.
+    Showing only stock, market, and crypto-related trending searches. Refreshes hourly.
+    Ticker links are matched automatically from company names.
 </div>
 {% else %}
 <div style="text-align: center; padding: 2em; color: var(--pp-sub-text-light);">
-    Trending search data is temporarily unavailable. Google Trends may be rate-limiting requests.
-    <br><small>Data refreshes every hour — check back soon.</small>
+    No stock or market-related searches trending right now.
+    <br><small>Today's top searches are unrelated to markets — check back later.</small>
 </div>
 {% endif %}

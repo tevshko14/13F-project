@@ -3155,9 +3155,10 @@ async def alternative_signals_page(request: Request):
 async def gt_trending_api(request: Request):
     """Fetch trending Google searches with ticker matching."""
     trending = await _to_heavy(google_trends.fetch_trending_searches)
+    # Pass None (API failure) vs [] (worked, nothing market-relevant) as distinct states
     return templates.TemplateResponse(
         "partials/google_trends_trending.html",
-        {"request": request, "trending": trending or []},
+        {"request": request, "trending": trending},
     )
 
 
