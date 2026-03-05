@@ -173,11 +173,10 @@
     {% endif %}
 
     <div class="wt-footer">
-        {% if cloudflare %}
-        Cloudflare Radar ranks domains by DNS query volume across 100B+ daily requests.
-        {% endif %}
+        Domain rank tracks actual user visits — for this company, rank changes are a
+        <strong>leading indicator of revenue</strong>. Rising rank = more users on the platform.
         {% if tranco %}
-        Tranco aggregates 5 independent sources (CrUX, Cloudflare, Cisco Umbrella, Majestic, Farsight) for a manipulation-resistant ranking.
+        <br>Tranco aggregates 5 independent sources for a manipulation-resistant signal.
         {% endif %}
     </div>
 </div>
@@ -208,7 +207,7 @@
 {% if wikipedia %}
 <div class="wt-card wt-card-full">
     <div class="wt-card-header">
-        <h3>Public Attention</h3>
+        <h3>Event Detector</h3>
         <span class="wt-source">via Wikipedia Page Views</span>
     </div>
 
@@ -247,8 +246,9 @@
     </div>
 
     <div class="wt-footer">
-        Wikipedia page views track public attention spikes — sudden increases often
-        correlate with news events, earnings, or viral moments that move the stock.
+        Wikipedia page views are an <strong>event detector</strong>, not a direct revenue signal.
+        Spikes flag news events, earnings surprises, or viral moments — overlay with domain
+        ranking changes above to separate noise from real engagement shifts.
     </div>
 </div>
 
@@ -337,7 +337,7 @@
 {% elif relevance %}
 <div class="wt-card wt-card-full">
     <div class="wt-card-header">
-        <h3>Public Attention</h3>
+        <h3>Event Detector</h3>
         <span class="wt-source">via Wikipedia Page Views</span>
     </div>
     <div class="wt-empty">
