@@ -4,8 +4,9 @@ Collects web traffic metrics from multiple free sources and classifies
 which stocks have high-confidence web-traffic-to-revenue correlation.
 
 Sources:
-  1. SimilarWeb (undocumented extension API) — total visits, bounce rate, traffic sources
+  1. Cloudflare Radar API — domain popularity rank (free, documented, CC BY-NC 4.0)
   2. Wikipedia Page Views — daily page view counts (public attention proxy)
+  3. Tranco List — aggregated domain ranking from 5 sources (daily CSV, academic)
 
 Data is stored in Supabase ``web_traffic_history`` cold table for long-term
 historical analysis. Sector-based auto-filtering ensures we only track
@@ -18,12 +19,14 @@ ad-driven platforms, fintech, online marketplaces).
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
+import os
 import threading
 import time
-import urllib.parse
-import urllib.request
 import json
+import zipfile
 from datetime import datetime, timedelta
 
 import httpx
@@ -34,8 +37,11 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 
 # ── In-memory caches ─────────────────────────────────────────────────
-_traffic_cache: dict[str, tuple[float, dict]] = {}
-_TRAFFIC_TTL = 86_400  # 24 hours — traffic data changes slowly
+_radar_cache: dict[str, tuple[float, dict]] = {}
+_RADAR_TTL = 86_400  # 24 hours — Cloudflare Radar domain rank
+
+_tranco_cache: tuple[float, dict[str, int]] | None = None
+_TRANCO_TTL = 86_400  # 24 hours — Tranco list (daily CSV)
 
 _wiki_cache: dict[str, tuple[float, dict]] = {}
 _WIKI_TTL = 86_400  # 24 hours
@@ -117,7 +123,7 @@ _TICKER_OVERRIDES: dict[str, tuple[bool, str]] = {
 }
 
 # ── Domain mappings for companies (ticker → primary domain) ──────────
-# SimilarWeb needs the domain, not the ticker.
+# Used by Cloudflare Radar and Tranco for domain rank lookups.
 _TICKER_TO_DOMAIN: dict[str, str] = {
     "HOOD": "robinhood.com",
     "SOFI": "sofi.com",
@@ -273,11 +279,19 @@ def get_relevance_badge(ticker: str) -> dict | None:
 
 
 # ═════════════════════════════════════════════════════════════════════
-# Data source 1: SimilarWeb (undocumented extension API)
+# Data source 1: Cloudflare Radar API (free, documented, reliable)
 # ═════════════════════════════════════════════════════════════════════
+#
+# Requires CLOUDFLARE_API_TOKEN env var (free Cloudflare account).
+# Docs: https://developers.cloudflare.com/radar/investigate/domain-ranking-datasets/
+# Rate limit: 1,200 requests per 5 minutes.
 
-_SW_BASE = "https://data.similarweb.com/api/v1/data"
-_SW_TIMEOUT = 10
+_CF_RADAR_BASE = "https://api.cloudflare.com/client/v4/radar/ranking"
+_CF_TIMEOUT = 10
+
+
+def _get_cf_token() -> str | None:
+    return os.environ.get("CLOUDFLARE_API_TOKEN")
 
 
 def _get_domain_for_ticker(ticker: str) -> str | None:
@@ -285,77 +299,159 @@ def _get_domain_for_ticker(ticker: str) -> str | None:
     return _TICKER_TO_DOMAIN.get(ticker.upper())
 
 
-def fetch_similarweb(ticker: str) -> dict | None:
-    """Fetch traffic data from SimilarWeb's undocumented extension API.
+def fetch_cloudflare_rank(ticker: str) -> dict | None:
+    """Fetch domain popularity rank from Cloudflare Radar.
 
-    Returns dict with traffic metrics or None on failure.
+    Returns dict with rank data or None on failure.
+    Rank buckets: top 100 get exact rank, others get bucket
+    (200, 500, 1K, 2K, 5K, 10K, 20K, 50K, 100K, 200K, 500K, 1M).
     """
     ticker = ticker.upper()
 
     # Check cache
     with _lock:
-        cached = _traffic_cache.get(ticker)
-        if cached and time.time() - cached[0] < _TRAFFIC_TTL:
+        cached = _radar_cache.get(ticker)
+        if cached and time.time() - cached[0] < _RADAR_TTL:
             return cached[1]
 
     domain = _get_domain_for_ticker(ticker)
     if not domain:
         return None
 
-    url = f"{_SW_BASE}?domain={domain}"
+    token = _get_cf_token()
+    if not token:
+        logger.debug("CLOUDFLARE_API_TOKEN not set — skipping Radar lookup")
+        return None
+
+    url = f"{_CF_RADAR_BASE}/domain/{domain}"
     try:
-        resp = httpx.get(url, timeout=_SW_TIMEOUT, headers={
-            "User-Agent": "Mozilla/5.0 (compatible; PaperPanda/1.0)",
+        resp = httpx.get(url, timeout=_CF_TIMEOUT, headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
         })
         if resp.status_code != 200:
-            logger.warning("SimilarWeb returned %d for %s", resp.status_code, domain)
+            logger.warning("Cloudflare Radar returned %d for %s", resp.status_code, domain)
             return None
 
         raw = resp.json()
-        result = _parse_similarweb(raw, domain)
+        result = _parse_cloudflare_rank(raw, domain)
 
         with _lock:
-            _traffic_cache[ticker] = (time.time(), result)
+            _radar_cache[ticker] = (time.time(), result)
         return result
 
     except Exception as e:
-        logger.warning("SimilarWeb fetch failed for %s: %s", domain, e)
+        logger.warning("Cloudflare Radar fetch failed for %s: %s", domain, e)
         return None
 
 
-def _parse_similarweb(raw: dict, domain: str) -> dict:
-    """Parse SimilarWeb response into a clean dict."""
-    engagements = raw.get("Engagments", {})  # note: their typo, not ours
-    traffic_sources = raw.get("TrafficSources", {})
-    top_countries = raw.get("TopCountryShares", [])
+def _parse_cloudflare_rank(raw: dict, domain: str) -> dict:
+    """Parse Cloudflare Radar response into a clean dict."""
+    details = raw.get("result", {}).get("details_0", {})
+    top = details.get("top", [])
+    bucket = details.get("bucket", [])
 
-    # Estimate total monthly visits from engagements
-    visits = engagements.get("Visits")
+    # top gives exact rank for top-100 domains
+    # bucket gives rank bucket for all others
+    rank_info = {}
+    if top:
+        latest = top[0] if isinstance(top, list) else top
+        rank_info["rank"] = latest.get("rank")
+        rank_info["rank_type"] = "exact"
+    elif bucket:
+        latest = bucket[0] if isinstance(bucket, list) else bucket
+        rank_info["rank"] = latest.get("rank")
+        rank_info["rank_type"] = "bucket"
+
+    # Extract categories if available
+    categories = details.get("categories", [])
+    cat_names = [c.get("name", "") for c in categories if c.get("name")]
 
     return {
-        "source": "similarweb",
+        "source": "cloudflare_radar",
         "domain": domain,
-        "global_rank": raw.get("GlobalRank", {}).get("Rank"),
-        "country_rank": raw.get("CountryRank", {}).get("Rank"),
-        "category_rank": raw.get("CategoryRank", {}).get("Rank"),
-        "category": raw.get("Category"),
-        "total_visits": visits,
-        "avg_visit_duration": engagements.get("TimeOnSite"),
-        "pages_per_visit": engagements.get("PagePerVisit"),
-        "bounce_rate": engagements.get("BounceRate"),
-        "traffic_sources": {
-            "direct": traffic_sources.get("Direct"),
-            "referral": traffic_sources.get("Referral"),
-            "organic_search": traffic_sources.get("Search"),  # organic
-            "paid_search": traffic_sources.get("Paid Referrals"),
-            "social": traffic_sources.get("Social"),
-            "mail": traffic_sources.get("Mail"),
-            "display_ads": traffic_sources.get("Display Ads"),
-        },
-        "top_countries": [
-            {"country": c.get("CountryCode"), "share": c.get("Value")}
-            for c in (top_countries or [])[:5]
-        ],
+        "rank": rank_info.get("rank"),
+        "rank_type": rank_info.get("rank_type", "unknown"),
+        "categories": cat_names,
+        "fetched_at": datetime.utcnow().isoformat(),
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Data source 2: Tranco List (free, academic, aggregated from 5 sources)
+# ═════════════════════════════════════════════════════════════════════
+#
+# Downloads the latest Tranco top-1M CSV (aggregated daily from CrUX,
+# Cloudflare Radar, Cisco Umbrella, Majestic, Farsight). No API key needed.
+# Source: https://tranco-list.eu/
+
+_TRANCO_URL = "https://tranco-list.eu/top-1m.csv.zip"
+
+
+def _load_tranco_list() -> dict[str, int]:
+    """Download and parse the Tranco top-1M list into {domain: rank}."""
+    global _tranco_cache
+
+    with _lock:
+        if _tranco_cache and time.time() - _tranco_cache[0] < _TRANCO_TTL:
+            return _tranco_cache[1]
+
+    try:
+        resp = httpx.get(_TRANCO_URL, timeout=30, follow_redirects=True)
+        if resp.status_code != 200:
+            logger.warning("Tranco download returned %d", resp.status_code)
+            return {}
+
+        # Parse the CSV from the zip
+        z = zipfile.ZipFile(io.BytesIO(resp.content))
+        csv_name = z.namelist()[0]
+        with z.open(csv_name) as f:
+            reader = csv.reader(io.TextIOWrapper(f, encoding="utf-8"))
+            ranks = {}
+            for row in reader:
+                if len(row) >= 2:
+                    try:
+                        ranks[row[1].strip()] = int(row[0])
+                    except (ValueError, IndexError):
+                        continue
+
+        with _lock:
+            _tranco_cache = (time.time(), ranks)
+
+        logger.info("Tranco list loaded: %d domains", len(ranks))
+        return ranks
+
+    except Exception as e:
+        logger.warning("Tranco list download failed: %s", e)
+        return {}
+
+
+def fetch_tranco_rank(ticker: str) -> dict | None:
+    """Look up a ticker's domain rank in the Tranco top-1M list."""
+    ticker = ticker.upper()
+    domain = _get_domain_for_ticker(ticker)
+    if not domain:
+        return None
+
+    ranks = _load_tranco_list()
+    if not ranks:
+        return None
+
+    rank = ranks.get(domain)
+    if rank is None:
+        # Try without www prefix / with www prefix
+        alt = f"www.{domain}" if not domain.startswith("www.") else domain[4:]
+        rank = ranks.get(alt)
+
+    if rank is None:
+        return None
+
+    return {
+        "source": "tranco",
+        "domain": domain,
+        "rank": rank,
+        "total_domains": len(ranks),
+        "percentile": round((1 - rank / len(ranks)) * 100, 2),
         "fetched_at": datetime.utcnow().isoformat(),
     }
 
@@ -442,7 +538,8 @@ def get_web_traffic_data(ticker: str) -> dict:
 
     Returns a dict with:
       - relevance: badge info or None
-      - similarweb: traffic data or None
+      - cloudflare: Cloudflare Radar rank data or None
+      - tranco: Tranco list rank data or None
       - wikipedia: page view data or None
     """
     ticker = ticker.upper()
@@ -450,7 +547,8 @@ def get_web_traffic_data(ticker: str) -> dict:
 
     result: dict = {
         "relevance": relevance,
-        "similarweb": None,
+        "cloudflare": None,
+        "tranco": None,
         "wikipedia": None,
     }
 
@@ -458,6 +556,7 @@ def get_web_traffic_data(ticker: str) -> dict:
     if not relevance:
         return result
 
-    result["similarweb"] = fetch_similarweb(ticker)
+    result["cloudflare"] = fetch_cloudflare_rank(ticker)
+    result["tranco"] = fetch_tranco_rank(ticker)
     result["wikipedia"] = fetch_wikipedia_views(ticker)
     return result

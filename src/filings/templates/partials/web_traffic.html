@@ -72,18 +72,6 @@
         background: #e8f5e9;
         color: #2e7d32;
     }
-    .wt-traffic-bar {
-        height: 6px;
-        border-radius: 3px;
-        background: var(--pp-overlay-10);
-        overflow: hidden;
-        margin-bottom: 0.5em;
-    }
-    .wt-traffic-bar .fill {
-        height: 100%;
-        border-radius: 3px;
-        transition: width 0.3s ease;
-    }
     .wt-footer {
         font-size: 0.78em;
         color: var(--pp-sub-text-light);
@@ -122,121 +110,93 @@
 <div class="wt-grid">
 
 {# ═══════════════════════════════════════════════════════════════════ #}
-{# Card 1: SimilarWeb Traffic Overview                                 #}
+{# Card 1: Domain Popularity Rankings (Cloudflare Radar + Tranco)      #}
 {# ═══════════════════════════════════════════════════════════════════ #}
 
-{% if similarweb %}
-<div class="wt-card wt-card-full">
+{% if cloudflare or tranco %}
+<div class="wt-card">
     <div class="wt-card-header">
-        <h3>Website Traffic</h3>
-        <span class="wt-source">via SimilarWeb</span>
+        <h3>Domain Popularity</h3>
+        <span class="wt-source">
+            {% if cloudflare and tranco %}via Cloudflare Radar + Tranco
+            {% elif cloudflare %}via Cloudflare Radar
+            {% else %}via Tranco List{% endif %}
+        </span>
     </div>
 
     <div class="wt-stat-row">
-        {% if similarweb.total_visits %}
+        {% if cloudflare and cloudflare.rank %}
         <div class="wt-stat">
             <div class="value" style="color: #1976d2;">
-                {% if similarweb.total_visits >= 1000000000 %}
-                    {{ "%.1f" | format(similarweb.total_visits / 1000000000) }}B
-                {% elif similarweb.total_visits >= 1000000 %}
-                    {{ "%.1f" | format(similarweb.total_visits / 1000000) }}M
-                {% elif similarweb.total_visits >= 1000 %}
-                    {{ "%.0f" | format(similarweb.total_visits / 1000) }}K
+                {% if cloudflare.rank_type == 'exact' %}
+                    #{{ "{:,}".format(cloudflare.rank) }}
                 {% else %}
-                    {{ similarweb.total_visits }}
+                    Top {{ "{:,}".format(cloudflare.rank) }}
                 {% endif %}
             </div>
-            <div class="label">Monthly Visits</div>
+            <div class="label">
+                Cloudflare Rank
+                {% if cloudflare.rank_type == 'bucket' %}
+                <br><span style="color: var(--pp-text-faint); font-size: 0.9em;">(bucket)</span>
+                {% endif %}
+            </div>
         </div>
         {% endif %}
 
-        {% if similarweb.global_rank %}
+        {% if tranco and tranco.rank %}
         <div class="wt-stat">
-            <div class="value" style="font-size: 1.2em; color: var(--pp-text-secondary);">
-                #{{ "{:,}".format(similarweb.global_rank) }}
+            <div class="value" style="font-size: 1.3em; color: var(--pp-text-secondary);">
+                #{{ "{:,}".format(tranco.rank) }}
             </div>
-            <div class="label">Global Rank</div>
+            <div class="label">Tranco Rank</div>
         </div>
         {% endif %}
 
-        {% if similarweb.avg_visit_duration %}
+        {% if tranco and tranco.percentile is defined %}
         <div class="wt-stat">
-            <div class="value" style="font-size: 1.2em; color: var(--pp-text-secondary);">
-                {% set mins = (similarweb.avg_visit_duration // 60)|int %}
-                {% set secs = (similarweb.avg_visit_duration % 60)|int %}
-                {{ mins }}:{{ "%02d" | format(secs) }}
+            <div class="value" style="font-size: 1.2em; color: {% if tranco.percentile >= 99 %}#2e7d32{% elif tranco.percentile >= 95 %}#e65100{% else %}var(--pp-text-secondary){% endif %};">
+                {{ tranco.percentile }}%
             </div>
-            <div class="label">Avg. Duration</div>
-        </div>
-        {% endif %}
-
-        {% if similarweb.pages_per_visit %}
-        <div class="wt-stat">
-            <div class="value" style="font-size: 1.2em; color: var(--pp-text-secondary);">
-                {{ "%.1f" | format(similarweb.pages_per_visit) }}
-            </div>
-            <div class="label">Pages/Visit</div>
-        </div>
-        {% endif %}
-
-        {% if similarweb.bounce_rate is not none %}
-        <div class="wt-stat">
-            <div class="value" style="font-size: 1.2em; color: {% if similarweb.bounce_rate < 0.4 %}#2e7d32{% elif similarweb.bounce_rate < 0.6 %}#e65100{% else %}#c62828{% endif %};">
-                {{ "%.0f" | format(similarweb.bounce_rate * 100) }}%
-            </div>
-            <div class="label">Bounce Rate</div>
+            <div class="label">Percentile</div>
         </div>
         {% endif %}
     </div>
 
-    {# Traffic Sources Breakdown #}
-    {% if similarweb.traffic_sources %}
-    <div style="margin-top: 1.2em; padding-top: 0.8em; border-top: 1px solid var(--pp-overlay-8);">
-        <div style="font-size: 0.78em; font-weight: 600; color: var(--pp-sub-text-light); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.6em;">
-            Traffic Sources
-        </div>
-        {% set sources = [
-            ("Direct", similarweb.traffic_sources.direct, "#1976d2"),
-            ("Organic Search", similarweb.traffic_sources.organic_search, "#2e7d32"),
-            ("Paid Search", similarweb.traffic_sources.paid_search, "#e65100"),
-            ("Social", similarweb.traffic_sources.social, "#7b1fa2"),
-            ("Referral", similarweb.traffic_sources.referral, "#00838f"),
-            ("Mail", similarweb.traffic_sources.mail, "#455a64"),
-            ("Display Ads", similarweb.traffic_sources.display_ads, "#c62828"),
-        ] %}
-        {% for name, val, color in sources %}
-        {% if val is not none and val > 0.001 %}
-        <div style="margin-bottom: 0.5em;">
-            <div style="display: flex; justify-content: space-between; font-size: 0.82em; margin-bottom: 0.15em;">
-                <span style="color: var(--pp-text-secondary);">{{ name }}</span>
-                <strong style="color: {{ color }};">{{ "%.1f" | format(val * 100) }}%</strong>
-            </div>
-            <div class="wt-traffic-bar">
-                <div class="fill" style="width: {{ (val * 100)|round }}%; background: {{ color }};"></div>
-            </div>
-        </div>
-        {% endif %}
+    {% if cloudflare and cloudflare.categories %}
+    <div style="margin-top: 1em;">
+        {% for cat in cloudflare.categories %}
+        <span style="display: inline-block; padding: 0.2em 0.6em; border-radius: 12px; background: var(--pp-tag-bg); color: var(--pp-tag-text); font-size: 0.78em; font-weight: 500; margin: 0.2em 0.2em 0 0;">
+            {{ cat }}
+        </span>
         {% endfor %}
     </div>
     {% endif %}
 
     <div class="wt-footer">
-        &#x1f310; {{ similarweb.domain }}
-        {% if similarweb.category %}
-        &middot; {{ similarweb.category }}
+        {% if cloudflare %}
+        Cloudflare Radar ranks domains by DNS query volume across 100B+ daily requests.
+        {% endif %}
+        {% if tranco %}
+        Tranco aggregates 5 independent sources (CrUX, Cloudflare, Cisco Umbrella, Majestic, Farsight) for a manipulation-resistant ranking.
         {% endif %}
     </div>
 </div>
 {% elif relevance %}
-<div class="wt-card wt-card-full">
+<div class="wt-card">
     <div class="wt-card-header">
-        <h3>Website Traffic</h3>
-        <span class="wt-source">via SimilarWeb</span>
+        <h3>Domain Popularity</h3>
+        <span class="wt-source">via Cloudflare Radar + Tranco</span>
     </div>
     <div class="wt-empty">
-        Traffic data temporarily unavailable for <strong>{{ ticker }}</strong>.
-        <br>
-        <small class="text-muted">Data refreshes daily — check back soon.</small>
+        {% if not has_cf_token is defined or not has_cf_token %}
+            Configure <code>CLOUDFLARE_API_TOKEN</code> for domain ranking data.
+            <br>
+            <small class="text-muted">Free Cloudflare account required. Tranco data loads automatically.</small>
+        {% else %}
+            Ranking data temporarily unavailable for <strong>{{ ticker }}</strong>.
+            <br>
+            <small class="text-muted">Data refreshes daily — check back soon.</small>
+        {% endif %}
     </div>
 </div>
 {% endif %}

@@ -2342,8 +2342,10 @@ async def web_traffic_data(request: Request, ticker: str):
             "request": request,
             "ticker": ticker.upper(),
             "relevance": data.get("relevance"),
-            "similarweb": data.get("similarweb"),
+            "cloudflare": data.get("cloudflare"),
+            "tranco": data.get("tranco"),
             "wikipedia": data.get("wikipedia"),
+            "has_cf_token": bool(web_traffic._get_cf_token()),
         },
     )
 
