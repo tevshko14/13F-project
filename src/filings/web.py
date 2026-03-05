@@ -192,6 +192,9 @@ _logo_set: set[str] = set()  # exposed to templates as Jinja global
 _headshot_cache: dict[str, bytes] = {}
 _headshot_set: set[str] = set()  # exposed to templates as Jinja global
 
+_analyst_photo_cache: dict[str, bytes] = {}
+_analyst_photo_set: set[str] = set()  # exposed to templates as Jinja global
+
 
 async def _to_heavy(fn, *args):
     """Run *fn* on the heavy thread pool, gated by a semaphore.
@@ -307,6 +310,32 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Headshot cache load failed (%s), headshots disabled", exc)
         templates.env.globals["headshot_members"] = set()
+
+    # Load analyst headshots from Supabase into memory
+    try:
+        _sb_client_for_analysts = supabase_cache._get_client()
+        if _sb_client_for_analysts is not None:
+            from filings import analyst_scraper as _as
+
+            analyst_photo_rows = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _as.get_all_analyst_photos, _sb_client_for_analysts
+                ),
+                timeout=60,
+            )
+            for row in analyst_photo_rows:
+                aid = row.get("analyst_id", "")
+                b64 = row.get("photo_b64", "")
+                if aid and b64:
+                    _analyst_photo_cache[aid] = _b64.b64decode(b64)
+            _analyst_photo_set.update(_analyst_photo_cache.keys())
+        templates.env.globals["analyst_photo_set"] = _analyst_photo_set
+        logger.info(
+            "Loaded %d analyst headshots into memory", len(_analyst_photo_cache)
+        )
+    except Exception as exc:
+        logger.warning("Analyst photo cache load failed (%s)", exc)
+        templates.env.globals["analyst_photo_set"] = set()
 
     # Track background tasks for clean shutdown
     _bg_tasks: set[asyncio.Task] = set()
@@ -1391,6 +1420,48 @@ async def serve_headshot(member_id: str):
     )
 
 
+@app.get("/api/analyst-photo/{analyst_id}.jpg")
+async def serve_analyst_photo(analyst_id: str):
+    """Serve an analyst headshot JPEG from the in-memory cache.
+
+    Falls through to TipRanks CDN download on cache miss, then persists.
+    Browser caches for 1 year (immutable).
+    """
+    data = _analyst_photo_cache.get(analyst_id)
+    if data:
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+
+    # Cache miss — try to download from TipRanks CDN on-demand
+    try:
+        from filings import analyst_scraper as _as
+
+        photo_bytes = await asyncio.to_thread(_as.download_analyst_photo, analyst_id)
+        if photo_bytes:
+            _analyst_photo_cache[analyst_id] = photo_bytes
+            _analyst_photo_set.add(analyst_id)
+            # Persist to DB in background
+            _sb = supabase_cache._get_client()
+            if _sb:
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        _as.save_analyst_photos, {analyst_id: photo_bytes}, _sb
+                    )
+                )
+            return Response(
+                content=photo_bytes,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            )
+    except Exception as exc:
+        logger.debug("On-demand analyst photo fetch failed for %s: %s", analyst_id, exc)
+
+    return Response(status_code=404)
+
+
 _headshot_populate_status: dict = {}  # shared progress dict
 
 
@@ -2274,17 +2345,26 @@ async def stock_detail(request: Request, ticker: str):
 
 @app.get("/api/analysts/{ticker}", response_class=HTMLResponse)
 async def analyst_ratings(request: Request, ticker: str):
+    ticker = ticker.upper().strip()
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
-    ratings = await _to_heavy(analysts.get_analyst_ratings, ticker)
-    consensus = analysts.get_consensus_summary(ratings)
+    ratings, profiles, data_view = await _to_heavy(
+        analysts.get_analyst_ratings_with_profiles, ticker
+    )
+    consensus = analysts.get_consensus_summary_from_raw(ratings, data_view)
+    from filings import analyst_scraper as _as
+
     return templates.TemplateResponse(
         "partials/analyst_ratings.html",
         {
             "request": request,
-            "ratings": ratings[:50],
+            "ratings": ratings[:100],
+            "profiles": profiles,
             "consensus": consensus,
-            "ticker": ticker.upper(),
+            "ticker": ticker,
+            "data_view": data_view,
+            "analyst_photo_set": _analyst_photo_set,
+            "get_firm_logo_url": _as.get_firm_logo_url,
         },
     )
 

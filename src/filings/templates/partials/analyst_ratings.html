@@ -1,127 +1,253 @@
 {% if ratings %}
-{# ── Consensus Summary Bar ── #}
+{# ── Consensus Summary ── #}
 <article style="margin-bottom: 1.5em;">
     <header>
         <strong>Analyst Consensus</strong>
         <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            {{ consensus.total }} firm{{ "s" if consensus.total != 1 else "" }} covering {{ ticker }}
+            {{ consensus.total }} analyst{{ "s" if consensus.total != 1 else "" }} covering {{ ticker }}
+            {% if data_view == "individual" %}
+            <span class="badge" style="font-size: 0.7em; background: #e3f2fd; color: #1565c0; margin-left: 0.4em;">TipRanks</span>
+            {% endif %}
         </span>
     </header>
     <div style="display: flex; gap: 2em; align-items: center; flex-wrap: wrap;">
-        <div style="display: flex; gap: 1.5em;">
-            <span>
-                <span class="badge badge-add" style="font-size: 0.9em; padding: 0.25em 0.6em;">
-                    Buy: {{ consensus.buy }}
-                </span>
-            </span>
-            <span>
-                <span class="badge" style="font-size: 0.9em; padding: 0.25em 0.6em; background: #fff3e0; color: #e65100;">
-                    Hold: {{ consensus.hold }}
-                </span>
-            </span>
-            <span>
-                <span class="badge badge-reduce" style="font-size: 0.9em; padding: 0.25em 0.6em;">
-                    Sell: {{ consensus.sell }}
-                </span>
-            </span>
+        <div style="display: flex; gap: 1.2em; flex-wrap: wrap; align-items: center;">
+            <span class="badge badge-add" style="font-size: 0.9em; padding: 0.25em 0.6em;">Buy: {{ consensus.buy }}</span>
+            <span class="badge" style="font-size: 0.9em; padding: 0.25em 0.6em; background: #fff3e0; color: #e65100;">Hold: {{ consensus.hold }}</span>
+            <span class="badge badge-reduce" style="font-size: 0.9em; padding: 0.25em 0.6em;">Sell: {{ consensus.sell }}</span>
             {% if consensus.other > 0 %}
-            <span>
-                <span class="badge" style="font-size: 0.9em; padding: 0.25em 0.6em; background: #f5f5f5; color: #616161;">
-                    Other: {{ consensus.other }}
-                </span>
+            <span class="badge" style="font-size: 0.9em; padding: 0.25em 0.6em; background: #f5f5f5; color: #616161;">Other: {{ consensus.other }}</span>
+            {% endif %}
+            {% if consensus.mean_price_target %}
+            <span style="font-size: 0.88em; color: var(--pp-sub-text); border-left: 1px solid var(--pp-overlay-15); padding-left: 1.2em; margin-left: 0.2em;">
+                Mean PT: <strong>${{ "%.0f"|format(consensus.mean_price_target) }}</strong>
             </span>
             {% endif %}
         </div>
-
-        {# Visual bar #}
         {% if consensus.total > 0 %}
         <div style="flex: 1; min-width: 150px; max-width: 400px;">
             <div style="display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #f5f5f5;">
-                {% if consensus.buy > 0 %}
-                <div style="width: {{ (consensus.buy / consensus.total * 100)|round(1) }}%; background: #2e7d32;"></div>
-                {% endif %}
-                {% if consensus.hold > 0 %}
-                <div style="width: {{ (consensus.hold / consensus.total * 100)|round(1) }}%; background: #e65100;"></div>
-                {% endif %}
-                {% if consensus.sell > 0 %}
-                <div style="width: {{ (consensus.sell / consensus.total * 100)|round(1) }}%; background: #c62828;"></div>
-                {% endif %}
-                {% if consensus.other > 0 %}
-                <div style="width: {{ (consensus.other / consensus.total * 100)|round(1) }}%; background: #9e9e9e;"></div>
-                {% endif %}
+                {% if consensus.buy > 0 %}<div style="width: {{ (consensus.buy / consensus.total * 100)|round(1) }}%; background: #2e7d32;"></div>{% endif %}
+                {% if consensus.hold > 0 %}<div style="width: {{ (consensus.hold / consensus.total * 100)|round(1) }}%; background: #e65100;"></div>{% endif %}
+                {% if consensus.sell > 0 %}<div style="width: {{ (consensus.sell / consensus.total * 100)|round(1) }}%; background: #c62828;"></div>{% endif %}
+                {% if consensus.other > 0 %}<div style="width: {{ (consensus.other / consensus.total * 100)|round(1) }}%; background: #9e9e9e;"></div>{% endif %}
             </div>
         </div>
         {% endif %}
     </div>
 </article>
 
-{# ── Ratings Table ── #}
-<article>
-    <header>
-        <strong>Recent Analyst Actions</strong>
-    </header>
-    <figure>
-    <table>
-        <thead>
-            <tr>
-                <th data-sort="date">Date</th>
-                <th data-sort="text">Firm</th>
-                <th data-sort="activity">Action</th>
-                <th data-sort="text">Rating Change</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for r in ratings %}
-            <tr>
-                <td class="text-muted">{{ r.date }}</td>
-                <td><strong>{{ r.firm }}</strong></td>
-                <td>
-                    {% if r.action == "upgrade" %}
-                        <span class="badge badge-add">Upgrade</span>
-                    {% elif r.action == "downgrade" %}
-                        <span class="badge badge-reduce">Downgrade</span>
-                    {% elif r.action == "init" %}
-                        <span class="badge badge-new">Initiated</span>
-                    {% elif r.action == "maintain" %}
-                        <span class="badge" style="background: #fff3e0; color: #e65100;">Maintain</span>
-                    {% elif r.action == "reiterate" %}
-                        <span class="badge" style="background: #e3f2fd; color: #1565c0;">Reiterate</span>
-                    {% else %}
-                        <span class="badge" style="background: #f5f5f5; color: #616161;">{{ r.action|capitalize }}</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if r.from_grade and r.to_grade and r.from_grade != r.to_grade %}
-                        {{ r.from_grade }}
-                        <span style="opacity: 0.5; margin: 0 0.3em;">&rarr;</span>
-                        <strong>{{ r.to_grade }}</strong>
-                    {% elif r.to_grade %}
-                        <strong>{{ r.to_grade }}</strong>
-                    {% elif r.from_grade %}
-                        {{ r.from_grade }}
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    </figure>
-    <footer class="text-muted text-small">
-        Data sourced from public analyst ratings (firm-level).
-        {% if not ratings[0].date %}
-        Some entries may have incomplete date information.
+{# ── Filter + Group Controls ── #}
+<div style="display: flex; gap: 0.75em; align-items: center; margin-bottom: 1em; flex-wrap: wrap;">
+    <input type="text" id="analyst-filter"
+           placeholder="Filter by analyst or firm…"
+           style="flex: 1; min-width: 180px; max-width: 340px; padding: 0.45em 0.85em;
+                  border-radius: 8px; border: 1px solid var(--pp-overlay-15);
+                  background: var(--pp-surface); color: var(--pp-text); font-size: 0.88em;">
+    <label style="display: flex; align-items: center; gap: 0.4em; font-size: 0.85em;
+                  color: var(--pp-sub-text); cursor: pointer; user-select: none;">
+        <input type="checkbox" id="group-by-firm" style="cursor: pointer;">
+        Group by firm
+    </label>
+</div>
+
+{# ── Analyst Ratings List ── #}
+<article id="analyst-list-container">
+
+{# Flat list — individual (TipRanks) or firm-level (yfinance) #}
+<div id="analyst-flat-list">
+{% for r in ratings %}
+{% set logo_url = get_firm_logo_url(r.firm) if get_firm_logo_url else None %}
+{% if data_view == "individual" %}
+  {% set profile = profiles.get(r.analyst_id, {}) %}
+  {% set star_rating = profile.get("star_rating") %}
+{% else %}
+  {% set profile = {} %}
+  {% set star_rating = None %}
+{% endif %}
+
+<div class="analyst-row"
+     data-name="{{ (r.analyst_name or '') | lower }}"
+     data-firm="{{ (r.firm or '') | lower }}"
+     style="display: flex; align-items: flex-start; gap: 0.85em; padding: 0.8em 0;
+            border-bottom: 1px solid var(--pp-overlay-5);">
+
+    {# Avatar: analyst photo → firm logo → initials badge #}
+    <div style="flex-shrink: 0; position: relative;">
+        {% if data_view == "individual" and analyst_photo_set is defined and r.analyst_id and r.analyst_id in analyst_photo_set %}
+        <img src="/api/analyst-photo/{{ r.analyst_id }}.jpg"
+             alt="{{ r.analyst_name }}" width="38" height="38"
+             loading="lazy" decoding="async"
+             style="border-radius: 50%; object-fit: cover; display: block;"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+        <div style="display: none; width: 38px; height: 38px; border-radius: 50%;
+                    background: var(--pp-overlay-8); align-items: center;
+                    justify-content: center; font-size: 0.82em; font-weight: 700;
+                    color: var(--pp-sub-text);">
+            {{ (r.analyst_name or r.firm or "?")[0] | upper }}
+        </div>
+        {% elif logo_url %}
+        <img src="{{ logo_url }}"
+             alt="{{ r.firm }}" width="38" height="38"
+             loading="lazy" decoding="async"
+             style="border-radius: 50%; object-fit: contain; background: var(--pp-surface);"
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+        <div style="display: none; width: 38px; height: 38px; border-radius: 50%;
+                    background: var(--pp-overlay-8); align-items: center;
+                    justify-content: center; font-size: 0.82em; font-weight: 700;
+                    color: var(--pp-sub-text);">
+            {{ (r.firm or "?")[0] | upper }}
+        </div>
+        {% else %}
+        <div style="width: 38px; height: 38px; border-radius: 50%; background: var(--pp-overlay-8);
+                    display: flex; align-items: center; justify-content: center;
+                    font-size: 0.82em; font-weight: 700; color: var(--pp-sub-text);">
+            {{ (r.analyst_name or r.firm or "?")[0] | upper }}
+        </div>
         {% endif %}
-    </footer>
+    </div>
+
+    {# Content: name, firm, stars, action, grade, price target #}
+    <div style="flex: 1; min-width: 0;">
+        <div style="display: flex; align-items: baseline; gap: 0.45em; flex-wrap: wrap; margin-bottom: 0.2em;">
+            {% if data_view == "individual" and r.analyst_name %}
+            <strong style="font-size: 0.92em;">{{ r.analyst_name }}</strong>
+            <span class="text-muted" style="font-size: 0.82em;">{{ r.firm }}</span>
+            {% else %}
+            <strong style="font-size: 0.92em;">{{ r.firm }}</strong>
+            {% endif %}
+            {% if star_rating %}
+            <span style="font-size: 0.75em; color: #f9a825;"
+                  title="{{ star_rating }}/5 stars on TipRanks">
+                {% for i in range(5) %}{% if i < star_rating | int %}★{% else %}☆{% endif %}{% endfor %}
+                <span style="color: var(--pp-sub-text-light); margin-left: 0.15em;">{{ "%.1f"|format(star_rating) }}</span>
+            </span>
+            {% endif %}
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap;">
+            {# Action badge #}
+            {% if r.action == "upgrade" %}
+                <span class="badge badge-add" style="font-size: 0.76em; padding: 0.13em 0.48em;">Upgrade</span>
+            {% elif r.action == "downgrade" %}
+                <span class="badge badge-reduce" style="font-size: 0.76em; padding: 0.13em 0.48em;">Downgrade</span>
+            {% elif r.action == "init" %}
+                <span class="badge badge-new" style="font-size: 0.76em; padding: 0.13em 0.48em;">Initiated</span>
+            {% elif r.action == "maintain" %}
+                <span class="badge" style="font-size: 0.76em; padding: 0.13em 0.48em; background: #fff3e0; color: #e65100;">Maintain</span>
+            {% elif r.action == "reiterate" %}
+                <span class="badge" style="font-size: 0.76em; padding: 0.13em 0.48em; background: #e3f2fd; color: #1565c0;">Reiterate</span>
+            {% elif r.action %}
+                <span class="badge" style="font-size: 0.76em; padding: 0.13em 0.48em; background: #f5f5f5; color: #616161;">{{ r.action | capitalize }}</span>
+            {% endif %}
+
+            {# Grade change #}
+            {% if r.from_grade and r.to_grade and r.from_grade != r.to_grade %}
+                <span style="font-size: 0.84em; color: var(--pp-sub-text);">
+                    {{ r.from_grade }} <span style="opacity:0.4;">→</span> <strong style="color: var(--pp-text);">{{ r.to_grade }}</strong>
+                </span>
+            {% elif r.to_grade %}
+                <strong style="font-size: 0.84em;">{{ r.to_grade }}</strong>
+            {% endif %}
+
+            {# Price target #}
+            {% if r.price_target %}
+            <span style="font-size: 0.84em; color: var(--pp-sub-text);">
+                PT:&nbsp;{% if r.prior_price_target and r.prior_price_target != r.price_target %}<span style="opacity:0.6;">${{ "%.0f"|format(r.prior_price_target) }}</span><span style="opacity:0.35; margin: 0 0.2em;">→</span>{% endif %}<strong style="color: var(--pp-text);">${{ "%.0f"|format(r.price_target) }}</strong>
+            </span>
+            {% endif %}
+        </div>
+    </div>
+
+    {# Date #}
+    <div style="flex-shrink: 0; font-size: 0.78em; color: var(--pp-sub-text-light); white-space: nowrap;">
+        {{ r.grade_date }}
+    </div>
+</div>
+{% endfor %}
+</div>
+
+{# Grouped view (built by JS on toggle) #}
+<div id="analyst-grouped-list" style="display: none;"></div>
+
+<footer class="text-muted text-small" style="margin-top: 1em; padding-top: 0.75em; border-top: 1px solid var(--pp-overlay-5);">
+    {% if data_view == "individual" %}
+    Individual analyst ratings sourced from TipRanks. Star ratings reflect analyst accuracy history.
+    {% else %}
+    Firm-level ratings from Yahoo Finance &amp; Finnhub. Price targets shown where available.
+    {% endif %}
+</footer>
 </article>
+
+<script>
+(function() {
+    var filterInput = document.getElementById('analyst-filter');
+    var groupToggle = document.getElementById('group-by-firm');
+    var flatList    = document.getElementById('analyst-flat-list');
+    var groupedList = document.getElementById('analyst-grouped-list');
+
+    // ── Filter ──
+    if (filterInput) {
+        filterInput.addEventListener('input', function() {
+            var q = this.value.toLowerCase().trim();
+            flatList.querySelectorAll('.analyst-row').forEach(function(row) {
+                if (!q) { row.style.display = ''; return; }
+                var hit = (row.dataset.name || '').includes(q)
+                       || (row.dataset.firm || '').includes(q);
+                row.style.display = hit ? '' : 'none';
+            });
+        });
+    }
+
+    // ── Group by firm toggle ──
+    if (groupToggle) {
+        groupToggle.addEventListener('change', function() {
+            if (this.checked) {
+                flatList.style.display = 'none';
+                groupedList.style.display = '';
+                _buildGrouped();
+            } else {
+                flatList.style.display = '';
+                groupedList.style.display = 'none';
+            }
+        });
+    }
+
+    function _buildGrouped() {
+        if (groupedList.children.length > 0) return;
+        var rows = Array.from(flatList.querySelectorAll('.analyst-row'));
+        var groups = {}, order = [];
+        rows.forEach(function(row) {
+            var f = (row.dataset.firm || '').trim() || 'other';
+            if (!groups[f]) { groups[f] = []; order.push(f); }
+            groups[f].push(row.cloneNode(true));
+        });
+        order.forEach(function(firm) {
+            var firmRows = groups[firm];
+            var d = document.createElement('details');
+            d.style.cssText = 'border-bottom: 1px solid var(--pp-overlay-8); margin-bottom: 0.15em;';
+            var s = document.createElement('summary');
+            s.style.cssText = 'padding: 0.6em 0; cursor: pointer; list-style: none; font-weight: 600; font-size: 0.9em;';
+            // Grab firm display name from first row's strong
+            var nameEl = firmRows[0].querySelector('strong');
+            var displayName = nameEl ? nameEl.textContent.trim() : firm;
+            s.textContent = displayName + ' (' + firmRows.length + ' rating' + (firmRows.length !== 1 ? 's' : '') + ')';
+            var inner = document.createElement('div');
+            inner.style.paddingLeft = '0.5em';
+            firmRows.forEach(function(r) { inner.appendChild(r); });
+            d.appendChild(s);
+            d.appendChild(inner);
+            groupedList.appendChild(d);
+        });
+    }
+})();
+</script>
 
 {% else %}
 <article>
     <p class="text-muted" style="text-align: center; padding: 2em 0;">
         No analyst ratings found for <strong>{{ ticker }}</strong>.
         <br>
-        <small>This stock may not have analyst coverage, or data may not be available for this ticker.</small>
+        <small>This stock may not have analyst coverage, or data may not be available.</small>
     </p>
 </article>
 {% endif %}
