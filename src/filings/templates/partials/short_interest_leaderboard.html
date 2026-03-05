@@ -1,0 +1,287 @@
+{# Short interest leaderboard — HTMX partial for /alternative-signals #}
+<style>
+    .si-lb-wrap.pp-table-wrap { overflow: visible; }
+
+    .si-badge {
+        display: inline-block;
+        font-size: 0.72em;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 4px;
+    }
+    .si-badge-heavy { background: rgba(198, 40, 40, 0.12); color: #c62828; }
+    .si-badge-elevated { background: rgba(230, 81, 0, 0.12); color: #e65100; }
+
+    .si-guru-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 22px;
+        height: 22px;
+        border-radius: 12px;
+        font-size: 0.78em;
+        font-weight: 700;
+        padding: 0 6px;
+    }
+    .si-guru-count.has-gurus {
+        background: rgba(34, 197, 94, 0.12);
+        color: #16a34a;
+    }
+    .si-guru-count.no-gurus {
+        background: var(--pp-overlay-5);
+        color: var(--pp-text-faint);
+    }
+
+    .si-change-up { color: #c62828; font-weight: 600; }
+    .si-change-down { color: #2e7d32; font-weight: 600; }
+    .si-change-flat { color: var(--pp-text-muted); }
+
+    /* ── Tooltip (same as deployment leaderboard) ── */
+    .pp-tooltip { position: relative; cursor: help; }
+    .pp-tooltip .pp-tip-box {
+        display: none;
+        position: absolute;
+        bottom: calc(100% + 8px);
+        right: 0;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 8px;
+        padding: 0.65em 0.85em;
+        font-size: 0.82em;
+        font-weight: 400;
+        text-transform: none;
+        letter-spacing: normal;
+        line-height: 1.55;
+        white-space: normal;
+        max-width: 320px;
+        min-width: 220px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+        z-index: 100;
+        color: var(--pp-text-secondary);
+        pointer-events: none;
+    }
+    .pp-tooltip.pp-tip-left .pp-tip-box { right: auto; left: 0; }
+    .pp-tooltip.pp-tip-center .pp-tip-box { right: auto; left: 50%; transform: translateX(-50%); }
+    thead .pp-tooltip .pp-tip-box { bottom: auto; top: calc(100% + 8px); }
+    .pp-tooltip:hover .pp-tip-box { display: block; }
+    .pp-tip-title { font-weight: 600; color: var(--pp-text); margin-bottom: 0.3em; font-size: 0.95em; display: block; }
+    .pp-tip-note { color: var(--pp-text-muted); font-size: 0.85em; font-style: italic; margin-top: 0.4em; border-top: 1px solid var(--pp-border-light); padding-top: 0.4em; display: block; }
+    .pp-info-icon {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 13px; height: 13px; border-radius: 50%;
+        border: 1px solid var(--pp-text-muted);
+        font-size: 0.6em; font-weight: 700; font-style: italic;
+        color: var(--pp-text-muted); margin-left: 3px;
+        vertical-align: middle; cursor: help; line-height: 1;
+    }
+
+    .si-section-title {
+        font-size: 1.1em;
+        font-weight: 700;
+        margin: 1.5em 0 0.6em;
+        color: var(--pp-text);
+    }
+    .si-section-title:first-of-type { margin-top: 0; }
+
+    .si-show-all-btn {
+        display: block;
+        margin: 0.8em auto 0;
+        padding: 0.5em 1.5em;
+        font-size: 0.82em;
+        font-weight: 600;
+        background: var(--pp-overlay-5);
+        border: 1px solid var(--pp-border);
+        border-radius: 8px;
+        color: var(--pp-text-muted);
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .si-show-all-btn:hover {
+        background: var(--pp-overlay-10);
+        color: var(--pp-text);
+    }
+</style>
+
+{% if metadata and metadata.timestamp %}
+<p class="text-muted" style="font-size: 0.78em; margin-bottom: 1em;">
+    Last updated: {{ metadata.timestamp }} &middot; {{ metadata.count }} stocks scanned
+</p>
+{% endif %}
+
+{# ═══ Table 1: Most Shorted Stocks ═══ #}
+{% if highest_short %}
+<h3 class="si-section-title">Most Shorted Stocks</h3>
+<div class="pp-table-wrap si-lb-wrap">
+<table class="gp-table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th data-sort="text">Ticker</th>
+            <th class="text-right pp-tooltip pp-tip-center" data-sort="number">
+                % of Float <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box">
+                    <span class="pp-tip-title">Short Percent of Float</span>
+                    The percentage of a company's publicly tradeable shares (float) that have been sold short. Higher values indicate more bearish sentiment.
+                    <span class="pp-tip-note">Source: FINRA bi-monthly short interest reports via Yahoo Finance.</span>
+                </span>
+            </th>
+            <th class="text-right pp-tooltip pp-tip-center" data-sort="number">
+                Days to Cover <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box">
+                    <span class="pp-tip-title">Short Ratio (Days to Cover)</span>
+                    Shares short divided by average daily volume. Represents how many days it would take all short sellers to cover their positions.
+                    <span class="pp-tip-note">Higher values indicate greater squeeze potential.</span>
+                </span>
+            </th>
+            <th class="text-right" data-sort="number">Shares Short</th>
+            <th class="text-right pp-tooltip" data-sort="number">
+                vs Prior <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box">
+                    <span class="pp-tip-title">Change vs Prior Month</span>
+                    Percentage change in shares sold short compared to the prior FINRA report.
+                    <span class="pp-tip-note">Red &#x25B2; = increasing short interest (more bearish). Green &#x25BC; = decreasing (shorts covering).</span>
+                </span>
+            </th>
+            <th class="text-right pp-tooltip" data-sort="number">
+                Smart Money <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box">
+                    <span class="pp-tip-title">Superinvestor Holders</span>
+                    Number of tracked superinvestors (Buffett, Klarman, Ackman, etc.) who hold this stock in their 13F portfolio.
+                </span>
+            </th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in highest_short %}
+        <tr{% if loop.index > 20 %} class="si-extra-row si-extra-highest" style="display:none;"{% endif %}>
+            <td class="text-muted">{{ loop.index }}</td>
+            <td><a href="/stock/{{ row.ticker }}" style="font-weight: 600;">{{ row.ticker }}</a></td>
+            <td class="text-right" data-sort="{{ row.short_pct_float }}">
+                <span style="font-weight: 600;
+                    {% if row.short_pct_float >= 0.20 %}color: #c62828;
+                    {% elif row.short_pct_float >= 0.10 %}color: #e65100;
+                    {% elif row.short_pct_float >= 0.05 %}color: #616161;
+                    {% else %}color: var(--pp-text-muted);{% endif %}">
+                    {{ "%.1f"|format(row.short_pct_float * 100) }}%
+                </span>
+                {% if row.short_pct_float >= 0.20 %}
+                <span class="si-badge si-badge-heavy">Heavily Shorted</span>
+                {% elif row.short_pct_float >= 0.10 %}
+                <span class="si-badge si-badge-elevated">Elevated</span>
+                {% endif %}
+            </td>
+            <td class="text-right" data-sort="{{ row.short_ratio }}">{{ "%.1f"|format(row.short_ratio) }}</td>
+            <td class="text-right" data-sort="{{ row.shares_short }}">{{ "{:,.0f}".format(row.shares_short) }}</td>
+            <td class="text-right" data-sort="{{ row.short_change_pct }}">
+                {% if row.short_change_pct > 0 %}
+                <span class="si-change-up">&#x25B2; +{{ "%.1f"|format(row.short_change_pct) }}%</span>
+                {% elif row.short_change_pct < 0 %}
+                <span class="si-change-down">&#x25BC; {{ "%.1f"|format(row.short_change_pct) }}%</span>
+                {% else %}
+                <span class="si-change-flat">&mdash;</span>
+                {% endif %}
+            </td>
+            <td class="text-right" data-sort="{{ row.guru_count }}">
+                {% if row.guru_count > 0 %}
+                <span class="si-guru-count has-gurus pp-tooltip">
+                    {{ row.guru_count }}
+                    <span class="pp-tip-box" style="min-width: 140px; max-width: 240px;">
+                        <span class="pp-tip-title">Held by {{ row.guru_count }} superinvestor{{ 's' if row.guru_count != 1 }}</span>
+                        {{ row.guru_names | join(', ') }}
+                    </span>
+                </span>
+                {% else %}
+                <span class="si-guru-count no-gurus">0</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% if highest_short|length > 20 %}
+<button class="si-show-all-btn" onclick="this.style.display='none'; document.querySelectorAll('.si-extra-highest').forEach(function(r){r.style.display='';});">
+    Show all {{ highest_short|length }} stocks
+</button>
+{% endif %}
+{% else %}
+<p class="text-muted" style="text-align: center; padding: 2em 0;">
+    No short interest data available yet. Run the sync worker to populate.
+</p>
+{% endif %}
+
+
+{# ═══ Table 2: Trending Short Interest (Biggest Increase) ═══ #}
+{% if trending_short %}
+<h3 class="si-section-title" style="margin-top: 2.5em;">Trending Short Interest</h3>
+<p class="text-muted" style="font-size: 0.82em; margin-bottom: 0.8em;">
+    Stocks with the largest increase in short interest vs the prior FINRA report.
+</p>
+<div class="pp-table-wrap si-lb-wrap">
+<table class="gp-table">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th data-sort="text">Ticker</th>
+            <th class="text-right pp-tooltip pp-tip-center" data-sort="number">
+                Change vs Prior <span class="pp-info-icon">i</span>
+                <span class="pp-tip-box">
+                    <span class="pp-tip-title">Short Interest Change</span>
+                    Percentage increase in shares sold short compared to the prior FINRA report. Only stocks with increasing short interest are shown.
+                </span>
+            </th>
+            <th class="text-right" data-sort="number">% of Float</th>
+            <th class="text-right" data-sort="number">Shares Short</th>
+            <th class="text-right" data-sort="number">Days to Cover</th>
+            <th class="text-right" data-sort="number">Smart Money</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in trending_short %}
+        <tr{% if loop.index > 20 %} class="si-extra-row si-extra-trending" style="display:none;"{% endif %}>
+            <td class="text-muted">{{ loop.index }}</td>
+            <td><a href="/stock/{{ row.ticker }}" style="font-weight: 600;">{{ row.ticker }}</a></td>
+            <td class="text-right" data-sort="{{ row.short_change_pct }}">
+                <span class="si-change-up" style="font-size: 1.05em;">
+                    &#x25B2; +{{ "%.1f"|format(row.short_change_pct) }}%
+                </span>
+            </td>
+            <td class="text-right" data-sort="{{ row.short_pct_float }}">
+                <span style="
+                    {% if row.short_pct_float >= 0.20 %}color: #c62828;
+                    {% elif row.short_pct_float >= 0.10 %}color: #e65100;
+                    {% else %}color: var(--pp-text);{% endif %}">
+                    {{ "%.1f"|format(row.short_pct_float * 100) }}%
+                </span>
+                {% if row.short_pct_float >= 0.20 %}
+                <span class="si-badge si-badge-heavy">Heavily Shorted</span>
+                {% elif row.short_pct_float >= 0.10 %}
+                <span class="si-badge si-badge-elevated">Elevated</span>
+                {% endif %}
+            </td>
+            <td class="text-right" data-sort="{{ row.shares_short }}">{{ "{:,.0f}".format(row.shares_short) }}</td>
+            <td class="text-right" data-sort="{{ row.short_ratio }}">{{ "%.1f"|format(row.short_ratio) }}</td>
+            <td class="text-right" data-sort="{{ row.guru_count }}">
+                {% if row.guru_count > 0 %}
+                <span class="si-guru-count has-gurus pp-tooltip">
+                    {{ row.guru_count }}
+                    <span class="pp-tip-box" style="min-width: 140px; max-width: 240px;">
+                        <span class="pp-tip-title">Held by {{ row.guru_count }} superinvestor{{ 's' if row.guru_count != 1 }}</span>
+                        {{ row.guru_names | join(', ') }}
+                    </span>
+                </span>
+                {% else %}
+                <span class="si-guru-count no-gurus">0</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% if trending_short|length > 20 %}
+<button class="si-show-all-btn" onclick="this.style.display='none'; document.querySelectorAll('.si-extra-trending').forEach(function(r){r.style.display='';});">
+    Show all {{ trending_short|length }} stocks
+</button>
+{% endif %}
+{% endif %}

@@ -39,6 +39,7 @@ filings-youtube-sync = "filings.youtube_sync:main"
 filings-migrate-cold = "filings.migrate_cold_storage:main"
 filings-insider-backfill = "filings.insider_backfill:main"
 filings-insider-returns = "filings.insider_returns:main"
+filings-short-interest-sync = "filings.short_interest_sync:main"
 
 [build-system]
 requires = ["hatchling"]

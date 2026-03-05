@@ -484,6 +484,212 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 5. Google Trends (Search Interest)
+# ═══════════════════════════════════════════════════════════════════
+
+_GOOGLE_TRENDS_TTL = 14400  # 4 hours — trends don't change fast
+_google_trends_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+def _get_google_trends(ticker: str) -> dict | None:
+    """Fetch Google Search interest for *ticker* over the past 12 months.
+
+    Uses pytrends (unofficial Google Trends API — no key required).
+    Returns dict with:
+        current        – latest weekly interest value (0-100)
+        one_month_ago  – value ~4 weeks back
+        peak           – max value in the period
+        sparkline      – list of {date, value} for the past 52 weeks
+    Returns None on any failure (rate-limit, network error, etc.)
+    """
+    key = ticker.upper()
+
+    with _lock:
+        if key in _google_trends_cache:
+            ts, data = _google_trends_cache[key]
+            if time.time() - ts < _GOOGLE_TRENDS_TTL:
+                return data
+
+    try:
+        from pytrends.request import TrendReq
+
+        # retries=0 avoids pytrends' urllib3 Retry adapter which breaks on urllib3 v2
+        pt = TrendReq(hl="en-US", tz=0, timeout=(10, 25), retries=0)
+        pt.build_payload([key], cat=0, timeframe="today 12-m", geo="", gprop="")
+        df = pt.interest_over_time()
+    except Exception as exc:
+        logger.warning("Google Trends fetch failed for %s: %s", key, exc)
+        with _lock:
+            _google_trends_cache[key] = (time.time(), None)
+            _evict_oldest(_google_trends_cache)
+        return None
+
+    if df is None or df.empty or key not in df.columns:
+        with _lock:
+            _google_trends_cache[key] = (time.time(), None)
+            _evict_oldest(_google_trends_cache)
+        return None
+
+    series = df[key].dropna()
+    if len(series) < 2:
+        with _lock:
+            _google_trends_cache[key] = (time.time(), None)
+            _evict_oldest(_google_trends_cache)
+        return None
+
+    values = series.tolist()
+    dates = [str(d.date()) for d in series.index]
+    current = int(values[-1])
+    one_month_ago = int(values[-5]) if len(values) >= 5 else int(values[0])
+    peak = int(max(values))
+
+    sparkline = [{"date": d, "value": int(v)} for d, v in zip(dates, values)]
+
+    result = {
+        "current": current,
+        "one_month_ago": one_month_ago,
+        "peak": peak,
+        "sparkline": sparkline,
+    }
+
+    with _lock:
+        _google_trends_cache[key] = (time.time(), result)
+        _evict_oldest(_google_trends_cache)
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 6. Short Interest (yfinance / FINRA)
+# ═══════════════════════════════════════════════════════════════════
+
+_SHORT_INTEREST_TTL = 43200  # 12 hours — FINRA updates only 2x/month
+_short_interest_cache: dict[str, tuple[float, dict | None]] = {}
+
+
+def _get_short_interest(ticker: str) -> dict | None:
+    """Fetch short interest data for *ticker* from yfinance (sourced from FINRA).
+
+    Returns dict with:
+        shares_short          – current shares sold short
+        shares_short_prior    – prior month shares short
+        short_pct_float       – % of float shorted (0-1)
+        short_ratio           – days to cover
+        float_shares          – total float
+        shares_outstanding    – total shares outstanding
+        report_date           – FINRA report date (epoch)
+        prior_date            – prior month report date (epoch)
+    Returns None on any failure.
+    """
+    key = ticker.upper()
+
+    with _lock:
+        if key in _short_interest_cache:
+            ts, data = _short_interest_cache[key]
+            if time.time() - ts < _SHORT_INTEREST_TTL:
+                return data
+
+    try:
+        import yfinance as yf
+
+        t = yf.Ticker(key)
+        info = t.info or {}
+    except Exception as exc:
+        logger.warning("Short interest fetch failed for %s: %s", key, exc)
+        with _lock:
+            _short_interest_cache[key] = (time.time(), None)
+            _evict_oldest(_short_interest_cache)
+        return None
+
+    shares_short = info.get("sharesShort")
+    if not shares_short:
+        # No short interest data available for this ticker
+        with _lock:
+            _short_interest_cache[key] = (time.time(), None)
+            _evict_oldest(_short_interest_cache)
+        return None
+
+    shares_short_prior = info.get("sharesShortPriorMonth") or 0
+    short_change = shares_short - shares_short_prior
+    short_change_pct = (
+        (short_change / shares_short_prior * 100) if shares_short_prior else 0.0
+    )
+
+    result = {
+        "shares_short": shares_short,
+        "shares_short_prior": shares_short_prior,
+        "short_change": short_change,
+        "short_change_pct": round(short_change_pct, 1),
+        "short_pct_float": info.get("shortPercentOfFloat") or 0,
+        "short_ratio": info.get("shortRatio") or 0,
+        "float_shares": info.get("floatShares") or 0,
+        "shares_outstanding": info.get("sharesOutstanding") or 0,
+        "report_date": info.get("dateShortInterest"),
+        "prior_date": info.get("sharesShortPreviousMonthDate"),
+    }
+
+    with _lock:
+        _short_interest_cache[key] = (time.time(), result)
+        _evict_oldest(_short_interest_cache)
+
+    # Fire-and-forget: archive to Supabase for historical chart
+    def _archive_short_interest() -> None:
+        try:
+            from datetime import date as _date
+            from filings import supabase_cache
+
+            rows: list[dict] = []
+            if result.get("report_date"):
+                rows.append({
+                    "ticker": key,
+                    "report_date": _date.fromtimestamp(result["report_date"]).isoformat(),
+                    "shares_short": result["shares_short"],
+                    "shares_short_prior": result.get("shares_short_prior") or 0,
+                    "short_pct_float": result.get("short_pct_float") or 0,
+                    "short_ratio": result.get("short_ratio") or 0,
+                    "float_shares": result.get("float_shares") or 0,
+                    "shares_outstanding": result.get("shares_outstanding") or 0,
+                })
+            # Also backfill the prior-month data point
+            if result.get("prior_date") and result.get("shares_short_prior"):
+                rows.append({
+                    "ticker": key,
+                    "report_date": _date.fromtimestamp(result["prior_date"]).isoformat(),
+                    "shares_short": result["shares_short_prior"],
+                })
+            if rows:
+                supabase_cache.upsert_short_interest_rows(rows)
+        except Exception:
+            pass  # non-fatal — don't break the hot path
+
+    threading.Thread(target=_archive_short_interest, daemon=True).start()
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 7. Short Interest History (Supabase)
+# ═══════════════════════════════════════════════════════════════════
+
+
+def _get_short_interest_history(ticker: str) -> list[dict] | None:
+    """Fetch archived short interest history from Supabase.
+
+    Returns a list of dicts (newest first) or None if unavailable.
+    Each dict has: report_date, shares_short, short_pct_float, etc.
+    """
+    try:
+        from filings import supabase_cache
+
+        rows = supabase_cache.get_short_interest_history(ticker.upper())
+        if not rows:
+            return None
+        return rows
+    except Exception as exc:
+        logger.warning("Short interest history fetch failed for %s: %s", ticker, exc)
+        return None
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Public API
 # ═══════════════════════════════════════════════════════════════════
 
@@ -503,10 +709,13 @@ def get_sentiment_data(ticker: str) -> dict:
         "cnn_fear_greed": lambda: _get_cnn_fear_greed(),
         "apewisdom": lambda: _get_apewisdom_for_ticker(ticker),
         "alphavantage": lambda: _get_alphavantage_sentiment(ticker),
+        "google_trends": lambda: _get_google_trends(ticker),
+        "short_interest": lambda: _get_short_interest(ticker),
+        "short_interest_history": lambda: _get_short_interest_history(ticker),
     }
     result: dict[str, dict | None] = {}
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=7) as executor:
         futures = {executor.submit(fn): key for key, fn in tasks.items()}
         for future in as_completed(futures):
             key = futures[future]
