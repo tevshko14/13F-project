@@ -585,6 +585,45 @@ def fetch_macro_trends(
 # 3. Trending searches → ticker mapping
 # ═════════════════════════════════════════════════════════════════════
 
+# ── Financial keyword filter — only surface market-relevant trends ──
+# Any trending search whose query or top article title contains one of these
+# is considered worth showing.  Ticker-matched results are always shown.
+_FINANCIAL_KEYWORDS: frozenset[str] = frozenset({
+    # Market structure
+    "stock", "stocks", "share", "shares", "equity", "equities", "market",
+    "nasdaq", "nyse", "s&p", "dow", "russell", "wall street",
+    # Corporate events
+    "ipo", "spac", "earnings", "revenue", "profit", "quarterly", "guidance",
+    "dividend", "buyback", "acquisition", "merger", "takeover", "spinoff",
+    # Crypto
+    "bitcoin", "btc", "ethereum", "eth", "crypto", "cryptocurrency",
+    "nft", "defi", "blockchain", "stablecoin",
+    # Macro / Economy
+    "fed", "federal reserve", "fomc", "inflation", "recession", "gdp",
+    "interest rate", "rate hike", "rate cut", "treasury", "yield curve",
+    "unemployment", "cpi", "ppi", "tariff", "tariffs", "trade war",
+    "stimulus", "quantitative easing", "monetary policy",
+    # Sectors / Commodities
+    "oil", "crude", "gold", "silver", "commodity", "commodities",
+    "semiconductor", "chip stocks", "ai stock", "tech stock",
+    # Finance institutions
+    "bank", "banks", "banking", "fintech", "hedge fund",
+    "sec ", "sec.", "sec,", "irs", "wall street",
+})
+
+
+def _is_market_relevant(item: dict) -> bool:
+    """Return True if the trending search has clear stock/market relevance.
+
+    Always True if a ticker was matched (company name in query/articles).
+    Otherwise checks query + article title for financial keywords.
+    """
+    if item.get("ticker"):
+        return True
+    text = f"{item['query']} {item.get('article_title', '')}".lower()
+    return any(kw in text for kw in _FINANCIAL_KEYWORDS)
+
+
 # ── Known company name → ticker for matching trending searches ──────
 _NAME_TO_TICKER: dict[str, str] = {}
 
@@ -615,18 +654,25 @@ def _build_name_to_ticker() -> None:
 
 
 def _match_trending_to_ticker(query: str) -> str | None:
-    """Try to match a trending search query to a known ticker."""
+    """Try to match a trending search query to a known ticker.
+
+    Uses word-boundary matching to avoid false positives like "uber" matching
+    inside "hubert" or "youtube" matching inside "youtube tv" as a substring
+    of an unrelated company name.
+    """
     _build_name_to_ticker()
     q = query.lower().strip()
 
-    # Exact match
+    # Exact match first
     if q in _NAME_TO_TICKER:
         return _NAME_TO_TICKER[q]
 
-    # Check if any company name appears in the query
+    # Word-boundary substring — name must appear as a complete word/phrase
     for name, ticker in _NAME_TO_TICKER.items():
-        if len(name) >= 4 and name in q:  # avoid short false positives
-            return ticker
+        if len(name) >= 4:
+            pattern = r"\b" + re.escape(name) + r"\b"
+            if re.search(pattern, q):
+                return ticker
 
     return None
 
@@ -709,9 +755,15 @@ def fetch_trending_searches(geo: str = "US") -> list[dict] | None:
             "article_url": article_url,
         })
 
+    # Keep only stock/market-relevant results — removes sports, celebrity etc.
+    relevant = [r for r in results if _is_market_relevant(r)]
+    logger.debug(
+        "fetch_trending_searches: %d total → %d market-relevant", len(results), len(relevant)
+    )
+
     with _lock:
-        _trending_cache = (time.time(), results)
-    return results
+        _trending_cache = (time.time(), relevant)
+    return relevant
 
 
 # ═════════════════════════════════════════════════════════════════════
