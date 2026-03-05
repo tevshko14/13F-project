@@ -2352,6 +2352,46 @@ async def web_traffic_data(request: Request, ticker: str):
     )
 
 
+@app.get("/api/signals/{ticker}", response_class=HTMLResponse)
+async def signals_data(request: Request, ticker: str):
+    """Combined signals tab: sentiment + web traffic + Google Trends."""
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+
+    # Fetch all three data sources in parallel
+    sentiment_coro = _to_heavy(sentiment.get_sentiment_data, ticker)
+    webtraffic_coro = _to_heavy(web_traffic.get_web_traffic_data, ticker)
+    gt_coro = _to_heavy(google_trends.get_trends_summary, ticker)
+
+    sent_data, wt_data, gt_data = await asyncio.gather(
+        sentiment_coro, webtraffic_coro, gt_coro
+    )
+
+    return templates.TemplateResponse(
+        "partials/signals.html",
+        {
+            "request": request,
+            "ticker": ticker.upper(),
+            # Sentiment
+            "cnn": sent_data.get("cnn_fear_greed"),
+            "finnhub": sent_data.get("finnhub"),
+            "apewisdom": sent_data.get("apewisdom"),
+            "alphavantage": sent_data.get("alphavantage"),
+            "has_finnhub_key": sentiment.has_finnhub_key(),
+            "has_alphavantage_key": sentiment.has_alphavantage_key(),
+            # Google Trends
+            "gt_keywords": gt_data.get("keywords") if gt_data else None,
+            "gt_trend": gt_data.get("trend") if gt_data else None,
+            # Web Traffic
+            "wt_relevance": wt_data.get("relevance"),
+            "wt_cloudflare": wt_data.get("cloudflare"),
+            "wt_tranco": wt_data.get("tranco"),
+            "wt_wikipedia": wt_data.get("wikipedia"),
+            "has_cf_token": bool(web_traffic._get_cf_token()),
+        },
+    )
+
+
 @app.get("/api/company-filings/{ticker}", response_class=HTMLResponse)
 async def company_filings_tab(request: Request, ticker: str):
     if not _valid_ticker(ticker):

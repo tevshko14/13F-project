@@ -1,0 +1,640 @@
+{# ── Signals Tab: Unified Sentiment + Web Traffic + Google Trends ── #}
+
+<style>
+    .sig-section {
+        margin-bottom: 2em;
+    }
+    .sig-section-header {
+        font-size: 0.78em;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-sub-text-light);
+        margin-bottom: 1em;
+        padding-bottom: 0.4em;
+        border-bottom: 1px solid var(--pp-overlay-8);
+    }
+    .sig-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1.2em;
+    }
+    @media (min-width: 769px) {
+        .sig-grid {
+            grid-template-columns: 1fr 1fr;
+        }
+        .sig-grid .sig-full {
+            grid-column: 1 / -1;
+        }
+    }
+    .sig-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 10px;
+        padding: 1.2em 1.5em;
+        background: var(--pp-surface);
+    }
+    .sig-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.8em;
+        padding-bottom: 0.5em;
+        border-bottom: 1px solid var(--pp-overlay-5);
+    }
+    .sig-card-header h3 {
+        font-size: 1em;
+        font-weight: 700;
+        margin: 0;
+        color: var(--pp-text);
+    }
+    .sig-card-header .sig-source {
+        font-size: 0.72em;
+        color: var(--pp-sub-text-light);
+        font-weight: 400;
+    }
+    .sig-stat-row {
+        display: flex;
+        gap: 2em;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .sig-stat {
+        text-align: center;
+        min-width: 70px;
+    }
+    .sig-stat .value {
+        font-size: 1.5em;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .sig-stat .label {
+        font-size: 0.72em;
+        color: var(--pp-sub-text);
+        margin-top: 0.15em;
+    }
+    .sig-footer {
+        font-size: 0.75em;
+        color: var(--pp-sub-text-light);
+        margin-top: 0.7em;
+        padding-top: 0.4em;
+        border-top: 1px solid var(--pp-overlay-5);
+    }
+    .sig-chart-container {
+        width: 100%;
+        height: 180px;
+        position: relative;
+    }
+    .sig-pill {
+        display: inline-block;
+        padding: 0.2em 0.6em;
+        border-radius: 12px;
+        font-size: 0.78em;
+        font-weight: 500;
+        margin: 0.15em 0.15em 0 0;
+    }
+    .sig-pill-intent { background: #e3f2fd; color: #1565c0; }
+    .sig-pill-product { background: #f3e5f5; color: #7b1fa2; }
+    .sig-pill-comparison { background: #fff3e0; color: #e65100; }
+    :root[data-theme="dark"] .sig-pill-intent { background: rgba(21, 101, 192, 0.15); }
+    :root[data-theme="dark"] .sig-pill-product { background: rgba(123, 31, 162, 0.15); }
+    :root[data-theme="dark"] .sig-pill-comparison { background: rgba(230, 81, 0, 0.15); }
+    .mood-badge-sig { background: var(--mood-bg); }
+    :root[data-theme="dark"] .mood-badge-sig { background: var(--mood-bg-dark); }
+</style>
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# SECTION 1: SENTIMENT                                                #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+<div class="sig-section">
+    <div class="sig-section-header">Sentiment</div>
+    <div class="sig-grid">
+
+        {# ── Market Mood: CNN Fear & Greed ── #}
+        {% if cnn %}
+        <div class="sig-card">
+            <div class="sig-card-header">
+                <h3>Market Mood</h3>
+                <span class="sig-source">CNN Fear &amp; Greed</span>
+            </div>
+            {% set score = cnn.score %}
+            {% if score <= 25 %}
+                {% set mood_color = "#c62828" %}
+                {% set mood_bg = "#ffebee" %}
+                {% set mood_bg_dark = "rgba(198, 40, 40, 0.15)" %}
+            {% elif score <= 45 %}
+                {% set mood_color = "#e65100" %}
+                {% set mood_bg = "#fff3e0" %}
+                {% set mood_bg_dark = "rgba(230, 81, 0, 0.15)" %}
+            {% elif score <= 55 %}
+                {% set mood_color = "#616161" %}
+                {% set mood_bg = "#f5f5f5" %}
+                {% set mood_bg_dark = "rgba(255, 255, 255, 0.08)" %}
+            {% elif score <= 75 %}
+                {% set mood_color = "#2e7d32" %}
+                {% set mood_bg = "#e8f5e9" %}
+                {% set mood_bg_dark = "rgba(46, 125, 50, 0.15)" %}
+            {% else %}
+                {% set mood_color = "#1b5e20" %}
+                {% set mood_bg = "#c8e6c9" %}
+                {% set mood_bg_dark = "rgba(27, 94, 32, 0.2)" %}
+            {% endif %}
+
+            <div style="display: flex; gap: 1.5em; align-items: center; flex-wrap: wrap;">
+                <div style="text-align: center;">
+                    <span style="display: inline-block; font-size: 1.6em; font-weight: 700; color: {{ mood_color }};">
+                        {{ score|round(0)|int }}
+                    </span>
+                    <span style="font-size: 0.85em; color: var(--pp-sub-text);">/100</span>
+                    <div>
+                        <span class="badge mood-badge-sig" style="--mood-bg: {{ mood_bg }}; --mood-bg-dark: {{ mood_bg_dark }}; color: {{ mood_color }}; font-size: 0.82em; padding: 0.15em 0.6em;">
+                            {{ cnn.rating }}
+                        </span>
+                    </div>
+                </div>
+                <div style="flex: 1; min-width: 180px; max-width: 400px;">
+                    <div style="position: relative; height: 8px; border-radius: 4px; overflow: hidden;
+                                background: linear-gradient(to right, #c62828, #e65100, #9e9e9e, #2e7d32, #1b5e20);">
+                        <div style="position: absolute; left: {{ score }}%; top: -2px;
+                                    width: 3px; height: 12px; background: var(--pp-gauge-indicator); border-radius: 2px;
+                                    transform: translateX(-50%);"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.65em; color: var(--pp-sub-text-light); margin-top: 0.2em;">
+                        <span>Extreme Fear</span>
+                        <span>Neutral</span>
+                        <span>Extreme Greed</span>
+                    </div>
+                </div>
+                <div style="font-size: 0.82em; color: var(--pp-info-text);">
+                    {% if cnn.previous_close is not none %}
+                    <div>Prev: <strong>{{ cnn.previous_close|round(0)|int }}</strong></div>
+                    {% endif %}
+                    {% if cnn.one_week_ago is not none %}
+                    <div>1w ago: <strong>{{ cnn.one_week_ago|round(0)|int }}</strong></div>
+                    {% endif %}
+                    {% if cnn.one_month_ago is not none %}
+                    <div>1m ago: <strong>{{ cnn.one_month_ago|round(0)|int }}</strong></div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {# ── News Sentiment: Finnhub ── #}
+        {% if finnhub %}
+        <div class="sig-card">
+            <div class="sig-card-header">
+                <h3>News Sentiment</h3>
+                <span class="sig-source">Finnhub</span>
+            </div>
+            {% set bull = (finnhub.bullish_pct * 100)|round(0)|int %}
+            {% set bear = (finnhub.bearish_pct * 100)|round(0)|int %}
+            {% set neutral_pct = 100 - bull - bear %}
+            <div style="display: flex; gap: 1em; margin-bottom: 0.5em;">
+                <span class="badge badge-add" style="font-size: 0.85em; padding: 0.2em 0.5em;">Bullish: {{ bull }}%</span>
+                {% if neutral_pct > 0 %}
+                <span class="badge" style="font-size: 0.85em; padding: 0.2em 0.5em; background: var(--pp-neutral-badge-bg); color: var(--pp-neutral-badge-text);">Neutral: {{ neutral_pct }}%</span>
+                {% endif %}
+                <span class="badge badge-reduce" style="font-size: 0.85em; padding: 0.2em 0.5em;">Bearish: {{ bear }}%</span>
+            </div>
+            <div style="display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--pp-neutral-badge-bg); margin-bottom: 0.8em;">
+                {% if bull > 0 %}<div style="width: {{ bull }}%; background: #2e7d32;"></div>{% endif %}
+                {% if neutral_pct > 0 %}<div style="width: {{ neutral_pct }}%; background: #9e9e9e;"></div>{% endif %}
+                {% if bear > 0 %}<div style="width: {{ bear }}%; background: #c62828;"></div>{% endif %}
+            </div>
+            <div style="font-size: 0.82em; color: var(--pp-info-text);">
+                <span>Articles: <strong>{{ finnhub.buzz_articles_last_week }}</strong></span>
+                <span style="margin-left: 1em;">Buzz: <strong>{{ "%.2f"|format(finnhub.buzz_score) }}</strong>
+                    {% if finnhub.buzz_score > 1.0 %}<span style="color: #2e7d32;">&#x25B2;</span>
+                    {% elif finnhub.buzz_score < 1.0 %}<span style="color: #c62828;">&#x25BC;</span>{% endif %}
+                </span>
+            </div>
+        </div>
+        {% endif %}
+
+        {# ── Reddit Buzz: ApeWisdom ── #}
+        {% if apewisdom %}
+        <div class="sig-card">
+            <div class="sig-card-header">
+                <h3>Reddit Buzz</h3>
+                <span class="sig-source">ApeWisdom</span>
+            </div>
+            <div class="sig-stat-row">
+                <div class="sig-stat">
+                    <div class="value" style="color: #1976d2;">#{{ apewisdom.rank }}</div>
+                    <div class="label">Rank</div>
+                </div>
+                <div class="sig-stat">
+                    <div class="value">{{ apewisdom.mentions }}</div>
+                    <div class="label">Mentions (24h)</div>
+                </div>
+                <div class="sig-stat">
+                    <div class="value">{{ "{:,}".format(apewisdom.upvotes) }}</div>
+                    <div class="label">Upvotes</div>
+                </div>
+                <div class="sig-stat">
+                    {% set rank_diff = apewisdom.rank_24h_ago - apewisdom.rank %}
+                    {% if rank_diff > 0 %}
+                        <div class="value" style="color: #2e7d32;">&#x25B2; +{{ rank_diff }}</div>
+                    {% elif rank_diff < 0 %}
+                        <div class="value" style="color: #c62828;">&#x25BC; {{ rank_diff }}</div>
+                    {% else %}
+                        <div class="value" style="color: var(--pp-sub-text);">&#x2014;</div>
+                    {% endif %}
+                    <div class="label">Rank 24h</div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        {# ── Recent News Sentiment: Alpha Vantage ── #}
+        {% if alphavantage and alphavantage.articles %}
+        <div class="sig-card sig-full">
+            <div class="sig-card-header">
+                <h3>Recent News Sentiment</h3>
+                <span class="sig-source">Alpha Vantage NLP
+                    {% if alphavantage.avg_sentiment_label %}
+                    &mdash; Overall:
+                    {% if "bullish" in alphavantage.avg_sentiment_label|lower %}
+                        <span class="badge badge-add" style="font-size: 0.9em; padding: 0.1em 0.4em;">{{ alphavantage.avg_sentiment_label }}</span>
+                    {% elif "bearish" in alphavantage.avg_sentiment_label|lower %}
+                        <span class="badge badge-reduce" style="font-size: 0.9em; padding: 0.1em 0.4em;">{{ alphavantage.avg_sentiment_label }}</span>
+                    {% else %}
+                        <span class="badge" style="font-size: 0.9em; padding: 0.1em 0.4em; background: var(--pp-neutral-orange-bg, #fff3e0); color: #e65100;">{{ alphavantage.avg_sentiment_label }}</span>
+                    {% endif %}
+                    {% endif %}
+                </span>
+            </div>
+            <figure style="margin: 0;">
+            <table>
+                <thead>
+                    <tr>
+                        <th data-sort="text">Date</th>
+                        <th data-sort="text">Source</th>
+                        <th>Title</th>
+                        <th data-sort="text">Sentiment</th>
+                        <th class="text-right" data-sort="number">Score</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in alphavantage.articles %}
+                    <tr>
+                        <td class="text-muted text-small">{{ a.published }}</td>
+                        <td class="text-small">{{ a.source }}</td>
+                        <td>
+                            <a href="{{ a.url }}" target="_blank" rel="noopener">
+                                {{ a.title[:80] }}{% if a.title|length > 80 %}...{% endif %}
+                            </a>
+                        </td>
+                        <td>
+                            {% if "bullish" in a.ticker_sentiment_label|lower %}
+                                <span class="badge badge-add" style="font-size: 0.78em; padding: 0.12em 0.45em;">{{ a.ticker_sentiment_label }}</span>
+                            {% elif "bearish" in a.ticker_sentiment_label|lower %}
+                                <span class="badge badge-reduce" style="font-size: 0.78em; padding: 0.12em 0.45em;">{{ a.ticker_sentiment_label }}</span>
+                            {% else %}
+                                <span class="badge" style="font-size: 0.78em; padding: 0.12em 0.45em; background: var(--pp-neutral-orange-bg, #fff3e0); color: #e65100;">{{ a.ticker_sentiment_label }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-right">{{ "%.3f"|format(a.ticker_sentiment_score) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </figure>
+        </div>
+        {% endif %}
+
+    </div>{# end sig-grid (sentiment) #}
+
+    {% if not cnn and not finnhub and not apewisdom and not alphavantage %}
+    <div class="sig-card" style="max-width: 500px;">
+        <p class="text-muted" style="text-align: center; padding: 1em 0; margin: 0;">
+            No sentiment data available for <strong>{{ ticker }}</strong>.
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# SECTION 2: SEARCH INTEREST (Google Trends)                         #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+{% if gt_keywords %}
+<div class="sig-section">
+    <div class="sig-section-header">Search Interest</div>
+    <div class="sig-grid">
+
+        {# ── Trend Chart (full-width) ── #}
+        {% if gt_trend and gt_trend.data %}
+        <div class="sig-card sig-full">
+            <div class="sig-card-header">
+                <h3>Search Interest (3 months)</h3>
+                <span class="sig-source">Google Trends</span>
+            </div>
+
+            {# Keyword pills #}
+            <div style="margin-bottom: 0.8em;">
+                {% for kw in gt_keywords.intent[:3] %}
+                <span class="sig-pill sig-pill-intent">{{ kw }}</span>
+                {% endfor %}
+            </div>
+
+            <div class="sig-chart-container">
+                <canvas id="sig-gt-chart"></canvas>
+            </div>
+
+            {% if gt_trend.averages %}
+            <div style="display: flex; gap: 1.5em; flex-wrap: wrap; margin-top: 0.8em;">
+                {% for kw, avg in gt_trend.averages.items() %}
+                <div class="sig-stat">
+                    <div class="value" style="font-size: 1.2em; color: #1976d2;">{{ avg }}</div>
+                    <div class="label">{{ kw }}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="sig-footer">
+                Interest scores are relative (0-100) within the timeframe. Higher = more search volume relative to peak.
+            </div>
+        </div>
+
+        <script>
+        (function() {
+            var ctx = document.getElementById('sig-gt-chart');
+            if (!ctx || typeof Chart === 'undefined') return;
+
+            var raw = {{ gt_trend.data | tojson }};
+            var keywords = {{ gt_trend.keywords | tojson }};
+            var colors = ['#1976d2', '#e65100', '#2e7d32', '#7b1fa2', '#c62828'];
+
+            var labels = raw.map(function(d) { return d.date; });
+            var datasets = keywords.map(function(kw, i) {
+                return {
+                    label: kw,
+                    data: raw.map(function(d) { return d.values[kw] || 0; }),
+                    borderColor: colors[i % colors.length],
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                    fill: false,
+                };
+            });
+
+            new Chart(ctx, {
+                type: 'line',
+                data: { labels: labels, datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, padding: 10 } },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) { return ctx.dataset.label + ': ' + ctx.parsed.y; }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { display: true, ticks: { maxTicksLimit: 8, font: { size: 10 }, color: '#999' }, grid: { display: false } },
+                        y: { display: true, min: 0, max: 100, ticks: { font: { size: 10 }, color: '#999' }, grid: { color: 'rgba(0,0,0,0.05)' } }
+                    }
+                }
+            });
+        })();
+        </script>
+        {% else %}
+
+        {# No trend data — show keywords only #}
+        <div class="sig-card sig-full">
+            <div class="sig-card-header">
+                <h3>{{ gt_keywords.name }} ({{ gt_keywords.ticker }})</h3>
+                <span class="sig-source">Google Trends</span>
+            </div>
+
+            {% if gt_keywords.intent %}
+            <div style="margin-bottom: 0.8em;">
+                <div style="font-size: 0.78em; font-weight: 600; color: #1565c0; margin-bottom: 0.3em;">
+                    Intent Keywords
+                </div>
+                {% for kw in gt_keywords.intent %}
+                <span class="sig-pill sig-pill-intent">{{ kw }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if gt_keywords.product %}
+            <div style="margin-bottom: 0.8em;">
+                <div style="font-size: 0.78em; font-weight: 600; color: #7b1fa2; margin-bottom: 0.3em;">
+                    Product Keywords
+                </div>
+                {% for kw in gt_keywords.product %}
+                <span class="sig-pill sig-pill-product">{{ kw }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if gt_keywords.comparison %}
+            <div style="margin-bottom: 0.8em;">
+                <div style="font-size: 0.78em; font-weight: 600; color: #e65100; margin-bottom: 0.3em;">
+                    Comparison Keywords
+                </div>
+                {% for kw in gt_keywords.comparison %}
+                <span class="sig-pill sig-pill-comparison">{{ kw }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div style="text-align: center; padding: 0.8em; color: var(--pp-sub-text-light); font-size: 0.82em; border: 1px dashed var(--pp-overlay-8); border-radius: 8px; margin-top: 0.5em;">
+                Search interest data temporarily unavailable. Keywords above are ready for tracking.
+            </div>
+        </div>
+        {% endif %}
+
+    </div>{# end sig-grid (search interest) #}
+</div>
+{% endif %}
+
+{# ═══════════════════════════════════════════════════════════════════ #}
+{# SECTION 3: WEB TRAFFIC                                             #}
+{# ═══════════════════════════════════════════════════════════════════ #}
+
+{% if wt_relevance or wt_cloudflare or wt_tranco or wt_wikipedia %}
+<div class="sig-section">
+    <div class="sig-section-header">
+        Web Traffic
+        {% if wt_relevance %}
+        <span style="margin-left: 0.8em; font-size: 0.85em; font-weight: 500; text-transform: none; letter-spacing: 0; color: #2e7d32;">
+            {{ wt_relevance.label }}
+        </span>
+        {% endif %}
+    </div>
+    <div class="sig-grid">
+
+        {# ── Domain Popularity ── #}
+        {% if wt_cloudflare or wt_tranco %}
+        <div class="sig-card">
+            <div class="sig-card-header">
+                <h3>Domain Popularity</h3>
+                <span class="sig-source">
+                    {% if wt_cloudflare and wt_tranco %}Cloudflare + Tranco
+                    {% elif wt_cloudflare %}Cloudflare Radar
+                    {% else %}Tranco List{% endif %}
+                </span>
+            </div>
+            <div class="sig-stat-row">
+                {% if wt_cloudflare and wt_cloudflare.rank %}
+                <div class="sig-stat">
+                    <div class="value" style="color: #1976d2;">
+                        {% if wt_cloudflare.rank_type == 'exact' %}#{{ "{:,}".format(wt_cloudflare.rank) }}
+                        {% else %}Top {{ "{:,}".format(wt_cloudflare.rank) }}{% endif %}
+                    </div>
+                    <div class="label">Cloudflare Rank</div>
+                </div>
+                {% endif %}
+                {% if wt_tranco and wt_tranco.rank %}
+                <div class="sig-stat">
+                    <div class="value" style="font-size: 1.2em; color: var(--pp-text-secondary);">
+                        #{{ "{:,}".format(wt_tranco.rank) }}
+                    </div>
+                    <div class="label">Tranco Rank</div>
+                </div>
+                {% endif %}
+                {% if wt_tranco and wt_tranco.percentile is defined %}
+                <div class="sig-stat">
+                    <div class="value" style="font-size: 1.1em; color: {% if wt_tranco.percentile >= 99 %}#2e7d32{% elif wt_tranco.percentile >= 95 %}#e65100{% else %}var(--pp-text-secondary){% endif %};">
+                        {{ wt_tranco.percentile }}%
+                    </div>
+                    <div class="label">Percentile</div>
+                </div>
+                {% endif %}
+            </div>
+            {% if wt_cloudflare and wt_cloudflare.categories %}
+            <div style="margin-top: 0.8em;">
+                {% for cat in wt_cloudflare.categories %}
+                <span style="display: inline-block; padding: 0.15em 0.5em; border-radius: 12px; background: var(--pp-tag-bg); color: var(--pp-tag-text); font-size: 0.75em; font-weight: 500; margin: 0.15em 0.15em 0 0;">{{ cat }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+            <div class="sig-footer">
+                Domain rank tracks actual visits. For digital-first companies, rank changes are a leading indicator of revenue.
+            </div>
+        </div>
+        {% endif %}
+
+        {# ── Event Detector: Wikipedia ── #}
+        {% if wt_wikipedia %}
+        <div class="sig-card {% if not wt_cloudflare and not wt_tranco %}sig-full{% endif %}">
+            <div class="sig-card-header">
+                <h3>Event Detector</h3>
+                <span class="sig-source">Wikipedia Page Views</span>
+            </div>
+            <div class="sig-stat-row" style="margin-bottom: 0.8em;">
+                <div class="sig-stat">
+                    <div class="value" style="color: #1976d2;">{{ "{:,}".format(wt_wikipedia.avg_daily_views) }}</div>
+                    <div class="label">Avg. Daily</div>
+                </div>
+                <div class="sig-stat">
+                    <div class="value" style="font-size: 1.1em; color: var(--pp-text-secondary);">
+                        {% if wt_wikipedia.total_views >= 1000000 %}{{ "%.1f" | format(wt_wikipedia.total_views / 1000000) }}M
+                        {% elif wt_wikipedia.total_views >= 1000 %}{{ "%.0f" | format(wt_wikipedia.total_views / 1000) }}K
+                        {% else %}{{ wt_wikipedia.total_views }}{% endif %}
+                    </div>
+                    <div class="label">Total ({{ wt_wikipedia.days }}d)</div>
+                </div>
+                <div class="sig-stat">
+                    <div class="value" style="font-size: 1.1em; color: #e65100;">{{ "{:,}".format(wt_wikipedia.max_daily_views) }}</div>
+                    <div class="label">Peak Day</div>
+                </div>
+            </div>
+            <div class="sig-chart-container">
+                <canvas id="sig-wiki-chart"></canvas>
+            </div>
+            <div class="sig-footer">
+                Wikipedia spikes flag news events, earnings surprises, or viral moments.
+            </div>
+        </div>
+
+        <script>
+        (function() {
+            var ctx = document.getElementById('sig-wiki-chart');
+            if (!ctx || typeof Chart === 'undefined') return;
+
+            var rawData = {{ wt_wikipedia.daily_views | tojson }};
+            var labels = rawData.map(function(d) {
+                var s = d.date;
+                return s.substring(4,6) + '/' + s.substring(6,8);
+            });
+            var values = rawData.map(function(d) { return d.views; });
+
+            var ma7 = values.map(function(_, i) {
+                if (i < 6) return null;
+                var sum = 0;
+                for (var j = i - 6; j <= i; j++) sum += values[j];
+                return Math.round(sum / 7);
+            });
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Daily Views',
+                            data: values,
+                            borderColor: 'rgba(25, 118, 210, 0.3)',
+                            backgroundColor: 'rgba(25, 118, 210, 0.05)',
+                            fill: true,
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            tension: 0.3,
+                        },
+                        {
+                            label: '7-Day Avg',
+                            data: ma7,
+                            borderColor: 'rgba(25, 118, 210, 1)',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            tension: 0.3,
+                            fill: false,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: true, position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    return ctx.dataset.label + ': ' + (ctx.parsed.y || 0).toLocaleString();
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: { display: true, ticks: { maxTicksLimit: 10, font: { size: 10 }, color: '#999' }, grid: { display: false } },
+                        y: {
+                            display: true,
+                            ticks: {
+                                font: { size: 10 },
+                                color: '#999',
+                                callback: function(v) { return v >= 1000 ? (v/1000).toFixed(0) + 'K' : v; }
+                            },
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                        }
+                    }
+                }
+            });
+        })();
+        </script>
+        {% endif %}
+
+    </div>{# end sig-grid (web traffic) #}
+</div>
+{% endif %}
+
+<script>if (window.initSortableTables) window.initSortableTables();</script>
