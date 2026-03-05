@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Profile — PaperPanda{% endblock %}
+
+{% block content %}
+<style>
+    .profile-container {
+        max-width: 640px;
+        margin: 2em auto;
+        padding: 0 1em;
+    }
+    .profile-card {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 16px;
+        padding: 2em;
+        margin-bottom: 1.5em;
+    }
+    .profile-card h2 {
+        font-size: 1.15em;
+        font-weight: 700;
+        margin: 0 0 1.2em;
+        color: var(--pp-text);
+    }
+
+    /* ── User info ── */
+    .profile-user {
+        display: flex;
+        align-items: center;
+        gap: 1.2em;
+        margin-bottom: 1.5em;
+    }
+    .profile-avatar {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        object-fit: cover;
+        border: 2px solid var(--pp-border);
+        flex-shrink: 0;
+    }
+    .profile-avatar-placeholder {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: var(--pp-surface-hover);
+        border: 2px solid var(--pp-border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .profile-avatar-placeholder svg {
+        width: 32px;
+        height: 32px;
+        color: var(--pp-text-muted);
+    }
+    .profile-info h1 {
+        font-size: 1.4em;
+        font-weight: 700;
+        margin: 0 0 0.2em;
+    }
+    .profile-info .email {
+        color: var(--pp-text-muted);
+        font-size: 0.9em;
+    }
+    .profile-role-badge {
+        display: inline-block;
+        font-size: 0.72em;
+        font-weight: 700;
+        padding: 0.2em 0.7em;
+        border-radius: 999px;
+        margin-left: 0.5em;
+        vertical-align: middle;
+    }
+    .profile-role-badge.free {
+        background: var(--pp-surface-hover);
+        color: var(--pp-text-muted);
+    }
+    .profile-role-badge.pro {
+        background: rgba(34, 197, 94, 0.15);
+        color: #22c55e;
+    }
+
+    /* ── Action buttons ── */
+    .profile-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5em;
+        padding: 0.6em 1.2em;
+        font-size: 0.88em;
+        font-weight: 600;
+        border-radius: 10px;
+        cursor: pointer;
+        border: 1px solid var(--pp-border);
+        background: var(--pp-surface-hover);
+        color: var(--pp-text);
+        transition: background 0.2s, border-color 0.2s;
+        font-family: inherit;
+        text-decoration: none;
+    }
+    .profile-btn:hover {
+        background: var(--pp-overlay-10);
+        border-color: var(--pp-text-muted);
+    }
+    .profile-btn.primary {
+        background: rgba(239, 68, 68, 0.85);
+        border-color: rgba(239, 68, 68, 0.9);
+        color: #fff;
+    }
+    .profile-btn.primary:hover {
+        background: rgba(239, 68, 68, 1);
+    }
+    .profile-btn.danger {
+        color: #ef4444;
+        border-color: rgba(239, 68, 68, 0.3);
+    }
+    .profile-btn.danger:hover {
+        background: rgba(239, 68, 68, 0.1);
+        border-color: #ef4444;
+    }
+    .profile-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6em;
+    }
+</style>
+
+<div class="profile-container">
+    {# ── Section 1: User Info ── #}
+    <div class="profile-card">
+        <div class="profile-user">
+            {% if request.state.profile and request.state.profile.avatar_url %}
+            <img src="{{ request.state.profile.avatar_url }}" alt="Avatar" class="profile-avatar">
+            {% else %}
+            <div class="profile-avatar-placeholder">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </div>
+            {% endif %}
+            <div class="profile-info">
+                <h1>
+                    {% if request.state.profile and request.state.profile.display_name %}
+                        {{ request.state.profile.display_name }}
+                    {% else %}
+                        User
+                    {% endif %}
+                    {% set role = request.state.profile.user_role if request.state.profile else 'FREE' %}
+                    {% if role == 'PRO' %}
+                    <span class="profile-role-badge pro">PRO</span>
+                    {% else %}
+                    <span class="profile-role-badge free">FREE</span>
+                    {% endif %}
+                </h1>
+                <div class="email">
+                    {% if request.state.profile and request.state.profile.email %}
+                        {{ request.state.profile.email }}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <div class="profile-actions">
+            <button class="profile-btn primary" onclick="ppOpenUserProfile()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                Manage Account
+            </button>
+            <button class="profile-btn danger" onclick="ppSignOut()">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Sign Out
+            </button>
+        </div>
+    </div>
+
+    {# ── Section 2: Subscription Tier ── #}
+    <div class="profile-card">
+        <h2>Subscription Plan</h2>
+        <p style="color: var(--pp-text-muted); text-align: center; padding: 1em 0;">
+            Subscription plans coming soon.
+        </p>
+    </div>
+</div>
+
+<script>
+function ppOpenUserProfile() {
+    if (window.Clerk && window.Clerk.openUserProfile) {
+        window.Clerk.openUserProfile();
+    }
+}
+</script>
+{% endblock %}

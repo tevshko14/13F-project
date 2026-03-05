@@ -31,7 +31,6 @@ from fastapi.responses import (
     PlainTextResponse,
     RedirectResponse,
     Response,
-    StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -225,7 +224,7 @@ async def lifespan(app: FastAPI):
     funds in the background so users never see outdated data even if the
     cron job fails.
     """
-    global _heavy_pool, _heavy_sem, _posthog_http, _startup_ts
+    global _heavy_pool, _heavy_sem, _startup_ts
     _startup_ts = time_module.time()
 
     # ── Thread pool architecture ─────────────────────────────────────────
@@ -342,10 +341,6 @@ async def lifespan(app: FastAPI):
     if _bg_tasks:
         await asyncio.gather(*_bg_tasks, return_exceptions=True)
 
-    # _heavy_pool already declared global at top of lifespan
-    if _posthog_http and not _posthog_http.is_closed:
-        await _posthog_http.aclose()
-        _posthog_http = None
     if _heavy_pool is not None:
         _heavy_pool.shutdown(wait=False)
         _heavy_pool = None
@@ -604,14 +599,11 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
-# Auth middleware (Clerk JWKS or legacy Supabase JWT)
-if auth.CLERK_DOMAIN or auth.JWT_SECRET:
+# Auth middleware (Clerk JWKS)
+if auth.CLERK_DOMAIN:
     AuthMiddleware = auth._build_auth_middleware()
     app.add_middleware(AuthMiddleware)
-    if auth.CLERK_DOMAIN:
-        logger.info("Auth middleware enabled (Clerk JWKS: %s)", auth.CLERK_DOMAIN)
-    else:
-        logger.info("Auth middleware enabled (Supabase JWT validation)")
+    logger.info("Auth middleware enabled (Clerk JWKS: %s)", auth.CLERK_DOMAIN)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2318,17 +2310,6 @@ async def sentiment_data(request: Request, ticker: str):
 async def vitals_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
-    # ── Paywall: disabled while auth is not active ──
-    # if auth.JWT_SECRET:
-    #     user = getattr(request.state, "user", None)
-    #     profile = getattr(request.state, "profile", None)
-    #     is_premium = bool(profile and profile.get("tier") == "premium")
-    #     if not user or not is_premium:
-    #         return templates.TemplateResponse("partials/vitals_paywall.html", {
-    #             "request": request,
-    #             "ticker": ticker.upper(),
-    #             "user": user,
-    #         })
 
     data = await _to_heavy(vitals.get_vitals_data, ticker)
     return templates.TemplateResponse(
@@ -2695,84 +2676,6 @@ async def stripe_webhook(request: Request):
         # and can be replayed manually from the Stripe dashboard.
 
     return JSONResponse({"status": "ok"})
-
-
-# ── PostHog reverse proxy ─────────────────────────────────────────────────────
-# Proxying PostHog through our own domain bypasses ad blockers that block
-# requests to us.i.posthog.com / us-assets.i.posthog.com directly.
-# The frontend snippet points api_host at /ingest so all PostHog traffic
-# routes through paperpanda.io and is indistinguishable from first-party calls.
-
-_PH_ASSET_HOST = "https://us-assets.i.posthog.com"
-_PH_API_HOST = "https://us.i.posthog.com"
-
-# Shared httpx client for PostHog proxy — enables connection pooling & reuse.
-# Lazy-initialized on first request to avoid import-time side effects.
-import httpx as _httpx
-
-_posthog_http: _httpx.AsyncClient | None = None
-
-
-def _get_posthog_client() -> _httpx.AsyncClient:
-    global _posthog_http
-    if _posthog_http is None or _posthog_http.is_closed:
-        _posthog_http = _httpx.AsyncClient(timeout=10)
-    return _posthog_http
-
-
-@app.api_route("/ingest/static/{path:path}", methods=["GET", "HEAD"])
-async def posthog_asset_proxy(path: str, request: Request):
-    """Proxy PostHog's JS bundle through our domain to defeat ad blockers."""
-    url = f"{_PH_ASSET_HOST}/static/{path}"
-    params = dict(request.query_params)
-    try:
-        hc = _get_posthog_client()
-        resp = await hc.get(url, params=params)
-        headers = {
-            k: v for k, v in resp.headers.items()
-            if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
-        }
-        return StreamingResponse(
-            iter([resp.content]),
-            status_code=resp.status_code,
-            headers=headers,
-        )
-    except Exception as exc:
-        logger.warning("posthog_asset_proxy error: %s", exc)
-        return JSONResponse({"error": "proxy error"}, status_code=502)
-
-
-@app.api_route("/ingest/{path:path}", methods=["GET", "POST", "OPTIONS"])
-async def posthog_ingest_proxy(path: str, request: Request):
-    """Proxy PostHog event ingestion through our domain to defeat ad blockers."""
-    url = f"{_PH_API_HOST}/{path}"
-    params = dict(request.query_params)
-    body = await request.body()
-    headers = {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in ("host", "content-length", "transfer-encoding", "connection")
-    }
-    try:
-        hc = _get_posthog_client()
-        resp = await hc.request(
-            method=request.method,
-            url=url,
-            params=params,
-            content=body,
-            headers=headers,
-        )
-        resp_headers = {
-            k: v for k, v in resp.headers.items()
-            if k.lower() not in ("content-encoding", "transfer-encoding", "connection")
-        }
-        return StreamingResponse(
-            iter([resp.content]),
-            status_code=resp.status_code,
-            headers=resp_headers,
-        )
-    except Exception as exc:
-        logger.warning("posthog_ingest_proxy error: %s", exc)
-        return JSONResponse({"error": "proxy error"}, status_code=502)
 
 
 # --- Deployment / AUM Tracking ---
@@ -4391,6 +4294,14 @@ async def most_added(request: Request):
 # ═══════════════════════════════════════════════════════════════════════
 
 
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request):
+    """User profile page — account management."""
+    if not request.state.user:
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("profile.html", {"request": request})
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Render page that auto-opens Clerk sign-in modal."""
@@ -4403,18 +4314,9 @@ async def signup_page(request: Request):
     return templates.TemplateResponse("signup.html", {"request": request})
 
 
-@app.get("/reset-password")
-async def reset_password_page(request: Request):
-    """Redirect to login (Clerk handles password reset in its sign-in modal)."""
-    return RedirectResponse(url="/login", status_code=302)
-
-
 @app.get("/logout")
 async def logout(request: Request):
     response = RedirectResponse(url="/", status_code=302)
-    # Clear both legacy Supabase and Clerk cookies
-    response.delete_cookie("sb-access-token", path="/")
-    response.delete_cookie("sb-refresh-token", path="/")
     response.delete_cookie("__session", path="/")
     return response
 
@@ -4423,8 +4325,14 @@ async def logout(request: Request):
 async def clerk_webhook(request: Request):
     """Handle Clerk user lifecycle webhooks (user.created/updated/deleted).
 
-    Verifies signature via svix, then upserts/deletes the profiles table row.
+    Verifies svix HMAC-SHA256 signature, then upserts/deletes the profiles
+    table row.  No external dependency required — svix uses standard HMAC.
     """
+    import base64
+    import hashlib
+    import hmac
+    import json as _json
+
     if not _CLERK_WEBHOOK_SECRET:
         return JSONResponse({"error": "Webhook secret not configured"}, status_code=500)
 
@@ -4437,18 +4345,25 @@ async def clerk_webhook(request: Request):
 
     body = await request.body()
 
+    # Verify HMAC-SHA256 signature (svix protocol)
     try:
-        from svix.webhooks import Webhook
-        wh = Webhook(_CLERK_WEBHOOK_SECRET)
-        payload = wh.verify(body, {
-            "svix-id": svix_id,
-            "svix-timestamp": svix_timestamp,
-            "svix-signature": svix_signature,
-        })
+        secret = _CLERK_WEBHOOK_SECRET
+        if secret.startswith("whsec_"):
+            secret = secret[6:]
+        secret_bytes = base64.b64decode(secret)
+        to_sign = f"{svix_id}.{svix_timestamp}.{body.decode()}".encode()
+        expected = base64.b64encode(
+            hmac.new(secret_bytes, to_sign, hashlib.sha256).digest()
+        ).decode()
+        # svix-signature may contain multiple sigs like "v1,<sig1> v1,<sig2>"
+        sigs = [s.split(",", 1)[1] for s in svix_signature.split(" ") if "," in s]
+        if not any(hmac.compare_digest(expected, s) for s in sigs):
+            raise ValueError("No matching signature")
     except Exception as exc:
         logger.warning("Clerk webhook verification failed: %s", exc)
         return JSONResponse({"error": "Invalid signature"}, status_code=400)
 
+    payload = _json.loads(body)
     event_type = payload.get("type", "")
     data = payload.get("data", {})
 
@@ -4701,8 +4616,6 @@ if _has_limiter:
     # Auth pages (bot/scraper prevention)
     login_page = limiter.limit("10/minute")(login_page)
     signup_page = limiter.limit("10/minute")(signup_page)
-    reset_password_page = limiter.limit("5/minute")(reset_password_page)
-    # Auth session cookie endpoints (removed — Clerk manages sessions)
     # Infrastructure monitoring
     health_detail = limiter.limit("5/minute")(health_detail)
     # Notification endpoints (polled frequently — generous limits)
