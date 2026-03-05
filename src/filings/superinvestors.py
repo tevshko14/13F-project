@@ -79,6 +79,7 @@ SUPERINVESTORS: list[SuperinvestorInfo] = [
     # K
     SuperinvestorInfo("1039565", "Kahn Brothers", "Kahn Brothers Group", crd_number="144368"),
     # L
+    SuperinvestorInfo("2045724", "Leopold Aschenbrenner", "Situational Awareness LP"),
     SuperinvestorInfo("1484150", "Lindsell Train", "Lindsell Train", crd_number="158323"),
     SuperinvestorInfo("1061165", "Steve Mandel", "Lone Pine Capital", crd_number="156602"),
     # M

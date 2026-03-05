@@ -345,6 +345,8 @@ CREATE INDEX IF NOT EXISTS idx_si_ticker_date
 CREATE INDEX IF NOT EXISTS idx_si_pct_float
     ON short_interest_history (short_pct_float DESC)
     WHERE short_pct_float > 0;
+CREATE INDEX IF NOT EXISTS idx_si_date_pct
+    ON short_interest_history (report_date DESC, short_pct_float DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS idx_si_report_date
     ON short_interest_history (report_date DESC);
 """
@@ -2977,13 +2979,26 @@ def get_latest_short_interest_all(limit: int = 600) -> list[dict]:
 
     Used by the sync worker to build the leaderboard.
     Returns list of dicts sorted by short_pct_float DESC.
+
+    Uses a single SQL query via RPC to avoid two sequential round-trips.
+    Falls back to the two-query approach if the RPC function isn't available.
     """
     client = _get_client()
     if client is None:
         return []
 
     try:
-        # Get the latest report date in the table
+        # Single-query approach via RPC (requires get_latest_short_interest function)
+        resp = client.rpc(
+            "get_latest_short_interest",
+            {"row_limit": limit},
+        ).execute()
+        return resp.data or []
+    except Exception:
+        pass  # RPC not available — fall back to two-query approach
+
+    try:
+        # Fallback: two queries (still works if RPC function hasn't been created)
         resp = (
             client.table("short_interest_history")
             .select("report_date")
@@ -2995,7 +3010,6 @@ def get_latest_short_interest_all(limit: int = 600) -> list[dict]:
             return []
         latest_date = resp.data[0]["report_date"]
 
-        # Fetch all rows for that report date
         resp = (
             client.table("short_interest_history")
             .select(

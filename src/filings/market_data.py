@@ -1424,7 +1424,7 @@ def get_ticker_search_list(cache_data: dict) -> list[dict]:
         for h in fund_data.get("all_holdings", []):
             t = h.get("ticker")
             if t:
-                t_upper = t.upper()
+                t_upper = t.strip().upper()
                 if t_upper not in super_tickers:
                     super_tickers[t_upper] = h.get("issuer", t_upper)
 

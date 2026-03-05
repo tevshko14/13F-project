@@ -57,6 +57,19 @@ _MACRO_TTL = 86_400  # 24 h
 _sector_cache: dict[str, tuple[float, dict | None]] = {}
 _SECTOR_TTL = 604_800  # 7 days
 
+# ── Cache size limits (prevent unbounded memory growth) ───────────
+_MAX_INTEREST_CACHE = 500
+_MAX_SECTOR_CACHE = 500
+
+
+def _evict_oldest_gt(cache: dict, max_size: int) -> None:
+    """Evict oldest entries from a ``(timestamp, data)`` cache. Must hold _lock."""
+    if len(cache) <= max_size:
+        return
+    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
+    for k in sorted_keys[: len(cache) - max_size]:
+        del cache[k]
+
 # ── Rate-limiter (shared across all Google Trends calls) ────────────
 _last_request_time: float = 0.0
 _MIN_INTERVAL = 3.0  # seconds between requests
@@ -69,13 +82,22 @@ _GT_HEADERS = {
 
 
 def _rate_limit() -> None:
-    """Block until MIN_INTERVAL seconds have passed since the last request."""
+    """Reserve a time slot and sleep outside the lock until it arrives.
+
+    Previous implementation held ``_lock`` while sleeping, serialising all
+    concurrent Google Trends requests (10 concurrent = 30 s total).  Now
+    each thread reserves the *next* available slot under the lock, then
+    sleeps outside it — so threads A/B/C sleep 3 s / 6 s / 9 s in parallel.
+    """
     global _last_request_time
+    sleep_time = 0.0
     with _lock:
-        elapsed = time.time() - _last_request_time
-        if elapsed < _MIN_INTERVAL:
-            time.sleep(_MIN_INTERVAL - elapsed)
-        _last_request_time = time.time()
+        now = time.time()
+        earliest = max(now, _last_request_time + _MIN_INTERVAL)
+        sleep_time = earliest - now
+        _last_request_time = earliest  # reserve this slot
+    if sleep_time > 0:
+        time.sleep(sleep_time)
 
 
 def _gt_get(url: str, *, timeout: int = 15, retries: int = 3) -> httpx.Response | None:
@@ -297,6 +319,7 @@ def _get_yf_info(ticker: str) -> dict | None:
 
     with _lock:
         _sector_cache[ticker] = (time.time(), result)
+        _evict_oldest_gt(_sector_cache, _MAX_SECTOR_CACHE)
     return result
 
 
@@ -495,6 +518,7 @@ def fetch_interest_over_time(
 
     with _lock:
         _interest_cache[cache_key] = (time.time(), result)
+        _evict_oldest_gt(_interest_cache, _MAX_INTEREST_CACHE)
     return result
 
 
