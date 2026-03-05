@@ -546,7 +546,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             )
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Referrer-Policy"] = "strict-origin"
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=()"
         )
@@ -3166,8 +3166,8 @@ async def gt_macro_api(request: Request, category: str = ""):
     """Fetch macro trend chart for a category."""
     cat = category if category in google_trends.MACRO_CATEGORIES else None
     trend_data = await _to_heavy(google_trends.fetch_macro_trends, cat)
-    # Create a safe chart ID from the category name
-    chart_id = (category or "overview").lower().replace(" ", "-").replace("/", "-")
+    # Use validated cat (not raw category) for chart ID to prevent XSS
+    chart_id = (cat or "overview").lower().replace(" ", "-").replace("/", "-")
     return templates.TemplateResponse(
         "partials/google_trends_macro.html",
         {"request": request, "trend_data": trend_data, "chart_id": chart_id},
@@ -3178,7 +3178,7 @@ async def gt_macro_api(request: Request, category: str = ""):
 async def gt_ticker_api(request: Request, ticker: str):
     """Fetch Google Trends keywords and interest data for a ticker."""
     ticker = ticker.upper().strip()
-    if not ticker or len(ticker) > 10:
+    if not _valid_ticker(ticker):
         return HTMLResponse("<div>Invalid ticker.</div>", status_code=400)
 
     summary = await _to_heavy(google_trends.get_trends_summary, ticker)

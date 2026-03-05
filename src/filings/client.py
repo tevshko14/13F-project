@@ -259,12 +259,28 @@ def compare_quarters(
     return current_info, previous_info, changes[:top_n]
 
 
+# Known SEC EDGAR ticker → current trading symbol corrections.
+# 13F filings resolve tickers from CUSIP which can lag behind renames,
+# share-class changes, or ticker migrations.
+_TICKER_CORRECTIONS: dict[str, str] = {
+    "FB": "META",
+    "TWTR": "X",
+    "BMNRD": "BMNR",
+}
+
+
 def _safe_ticker(row) -> str | None:
-    """Extract ticker from a DataFrame row, handling missing/NaN values."""
+    """Extract ticker from a DataFrame row, handling missing/NaN values.
+
+    SEC EDGAR stores tickers in a fixed-width 5-char field, so values
+    may arrive padded (e.g. ``"BMNR "`` or ``"BMNRD"`` for BMNR).
+    We strip whitespace and apply known corrections.
+    """
     if hasattr(row, "Ticker"):
         val = row.Ticker
-        if val and str(val) not in ("", "nan", "None", "NaN"):
-            return str(val)
+        if val and str(val).strip() not in ("", "nan", "None", "NaN"):
+            t = str(val).strip()
+            return _TICKER_CORRECTIONS.get(t, t)
     return None
 
 

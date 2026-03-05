@@ -46,6 +46,12 @@ _apewisdom_cache: tuple[float, list[dict]] | None = None
 _leaderboard_cache: tuple[float, dict] | None = None
 _LEADERBOARD_TTL = 1800  # 30 minutes
 
+# ── ApeWisdom ticker → data index (O(1) lookups) ─────────────────
+_apewisdom_index: dict[str, dict] | None = None
+
+# ── Shared thread pool for sentiment tasks (avoids per-call pool creation) ──
+_sentiment_executor = ThreadPoolExecutor(max_workers=7, thread_name_prefix="sentiment")
+
 # ── Alpha Vantage daily budget tracker ──────────────────────────────
 _av_daily_count = 0
 _av_daily_reset: float = 0.0
@@ -279,9 +285,26 @@ def _get_apewisdom_all() -> list[dict]:
     return _fetch_apewisdom_pages()
 
 
+def _build_apewisdom_index(data: list[dict]) -> dict[str, dict]:
+    """Build ticker → enriched-dict lookup from ApeWisdom results (O(1) lookups)."""
+    idx: dict[str, dict] = {}
+    for item in data:
+        t = (item.get("ticker") or "").upper()
+        if t:
+            idx[t] = {
+                "rank": item.get("rank", 0),
+                "name": item.get("name", ""),
+                "mentions": int(item.get("mentions", 0)),
+                "upvotes": int(item.get("upvotes", 0)),
+                "rank_24h_ago": item.get("rank_24h_ago", 0),
+                "mentions_24h_ago": int(item.get("mentions_24h_ago", 0)),
+            }
+    return idx
+
+
 def _fetch_apewisdom_pages() -> list[dict]:
     """Fetch 5 ApeWisdom pages concurrently and update cache."""
-    global _apewisdom_cache
+    global _apewisdom_cache, _apewisdom_index
 
     def _fetch_page(page: int) -> list[dict]:
         url = f"https://apewisdom.io/api/v1.0/filter/all-stocks/page/{page}"
@@ -302,6 +325,7 @@ def _fetch_apewisdom_pages() -> list[dict]:
 
     with _lock:
         _apewisdom_cache = (time.time(), all_results)
+        _apewisdom_index = _build_apewisdom_index(all_results)
     return all_results
 
 
@@ -330,20 +354,13 @@ def _schedule_apewisdom_refresh() -> None:
 
 
 def _get_apewisdom_for_ticker(ticker: str) -> dict | None:
-    """Look up a single ticker in the ApeWisdom data."""
-    all_data = _get_apewisdom_all()
-    t = ticker.upper()
-    for item in all_data:
-        if (item.get("ticker") or "").upper() == t:
-            return {
-                "rank": item.get("rank", 0),
-                "name": item.get("name", ""),
-                "mentions": int(item.get("mentions", 0)),
-                "upvotes": int(item.get("upvotes", 0)),
-                "rank_24h_ago": item.get("rank_24h_ago", 0),
-                "mentions_24h_ago": int(item.get("mentions_24h_ago", 0)),
-            }
-    return None
+    """Look up a single ticker in the ApeWisdom data (O(1) via index)."""
+    _get_apewisdom_all()  # ensure cache is populated / refreshed
+    with _lock:
+        idx = _apewisdom_index
+    if idx is None:
+        return None
+    return idx.get(ticker.upper())
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -661,7 +678,7 @@ def _get_short_interest(ticker: str) -> dict | None:
         except Exception:
             pass  # non-fatal — don't break the hot path
 
-    threading.Thread(target=_archive_short_interest, daemon=True).start()
+    _sentiment_executor.submit(_archive_short_interest)
 
     return result
 
@@ -715,15 +732,14 @@ def get_sentiment_data(ticker: str) -> dict:
     }
     result: dict[str, dict | None] = {}
 
-    with ThreadPoolExecutor(max_workers=7) as executor:
-        futures = {executor.submit(fn): key for key, fn in tasks.items()}
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                result[key] = future.result()
-            except Exception as exc:
-                logger.warning("%s sentiment failed: %s", key, exc)
-                result[key] = None
+    futures = {_sentiment_executor.submit(fn): key for key, fn in tasks.items()}
+    for future in as_completed(futures):
+        key = futures[future]
+        try:
+            result[key] = future.result()
+        except Exception as exc:
+            logger.warning("%s sentiment failed: %s", key, exc)
+            result[key] = None
 
     return result
 
