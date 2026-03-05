@@ -3209,6 +3209,15 @@ async def alt_signals_short_interest(request: Request):
         data = await asyncio.to_thread(
             supabase_cache.build_leaderboard_from_db, ticker_map
         )
+        # Store in cache so subsequent requests are instant (12h TTL matches cron cadence)
+        if data:
+            await asyncio.to_thread(
+                supabase_cache.set_cached,
+                "short_interest_leaderboard",
+                "alt_signals",
+                data,
+                43200,  # 12 hours
+            )
     if not data:
         return HTMLResponse(
             '<div style="text-align: center; padding: 2em 0;">'
