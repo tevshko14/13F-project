@@ -29,6 +29,7 @@ import os
 import re
 import threading
 import time
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from urllib.parse import quote
 
@@ -406,21 +407,30 @@ def _keywords_from_profile(ticker: str, profile: dict) -> dict:
 # session/cookie negotiation.  Falls back to direct HTTP for the
 # daily trending endpoint which doesn't require auth.
 
-_GT_TRENDING = "https://trends.google.com/trends/api/dailytrends"
+# NOTE: The old /trends/api/dailytrends endpoint is deprecated and returns 404.
+# The canonical replacement is the public RSS feed below.
+_GT_TRENDING_RSS = "https://trends.google.com/trending/rss"
+_GT_TRENDING_NS = "https://trends.google.com/trending/rss"  # XML namespace
 
 # Reusable pytrends session (created lazily)
 _pytrends_instance: TrendReq | None = None
 
 
 def _get_pytrends() -> TrendReq | None:
-    """Get or create a pytrends session."""
+    """Get or create a pytrends session.
+
+    Note: do NOT pass ``retries``/``backoff_factor`` to ``TrendReq`` — pytrends
+    passes ``method_whitelist`` to ``urllib3.util.retry.Retry`` internally, which
+    was removed in urllib3 2.0 and raises a ``TypeError``.  We handle retries
+    ourselves via ``_gt_get()`` for direct HTTP calls.
+    """
     global _pytrends_instance
     if not _PYTRENDS_AVAILABLE:
         logger.warning("pytrends not installed — Google Trends data unavailable")
         return None
     if _pytrends_instance is None:
         try:
-            _pytrends_instance = TrendReq(hl="en-US", tz=240, retries=3, backoff_factor=1.0)
+            _pytrends_instance = TrendReq(hl="en-US", tz=240)
         except Exception as e:
             logger.warning("Failed to create pytrends session: %s", e)
             return None
@@ -624,13 +634,16 @@ def _match_trending_to_ticker(query: str) -> str | None:
 def fetch_trending_searches(geo: str = "US") -> list[dict] | None:
     """Fetch Google's daily trending searches and map them to tickers.
 
+    Uses the public Google Trends RSS feed (the old JSON /dailytrends endpoint
+    was deprecated and now returns 404).
+
     Returns list of dicts:
       - query: the trending search term
-      - traffic: approximate search volume string (e.g. "500K+")
-      - related_queries: list of related queries
+      - traffic: approximate search volume string (e.g. "5000+")
+      - related_queries: list of related article titles (substitutes old relatedQueries)
       - ticker: matched ticker or None
-      - article_title: news article title if available
-      - article_url: news article URL if available
+      - article_title: top news article title if available
+      - article_url: top news article URL if available
     """
     global _trending_cache
 
@@ -638,53 +651,63 @@ def fetch_trending_searches(geo: str = "US") -> list[dict] | None:
         if _trending_cache and time.time() - _trending_cache[0] < _TRENDING_TTL:
             return _trending_cache[1]
 
-    url = f"{_GT_TRENDING}?hl=en-US&tz=240&geo={geo}&ns=15"
+    url = f"{_GT_TRENDING_RSS}?geo={geo}"
     resp = _gt_get(url)
     if not resp:
         return None
 
-    data = _parse_gt_json(resp.text)
-    if not data:
+    NS = _GT_TRENDING_NS
+    try:
+        root = ET.fromstring(resp.text)
+    except ET.ParseError as e:
+        logger.warning("Failed to parse Google Trends RSS: %s", e)
         return None
 
-    days = data.get("default", {}).get("trendingSearchesDays", [])
+    channel = root.find("channel")
+    if channel is None:
+        return None
+
+    items = channel.findall("item")
     results: list[dict] = []
 
-    for day in days[:2]:  # Last 2 days
-        for search in day.get("trendingSearches", []):
-            title_obj = search.get("title", {})
-            query = title_obj.get("query", "")
-            traffic = search.get("formattedTraffic", "")
+    for item in items:
+        query = item.findtext("title", "").strip()
+        if not query:
+            continue
 
-            # Get related queries
-            related = [
-                r.get("query", "")
-                for r in search.get("relatedQueries", [])
-                if r.get("query")
-            ]
+        traffic = item.findtext(f"{{{NS}}}approx_traffic", "")
 
-            # Get article info
-            articles = search.get("articles", [])
-            article_title = articles[0].get("title", "") if articles else ""
-            article_url = articles[0].get("url", "") if articles else ""
+        # Collect all news items
+        news_items = item.findall(f"{{{NS}}}news_item")
+        article_title = ""
+        article_url = ""
+        related: list[str] = []
 
-            # Try to match to a ticker
-            ticker = _match_trending_to_ticker(query)
-            # Also check related queries if main didn't match
-            if not ticker:
-                for rq in related:
-                    ticker = _match_trending_to_ticker(rq)
-                    if ticker:
-                        break
+        for idx, ni in enumerate(news_items):
+            title = ni.findtext(f"{{{NS}}}news_item_title", "").strip()
+            url_val = ni.findtext(f"{{{NS}}}news_item_url", "").strip()
+            if idx == 0:
+                article_title = title
+                article_url = url_val
+            elif title:
+                related.append(title)
 
-            results.append({
-                "query": query,
-                "traffic": traffic,
-                "related_queries": related[:5],
-                "ticker": ticker,
-                "article_title": article_title,
-                "article_url": article_url,
-            })
+        # Try to match to a ticker
+        ticker = _match_trending_to_ticker(query)
+        if not ticker:
+            for rq in related:
+                ticker = _match_trending_to_ticker(rq)
+                if ticker:
+                    break
+
+        results.append({
+            "query": query,
+            "traffic": traffic,
+            "related_queries": related[:5],
+            "ticker": ticker,
+            "article_title": article_title,
+            "article_url": article_url,
+        })
 
     with _lock:
         _trending_cache = (time.time(), results)
