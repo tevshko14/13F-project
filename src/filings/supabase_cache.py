@@ -2998,30 +2998,38 @@ def get_latest_short_interest_all(limit: int = 1600) -> list[dict]:
         pass  # RPC not available — fall back to two-query approach
 
     try:
-        # Fallback: two queries (still works if RPC function hasn't been created)
-        resp = (
-            client.table("short_interest_history")
-            .select("report_date")
-            .order("report_date", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if not resp.data:
-            return []
-        latest_date = resp.data[0]["report_date"]
+        # Fallback: fetch recent rows (last 7 days) and pick each ticker's
+        # most-recent entry in Python.  This mirrors the DISTINCT ON (ticker)
+        # logic in the RPC and avoids the single-date bug where FINRA data
+        # lands on different dates for NYSE vs NASDAQ tickers.
+        from datetime import date, timedelta
 
+        cutoff = (date.today() - timedelta(days=7)).isoformat()
         resp = (
             client.table("short_interest_history")
             .select(
                 "ticker,report_date,shares_short,shares_short_prior,"
                 "short_pct_float,short_ratio,float_shares,shares_outstanding"
             )
-            .eq("report_date", latest_date)
-            .order("short_pct_float", desc=True)
-            .limit(limit)
+            .gte("report_date", cutoff)
+            .order("report_date", desc=True)
+            .limit(limit * 5)  # over-fetch; multiple dates per ticker
             .execute()
         )
-        return resp.data or []
+        rows = resp.data or []
+        # Keep only the most-recent row per ticker (rows already sorted by date DESC)
+        seen: set[str] = set()
+        latest_per_ticker: list[dict] = []
+        for row in rows:
+            t = row.get("ticker", "")
+            if t and t not in seen:
+                seen.add(t)
+                latest_per_ticker.append(row)
+        # Sort by short % float descending (matches RPC output order)
+        latest_per_ticker.sort(
+            key=lambda r: r.get("short_pct_float") or 0, reverse=True
+        )
+        return latest_per_ticker[:limit]
     except Exception as exc:
         logger.warning("get_latest_short_interest_all failed: %s", exc)
         return []
