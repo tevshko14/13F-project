@@ -170,17 +170,6 @@
 </div>
 
 
-{# ══════════════════════════════════════════════════════════════════════
-   FILTER BAR
-   ══════════════════════════════════════════════════════════════════════ #}
-<div style="margin-bottom: 1em;">
-    <input type="text" id="analyst-filter"
-           placeholder="Filter by firm or analyst…"
-           style="width: 100%; max-width: 340px; padding: 0.45em 0.85em;
-                  border-radius: 8px; border: 1px solid var(--pp-overlay-15);
-                  background: var(--pp-surface); color: var(--pp-text); font-size: 0.88em;">
-</div>
-
 
 {# ══════════════════════════════════════════════════════════════════════
    FIRM-GROUPED ANALYST RATINGS — insider-style accordion
@@ -419,27 +408,6 @@ if (!window.toggleCluster) {
         detail.style.display = detail.style.display === 'none' ? '' : 'none';
     };
 }
-
-(function() {
-    var filterInput = document.getElementById('analyst-filter');
-    if (!filterInput) return;
-
-    filterInput.addEventListener('input', function() {
-        var q = this.value.toLowerCase().trim();
-        document.querySelectorAll('.analyst-firm-cluster').forEach(function(cluster) {
-            if (!q) {
-                cluster.style.display = '';
-                return;
-            }
-            var firmMatch = (cluster.dataset.firm || '').includes(q);
-            var nameMatch = false;
-            cluster.querySelectorAll('.analyst-row').forEach(function(row) {
-                if ((row.dataset.name || '').includes(q)) nameMatch = true;
-            });
-            cluster.style.display = (firmMatch || nameMatch) ? '' : 'none';
-        });
-    });
-})();
 </script>
 
 {% else %}
