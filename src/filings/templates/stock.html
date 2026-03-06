@@ -87,20 +87,6 @@
                     Vitals
                 </button>
             </li>
-            <li>
-                <button id="tab-filings-btn"
-                        class="stock-tab"
-                        onclick="switchTab('filings')">
-                    SEC Filings
-                </button>
-            </li>
-            <li>
-                <button id="tab-insider-btn"
-                        class="stock-tab"
-                        onclick="switchTab('insider')">
-                    Insider Trading
-                </button>
-            </li>
         </ul>
     </nav>
 </div>
@@ -717,6 +703,8 @@
 <div class="pp-pill-nav" id="ownership-pill-nav">
     <button class="pp-pill-btn active" data-own-tab="funds">Funds</button>
     <button class="pp-pill-btn" data-own-tab="congress">Congress</button>
+    <button class="pp-pill-btn" data-own-tab="insider">Insider</button>
+    <button class="pp-pill-btn" data-own-tab="filings">SEC Filings</button>
 </div>
 
 {# ── Sub-panel: Funds (superinvestor holdings — pre-rendered) ── #}
@@ -930,6 +918,25 @@
     </div>
 </div>
 
+{# ── Sub-panel: SEC Filings (lazy-loaded on first pill click) ── #}
+<div class="pp-pill-panel" id="own-panel-filings">
+    <div id="filings-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading SEC filings...
+        </p>
+    </div>
+</div>
+
+{# ── Sub-panel: Insider Trading (lazy-loaded on first pill click) ── #}
+<div class="pp-pill-panel" id="own-panel-insider">
+    <div id="insider-insights-container"></div>
+    <div id="insider-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading insider trading data...
+        </p>
+    </div>
+</div>
+
 </div>{# end tab-ownership #}
 
 {# ── Forecasts Tab (Analysts + Earnings pills) ── #}
@@ -968,24 +975,6 @@
     </div>
 </div>
 
-{# ── SEC Filings Tab ── #}
-<div id="tab-filings" class="tab-content">
-    <div id="filings-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading SEC filings...
-        </p>
-    </div>
-</div>
-
-{# ── Insider Trading Tab ── #}
-<div id="tab-insider" class="tab-content">
-    <div id="insider-insights-container"></div>
-    <div id="insider-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading insider trading data...
-        </p>
-    </div>
-</div>
 
 {# ── Quarter Tab Switching ── #}
 <script>
@@ -1169,94 +1158,9 @@ window.toggleHolders = function(btn) {
             }
         }
 
-        // Lazy-load SEC filings on first click
-        if (tab === 'filings' && !filingsLoaded) {
-            filingsLoaded = true;
-            {% if stock_info.ticker %}
-            var filingsUrl = '/api/company-filings/{{ stock_info.ticker }}';
-            {% else %}
-            var filingsUrl = null;
-            {% endif %}
-
-            if (filingsUrl) {
-                fetch(filingsUrl)
-                    .then(function(resp) { return resp.text(); })
-                    .then(function(html) {
-                        var el = document.getElementById('filings-content');
-                        el.innerHTML = html;
-                        activateScripts(el);
-                    })
-                    .catch(function() {
-                        document.getElementById('filings-content').innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'Failed to load SEC filings. Please try again later.</p>';
-                    });
-            } else {
-                document.getElementById('filings-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'SEC filings require a ticker symbol.</p>';
-            }
-        }
-
-        // Lazy-load insider trading on first click
-        if (tab === 'insider' && !insiderLoaded) {
-            insiderLoaded = true;
-            {% if stock_info.ticker %}
-            var insiderUrl = '/api/insider-trades/{{ stock_info.ticker }}';
-            var insightsUrl = '/api/insider-insights/{{ stock_info.ticker }}';
-            {% else %}
-            var insiderUrl = null;
-            var insightsUrl = null;
-            {% endif %}
-
-            if (insiderUrl) {
-                // Fetch insights in parallel (non-blocking — empty response is fine)
-                if (insightsUrl) {
-                    fetch(insightsUrl)
-                        .then(function(resp) { return resp.ok ? resp.text() : ''; })
-                        .then(function(html) {
-                            if (html && html.trim()) {
-                                document.getElementById('insider-insights-container').innerHTML = html;
-                            }
-                        })
-                        .catch(function() {});  // Silent fail — insights are optional
-                }
-
-                var insiderRetried = false;
-                function fetchInsider() {
-                    fetch(insiderUrl)
-                        .then(function(resp) {
-                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                            return resp.text();
-                        })
-                        .then(function(html) {
-                            var el = document.getElementById('insider-content');
-                            el.innerHTML = html;
-                            activateScripts(el);
-                            if (window.initSortableTables) window.initSortableTables();
-                        })
-                        .catch(function() {
-                            if (!insiderRetried) {
-                                insiderRetried = true;
-                                setTimeout(fetchInsider, 1500);
-                                return;
-                            }
-                            document.getElementById('insider-content').innerHTML =
-                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                                'Failed to load insider trading data. Please try again later.</p>';
-                        });
-                }
-                fetchInsider();
-            } else {
-                document.getElementById('insider-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Insider trading data requires a ticker symbol.</p>';
-            }
-        }
-
     };
 
-    // ── Ownership inner pill switcher (Funds / Congress) ──
+    // ── Ownership inner pill switcher (Funds / Congress / SEC Filings / Insider) ──
     var congressLoaded = false;
     document.getElementById('ownership-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
         pill.addEventListener('click', function() {
@@ -1294,6 +1198,87 @@ window.toggleHolders = function(btn) {
                     document.getElementById('congress-content').innerHTML =
                         '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                         'Congressional trading data requires a ticker symbol.</p>';
+                }
+            }
+
+            // Lazy-load SEC filings on first pill click
+            if (pill.dataset.ownTab === 'filings' && !filingsLoaded) {
+                filingsLoaded = true;
+                {% if stock_info.ticker %}
+                var filingsUrl = '/api/company-filings/{{ stock_info.ticker }}';
+                {% else %}
+                var filingsUrl = null;
+                {% endif %}
+                if (filingsUrl) {
+                    fetch(filingsUrl)
+                        .then(function(resp) { return resp.text(); })
+                        .then(function(html) {
+                            var el = document.getElementById('filings-content');
+                            el.innerHTML = html;
+                            activateScripts(el);
+                        })
+                        .catch(function() {
+                            document.getElementById('filings-content').innerHTML =
+                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                                'Failed to load SEC filings. Please try again later.</p>';
+                        });
+                } else {
+                    document.getElementById('filings-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'SEC filings require a ticker symbol.</p>';
+                }
+            }
+
+            // Lazy-load insider trading on first pill click
+            if (pill.dataset.ownTab === 'insider' && !insiderLoaded) {
+                insiderLoaded = true;
+                {% if stock_info.ticker %}
+                var insiderUrl = '/api/insider-trades/{{ stock_info.ticker }}';
+                var insightsUrl = '/api/insider-insights/{{ stock_info.ticker }}';
+                {% else %}
+                var insiderUrl = null;
+                var insightsUrl = null;
+                {% endif %}
+                if (insiderUrl) {
+                    if (insightsUrl) {
+                        fetch(insightsUrl)
+                            .then(function(resp) { return resp.ok ? resp.text() : ''; })
+                            .then(function(html) {
+                                if (html && html.trim()) {
+                                    document.getElementById('insider-insights-container').innerHTML = html;
+                                }
+                            })
+                            .catch(function() {});
+                    }
+                    var insiderRetried = false;
+                    function fetchInsider() {
+                        fetch(insiderUrl)
+                            .then(function(resp) {
+                                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                                return resp.text();
+                            })
+                            .then(function(html) {
+                                var el = document.getElementById('insider-content');
+                                el.innerHTML = html;
+                                activateScripts(el);
+                                if (window.initSortableTables) window.initSortableTables();
+                            })
+                            .catch(function() {
+                                if (!insiderRetried) {
+                                    insiderRetried = true;
+                                    setTimeout(fetchInsider, 1500);
+                                    return;
+                                }
+                                document.getElementById('insider-content').innerHTML =
+                                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                                    'Failed to load insider trading data. Please try again later.</p>';
+                            });
+                    }
+                    fetchInsider();
+                } else {
+                    document.getElementById('insider-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Insider trading data requires a ticker symbol.</p>';
                 }
             }
 

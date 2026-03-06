@@ -78,78 +78,87 @@ for p in profiles:
 
     print(f"  → {email} (old ID: {old_id})")
 
-    # Step 1: Check if this email already exists in Clerk prod
-    search = httpx.get(
-        f"https://api.clerk.com/v1/users?email_address={email}",
-        headers=CLERK_HEADERS,
-        timeout=15,
-    )
-    search.raise_for_status()
-    existing = search.json()
-
-    if existing:
-        new_id = existing[0]["id"]
-        print(f"     Already exists in Clerk prod — using ID: {new_id}")
-    else:
-        # Step 2: Create stub user in Clerk prod
-        payload: dict = {
-            "email_address": [email],
-            "skip_password_checks": True,
-            "skip_password_requirement": True,
-        }
-        if display_name:
-            parts = display_name.split(" ", 1)
-            payload["first_name"] = parts[0]
-            if len(parts) > 1:
-                payload["last_name"] = parts[1]
-
-        create = httpx.post(
-            "https://api.clerk.com/v1/users",
+    try:
+        # Step 1: Check if this email already exists in Clerk prod
+        search = httpx.get(
+            f"https://api.clerk.com/v1/users?email_address={email}",
             headers=CLERK_HEADERS,
-            json=payload,
-            timeout=15,
+            timeout=30,
         )
-        if create.status_code not in (200, 201):
-            print(f"     FAILED to create: {create.status_code} {create.text}")
-            results.append({"email": email, "status": "failed", "reason": create.text})
-            continue
+        search.raise_for_status()
+        existing = search.json()
 
-        new_id = create.json()["id"]
-        print(f"     Created in Clerk prod — new ID: {new_id}")
-
-    # Step 3: Insert new profile row with new ID (preserving all fields)
-    insert_resp = httpx.post(
-        f"{SUPABASE_URL}/rest/v1/profiles",
-        headers={**SUPA_HEADERS, "Prefer": "resolution=ignore-duplicates,return=representation"},
-        json={
-            "id": new_id,
-            "email": email,
-            "display_name": p.get("display_name"),
-            "avatar_url": p.get("avatar_url"),
-            "user_role": p.get("user_role", "free"),
-        },
-        timeout=15,
-    )
-
-    if insert_resp.status_code in (200, 201):
-        print(f"     Inserted new profile row with prod ID ✓")
-    else:
-        print(f"     Profile insert note: {insert_resp.status_code} (may already exist)")
-
-    # Step 4: If old_id != new_id, delete the old orphaned profile row
-    if old_id != new_id:
-        del_resp = httpx.delete(
-            f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{old_id}",
-            headers=SUPA_HEADERS,
-            timeout=15,
-        )
-        if del_resp.status_code in (200, 204):
-            print(f"     Removed old dev profile row ✓")
+        if existing:
+            new_id = existing[0]["id"]
+            print(f"     Already exists in Clerk prod — using ID: {new_id}")
         else:
-            print(f"     Could not remove old row ({del_resp.status_code}) — clean up manually if needed")
+            # Step 2: Create stub user in Clerk prod
+            payload: dict = {
+                "email_address": [email],
+                "skip_password_checks": True,
+                "skip_password_requirement": True,
+            }
+            if display_name:
+                parts = display_name.split(" ", 1)
+                payload["first_name"] = parts[0]
+                if len(parts) > 1:
+                    payload["last_name"] = parts[1]
 
-    results.append({"email": email, "old_id": old_id, "new_id": new_id, "status": "ok"})
-    time.sleep(0.3)  # be kind to Clerk's rate limits
+            create = httpx.post(
+                "https://api.clerk.com/v1/users",
+                headers=CLERK_HEADERS,
+                json=payload,
+                timeout=30,
+            )
+            if create.status_code not in (200, 201):
+                print(f"     FAILED to create: {create.status_code} {create.text}")
+                results.append({"email": email, "status": "failed", "reason": create.text})
+                continue
+
+            new_id = create.json()["id"]
+            print(f"     Created in Clerk prod — new ID: {new_id}")
+
+        # Step 3: Insert new profile row with new ID (preserving all fields)
+        insert_resp = httpx.post(
+            f"{SUPABASE_URL}/rest/v1/profiles",
+            headers={**SUPA_HEADERS, "Prefer": "resolution=ignore-duplicates,return=representation"},
+            json={
+                "id": new_id,
+                "email": email,
+                "display_name": p.get("display_name"),
+                "avatar_url": p.get("avatar_url"),
+                "user_role": p.get("user_role", "free"),
+            },
+            timeout=30,
+        )
+
+        if insert_resp.status_code in (200, 201):
+            print(f"     Inserted new profile row with prod ID ✓")
+        else:
+            print(f"     Profile insert note: {insert_resp.status_code} (may already exist)")
+
+        # Step 4: If old_id != new_id, delete the old orphaned profile row
+        if old_id != new_id:
+            del_resp = httpx.delete(
+                f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{old_id}",
+                headers=SUPA_HEADERS,
+                timeout=30,
+            )
+            if del_resp.status_code in (200, 204):
+                print(f"     Removed old dev profile row ✓")
+            else:
+                print(f"     Could not remove old row ({del_resp.status_code}) — clean up manually if needed")
+
+        results.append({"email": email, "old_id": old_id, "new_id": new_id, "status": "ok"})
+
+    except httpx.TimeoutException:
+        print(f"     TIMEOUT — skipping, re-run the script to retry")
+        results.append({"email": email, "status": "failed", "reason": "timeout"})
+    except Exception as exc:
+        print(f"     ERROR — {exc}")
+        results.append({"email": email, "status": "failed", "reason": str(exc)})
+
+    time.sleep(0.5)  # be kind to Clerk's rate limits
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 
