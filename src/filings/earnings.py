@@ -488,10 +488,11 @@ def _parse_forward_estimates(tk) -> dict | None:
 
 
 def _compute_streak(history: list[dict]) -> dict:
-    """Compute consecutive EPS beat/miss streak from newest to oldest."""
+    """Compute EPS streak + summary metrics from earnings history."""
     if not history:
         return {}
 
+    # ── Consecutive streak ──────────────────────────────────────
     eps_streak = 0
     direction = None  # True = beat, False = miss
 
@@ -505,20 +506,48 @@ def _compute_streak(history: list[dict]) -> dict:
             break
         eps_streak += 1
 
-    if eps_streak == 0:
-        return {}
+    result: dict = {}
+    if eps_streak > 0:
+        if direction:
+            result["eps_streak"] = eps_streak
+            result["eps_streak_label"] = (
+                f"{eps_streak} consecutive beat{'s' if eps_streak != 1 else ''}"
+            )
+        else:
+            result["eps_streak"] = -eps_streak
+            result["eps_streak_label"] = (
+                f"{eps_streak} consecutive miss{'es' if eps_streak != 1 else ''}"
+            )
 
-    if direction:
-        label = f"{eps_streak} consecutive beat{'s' if eps_streak != 1 else ''}"
-        streak_val = eps_streak
-    else:
-        label = f"{eps_streak} consecutive miss{'es' if eps_streak != 1 else ''}"
-        streak_val = -eps_streak
+    # ── Beat rate ───────────────────────────────────────────────
+    rated = [r for r in history if r.get("beat_eps") is not None]
+    if rated:
+        beat_count = sum(1 for r in rated if r["beat_eps"])
+        result["beat_count"] = beat_count
+        result["total_count"] = len(rated)
 
-    return {
-        "eps_streak": streak_val,
-        "eps_streak_label": label,
-    }
+    # ── Avg surprise % ──────────────────────────────────────────
+    surprises = [r for r in history if r.get("eps_surprise_pct") is not None]
+    if surprises:
+        avg = sum(r["eps_surprise_pct"] for r in surprises) / len(surprises)
+        result["avg_surprise_pct"] = round(avg, 2)
+
+        # Biggest beat (max surprise)
+        best = max(surprises, key=lambda r: r["eps_surprise_pct"])
+        result["biggest_beat_pct"] = best["eps_surprise_pct"]
+        result["biggest_beat_quarter"] = (
+            best.get("fiscal_quarter") or best.get("report_date", "")
+        )
+
+        # Largest miss (min surprise, only if negative)
+        worst = min(surprises, key=lambda r: r["eps_surprise_pct"])
+        if worst["eps_surprise_pct"] < 0:
+            result["largest_miss_pct"] = worst["eps_surprise_pct"]
+            result["largest_miss_quarter"] = (
+                worst.get("fiscal_quarter") or worst.get("report_date", "")
+            )
+
+    return result
 
 
 def _safe_float(val) -> float | None:

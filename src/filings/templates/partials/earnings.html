@@ -9,16 +9,20 @@
         border-bottom: 1px solid var(--pp-border-light);
     }
     .earn-streak-row {
-        display: flex; gap: 1.2em; flex-wrap: wrap;
+        display: grid; grid-template-columns: repeat(5, 1fr); gap: 1em;
         margin-bottom: 1.5em;
+    }
+    @media (max-width: 768px) {
+        .earn-streak-row { grid-template-columns: repeat(2, 1fr); }
     }
     .earn-streak-card {
         border: 1px solid var(--pp-border); border-radius: 10px;
-        padding: 1em 1.5em; background: var(--pp-surface);
-        display: flex; flex-direction: column; align-items: center; min-width: 140px;
+        padding: 1em 1.2em; background: var(--pp-surface);
+        display: flex; flex-direction: column; align-items: center; text-align: center;
     }
-    .earn-streak-value { font-size: 1.6em; font-weight: 700; line-height: 1.2; }
+    .earn-streak-value { font-size: 1.5em; font-weight: 700; line-height: 1.2; }
     .earn-streak-label { font-size: 0.75em; color: var(--pp-text-muted); margin-top: 0.2em; }
+    .earn-streak-sub { font-size: 0.7em; color: var(--pp-text-muted); margin-top: 0.15em; }
     .earn-beat { color: #16a34a; }
     .earn-miss { color: #dc2626; }
     .earn-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
@@ -53,14 +57,60 @@
 
 {% if history %}
 
-{# ── Streak summary cards ── #}
-{% if streak and streak.eps_streak %}
+{# ── Summary metric tiles ── #}
+{% if streak and streak.total_count %}
 <div class="earn-streak-row">
+    {# Streak #}
+    {% if streak.eps_streak %}
     <div class="earn-streak-card">
         <div class="earn-streak-value {{ 'earn-beat' if streak.eps_streak > 0 else 'earn-miss' }}">
             {{ streak.eps_streak | abs }}
         </div>
         <div class="earn-streak-label">{{ streak.eps_streak_label }}</div>
+    </div>
+    {% endif %}
+
+    {# Beat Rate #}
+    <div class="earn-streak-card">
+        <div class="earn-streak-value {{ 'earn-beat' if streak.beat_count > streak.total_count / 2 else 'earn-miss' }}">
+            {{ streak.beat_count }} / {{ streak.total_count }}
+        </div>
+        <div class="earn-streak-label">quarters beat</div>
+    </div>
+
+    {# Avg. Surprise #}
+    {% if streak.avg_surprise_pct is not none %}
+    <div class="earn-streak-card">
+        <div class="earn-streak-value {{ 'earn-beat' if streak.avg_surprise_pct >= 0 else 'earn-miss' }}">
+            {{ "+%.2f" | format(streak.avg_surprise_pct) if streak.avg_surprise_pct >= 0 else "%.2f" | format(streak.avg_surprise_pct) }}%
+        </div>
+        <div class="earn-streak-label">avg. EPS surprise</div>
+    </div>
+    {% endif %}
+
+    {# Biggest Beat #}
+    {% if streak.biggest_beat_pct is not none %}
+    <div class="earn-streak-card">
+        <div class="earn-streak-value earn-beat">
+            +{{ "%.1f" | format(streak.biggest_beat_pct) }}%
+        </div>
+        <div class="earn-streak-label">biggest beat</div>
+        <div class="earn-streak-sub">{{ streak.biggest_beat_quarter }}</div>
+    </div>
+    {% endif %}
+
+    {# Largest Miss #}
+    <div class="earn-streak-card">
+        {% if streak.largest_miss_pct is not none %}
+        <div class="earn-streak-value earn-miss">
+            {{ "%.1f" | format(streak.largest_miss_pct) }}%
+        </div>
+        <div class="earn-streak-label">largest miss</div>
+        <div class="earn-streak-sub">{{ streak.largest_miss_quarter }}</div>
+        {% else %}
+        <div class="earn-streak-value earn-beat">—</div>
+        <div class="earn-streak-label">no misses</div>
+        {% endif %}
     </div>
 </div>
 {% endif %}
@@ -196,7 +246,10 @@
                 }
             },
             legend: {
-                data: ['Estimate', 'Actual'],
+                data: [
+                    { name: 'Estimate', itemStyle: { color: 'transparent', borderColor: '#71717a', borderWidth: 2 } },
+                    { name: 'Actual',   itemStyle: { color: '#16a34a', borderWidth: 0 } }
+                ],
                 textStyle: { color: textColor, fontSize: 11 },
                 top: 0
             },
