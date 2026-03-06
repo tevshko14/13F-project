@@ -57,6 +57,7 @@ from filings import (
     aum_data,
     web_traffic,
     google_trends,
+    earnings,
 )
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
@@ -3185,6 +3186,63 @@ async def gt_ticker_api(request: Request, ticker: str):
             "request": request,
             "keywords": summary.get("keywords"),
             "trend": summary.get("trend"),
+        },
+    )
+
+
+# ── Macro — Earnings Scorecard ───────────────────────────────────────
+
+
+@app.get("/macro", response_class=HTMLResponse)
+async def macro_page(
+    request: Request,
+    index: str = "sp500",
+    quarter: str = "",
+    sector: str = "",
+):
+    """Macro page — Earnings Scorecard dashboard."""
+    if index not in earnings.INDEX_CHOICES:
+        index = "sp500"
+    quarters = earnings.get_available_quarters()
+    if not quarter or quarter not in quarters:
+        quarter = quarters[0]
+    if sector and sector not in earnings.SECTORS:
+        sector = ""
+
+    return templates.TemplateResponse(
+        "macro.html",
+        {
+            "request": request,
+            "indices": earnings.INDEX_CHOICES,
+            "current_index": index,
+            "quarters": quarters,
+            "current_quarter": quarter,
+            "sectors": earnings.SECTORS,
+            "current_sector": sector,
+        },
+    )
+
+
+@app.get("/api/macro/scorecard", response_class=HTMLResponse)
+async def macro_scorecard_api(
+    request: Request,
+    index: str = "sp500",
+    quarter: str = "",
+    sector: str = "",
+):
+    """HTMX endpoint — returns the earnings scorecard partial."""
+    if index not in earnings.INDEX_CHOICES:
+        index = "sp500"
+
+    data = await _to_heavy(earnings.fetch_earnings_data, index, quarter or None, sector or None)
+    trend = await _to_heavy(earnings.fetch_historical_beat_rates, index)
+
+    return templates.TemplateResponse(
+        "partials/earnings_scorecard.html",
+        {
+            "request": request,
+            "data": data,
+            "trend_data": trend,
         },
     )
 

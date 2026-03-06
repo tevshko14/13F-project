@@ -1,0 +1,239 @@
+{% if data.get('is_mock') %}
+<div class="es-mock-banner">
+    Showing sample data — set <code>FMP_API_KEY</code> environment variable for live earnings data from Financial Modeling Prep.
+</div>
+{% endif %}
+
+{# ── Aggregated Metric Counter Cards ── #}
+{% set m = data.metrics %}
+<div class="es-metrics">
+    <div class="es-metric-card">
+        <div class="metric-value">{{ m.eps_beat_rate }}%</div>
+        <div class="metric-label">EPS Beat Rate</div>
+    </div>
+    <div class="es-metric-card">
+        <div class="metric-value">{{ m.rev_beat_rate }}%</div>
+        <div class="metric-label">Revenue Beat Rate</div>
+    </div>
+    <div class="es-metric-card">
+        <div class="metric-value">{{ m.dual_beats }}</div>
+        <div class="metric-label">Dual Beats</div>
+    </div>
+    <div class="es-metric-card">
+        <div class="metric-value {% if m.avg_price_change > 0 %}metric-positive{% elif m.avg_price_change < 0 %}metric-negative{% endif %}">
+            {{ "+" if m.avg_price_change > 0 }}{{ m.avg_price_change }}%
+        </div>
+        <div class="metric-label">Avg Market Reaction</div>
+    </div>
+</div>
+
+{# ── Charts ── #}
+<div class="es-charts">
+    {# Beat vs Miss Distribution (Donut) #}
+    <div class="es-chart-card">
+        <h3>Beat vs. Miss Distribution — {{ data.quarter }}</h3>
+        <div class="es-chart-wrap" id="es-donut-chart"></div>
+    </div>
+
+    {# Beat Rate vs Market Reaction Trend (Line) #}
+    <div class="es-chart-card">
+        <h3>Beat Rate vs. Market Reaction Trend</h3>
+        <div class="es-chart-wrap" id="es-trend-chart"></div>
+    </div>
+</div>
+
+{# ── Detailed Data Table ── #}
+<div class="es-table-wrap">
+    <div class="es-table-header">
+        <h3>Earnings Results — {{ data.index }} ({{ data.quarter }})</h3>
+        <input type="text" class="es-search" id="es-table-search"
+               placeholder="Search ticker or company…" oninput="esFilterTable(this.value)">
+    </div>
+    <table class="es-table" id="es-results-table">
+        <thead>
+            <tr>
+                <th onclick="esSort('symbol')">Ticker <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('name')">Company <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('sector')">Sector <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('date')">Date <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('actual_eps')">EPS <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('est_eps')">EPS Est. <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('eps_surprise_pct')">EPS Surprise <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('rev_surprise_pct')">Rev Surprise <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('price_change')">Reaction <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('guide')">Guide <span class="sort-arrow">▼</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in data.results %}
+            <tr>
+                <td><a href="/stock/{{ r.symbol }}" class="es-ticker-link">{{ r.symbol }}</a></td>
+                <td class="es-name">{{ r.name }}</td>
+                <td class="es-name">{{ r.sector or '—' }}</td>
+                <td>{{ r.date or '—' }}</td>
+                <td class="{% if r.eps_beat %}es-beat{% elif r.eps_beat == false %}es-miss{% endif %}">
+                    {{ r.actual_eps if r.actual_eps is not none else '—' }}
+                </td>
+                <td>{{ r.est_eps if r.est_eps is not none else '—' }}</td>
+                <td class="{% if r.eps_surprise_pct is not none and r.eps_surprise_pct > 0 %}es-beat{% elif r.eps_surprise_pct is not none and r.eps_surprise_pct < 0 %}es-miss{% endif %}">
+                    {% if r.eps_surprise_pct is not none %}{{ "+" if r.eps_surprise_pct > 0 }}{{ r.eps_surprise_pct }}%{% else %}—{% endif %}
+                </td>
+                <td class="{% if r.rev_surprise_pct is not none and r.rev_surprise_pct > 0 %}es-beat{% elif r.rev_surprise_pct is not none and r.rev_surprise_pct < 0 %}es-miss{% endif %}">
+                    {% if r.rev_surprise_pct is not none %}{{ "+" if r.rev_surprise_pct > 0 }}{{ r.rev_surprise_pct }}%{% else %}—{% endif %}
+                </td>
+                <td class="{% if r.price_change is not none and r.price_change > 0 %}es-beat{% elif r.price_change is not none and r.price_change < 0 %}es-miss{% endif %}">
+                    {% if r.price_change is not none %}{{ "+" if r.price_change > 0 }}{{ r.price_change }}%{% else %}—{% endif %}
+                </td>
+                <td class="{% if r.guide == 'Raised' %}es-guide-raised{% elif r.guide == 'Lowered' %}es-guide-lowered{% else %}es-guide-maintained{% endif %}">
+                    {{ r.guide }}
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not data.results %}
+            <tr><td colspan="10" style="text-align:center; padding:2em; color:var(--pp-text-muted);">No earnings data available for this period.</td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<script>
+(function() {
+    /* ── Donut chart: Beat / Miss / Inline ── */
+    var donutEl = document.getElementById('es-donut-chart');
+    if (donutEl) {
+        window.requireECharts(function() {
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            var textColor = isDark ? '#ccc' : '#333';
+            var chart = echarts.init(donutEl);
+            chart.setOption({
+                tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+                legend: {
+                    bottom: 0, textStyle: { color: textColor, fontSize: 12 },
+                    data: ['EPS Beat', 'EPS Miss', 'EPS Inline', 'Rev Beat', 'Rev Miss', 'Rev Inline']
+                },
+                series: [
+                    {
+                        name: 'EPS', type: 'pie', radius: ['30%', '55%'],
+                        center: ['30%', '45%'], label: { show: false },
+                        emphasis: { label: { show: true, fontWeight: 'bold' } },
+                        data: [
+                            { value: {{ m.eps_beats }}, name: 'EPS Beat', itemStyle: { color: '#22c55e' } },
+                            { value: {{ m.eps_misses }}, name: 'EPS Miss', itemStyle: { color: '#ef4444' } },
+                            { value: {{ m.eps_inline }}, name: 'EPS Inline', itemStyle: { color: '#a1a1aa' } }
+                        ]
+                    },
+                    {
+                        name: 'Revenue', type: 'pie', radius: ['30%', '55%'],
+                        center: ['70%', '45%'], label: { show: false },
+                        emphasis: { label: { show: true, fontWeight: 'bold' } },
+                        data: [
+                            { value: {{ m.rev_beats }}, name: 'Rev Beat', itemStyle: { color: '#22c55e' } },
+                            { value: {{ m.rev_misses }}, name: 'Rev Miss', itemStyle: { color: '#ef4444' } },
+                            { value: {{ m.rev_inline }}, name: 'Rev Inline', itemStyle: { color: '#a1a1aa' } }
+                        ]
+                    }
+                ]
+            });
+            window.addEventListener('resize', function() { chart.resize(); });
+        });
+    }
+
+    /* ── Trend chart: Beat Rate vs Market Reaction ── */
+    var trendEl = document.getElementById('es-trend-chart');
+    if (trendEl) {
+        window.requireECharts(function() {
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            var textColor = isDark ? '#ccc' : '#333';
+            var gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+            var trend = {{ trend_data | tojson }};
+            var chart = echarts.init(trendEl);
+            chart.setOption({
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        var s = params[0].axisValue + '<br/>';
+                        params.forEach(function(p) {
+                            s += p.marker + ' ' + p.seriesName + ': ' + p.value + (p.seriesName.indexOf('Reaction') >= 0 ? '%' : '%') + '<br/>';
+                        });
+                        return s;
+                    }
+                },
+                legend: { bottom: 0, textStyle: { color: textColor, fontSize: 12 } },
+                grid: { top: 20, right: 60, bottom: 50, left: 50 },
+                xAxis: {
+                    type: 'category',
+                    data: trend.map(function(d) { return d.quarter; }),
+                    axisLabel: { color: textColor, fontSize: 11 },
+                    axisLine: { lineStyle: { color: gridColor } }
+                },
+                yAxis: [
+                    {
+                        type: 'value', name: 'Beat Rate %', position: 'left',
+                        axisLabel: { color: textColor, formatter: '{value}%' },
+                        splitLine: { lineStyle: { color: gridColor } },
+                        nameTextStyle: { color: textColor }
+                    },
+                    {
+                        type: 'value', name: 'Reaction %', position: 'right',
+                        axisLabel: { color: textColor, formatter: '{value}%' },
+                        splitLine: { show: false },
+                        nameTextStyle: { color: textColor }
+                    }
+                ],
+                series: [
+                    {
+                        name: 'EPS Beat Rate', type: 'line', smooth: true,
+                        data: trend.map(function(d) { return d.eps_beat_rate; }),
+                        lineStyle: { width: 2.5, color: '#3b82f6' },
+                        itemStyle: { color: '#3b82f6' }, symbol: 'circle', symbolSize: 6
+                    },
+                    {
+                        name: 'Avg Market Reaction', type: 'bar', yAxisIndex: 1,
+                        data: trend.map(function(d) { return d.avg_price_change; }),
+                        itemStyle: {
+                            color: function(p) { return p.value >= 0 ? '#22c55e' : '#ef4444'; },
+                            borderRadius: [3, 3, 0, 0]
+                        },
+                        barWidth: '40%'
+                    }
+                ]
+            });
+            window.addEventListener('resize', function() { chart.resize(); });
+        });
+    }
+
+    /* ── Table search ── */
+    window.esFilterTable = function(query) {
+        query = query.toLowerCase();
+        var rows = document.querySelectorAll('#es-results-table tbody tr');
+        rows.forEach(function(row) {
+            var text = row.textContent.toLowerCase();
+            row.style.display = text.indexOf(query) >= 0 ? '' : 'none';
+        });
+    };
+
+    /* ── Table sort ── */
+    var sortCol = null, sortAsc = true;
+    window.esSort = function(col) {
+        if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
+        var tbody = document.querySelector('#es-results-table tbody');
+        var rows = Array.from(tbody.querySelectorAll('tr'));
+        var colMap = { symbol: 0, name: 1, sector: 2, date: 3, actual_eps: 4,
+                       est_eps: 5, eps_surprise_pct: 6, rev_surprise_pct: 7,
+                       price_change: 8, guide: 9 };
+        var idx = colMap[col] || 0;
+        rows.sort(function(a, b) {
+            var va = a.cells[idx].textContent.trim().replace('%', '').replace('+', '');
+            var vb = b.cells[idx].textContent.trim().replace('%', '').replace('+', '');
+            var na = parseFloat(va), nb = parseFloat(vb);
+            if (!isNaN(na) && !isNaN(nb)) { return sortAsc ? na - nb : nb - na; }
+            return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+        });
+        rows.forEach(function(r) { tbody.appendChild(r); });
+        // Update sort arrows
+        document.querySelectorAll('.es-table th').forEach(function(th, i) {
+            th.classList.toggle('sorted', i === idx);
+        });
+    };
+})();
+</script>
