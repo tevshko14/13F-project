@@ -146,6 +146,20 @@ class StockInfo:
     issuer_name: str | None
     cusip: str | None
     logo_domain: str | None = None  # e.g. "apple.com" for Clearbit logo lookup
+    # SEO-enrichment fields (from yfinance .info, zero extra API cost)
+    long_business_summary: str | None = None
+    sector: str | None = None
+    industry: str | None = None
+    market_cap: int | None = None
+    trailing_pe: float | None = None
+    forward_pe: float | None = None
+    dividend_yield: float | None = None
+    beta: float | None = None
+    fifty_two_week_high: float | None = None
+    fifty_two_week_low: float | None = None
+    current_price: float | None = None
+    recommendation_key: str | None = None  # e.g. "buy", "hold"
+    exchange: str | None = None  # e.g. "NMS" (NASDAQ)
 
 
 @dataclass

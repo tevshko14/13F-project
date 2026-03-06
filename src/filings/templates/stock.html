@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} Superinvestor Holdings & 13F Activity | PaperPanda{% endblock %}
-{% block meta_description %}See which superinvestors hold {{ stock_info.ticker or stock_info.cusip or "this stock" }}{% if stock_info.issuer_name %} ({{ stock_info.issuer_name }}){% endif %}. Track 13F filings, analyst ratings, insider trades, and quarterly activity.{% endblock %}
+{% block title %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }}{% if stock and stock.num_holders %} | {{ stock.num_holders }} Superinvestor Holder{{ "s" if stock.num_holders != 1 }}{% endif %}, 13F Activity & Analysis | PaperPanda{% endblock %}
+{% block meta_description %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} ({{ stock_info.issuer_name or "Stock Detail" }}){% if stock_info.sector %} — {{ stock_info.sector }}{% endif %}{% if stock_info.industry %}, {{ stock_info.industry }}{% endif %} stock held by {{ stock.num_holders if stock else 0 }} superinvestors. Track 13F filings, analyst ratings, insider trades, and quarterly activity on PaperPanda.{% endblock %}
 {% block og_title %}{{ stock_info.ticker or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} | PaperPanda{% endblock %}
 {% block og_description %}See which superinvestors hold {{ stock_info.ticker or "this stock" }}{% if stock_info.issuer_name %} ({{ stock_info.issuer_name }}){% endif %}. Track 13F filings, analyst ratings, insider trades, and quarterly activity.{% endblock %}
 {% block twitter_title %}{{ stock_info.ticker or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} | PaperPanda{% endblock %}
@@ -17,6 +17,27 @@
     ]
 }
 </script>
+{% if stock_info.issuer_name %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Dataset",
+    "name": "{{ stock_info.ticker }} — {{ stock_info.issuer_name }} Superinvestor Holdings",
+    "description": "13F filing data showing which superinvestors hold {{ stock_info.ticker }} ({{ stock_info.issuer_name }}), including position sizes, portfolio weights, and quarterly activity.",
+    "url": "https://paperpanda.io/stock/{{ stock_info.ticker }}",
+    "keywords": ["13F filings", "{{ stock_info.ticker }}", "{{ stock_info.issuer_name }}", "superinvestor", "hedge fund holdings"{% if stock_info.sector %}, "{{ stock_info.sector }}"{% endif %}],
+    "creator": {
+        "@type": "Organization",
+        "name": "PaperPanda",
+        "url": "https://paperpanda.io"
+    }{% if stock %},
+    "variableMeasured": [
+        {"@type": "PropertyValue", "name": "Number of Superinvestor Holders", "value": "{{ stock.num_holders }}"},
+        {"@type": "PropertyValue", "name": "Combined Position Value (USD)", "value": "{{ stock.combined_value }}"}
+    ]{% endif %}
+}
+</script>
+{% endif %}
 {% endblock %}
 {% block content %}
 <hgroup>
@@ -47,6 +68,236 @@
         {% endif %}
     </p>
 </hgroup>
+
+{# ── SEO: Server-Rendered Company Overview (visible to Googlebot) ── #}
+<style>
+    .seo-overview {
+        margin-bottom: 1.5em;
+        padding-bottom: 1em;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .seo-metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.6em;
+        margin-bottom: 1.2em;
+    }
+    .seo-metric {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15em;
+        padding: 0.55em 0.75em;
+        border-radius: 8px;
+        background: var(--pp-surface-alt);
+        border: 1px solid var(--pp-border-light);
+    }
+    .seo-metric-label {
+        font-size: 0.68em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--pp-sub-text-light);
+    }
+    .seo-metric-value {
+        font-size: 1.05em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .seo-description {
+        margin-bottom: 1.2em;
+    }
+    .seo-description summary {
+        cursor: pointer;
+        list-style: none;
+        margin-bottom: 0.5em;
+    }
+    .seo-description summary::-webkit-details-marker { display: none; }
+    .seo-description p {
+        font-size: 0.88em;
+        line-height: 1.6;
+        color: var(--pp-text-secondary);
+        margin: 0.4em 0;
+    }
+    .seo-classification {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5em 1.2em;
+        font-size: 0.82em !important;
+        color: var(--pp-sub-text) !important;
+    }
+    .seo-holder-summary {
+        margin-bottom: 1.2em;
+    }
+    .seo-holder-summary p {
+        font-size: 0.88em;
+        line-height: 1.6;
+        color: var(--pp-text-secondary);
+        margin: 0.4em 0;
+    }
+    .seo-holder-summary a {
+        color: var(--pp-link);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .seo-holder-summary a:hover { text-decoration: underline; }
+    .seo-related {
+        margin-top: 0.8em;
+    }
+    .seo-related-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 0.5em;
+    }
+    .seo-related-link {
+        display: flex;
+        flex-direction: column;
+        padding: 0.5em 0.7em;
+        border-radius: 6px;
+        border: 1px solid var(--pp-border-light);
+        background: var(--pp-surface);
+        text-decoration: none;
+        transition: background 0.15s, border-color 0.15s;
+    }
+    .seo-related-link:hover {
+        background: var(--pp-surface-alt);
+        border-color: var(--pp-overlay-20);
+    }
+    .seo-related-link strong {
+        font-size: 0.92em;
+        color: var(--pp-text);
+    }
+    .seo-related-link span {
+        font-size: 0.72em;
+        color: var(--pp-sub-text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    @media (max-width: 600px) {
+        .seo-metrics-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        .seo-related-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+</style>
+{% if stock_info.long_business_summary or stock_info.sector or (stock and stock.holders) %}
+<section class="seo-overview">
+    {# ── Key Metrics Grid ── #}
+    {% if stock_info.market_cap or stock_info.current_price %}
+    <div class="seo-metrics-grid">
+        {% if stock_info.current_price %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Price</span>
+            <span class="seo-metric-value">${{ "%.2f"|format(stock_info.current_price) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.market_cap %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Market Cap</span>
+            <span class="seo-metric-value">
+                {% if stock_info.market_cap >= 1e12 %}${{ "%.2f"|format(stock_info.market_cap / 1e12) }}T
+                {% elif stock_info.market_cap >= 1e9 %}${{ "%.1f"|format(stock_info.market_cap / 1e9) }}B
+                {% else %}${{ "%.0f"|format(stock_info.market_cap / 1e6) }}M{% endif %}
+            </span>
+        </div>
+        {% endif %}
+        {% if stock_info.trailing_pe %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">P/E Ratio</span>
+            <span class="seo-metric-value">{{ "%.1f"|format(stock_info.trailing_pe) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.dividend_yield %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Div. Yield</span>
+            <span class="seo-metric-value">{{ "%.2f"|format(stock_info.dividend_yield * 100) }}%</span>
+        </div>
+        {% endif %}
+        {% if stock_info.fifty_two_week_low and stock_info.fifty_two_week_high %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">52-Week Range</span>
+            <span class="seo-metric-value">${{ "%.2f"|format(stock_info.fifty_two_week_low) }} – ${{ "%.2f"|format(stock_info.fifty_two_week_high) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.beta %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Beta</span>
+            <span class="seo-metric-value">{{ "%.2f"|format(stock_info.beta) }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Company Description ── #}
+    {% if stock_info.long_business_summary %}
+    <details class="seo-description" open>
+        <summary>
+            <h2 style="display: inline; font-size: 1.05em; margin: 0;">About {{ stock_info.issuer_name or stock_info.ticker }}</h2>
+        </summary>
+        <p>{{ stock_info.long_business_summary }}</p>
+        {% if stock_info.sector or stock_info.industry %}
+        <p class="seo-classification">
+            {% if stock_info.sector %}<span>Sector: <strong>{{ stock_info.sector }}</strong></span>{% endif %}
+            {% if stock_info.industry %}<span>Industry: <strong>{{ stock_info.industry }}</strong></span>{% endif %}
+            {% if stock_info.exchange %}<span>Exchange: <strong>{{ stock_info.exchange }}</strong></span>{% endif %}
+        </p>
+        {% endif %}
+    </details>
+    {% endif %}
+
+    {# ── Superinvestor Ownership Summary (natural language for Googlebot) ── #}
+    {% if stock and stock.holders %}
+    <div class="seo-holder-summary">
+        <h2 style="font-size: 1.05em;">Who Owns {{ stock_info.ticker or "This Stock" }}? Superinvestor Holdings</h2>
+        <p>
+            {{ stock_info.issuer_name or stock_info.ticker }} is held by
+            <strong>{{ stock.num_holders }}</strong> tracked superinvestor{{ "s" if stock.num_holders != 1 else "" }},
+            with a combined position value of
+            <strong>
+                {% if stock.combined_value >= 1e9 %}${{ "%.1f"|format(stock.combined_value / 1e9) }} billion
+                {% elif stock.combined_value >= 1e6 %}${{ "%.0f"|format(stock.combined_value / 1e6) }} million
+                {% else %}${{ "{:,.0f}".format(stock.combined_value) }}{% endif %}
+            </strong>.
+            {% set top_holders = stock.holders[:3] %}
+            The largest positions are held by
+            {% for h in top_holders %}
+                <a href="/holdings/{{ h.fund_cik }}">{{ h.fund_display_name }}</a>
+                ({{ "%.1f"|format(h.pct_of_portfolio) }}% of portfolio){% if not loop.last %}, {% else %}.{% endif %}
+            {% endfor %}
+        </p>
+        {% set buyers = [] %}
+        {% set sellers = [] %}
+        {% for h in stock.holders %}
+            {% if h.activity in ["NEW BUY", "ADD"] %}{% if buyers.append(h) %}{% endif %}{% endif %}
+            {% if h.activity in ["REDUCE", "SOLD"] %}{% if sellers.append(h) %}{% endif %}{% endif %}
+        {% endfor %}
+        {% if buyers or sellers %}
+        <p>
+            In the most recent quarter{% if buyers %},
+            <strong>{{ buyers|length }}</strong> superinvestor{{ "s" if buyers|length != 1 else "" }} added or initiated positions{% endif %}{% if buyers and sellers %} while {% endif %}{% if sellers %}<strong>{{ sellers|length }}</strong> reduced or exited{% endif %}.
+        </p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Related Stocks (internal linking) ── #}
+    {% if related_stocks %}
+    <div class="seo-related">
+        <h3 style="font-size: 0.92em; margin-bottom: 0.6em;">Also Held by These Superinvestors</h3>
+        <div class="seo-related-grid">
+            {% for rs in related_stocks %}
+            <a href="/stock/{{ rs.ticker }}" class="seo-related-link">
+                <strong>{{ rs.ticker }}</strong>
+                <span>{{ rs.issuer }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endif %}
 
 {# ── Tab Navigation ── #}
 <div class="stock-tabs" style="margin-bottom: 1.5em;">

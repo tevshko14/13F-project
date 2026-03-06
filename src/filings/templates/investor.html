@@ -17,6 +17,25 @@
     ]
 }
 </script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Dataset",
+    "name": "{{ investor_name or fund.name }} — 13F Portfolio Holdings",
+    "description": "SEC 13F filing data for {{ fund.name }}, showing current portfolio positions, quarterly changes, and historical activity.",
+    "url": "https://paperpanda.io/holdings/{{ fund.cik }}",
+    "keywords": ["13F filings", "{{ investor_name or fund.name }}", "{{ fund.name }}", "portfolio holdings", "hedge fund"],
+    "creator": {
+        "@type": "Organization",
+        "name": "PaperPanda",
+        "url": "https://paperpanda.io"
+    },
+    "variableMeasured": [
+        {"@type": "PropertyValue", "name": "Total Portfolio Value (USD)", "value": "{{ fund.total_value }}"},
+        {"@type": "PropertyValue", "name": "Number of Holdings", "value": "{{ fund.total_holdings }}"}
+    ]
+}
+</script>
 {% endblock %}
 {% block content %}
 {% from "partials/ticker_link.html" import ticker_link %}
@@ -26,6 +45,56 @@
        Report Period: {{ fund.report_period }} &middot; Filed: {{ fund.filing_date }}</p>
 </hgroup>
 
+{# ── SEO: Server-Rendered Portfolio Summary (visible to Googlebot) ── #}
+{% if seo_summary and seo_summary.top_holdings %}
+<style>
+    .inv-seo-summary {
+        margin-bottom: 1.5em;
+        padding-bottom: 1em;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .inv-seo-summary h2 {
+        font-size: 1.05em;
+        margin: 0 0 0.5em;
+    }
+    .inv-seo-summary p {
+        font-size: 0.88em;
+        line-height: 1.6;
+        color: var(--pp-text-secondary);
+        margin: 0.4em 0;
+    }
+    .inv-seo-summary a {
+        color: var(--pp-link);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .inv-seo-summary a:hover { text-decoration: underline; }
+</style>
+<section class="inv-seo-summary">
+    <h2>{{ investor_name or fund.name }} — 13F Portfolio Summary</h2>
+    <p>
+        {{ investor_name or fund.name }} manages a
+        <strong>
+            {% if seo_summary.portfolio_value >= 1e9 %}${{ "%.1f"|format(seo_summary.portfolio_value / 1e9) }} billion
+            {% elif seo_summary.portfolio_value >= 1e6 %}${{ "%.0f"|format(seo_summary.portfolio_value / 1e6) }} million
+            {% else %}${{ "{:,.0f}".format(seo_summary.portfolio_value) }}{% endif %}
+        </strong>
+        portfolio across <strong>{{ seo_summary.num_holdings }}</strong> positions
+        as of {{ seo_summary.report_period }}.
+        Top holdings include
+        {% for h in seo_summary.top_holdings %}
+            {% if h.ticker %}<a href="/stock/{{ h.ticker }}">{{ h.ticker }}</a>{% else %}{{ h.issuer }}{% endif %}
+            ({{ "%.1f"|format(h.pct) }}%){% if not loop.last %}, {% else %}.{% endif %}
+        {% endfor %}
+    </p>
+    {% if seo_summary.new_buys or seo_summary.sold or seo_summary.adds or seo_summary.reduces %}
+    <p>
+        In the latest quarter,
+        {% if seo_summary.new_buys %}{{ investor_name or fund.name }} initiated <strong>{{ seo_summary.new_buys }}</strong> new position{{ "s" if seo_summary.new_buys != 1 }}{% endif %}{% if seo_summary.new_buys and (seo_summary.adds or seo_summary.sold or seo_summary.reduces) %}, {% endif %}{% if seo_summary.adds %}added to <strong>{{ seo_summary.adds }}</strong> existing position{{ "s" if seo_summary.adds != 1 }}{% endif %}{% if seo_summary.adds and (seo_summary.sold or seo_summary.reduces) %}, {% endif %}{% if seo_summary.reduces %}reduced <strong>{{ seo_summary.reduces }}</strong> position{{ "s" if seo_summary.reduces != 1 }}{% endif %}{% if seo_summary.reduces and seo_summary.sold %}, and {% endif %}{% if seo_summary.sold %}exited <strong>{{ seo_summary.sold }}</strong> position{{ "s" if seo_summary.sold != 1 }} entirely{% endif %}.
+    </p>
+    {% endif %}
+</section>
+{% endif %}
 
 <style>
     /* ── Table styling: Paper Panda design ── */

@@ -17,6 +17,17 @@
     ]
 }
 </script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "name": "{{ member.full_name }}",
+    "jobTitle": "{{ member.chamber }} Member",
+    {% if member.party %}"affiliation": {"@type": "Organization", "name": "{{ member.party }} Party"},{% endif %}
+    {% if member.state %}"workLocation": {"@type": "Place", "name": "{{ member.state }}"},{% endif %}
+    "url": "https://paperpanda.io/politician/{{ member.member_id }}"
+}
+</script>
 {% endblock %}
 {% block content %}
 
