@@ -1290,7 +1290,10 @@ def get_yfinance_info(ticker: str) -> dict:
         info = {}
 
     with _yf_info_lock:
-        _yf_info_cache[ticker] = (now, info)
+        # Only cache successful results for the full TTL;
+        # cache empty/failed results for just 60s to allow quick retry.
+        ttl_offset = 0 if info else (_YF_INFO_TTL - 60)
+        _yf_info_cache[ticker] = (now - ttl_offset, info)
     return info
 
 
@@ -1325,6 +1328,25 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
     yf_info = get_yfinance_info(ticker_upper)
     logo_domain = _resolve_logo_domain_from_info(yf_info)
 
+    # Extract SEO fields from yfinance (already fetched, zero extra cost)
+    seo = {
+        "long_business_summary": yf_info.get("longBusinessSummary"),
+        "sector": yf_info.get("sector"),
+        "industry": yf_info.get("industry"),
+        "market_cap": yf_info.get("marketCap"),
+        "trailing_pe": yf_info.get("trailingPE"),
+        "forward_pe": yf_info.get("forwardPE"),
+        "dividend_yield": yf_info.get("dividendYield"),
+        "beta": yf_info.get("beta"),
+        "fifty_two_week_high": yf_info.get("fiftyTwoWeekHigh"),
+        "fifty_two_week_low": yf_info.get("fiftyTwoWeekLow"),
+        "current_price": (
+            yf_info.get("currentPrice") or yf_info.get("regularMarketPrice")
+        ),
+        "recommendation_key": yf_info.get("recommendationKey"),
+        "exchange": yf_info.get("exchange"),
+    }
+
     # 1. Try to find in 13F cache (any fund's holdings)
     for fund_data in cache_data.values():
         for h in fund_data.get("all_holdings", []):
@@ -1335,6 +1357,7 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
                     issuer_name=h.get("issuer"),
                     cusip=h.get("cusip"),
                     logo_domain=logo_domain,
+                    **seo,
                 )
 
     # 2. Fall back to yfinance for company name (already fetched, no extra call)
@@ -1357,4 +1380,5 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
         issuer_name=name,
         cusip=None,
         logo_domain=logo_domain,
+        **seo,
     )

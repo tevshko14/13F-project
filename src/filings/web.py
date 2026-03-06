@@ -582,6 +582,23 @@ _HTMX_PARTIAL_CACHE: dict[str, int] = {
 }
 
 
+class TrailingSlashMiddleware(BaseHTTPMiddleware):
+    """301-redirect paths with trailing slashes to their canonical form.
+
+    Prevents Google from indexing /stock/AAPL and /stock/AAPL/ as separate pages.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if path != "/" and path.endswith("/"):
+            # Rebuild URL without trailing slash, preserving query string
+            new_path = path.rstrip("/")
+            query = str(request.url.query)
+            new_url = new_path + ("?" + query if query else "")
+            return RedirectResponse(url=new_url, status_code=301)
+        return await call_next(request)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -660,6 +677,7 @@ app.add_middleware(
     allowed_hosts=["*"],  # Railway terminates TLS; actual host validation not needed
 )
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(TrailingSlashMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
 # Auth middleware (Clerk JWKS)
@@ -1999,6 +2017,33 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=2
                 }
             )
 
+    # ── Build SEO summary for server-rendered content ──
+    seo_summary: dict = {}
+    if holdings_list:
+        total_value = fund.total_value if fund else 0
+        seo_summary["portfolio_value"] = total_value
+        seo_summary["num_holdings"] = fund.total_holdings if fund else len(holdings_list)
+        seo_summary["report_period"] = fund.report_period if fund else ""
+        # Top 5 holdings text
+        top5 = holdings_list[:5]
+        seo_summary["top_holdings"] = [
+            {
+                "ticker": h.ticker,
+                "issuer": h.issuer_name,
+                "pct": h.pct_of_portfolio,
+            }
+            for h in top5
+        ]
+        # Activity counts
+        new_buys = sum(1 for h in holdings_list if h.activity == "NEW BUY")
+        sold = sum(1 for h in holdings_list if h.activity == "SOLD")
+        adds = sum(1 for h in holdings_list if h.activity == "ADD")
+        reduces = sum(1 for h in holdings_list if h.activity == "REDUCE")
+        seo_summary["new_buys"] = new_buys
+        seo_summary["sold"] = sold
+        seo_summary["adds"] = adds
+        seo_summary["reduces"] = reduces
+
     return templates.TemplateResponse(
         "investor.html",
         {
@@ -2008,6 +2053,7 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=2
             "top_n": top_n,
             "investor_name": si.display_name if si else None,
             "quarterly_changes": quarterly_changes,
+            "seo_summary": seo_summary,
         },
     )
 
@@ -2019,7 +2065,7 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=2
 async def compare(request: Request, cik: str):
     if not _valid_cik(cik):
         return PlainTextResponse("Invalid CIK", status_code=400)
-    return RedirectResponse(url=f"/holdings/{cik}", status_code=302)
+    return RedirectResponse(url=f"/holdings/{cik}", status_code=301)
 
 
 # --- Compare API (lazy-loaded into investor page Compare tab) ---
@@ -2166,7 +2212,7 @@ async def portfolio_chart_data(request: Request, cik: str):
 @app.get("/activity", response_class=HTMLResponse)
 async def activity_feed(request: Request):
     """Redirect to grand portfolio with activity tab active."""
-    return RedirectResponse(url="/funds?view=activity", status_code=302)
+    return RedirectResponse(url="/funds?view=activity", status_code=301)
 
 
 # --- Top Funds (formerly Grand Portfolio) ---
@@ -2360,6 +2406,24 @@ async def stock_detail(request: Request, ticker: str):
         stock_info.cusip = detail.cusip or stock_info.cusip
         stock_info.ticker = detail.ticker or stock_info.ticker
 
+    # Build related stocks for internal linking (top holdings of this stock's holders)
+    related_stocks: list[dict] = []
+    if detail and cache_data:
+        _seen = {ticker.upper()}
+        for holder in detail.holders[:3]:
+            fd = cache_data.get(holder.fund_cik, {})
+            for h in fd.get("all_holdings", [])[:10]:
+                t = h.get("ticker")
+                if t and t.upper() not in _seen:
+                    _seen.add(t.upper())
+                    related_stocks.append(
+                        {"ticker": t, "issuer": h.get("issuer", "")}
+                    )
+                if len(related_stocks) >= 8:
+                    break
+            if len(related_stocks) >= 8:
+                break
+
     return templates.TemplateResponse(
         "stock.html",
         {
@@ -2367,6 +2431,7 @@ async def stock_detail(request: Request, ticker: str):
             "stock_info": stock_info,
             "stock": detail,
             "history": history,
+            "related_stocks": related_stocks,
         },
     )
 
@@ -4885,7 +4950,8 @@ _SITEMAP_TTL = 3600  # 1 hour
 
 @app.get("/sitemap.xml")
 async def sitemap_xml():
-    """Dynamic sitemap: static pages + all superinvestor holdings + stock pages.
+    """Dynamic sitemap: static pages + all superinvestor holdings + stock pages
+    + congress pages + politician pages.
     Cached for 1 hour to avoid O(n*m) iteration on every crawler request.
     """
     now = time_module.monotonic()
@@ -4895,27 +4961,33 @@ async def sitemap_xml():
         )
 
     base_url = "https://paperpanda.io"
+    today = date.today().isoformat()
 
     # ── Static pages (no redirects — only real destination URLs) ──
     urls = [
-        f"  <url><loc>{base_url}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>",
-        f"  <url><loc>{base_url}/funds</loc><changefreq>daily</changefreq><priority>0.9</priority></url>",
-        f"  <url><loc>{base_url}/insider-trading</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
-        f"  <url><loc>{base_url}/retail</loc><changefreq>daily</changefreq><priority>0.8</priority></url>",
-        f"  <url><loc>{base_url}/deployment</loc><changefreq>weekly</changefreq><priority>0.7</priority></url>",
-        f"  <url><loc>{base_url}/support</loc><changefreq>monthly</changefreq><priority>0.5</priority></url>",
-        f"  <url><loc>{base_url}/notifications</loc><changefreq>daily</changefreq><priority>0.4</priority></url>",
+        f"  <url><loc>{base_url}/</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>1.0</priority></url>",
+        f"  <url><loc>{base_url}/funds</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.9</priority></url>",
+        f"  <url><loc>{base_url}/insider-trading</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/congress</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/retail</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>",
+        f"  <url><loc>{base_url}/alternative-signals</loc><lastmod>{today}</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>",
+        f"  <url><loc>{base_url}/deployment</loc><lastmod>{today}</lastmod><changefreq>weekly</changefreq><priority>0.7</priority></url>",
+        f"  <url><loc>{base_url}/support</loc><lastmod>{today}</lastmod><changefreq>monthly</changefreq><priority>0.5</priority></url>",
+        f"  <url><loc>{base_url}/notifications</loc><lastmod>{today}</lastmod><changefreq>daily</changefreq><priority>0.4</priority></url>",
     ]
 
     # ── Superinvestor fund pages ──
+    cache_data = _fund_cache()
     for si in SUPERINVESTORS:
+        # Use filing_date as lastmod if available
+        fd = cache_data.get(si.cik, {}).get("filing_date", "") if cache_data else ""
+        lastmod = f"<lastmod>{fd}</lastmod>" if fd else ""
         urls.append(
             f"  <url><loc>{base_url}/holdings/{si.cik}</loc>"
-            f"<changefreq>weekly</changefreq><priority>0.7</priority></url>"
+            f"{lastmod}<changefreq>weekly</changefreq><priority>0.7</priority></url>"
         )
 
     # ── Stock pages (all unique tickers held by superinvestors) ──
-    cache_data = _fund_cache()
     seen_tickers: set[str] = set()
     if cache_data:
         for cik, fund_data in cache_data.items():
@@ -4927,6 +4999,20 @@ async def sitemap_xml():
                         f"  <url><loc>{base_url}/stock/{ticker}</loc>"
                         f"<changefreq>weekly</changefreq><priority>0.6</priority></url>"
                     )
+
+    # ── Politician pages ──
+    try:
+        members = await asyncio.to_thread(supabase_cache.get_all_congress_members)
+        if members:
+            for m in members:
+                mid = m.get("member_id", "")
+                if mid:
+                    urls.append(
+                        f"  <url><loc>{base_url}/politician/{mid}</loc>"
+                        f"<changefreq>weekly</changefreq><priority>0.5</priority></url>"
+                    )
+    except Exception:
+        pass  # Politician pages are best-effort
 
     xml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
