@@ -46,14 +46,7 @@
     .earn-badge-miss { background: rgba(239,68,68,0.12); color: #dc2626; }
     .earn-badge-meet { background: rgba(161,161,170,0.12); color: var(--pp-text-muted); }
     .earn-chart-container { width: 100%; height: 280px; margin-bottom: 1.5em; }
-    .earn-fwd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2em; }
-    .earn-fwd-card {
-        border: 1px solid var(--pp-border); border-radius: 10px;
-        padding: 1.2em; background: var(--pp-surface);
-    }
-    .earn-fwd-card h4 { font-size: 0.9em; font-weight: 700; margin: 0 0 0.8em 0; color: var(--pp-text); }
     @media (max-width: 768px) {
-        .earn-fwd-grid { grid-template-columns: 1fr; }
         .earn-chart-container { height: 220px; }
     }
 </style>
@@ -148,70 +141,6 @@
     </div>
     {% endif %}
 </div>
-
-{# ── Forward Estimates ── #}
-{% if forward_estimates %}
-<div class="earn-section">
-    <div class="earn-section-header">Forward Estimates</div>
-    <div class="earn-fwd-grid">
-        {% if forward_estimates.eps %}
-        <div class="earn-fwd-card">
-            <h4>EPS Estimates</h4>
-            <table class="earn-table" style="font-size: 0.92em;">
-                <thead>
-                    <tr>
-                        <th>Period</th>
-                        <th class="text-right"># Analysts</th>
-                        <th class="text-right">Avg</th>
-                        <th class="text-right">Low</th>
-                        <th class="text-right">High</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for est in forward_estimates.eps %}
-                    <tr>
-                        <td>{{ est.period }}</td>
-                        <td class="text-right">{{ est.analysts if est.analysts is not none else "—" }}</td>
-                        <td class="text-right">{{ "$%.2f" | format(est.avg) if est.avg is not none else "—" }}</td>
-                        <td class="text-right">{{ "$%.2f" | format(est.low) if est.low is not none else "—" }}</td>
-                        <td class="text-right">{{ "$%.2f" | format(est.high) if est.high is not none else "—" }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-
-        {% if forward_estimates.revenue %}
-        <div class="earn-fwd-card">
-            <h4>Revenue Estimates</h4>
-            <table class="earn-table" style="font-size: 0.92em;">
-                <thead>
-                    <tr>
-                        <th>Period</th>
-                        <th class="text-right"># Analysts</th>
-                        <th class="text-right">Avg</th>
-                        <th class="text-right">Low</th>
-                        <th class="text-right">High</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for est in forward_estimates.revenue %}
-                    <tr>
-                        <td>{{ est.period }}</td>
-                        <td class="text-right">{{ est.analysts if est.analysts is not none else "—" }}</td>
-                        <td class="text-right">{{ est.avg_fmt or "—" }}</td>
-                        <td class="text-right">{{ est.low_fmt or "—" }}</td>
-                        <td class="text-right">{{ est.high_fmt or "—" }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-    </div>
-</div>
-{% endif %}
 
 {# ── EPS Dot Chart (ECharts scatter) ── #}
 <script>

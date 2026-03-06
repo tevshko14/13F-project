@@ -2476,6 +2476,28 @@ async def earnings_data(request: Request, ticker: str):
     )
 
 
+@app.get("/api/estimates/{ticker}", response_class=HTMLResponse)
+async def forward_estimates(request: Request, ticker: str):
+    """Forward analyst estimates (EPS + Revenue) for the Estimates pill."""
+    ticker = ticker.upper().strip()
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+
+    from filings import earnings
+
+    data = await _to_heavy(earnings.get_forward_estimates, ticker)
+
+    return templates.TemplateResponse(
+        "partials/estimates.html",
+        {
+            "request": request,
+            "ticker": ticker,
+            "eps": data.get("eps", []) if data else [],
+            "revenue": data.get("revenue", []) if data else [],
+        },
+    )
+
+
 @app.get("/api/web-traffic/{ticker}", response_class=HTMLResponse)
 async def web_traffic_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
@@ -2533,6 +2555,19 @@ async def signals_data(request: Request, ticker: str):
             "wt_wikipedia": wt_data.get("wikipedia"),
             "has_cf_token": bool(web_traffic._get_cf_token()),
         },
+    )
+
+
+@app.get("/api/signals/{ticker}/short-interest", response_class=HTMLResponse)
+async def signals_short_interest(request: Request, ticker: str):
+    """Per-ticker short interest history for the Signals tab pill."""
+    ticker = ticker.upper().strip()
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+    rows = await _to_heavy(supabase_cache.get_short_interest_history, ticker, 24)
+    return templates.TemplateResponse(
+        "partials/short_interest_ticker.html",
+        {"request": request, "ticker": ticker, "history": rows},
     )
 
 
