@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 # ── Configuration ────────────────────────────────────────────────
 _EARNINGS_TTL = 86_400  # 24 hours — earnings don't change once reported
 _FWD_TTL = 3_600  # 1 hour — forward estimates update more often
+_FWD_DB_TTL = 21_600  # 6 hours — DB freshness threshold for estimates
+
+EST_EPS = "eps"
+EST_REVENUE = "revenue"
 
 # ── In-memory L1 caches ─────────────────────────────────────────
 _history_cache: dict[str, tuple[float, list[dict]]] = {}
@@ -51,7 +55,7 @@ def get_earnings_data(ticker: str) -> dict:
     cached = _history_cache.get(ticker)
     if cached and (now - cached[0]) < _EARNINGS_TTL:
         history = cached[1]
-        fwd = _get_forward_estimates(ticker)
+        fwd = get_forward_estimates(ticker)
         return {
             "history": history,
             "forward_estimates": fwd,
@@ -63,23 +67,10 @@ def get_earnings_data(ticker: str) -> dict:
     from filings import supabase_cache
 
     db_rows = supabase_cache.get_earnings_history(ticker, limit=100)
-    db_fresh = False
-    if db_rows:
-        # Check freshness via updated_at on the most recent row
-        latest_updated = db_rows[0].get("updated_at", "")
-        if latest_updated:
-            try:
-                updated_dt = datetime.fromisoformat(
-                    latest_updated.replace("Z", "+00:00")
-                )
-                age = (datetime.now(timezone.utc) - updated_dt).total_seconds()
-                db_fresh = age < _EARNINGS_TTL
-            except (ValueError, TypeError):
-                pass
 
-    if db_fresh:
+    if db_rows and _is_db_fresh(db_rows[0], "updated_at", _EARNINGS_TTL):
         _update_l1(ticker, db_rows)
-        fwd = _get_forward_estimates(ticker)
+        fwd = get_forward_estimates(ticker)
         return {
             "history": db_rows,
             "forward_estimates": fwd,
@@ -103,7 +94,8 @@ def get_earnings_data(ticker: str) -> dict:
 
         _update_l1(ticker, fresh_rows)
         if fwd:
-            _fwd_cache[ticker] = (time.time(), fwd)
+            _update_fwd_l1(ticker, fwd)
+            _persist_estimates_to_db(ticker, fwd)
 
         return {
             "history": fresh_rows,
@@ -117,7 +109,7 @@ def get_earnings_data(ticker: str) -> dict:
         _update_l1(ticker, db_rows)
         return {
             "history": db_rows,
-            "forward_estimates": _get_forward_estimates(ticker),
+            "forward_estimates": get_forward_estimates(ticker),
             "streak": _compute_streak(db_rows),
             "source": "stale",
         }
@@ -128,9 +120,6 @@ def get_earnings_data(ticker: str) -> dict:
         "streak": {},
         "source": "empty",
     }
-
-
-_FWD_DB_TTL = 21_600  # 6 hours — DB freshness threshold for estimates
 
 
 def get_forward_estimates(ticker: str) -> dict | None:
@@ -155,22 +144,10 @@ def get_forward_estimates(ticker: str) -> dict | None:
     from filings import supabase_cache
 
     db_rows = supabase_cache.get_analyst_estimates(ticker)
-    db_fresh = False
-    if db_rows:
-        fetched_at = db_rows[0].get("fetched_at", "")
-        if fetched_at:
-            try:
-                fetched_dt = datetime.fromisoformat(
-                    fetched_at.replace("Z", "+00:00")
-                )
-                age = (datetime.now(timezone.utc) - fetched_dt).total_seconds()
-                db_fresh = age < _FWD_DB_TTL
-            except (ValueError, TypeError):
-                pass
 
-    if db_fresh:
+    if db_rows and _is_db_fresh(db_rows[0], "fetched_at", _FWD_DB_TTL):
         result = _db_rows_to_estimates(db_rows)
-        _fwd_cache[ticker] = (time.time(), result)
+        _update_fwd_l1(ticker, result)
         return result
 
     # ── L3: live yfinance fetch ────────────────────────────────
@@ -184,14 +161,14 @@ def get_forward_estimates(ticker: str) -> dict | None:
         fresh = None
 
     if fresh:
-        _fwd_cache[ticker] = (time.time(), fresh)
+        _update_fwd_l1(ticker, fresh)
         _persist_estimates_to_db(ticker, fresh)
         return fresh
 
     # ── Stale fallback ─────────────────────────────────────────
     if db_rows:
         result = _db_rows_to_estimates(db_rows)
-        _fwd_cache[ticker] = (time.time(), result)
+        _update_fwd_l1(ticker, result)
         return result
 
     return cached[1] if cached else None
@@ -204,7 +181,7 @@ def _persist_estimates_to_db(ticker: str, data: dict) -> None:
     rows: list[dict] = []
     now_iso = datetime.now(timezone.utc).isoformat()
 
-    for est_type in ("eps", "revenue"):
+    for est_type in (EST_EPS, EST_REVENUE):
         for item in data.get(est_type, []):
             rows.append({
                 "ticker": ticker.upper(),
@@ -231,7 +208,7 @@ def _db_rows_to_estimates(db_rows: list[dict]) -> dict:
     """Convert DB rows back to the ``{eps: [...], revenue: [...]}`` format."""
     result: dict = {}
     for row in db_rows:
-        est_type = row.get("estimate_type", "eps")
+        est_type = row.get("estimate_type", EST_EPS)
         item = {
             "period_key": row.get("period_key", ""),
             "period": row.get("period_label", ""),
@@ -242,7 +219,7 @@ def _db_rows_to_estimates(db_rows: list[dict]) -> dict:
             "year_ago": row.get("year_ago_value"),
             "growth": row.get("growth_pct"),
         }
-        if est_type == "revenue":
+        if est_type == EST_REVENUE:
             item["avg_fmt"] = _fmt_revenue(item["avg"])
             item["low_fmt"] = _fmt_revenue(item["low"])
             item["high_fmt"] = _fmt_revenue(item["high"])
@@ -255,31 +232,32 @@ def _db_rows_to_estimates(db_rows: list[dict]) -> dict:
 
 
 def _update_l1(ticker: str, rows: list[dict]) -> None:
-    """Update L1 in-memory cache, evicting oldest if full."""
+    """Update L1 in-memory history cache, evicting oldest if full."""
     if len(_history_cache) >= _MAX_CACHE:
         oldest = min(_history_cache, key=lambda k: _history_cache[k][0])
         _history_cache.pop(oldest, None)
     _history_cache[ticker] = (time.time(), rows)
 
 
-def _get_forward_estimates(ticker: str) -> dict | None:
-    """Return cached forward estimates, or fetch fresh from yfinance."""
-    now = time.time()
-    cached = _fwd_cache.get(ticker)
-    if cached and (now - cached[0]) < _FWD_TTL:
-        return cached[1]
+def _update_fwd_l1(ticker: str, data: dict) -> None:
+    """Update L1 in-memory forward-estimates cache, evicting oldest if full."""
+    if len(_fwd_cache) >= _MAX_CACHE:
+        oldest = min(_fwd_cache, key=lambda k: _fwd_cache[k][0])
+        _fwd_cache.pop(oldest, None)
+    _fwd_cache[ticker] = (time.time(), data)
 
+
+def _is_db_fresh(row: dict, field: str, ttl: float) -> bool:
+    """Check if a DB row's timestamp *field* is within *ttl* seconds of now."""
+    ts = row.get(field, "")
+    if not ts:
+        return False
     try:
-        import yfinance as yf
-
-        tk = yf.Ticker(ticker)
-        fwd = _parse_forward_estimates(tk)
-        if fwd:
-            _fwd_cache[ticker] = (now, fwd)
-        return fwd
-    except Exception as exc:
-        logger.debug("Forward estimates fetch failed for %s: %s", ticker, exc)
-        return cached[1] if cached else None
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - dt).total_seconds()
+        return age < ttl
+    except (ValueError, TypeError):
+        return False
 
 
 def _get_fy_end_month(tk) -> int | None:
@@ -488,25 +466,57 @@ def _parse_forward_estimates(tk) -> dict | None:
 
 
 def _compute_streak(history: list[dict]) -> dict:
-    """Compute EPS streak + summary metrics from earnings history."""
+    """Compute EPS streak + summary metrics from earnings history.
+
+    Single pass over *history* to compute:
+      - consecutive streak, beat rate, avg surprise %,
+      - biggest beat (with quarter), largest miss (with quarter).
+    """
     if not history:
         return {}
 
-    # ── Consecutive streak ──────────────────────────────────────
     eps_streak = 0
     direction = None  # True = beat, False = miss
+    streak_done = False
+
+    beat_count = 0
+    total_rated = 0
+    surprise_sum = 0.0
+    surprise_count = 0
+    best_pct: float | None = None
+    best_row: dict = {}
+    worst_pct: float | None = None
+    worst_row: dict = {}
 
     for row in history:
         beat = row.get("beat_eps")
-        if beat is None:
-            break
-        if direction is None:
-            direction = beat
-        if beat != direction:
-            break
-        eps_streak += 1
+        if beat is not None:
+            total_rated += 1
+            if beat:
+                beat_count += 1
+            # Streak: only from the front (newest), stop on first disagreement
+            if not streak_done:
+                if direction is None:
+                    direction = beat
+                if beat != direction:
+                    streak_done = True
+                else:
+                    eps_streak += 1
 
+        surprise = row.get("eps_surprise_pct")
+        if surprise is not None:
+            surprise_sum += surprise
+            surprise_count += 1
+            if best_pct is None or surprise > best_pct:
+                best_pct = surprise
+                best_row = row
+            if worst_pct is None or surprise < worst_pct:
+                worst_pct = surprise
+                worst_row = row
+
+    # ── Build result dict ──────────────────────────────────────
     result: dict = {}
+
     if eps_streak > 0:
         if direction:
             result["eps_streak"] = eps_streak
@@ -519,32 +529,23 @@ def _compute_streak(history: list[dict]) -> dict:
                 f"{eps_streak} consecutive miss{'es' if eps_streak != 1 else ''}"
             )
 
-    # ── Beat rate ───────────────────────────────────────────────
-    rated = [r for r in history if r.get("beat_eps") is not None]
-    if rated:
-        beat_count = sum(1 for r in rated if r["beat_eps"])
+    if total_rated:
         result["beat_count"] = beat_count
-        result["total_count"] = len(rated)
+        result["total_count"] = total_rated
 
-    # ── Avg surprise % ──────────────────────────────────────────
-    surprises = [r for r in history if r.get("eps_surprise_pct") is not None]
-    if surprises:
-        avg = sum(r["eps_surprise_pct"] for r in surprises) / len(surprises)
-        result["avg_surprise_pct"] = round(avg, 2)
+    if surprise_count:
+        result["avg_surprise_pct"] = round(surprise_sum / surprise_count, 2)
 
-        # Biggest beat (max surprise)
-        best = max(surprises, key=lambda r: r["eps_surprise_pct"])
-        result["biggest_beat_pct"] = best["eps_surprise_pct"]
+        result["biggest_beat_pct"] = best_pct
         result["biggest_beat_quarter"] = (
-            best.get("fiscal_quarter") or best.get("report_date", "")
+            best_row.get("fiscal_quarter") or best_row.get("report_date", "")
         )
 
-        # Largest miss (min surprise, only if negative)
-        worst = min(surprises, key=lambda r: r["eps_surprise_pct"])
-        if worst["eps_surprise_pct"] < 0:
-            result["largest_miss_pct"] = worst["eps_surprise_pct"]
+        if worst_pct is not None and worst_pct < 0:
+            result["largest_miss_pct"] = worst_pct
             result["largest_miss_quarter"] = (
-                worst.get("fiscal_quarter") or worst.get("report_date", "")
+                worst_row.get("fiscal_quarter")
+                or worst_row.get("report_date", "")
             )
 
     return result
