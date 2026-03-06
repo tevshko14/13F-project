@@ -88,6 +88,13 @@
                 </button>
             </li>
             <li>
+                <button id="tab-earnings-btn"
+                        class="stock-tab"
+                        onclick="switchTab('earnings')">
+                    Earnings
+                </button>
+            </li>
+            <li>
                 <button id="tab-filings-btn"
                         class="stock-tab"
                         onclick="switchTab('filings')">
@@ -959,6 +966,15 @@
     </div>
 </div>
 
+{# ── Earnings Tab ── #}
+<div id="tab-earnings" class="tab-content">
+    <div id="earnings-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading earnings data...
+        </p>
+    </div>
+</div>
+
 {# ── SEC Filings Tab ── #}
 <div id="tab-filings" class="tab-content">
     <div id="filings-content">
@@ -1021,6 +1037,7 @@ window.toggleHolders = function(btn) {
     var analystLoaded = false;
     var signalsLoaded = false;
     var vitalsLoaded = false;
+    var earningsLoaded = false;
     var filingsLoaded = false;
     var insiderLoaded = false;
 
@@ -1128,6 +1145,35 @@ window.toggleHolders = function(btn) {
                 document.getElementById('vitals-content').innerHTML =
                     '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
                     'Vitals data requires a ticker symbol.</p>';
+            }
+        }
+
+        // Lazy-load earnings on first click
+        if (tab === 'earnings' && !earningsLoaded) {
+            earningsLoaded = true;
+            {% if stock_info.ticker %}
+            var earningsUrl = '/api/earnings/{{ stock_info.ticker }}';
+            {% else %}
+            var earningsUrl = null;
+            {% endif %}
+
+            if (earningsUrl) {
+                fetch(earningsUrl)
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) {
+                        var el = document.getElementById('earnings-content');
+                        el.innerHTML = html;
+                        activateScripts(el);
+                    })
+                    .catch(function() {
+                        document.getElementById('earnings-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load earnings data. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('earnings-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Earnings data requires a ticker symbol.</p>';
             }
         }
 

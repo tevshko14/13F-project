@@ -349,6 +349,27 @@ CREATE INDEX IF NOT EXISTS idx_si_date_pct
     ON short_interest_history (report_date DESC, short_pct_float DESC NULLS LAST);
 CREATE INDEX IF NOT EXISTS idx_si_report_date
     ON short_interest_history (report_date DESC);
+
+-- ── Earnings history (quarterly EPS & revenue results, cached from yfinance) ──
+CREATE TABLE IF NOT EXISTS earnings_history (
+    id                   BIGSERIAL PRIMARY KEY,
+    ticker               TEXT NOT NULL,
+    report_date          DATE NOT NULL,
+    fiscal_quarter       TEXT DEFAULT '',
+    eps_estimate         NUMERIC(10,4),
+    eps_actual           NUMERIC(10,4),
+    eps_surprise_pct     NUMERIC(8,4),
+    revenue_estimate     BIGINT,
+    revenue_actual       BIGINT,
+    revenue_surprise_pct NUMERIC(8,4),
+    beat_eps             BOOLEAN,
+    beat_revenue         BOOLEAN,
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(ticker, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_earnings_ticker_date
+    ON earnings_history (ticker, report_date DESC);
 """
 
 
@@ -3098,3 +3119,54 @@ def build_leaderboard_from_db(
             "timestamp": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
         },
     }
+
+
+# ── Earnings history helpers ─────────────────────────────────────
+
+_EARNINGS_COLS = (
+    "ticker,report_date,fiscal_quarter,eps_estimate,eps_actual,"
+    "eps_surprise_pct,revenue_estimate,revenue_actual,"
+    "revenue_surprise_pct,beat_eps,beat_revenue,updated_at"
+)
+
+
+def upsert_earnings_history(rows: list[dict]) -> int:
+    """Batch upsert rows into ``earnings_history``."""
+    client = _get_client()
+    if client is None or not rows:
+        return 0
+
+    upserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("earnings_history").upsert(
+                chunk, on_conflict="ticker,report_date"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_earnings_history chunk %d failed: %s", i, exc)
+
+    return upserted
+
+
+def get_earnings_history(ticker: str, limit: int = 100) -> list[dict]:
+    """Fetch historical earnings for *ticker*, newest first."""
+    client = _get_client()
+    if client is None:
+        return []
+
+    try:
+        resp = (
+            client.table("earnings_history")
+            .select(_EARNINGS_COLS)
+            .eq("ticker", ticker.upper())
+            .order("report_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_earnings_history(%s) failed: %s", ticker, exc)
+        return []

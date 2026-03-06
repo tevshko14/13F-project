@@ -1,0 +1,357 @@
+{# ── Earnings Tab: Quarterly EPS Results + Forward Estimates ── #}
+
+<style>
+    .earn-section { margin-bottom: 2em; }
+    .earn-section-header {
+        font-size: 0.72em; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.08em; color: var(--pp-text-faint);
+        margin-bottom: 1em; padding-bottom: 0.4em;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .earn-streak-row {
+        display: flex; gap: 1.2em; flex-wrap: wrap;
+        margin-bottom: 1.5em;
+    }
+    .earn-streak-card {
+        border: 1px solid var(--pp-border); border-radius: 10px;
+        padding: 1em 1.5em; background: var(--pp-surface);
+        display: flex; flex-direction: column; align-items: center; min-width: 140px;
+    }
+    .earn-streak-value { font-size: 1.6em; font-weight: 700; line-height: 1.2; }
+    .earn-streak-label { font-size: 0.75em; color: var(--pp-text-muted); margin-top: 0.2em; }
+    .earn-beat { color: #16a34a; }
+    .earn-miss { color: #dc2626; }
+    .earn-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+    .earn-table thead th {
+        padding: 0.6em 0.7em; font-size: 0.72em; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--pp-text-faint); background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border); white-space: nowrap;
+        text-align: left;
+    }
+    .earn-table thead th.text-right { text-align: right; }
+    .earn-table tbody td {
+        padding: 0.55em 0.7em; vertical-align: middle;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .earn-table tbody tr:hover { background: var(--pp-surface-alt); }
+    .earn-table tbody tr:last-child td { border-bottom: none; }
+    .earn-table .text-right { text-align: right; }
+    .earn-badge {
+        display: inline-block; padding: 0.15em 0.5em; border-radius: 4px;
+        font-size: 0.78em; font-weight: 700;
+    }
+    .earn-badge-beat { background: rgba(34,197,94,0.12); color: #16a34a; }
+    .earn-badge-miss { background: rgba(239,68,68,0.12); color: #dc2626; }
+    .earn-badge-meet { background: rgba(161,161,170,0.12); color: var(--pp-text-muted); }
+    .earn-chart-container { width: 100%; height: 280px; margin-bottom: 1.5em; }
+    .earn-fwd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2em; }
+    .earn-fwd-card {
+        border: 1px solid var(--pp-border); border-radius: 10px;
+        padding: 1.2em; background: var(--pp-surface);
+    }
+    .earn-fwd-card h4 { font-size: 0.9em; font-weight: 700; margin: 0 0 0.8em 0; color: var(--pp-text); }
+    @media (max-width: 768px) {
+        .earn-fwd-grid { grid-template-columns: 1fr; }
+        .earn-chart-container { height: 220px; }
+    }
+</style>
+
+{% if history %}
+
+{# ── Streak summary cards ── #}
+{% if streak and streak.eps_streak %}
+<div class="earn-streak-row">
+    <div class="earn-streak-card">
+        <div class="earn-streak-value {{ 'earn-beat' if streak.eps_streak > 0 else 'earn-miss' }}">
+            {{ streak.eps_streak | abs }}
+        </div>
+        <div class="earn-streak-label">{{ streak.eps_streak_label }}</div>
+    </div>
+</div>
+{% endif %}
+
+{# ── EPS Trend Chart ── #}
+<div class="earn-section">
+    <div class="earn-section-header">EPS Trend</div>
+    <div class="earn-chart-container">
+        <div id="earn-eps-chart" style="width: 100%; height: 100%;"></div>
+    </div>
+</div>
+
+{# ── Quarterly Results Table ── #}
+<div class="earn-section">
+    <div class="earn-section-header">Quarterly Results</div>
+    <div style="overflow-x: auto;">
+        <table class="earn-table">
+            <thead>
+                <tr>
+                    <th>Report Date</th>
+                    <th>Quarter</th>
+                    <th class="text-right">EPS Est.</th>
+                    <th class="text-right">EPS Actual</th>
+                    <th class="text-right">Surprise</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in history %}
+                <tr{% if loop.index > 8 %} class="earn-row-extra" style="display:none;"{% endif %}>
+                    <td style="white-space: nowrap;">{{ row.report_date }}</td>
+                    <td style="white-space: nowrap;">{{ row.fiscal_quarter or "—" }}</td>
+                    <td class="text-right">
+                        {% if row.eps_estimate is not none %}
+                            ${{ "%.2f" | format(row.eps_estimate) }}
+                        {% else %}—{% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if row.eps_actual is not none %}
+                            <strong>${{ "%.2f" | format(row.eps_actual) }}</strong>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if row.eps_surprise_pct is not none %}
+                            <span class="{{ 'earn-beat' if row.eps_surprise_pct >= 0 else 'earn-miss' }}" style="font-weight: 600;">
+                                {% if row.eps_surprise_pct >= 0 %}+{% endif %}{{ "%.2f" | format(row.eps_surprise_pct) }}%
+                            </span>
+                        {% else %}—{% endif %}
+                    </td>
+                    <td>
+                        {% if row.beat_eps is true %}
+                            <span class="earn-badge earn-badge-beat">Beat</span>
+                        {% elif row.beat_eps is false %}
+                            <span class="earn-badge earn-badge-miss">Miss</span>
+                        {% else %}
+                            <span class="earn-badge earn-badge-meet">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if history|length > 8 %}
+    <div style="text-align: center; margin-top: 0.8em;">
+        <button id="earn-expand-btn" onclick="(function(btn){
+            var extras = document.querySelectorAll('#tab-earnings .earn-row-extra');
+            var showing = btn.dataset.expanded === '1';
+            extras.forEach(function(r){ r.style.display = showing ? 'none' : ''; });
+            btn.dataset.expanded = showing ? '0' : '1';
+            btn.textContent = showing ? 'Show {{ history|length - 8 }} more quarters' : 'Show less';
+        })(this)" data-expanded="0"
+        style="background: none; border: 1px solid var(--pp-border); border-radius: 6px;
+               padding: 0.4em 1.2em; font-size: 0.82em; color: var(--pp-text-muted);
+               cursor: pointer;">
+            Show {{ history|length - 8 }} more quarters
+        </button>
+    </div>
+    {% endif %}
+</div>
+
+{# ── Forward Estimates ── #}
+{% if forward_estimates %}
+<div class="earn-section">
+    <div class="earn-section-header">Forward Estimates</div>
+    <div class="earn-fwd-grid">
+        {% if forward_estimates.eps %}
+        <div class="earn-fwd-card">
+            <h4>EPS Estimates</h4>
+            <table class="earn-table" style="font-size: 0.92em;">
+                <thead>
+                    <tr>
+                        <th>Period</th>
+                        <th class="text-right"># Analysts</th>
+                        <th class="text-right">Avg</th>
+                        <th class="text-right">Low</th>
+                        <th class="text-right">High</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for est in forward_estimates.eps %}
+                    <tr>
+                        <td>{{ est.period }}</td>
+                        <td class="text-right">{{ est.analysts if est.analysts is not none else "—" }}</td>
+                        <td class="text-right">{{ "$%.2f" | format(est.avg) if est.avg is not none else "—" }}</td>
+                        <td class="text-right">{{ "$%.2f" | format(est.low) if est.low is not none else "—" }}</td>
+                        <td class="text-right">{{ "$%.2f" | format(est.high) if est.high is not none else "—" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if forward_estimates.revenue %}
+        <div class="earn-fwd-card">
+            <h4>Revenue Estimates</h4>
+            <table class="earn-table" style="font-size: 0.92em;">
+                <thead>
+                    <tr>
+                        <th>Period</th>
+                        <th class="text-right"># Analysts</th>
+                        <th class="text-right">Avg</th>
+                        <th class="text-right">Low</th>
+                        <th class="text-right">High</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for est in forward_estimates.revenue %}
+                    <tr>
+                        <td>{{ est.period }}</td>
+                        <td class="text-right">{{ est.analysts if est.analysts is not none else "—" }}</td>
+                        <td class="text-right">{{ est.avg_fmt or "—" }}</td>
+                        <td class="text-right">{{ est.low_fmt or "—" }}</td>
+                        <td class="text-right">{{ est.high_fmt or "—" }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{# ── EPS Dot Chart (ECharts scatter) ── #}
+<script>
+(function() {
+    var chartEl = document.getElementById('earn-eps-chart');
+    if (!chartEl) return;
+
+    var allHistory = {{ history | tojson }};
+    // Show last 8 quarters (newest-first → take first 8, then reverse for chronological)
+    var history = allHistory.slice(0, 8).reverse();
+
+    window.requireECharts(function(err) {
+        if (err) {
+            chartEl.innerHTML = '<p style="text-align:center;padding:2em 0;color:var(--pp-text-muted);">Chart unavailable</p>';
+            return;
+        }
+
+        var rootStyle = getComputedStyle(document.documentElement);
+        var textColor = rootStyle.getPropertyValue('--pp-chart-axis-label').trim() || '#71717a';
+        var gridColor = rootStyle.getPropertyValue('--pp-border-light').trim() || 'rgba(128,128,128,0.15)';
+
+        var xLabels = history.map(function(r) {
+            return r.fiscal_quarter || r.report_date;
+        });
+        var estimates = history.map(function(r) { return r.eps_estimate; });
+        var actuals   = history.map(function(r) { return r.eps_actual; });
+
+        var DOT_SIZE = 22;
+
+        var chart = echarts.init(chartEl);
+        chart.setOption({
+            animation: false,
+            backgroundColor: 'transparent',
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'none' },
+                formatter: function(params) {
+                    var i = params[0] ? params[0].dataIndex : 0;
+                    var r = history[i];
+                    var quarter = r.fiscal_quarter || r.report_date;
+                    var html = '<strong>' + quarter + '</strong><br/>';
+                    if (r.eps_estimate != null) html += 'Estimate: $' + r.eps_estimate.toFixed(2) + '<br/>';
+                    if (r.eps_actual != null) {
+                        html += 'Actual: $' + r.eps_actual.toFixed(2);
+                        if (r.eps_estimate != null) {
+                            var diff = r.eps_actual - r.eps_estimate;
+                            var color = diff >= 0 ? '#16a34a' : '#dc2626';
+                            var sign = diff >= 0 ? '+' : '';
+                            html += ' <span style="color:' + color + '">(' + sign + '$' + Math.abs(diff).toFixed(2) + ')</span>';
+                        }
+                    }
+                    return html;
+                }
+            },
+            legend: {
+                data: ['Estimate', 'Actual'],
+                textStyle: { color: textColor, fontSize: 11 },
+                top: 0
+            },
+            grid: { left: 55, right: 20, top: 36, bottom: 90 },
+            xAxis: {
+                type: 'category',
+                data: xLabels,
+                axisLine: { lineStyle: { color: gridColor } },
+                axisTick: { show: false },
+                axisLabel: {
+                    interval: 0,
+                    color: textColor,
+                    fontSize: 10,
+                    lineHeight: 16,
+                    rich: {
+                        q:    { color: textColor,  fontSize: 11, align: 'center', padding: [0,0,2,0] },
+                        beat: { color: '#16a34a',  fontSize: 10, fontWeight: 'bold', align: 'center' },
+                        miss: { color: '#dc2626',  fontSize: 10, fontWeight: 'bold', align: 'center' },
+                        neu:  { color: textColor,  fontSize: 10, align: 'center' },
+                        pos:  { color: '#16a34a',  fontSize: 10, align: 'center' },
+                        neg:  { color: '#dc2626',  fontSize: 10, align: 'center' },
+                    },
+                    formatter: function(value, index) {
+                        if (index >= history.length) return value;
+                        var r = history[index];
+                        var beatLine = '{neu|—}';
+                        var amtLine  = '';
+                        if (r.beat_eps === true) {
+                            beatLine = '{beat|Beat}';
+                            var d = r.eps_actual - r.eps_estimate;
+                            amtLine = '\n{pos|+$' + d.toFixed(2) + '}';
+                        } else if (r.beat_eps === false) {
+                            beatLine = '{miss|Miss}';
+                            var d = r.eps_actual - r.eps_estimate;
+                            amtLine = '\n{neg|$' + d.toFixed(2) + '}';
+                        }
+                        return '{q|' + value + '}\n' + beatLine + amtLine;
+                    }
+                }
+            },
+            yAxis: {
+                type: 'value',
+                axisLabel: { color: textColor, fontSize: 10, formatter: '${value}' },
+                splitLine: { lineStyle: { color: gridColor, type: 'dashed' } }
+            },
+            series: [
+                {
+                    name: 'Estimate',
+                    type: 'scatter',
+                    data: estimates,
+                    symbolSize: DOT_SIZE,
+                    itemStyle: {
+                        color: 'transparent',
+                        borderColor: '#71717a',
+                        borderWidth: 3
+                    },
+                    z: 2
+                },
+                {
+                    name: 'Actual',
+                    type: 'scatter',
+                    data: actuals,
+                    symbolSize: DOT_SIZE,
+                    itemStyle: {
+                        color: function(params) {
+                            var r = history[params.dataIndex];
+                            if (r.beat_eps === true)  return '#16a34a';
+                            if (r.beat_eps === false) return '#dc2626';
+                            return '#71717a';
+                        },
+                        borderWidth: 0
+                    },
+                    z: 3
+                }
+            ]
+        });
+
+        if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
+    });
+})();
+</script>
+
+{% else %}
+<p style="text-align: center; padding: 2.5em 0; color: var(--pp-text-muted); font-size: 0.95em;">
+    No earnings data available for this stock.
+</p>
+{% endif %}
