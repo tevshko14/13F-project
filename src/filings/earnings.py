@@ -271,7 +271,7 @@ def _parse_earnings_dates(ticker: str, tk, fy_end_month: int | None = None) -> l
             "eps_actual": round(float(eps_actual), 4)
             if not pd.isna(eps_actual)
             else None,
-            "eps_surprise_pct": round(float(surprise_pct), 4)
+            "eps_surprise_pct": max(-99999.9999, min(99999.9999, round(float(surprise_pct), 4)))
             if not pd.isna(surprise_pct)
             else None,
             "revenue_estimate": None,
