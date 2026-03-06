@@ -370,6 +370,24 @@ CREATE TABLE IF NOT EXISTS earnings_history (
 );
 CREATE INDEX IF NOT EXISTS idx_earnings_ticker_date
     ON earnings_history (ticker, report_date DESC);
+
+CREATE TABLE IF NOT EXISTS analyst_estimates (
+    id               BIGSERIAL PRIMARY KEY,
+    ticker           TEXT NOT NULL,
+    estimate_type    TEXT NOT NULL,
+    period_key       TEXT NOT NULL,
+    period_label     TEXT NOT NULL,
+    num_analysts     INT,
+    avg_estimate     NUMERIC(18,4),
+    low_estimate     NUMERIC(18,4),
+    high_estimate    NUMERIC(18,4),
+    year_ago_value   NUMERIC(18,4),
+    growth_pct       NUMERIC(10,4),
+    fetched_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(ticker, estimate_type, period_key)
+);
+CREATE INDEX IF NOT EXISTS idx_analyst_estimates_ticker
+    ON analyst_estimates (ticker);
 """
 
 
@@ -3169,4 +3187,49 @@ def get_earnings_history(ticker: str, limit: int = 100) -> list[dict]:
         return resp.data or []
     except Exception as exc:
         logger.warning("get_earnings_history(%s) failed: %s", ticker, exc)
+        return []
+
+
+# ── Analyst forward estimates ────────────────────────────────────
+
+
+def upsert_analyst_estimates(rows: list[dict]) -> int:
+    """Batch upsert rows into ``analyst_estimates``."""
+    client = _get_client()
+    if client is None or not rows:
+        return 0
+
+    upserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("analyst_estimates").upsert(
+                chunk, on_conflict="ticker,estimate_type,period_key"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_analyst_estimates chunk %d failed: %s", i, exc)
+
+    return upserted
+
+
+def get_analyst_estimates(ticker: str) -> list[dict]:
+    """Fetch cached forward estimates for *ticker*."""
+    client = _get_client()
+    if client is None:
+        return []
+
+    try:
+        resp = (
+            client.table("analyst_estimates")
+            .select("*")
+            .eq("ticker", ticker.upper())
+            .order("estimate_type")
+            .order("period_key")
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_analyst_estimates(%s) failed: %s", ticker, exc)
         return []

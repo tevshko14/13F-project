@@ -944,6 +944,7 @@
     <div class="pp-pill-nav" id="forecasts-pill-nav">
         <button id="pill-analysts-btn" class="pp-pill-btn active" data-forecast-tab="analysts">Analysts</button>
         <button id="pill-earnings-btn" class="pp-pill-btn" data-forecast-tab="earnings">Earnings</button>
+        <button id="pill-estimates-btn" class="pp-pill-btn" data-forecast-tab="estimates">Estimates</button>
     </div>
     <div id="forecast-analysts-panel" class="pp-pill-panel active">
         <div id="analyst-ratings-content">
@@ -955,14 +956,28 @@
             <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading earnings data...</p>
         </div>
     </div>
+    <div id="forecast-estimates-panel" class="pp-pill-panel">
+        <div id="estimates-content">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading estimates data...</p>
+        </div>
+    </div>
 </div>
 
-{# ── Signals Tab (Sentiment + Search Interest + Web Traffic) ── #}
+{# ── Signals Tab (pills: Sentiment | Short Interest) ── #}
 <div id="tab-signals" class="tab-content">
-    <div id="signals-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading signals data...
-        </p>
+    <div class="pp-pill-nav" id="signals-pill-nav">
+        <button class="pp-pill-btn active" data-signal-tab="sentiment">Sentiment</button>
+        <button class="pp-pill-btn" data-signal-tab="short-interest">Short Interest</button>
+    </div>
+    <div id="signal-panel-sentiment" class="pp-pill-panel active">
+        <div id="signals-content">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading signals data...</p>
+        </div>
+    </div>
+    <div id="signal-panel-short-interest" class="pp-pill-panel">
+        <div id="short-interest-content">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading short interest data...</p>
+        </div>
     </div>
 </div>
 
@@ -1018,11 +1033,14 @@ window.toggleHolders = function(btn) {
 
     var analystLoaded = false;
     var signalsLoaded = false;
+    var shortInterestLoaded = false;
     var vitalsLoaded = false;
     var earningsLoaded = false;
+    var estimatesLoaded = false;
     var filingsLoaded = false;
     var insiderLoaded = false;
     var activeForecastPill = 'analysts';
+    var activeSignalPill = 'sentiment';
 
     function switchForecastPill(pill) {
         activeForecastPill = pill;
@@ -1072,8 +1090,89 @@ window.toggleHolders = function(btn) {
                 '<p class="text-muted" style="text-align:center;padding:2em 0;">Earnings data requires a ticker symbol.</p>';
             {% endif %}
         }
+
+        if (pill === 'estimates' && !estimatesLoaded) {
+            estimatesLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/estimates/{{ stock_info.ticker }}')
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    var el = document.getElementById('estimates-content');
+                    el.innerHTML = html; activateScripts(el);
+                })
+                .catch(function() {
+                    document.getElementById('estimates-content').innerHTML =
+                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load estimates data.</p>';
+                });
+            {% else %}
+            document.getElementById('estimates-content').innerHTML =
+                '<p class="text-muted" style="text-align:center;padding:2em 0;">Estimates data requires a ticker symbol.</p>';
+            {% endif %}
+        }
     }
     window.switchForecastPill = switchForecastPill;
+
+    // ── Signals pill switcher (Sentiment / Short Interest) ──
+    function switchSignalPill(pill) {
+        activeSignalPill = pill;
+        document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        // Activate the clicked pill button by matching data-signal-tab
+        document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
+            if (btn.dataset.signalTab === pill) btn.classList.add('active');
+        });
+        document.getElementById('tab-signals').querySelectorAll('.pp-pill-panel').forEach(function(panel) {
+            panel.classList.remove('active');
+        });
+        document.getElementById('signal-panel-' + pill).classList.add('active');
+
+        if (pill === 'sentiment' && !signalsLoaded) {
+            signalsLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/signals/{{ stock_info.ticker }}')
+                .then(function(resp) { return resp.text(); })
+                .then(function(html) {
+                    var el = document.getElementById('signals-content');
+                    el.innerHTML = html;
+                    activateScripts(el);
+                    if (window.initSortableTables) window.initSortableTables();
+                })
+                .catch(function() {
+                    document.getElementById('signals-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Failed to load signals data. Please try again later.</p>';
+                });
+            {% else %}
+            document.getElementById('signals-content').innerHTML =
+                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                'Signals data requires a ticker symbol.</p>';
+            {% endif %}
+        }
+
+        if (pill === 'short-interest' && !shortInterestLoaded) {
+            shortInterestLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/signals/{{ stock_info.ticker }}/short-interest')
+                .then(function(resp) { return resp.text(); })
+                .then(function(html) {
+                    var el = document.getElementById('short-interest-content');
+                    el.innerHTML = html;
+                    activateScripts(el);
+                })
+                .catch(function() {
+                    document.getElementById('short-interest-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Failed to load short interest data. Please try again later.</p>';
+                });
+            {% else %}
+            document.getElementById('short-interest-content').innerHTML =
+                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                'Short interest data requires a ticker symbol.</p>';
+            {% endif %}
+        }
+    }
+    window.switchSignalPill = switchSignalPill;
 
     var _tabBtns = document.querySelectorAll('.stock-tab');
     var _tabPanels = document.querySelectorAll('.tab-content');
@@ -1101,34 +1200,9 @@ window.toggleHolders = function(btn) {
             switchForecastPill(activeForecastPill);
         }
 
-        // Lazy-load signals data (sentiment + search interest + web traffic) on first click
-        if (tab === 'signals' && !signalsLoaded) {
-            signalsLoaded = true;
-            {% if stock_info.ticker %}
-            var signalsUrl = '/api/signals/{{ stock_info.ticker }}';
-            {% else %}
-            var signalsUrl = null;
-            {% endif %}
-
-            if (signalsUrl) {
-                fetch(signalsUrl)
-                    .then(function(resp) { return resp.text(); })
-                    .then(function(html) {
-                        var el = document.getElementById('signals-content');
-                        el.innerHTML = html;
-                        activateScripts(el);
-                        if (window.initSortableTables) window.initSortableTables();
-                    })
-                    .catch(function() {
-                        document.getElementById('signals-content').innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'Failed to load signals data. Please try again later.</p>';
-                    });
-            } else {
-                document.getElementById('signals-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Signals data requires a ticker symbol.</p>';
-            }
+        // Lazy-load signals tab (triggers active pill load)
+        if (tab === 'signals') {
+            switchSignalPill(activeSignalPill);
         }
 
         // Lazy-load vitals data on first click
@@ -1290,6 +1364,13 @@ window.toggleHolders = function(btn) {
     document.getElementById('forecasts-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
         pill.addEventListener('click', function() {
             switchForecastPill(pill.dataset.forecastTab);
+        });
+    });
+
+    // ── Signals inner pill switcher (Sentiment / Short Interest) ──
+    document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
+        pill.addEventListener('click', function() {
+            switchSignalPill(pill.dataset.signalTab);
         });
     });
 })();

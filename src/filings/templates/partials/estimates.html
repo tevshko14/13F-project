@@ -1,0 +1,174 @@
+{# Forward Analyst Estimates — Estimates pill content for Forecasts tab #}
+
+{% if not eps and not revenue %}
+<div class="sig-card" style="max-width: 500px;">
+    <p class="text-muted" style="text-align: center; padding: 1em 0; margin: 0;">
+        No forward estimates available for <strong>{{ ticker }}</strong>.
+    </p>
+</div>
+{% else %}
+
+<style>
+    .est-section { margin-bottom: 2em; }
+    .est-section-header {
+        font-size: 0.72em; font-weight: 600; text-transform: uppercase;
+        letter-spacing: 0.08em; color: var(--pp-text-faint);
+        margin-bottom: 1em; padding-bottom: 0.4em;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .est-table-wrap { overflow-x: auto; }
+    .est-table {
+        width: 100%; border-collapse: collapse; font-size: 0.88em;
+        min-width: 420px;
+    }
+    .est-table thead th {
+        padding: 0.6em 0.8em; font-size: 0.72em; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--pp-text-faint); background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border); white-space: nowrap;
+        text-align: right;
+    }
+    .est-table thead th:first-child { text-align: left; }
+    .est-table tbody td {
+        padding: 0.55em 0.8em; vertical-align: middle;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+        text-align: right; white-space: nowrap;
+    }
+    .est-table tbody td:first-child {
+        text-align: left; font-weight: 600; color: var(--pp-text);
+        font-size: 0.85em;
+    }
+    .est-table tbody tr:hover { background: var(--pp-surface-alt); }
+    .est-table tbody tr:last-child td { border-bottom: none; }
+    .est-growth-pos { color: #16a34a; font-weight: 600; }
+    .est-growth-neg { color: #dc2626; font-weight: 600; }
+</style>
+
+{# ── EPS Estimate Table (transposed: periods as columns) ── #}
+{% if eps %}
+<div class="est-section">
+    <div class="est-section-header">Earnings Estimate</div>
+    <div class="est-table-wrap">
+        <table class="est-table">
+            <thead>
+                <tr>
+                    <th>Currency in USD</th>
+                    {% for e in eps %}
+                    <th>{{ e.period }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>No. of Analysts</td>
+                    {% for e in eps %}
+                    <td>{{ e.analysts if e.analysts is not none else "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>Avg. Estimate</td>
+                    {% for e in eps %}
+                    <td>{{ "$%.2f"|format(e.avg) if e.avg is not none else "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>Low Estimate</td>
+                    {% for e in eps %}
+                    <td>{{ "$%.2f"|format(e.low) if e.low is not none else "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>High Estimate</td>
+                    {% for e in eps %}
+                    <td>{{ "$%.2f"|format(e.high) if e.high is not none else "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>Year Ago EPS</td>
+                    {% for e in eps %}
+                    <td>{{ "$%.2f"|format(e.year_ago) if e.year_ago is not none else "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>EPS Growth (yr/est)</td>
+                    {% for e in eps %}
+                    <td>
+                        {% if e.growth is not none %}
+                            <span class="{% if e.growth > 0 %}est-growth-pos{% elif e.growth < 0 %}est-growth-neg{% endif %}">
+                                {{ "%.2f"|format(e.growth * 100) }}%
+                            </span>
+                        {% else %}—{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{# ── Revenue Estimate Table (transposed: periods as columns) ── #}
+{% if revenue %}
+<div class="est-section">
+    <div class="est-section-header">Revenue Estimate</div>
+    <div class="est-table-wrap">
+        <table class="est-table">
+            <thead>
+                <tr>
+                    <th>Currency in USD</th>
+                    {% for r in revenue %}
+                    <th>{{ r.period }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>No. of Analysts</td>
+                    {% for r in revenue %}
+                    <td>{{ r.analysts if r.analysts is not none else "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>Avg. Estimate</td>
+                    {% for r in revenue %}
+                    <td>{{ r.avg_fmt or "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>Low Estimate</td>
+                    {% for r in revenue %}
+                    <td>{{ r.low_fmt or "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>High Estimate</td>
+                    {% for r in revenue %}
+                    <td>{{ r.high_fmt or "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>Year Ago Revenue</td>
+                    {% for r in revenue %}
+                    <td>{{ r.year_ago_fmt or "—" }}</td>
+                    {% endfor %}
+                </tr>
+                <tr>
+                    <td>Revenue Growth (yr/est)</td>
+                    {% for r in revenue %}
+                    <td>
+                        {% if r.growth is not none %}
+                            <span class="{% if r.growth > 0 %}est-growth-pos{% elif r.growth < 0 %}est-growth-neg{% endif %}">
+                                {{ "%.2f"|format(r.growth * 100) }}%
+                            </span>
+                        {% else %}—{% endif %}
+                    </td>
+                    {% endfor %}
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+{% endif %}

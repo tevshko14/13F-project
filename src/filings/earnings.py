@@ -130,6 +130,127 @@ def get_earnings_data(ticker: str) -> dict:
     }
 
 
+_FWD_DB_TTL = 21_600  # 6 hours — DB freshness threshold for estimates
+
+
+def get_forward_estimates(ticker: str) -> dict | None:
+    """Public entry point: return forward EPS + Revenue estimates.
+
+    3-tier cache:
+      L1: in-memory ``_fwd_cache`` (1h TTL)
+      L2: Supabase ``analyst_estimates`` table (6h TTL)
+      L3: live yfinance fetch → upsert to DB → return
+
+    Returns ``{eps: [...], revenue: [...]}`` or None.
+    """
+    ticker = ticker.upper().strip()
+
+    # ── L1: in-memory ──────────────────────────────────────────
+    now = time.time()
+    cached = _fwd_cache.get(ticker)
+    if cached and (now - cached[0]) < _FWD_TTL:
+        return cached[1]
+
+    # ── L2: Supabase cold storage ──────────────────────────────
+    from filings import supabase_cache
+
+    db_rows = supabase_cache.get_analyst_estimates(ticker)
+    db_fresh = False
+    if db_rows:
+        fetched_at = db_rows[0].get("fetched_at", "")
+        if fetched_at:
+            try:
+                fetched_dt = datetime.fromisoformat(
+                    fetched_at.replace("Z", "+00:00")
+                )
+                age = (datetime.now(timezone.utc) - fetched_dt).total_seconds()
+                db_fresh = age < _FWD_DB_TTL
+            except (ValueError, TypeError):
+                pass
+
+    if db_fresh:
+        result = _db_rows_to_estimates(db_rows)
+        _fwd_cache[ticker] = (time.time(), result)
+        return result
+
+    # ── L3: live yfinance fetch ────────────────────────────────
+    try:
+        import yfinance as yf
+
+        tk = yf.Ticker(ticker)
+        fresh = _parse_forward_estimates(tk)
+    except Exception as exc:
+        logger.warning("yfinance estimates fetch failed for %s: %s", ticker, exc)
+        fresh = None
+
+    if fresh:
+        _fwd_cache[ticker] = (time.time(), fresh)
+        _persist_estimates_to_db(ticker, fresh)
+        return fresh
+
+    # ── Stale fallback ─────────────────────────────────────────
+    if db_rows:
+        result = _db_rows_to_estimates(db_rows)
+        _fwd_cache[ticker] = (time.time(), result)
+        return result
+
+    return cached[1] if cached else None
+
+
+def _persist_estimates_to_db(ticker: str, data: dict) -> None:
+    """Convert parsed estimates to DB rows and upsert."""
+    from filings import supabase_cache
+
+    rows: list[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    for est_type in ("eps", "revenue"):
+        for item in data.get(est_type, []):
+            rows.append({
+                "ticker": ticker.upper(),
+                "estimate_type": est_type,
+                "period_key": item.get("period_key", ""),
+                "period_label": item.get("period", ""),
+                "num_analysts": item.get("analysts"),
+                "avg_estimate": item.get("avg"),
+                "low_estimate": item.get("low"),
+                "high_estimate": item.get("high"),
+                "year_ago_value": item.get("year_ago"),
+                "growth_pct": item.get("growth"),
+                "fetched_at": now_iso,
+            })
+
+    if rows:
+        try:
+            supabase_cache.upsert_analyst_estimates(rows)
+        except Exception as exc:
+            logger.warning("persist estimates for %s failed: %s", ticker, exc)
+
+
+def _db_rows_to_estimates(db_rows: list[dict]) -> dict:
+    """Convert DB rows back to the ``{eps: [...], revenue: [...]}`` format."""
+    result: dict = {}
+    for row in db_rows:
+        est_type = row.get("estimate_type", "eps")
+        item = {
+            "period_key": row.get("period_key", ""),
+            "period": row.get("period_label", ""),
+            "analysts": row.get("num_analysts"),
+            "avg": row.get("avg_estimate"),
+            "low": row.get("low_estimate"),
+            "high": row.get("high_estimate"),
+            "year_ago": row.get("year_ago_value"),
+            "growth": row.get("growth_pct"),
+        }
+        if est_type == "revenue":
+            item["avg_fmt"] = _fmt_revenue(item["avg"])
+            item["low_fmt"] = _fmt_revenue(item["low"])
+            item["high_fmt"] = _fmt_revenue(item["high"])
+            item["year_ago_fmt"] = _fmt_revenue(item["year_ago"])
+        result.setdefault(est_type, []).append(item)
+    return result if result else {}
+
+
 # ── Internal helpers ─────────────────────────────────────────────
 
 
@@ -302,20 +423,23 @@ def _parse_forward_estimates(tk) -> dict | None:
 
     result: dict = {}
 
+    _PERIOD_LABELS = {
+        "0q": "Current Qtr",
+        "+1q": "Next Qtr",
+        "0y": "Current Year",
+        "+1y": "Next Year",
+    }
+
     # EPS estimates
     try:
         eps_df = tk.get_earnings_estimate()
         if eps_df is not None and not eps_df.empty:
-            period_labels = {
-                "0q": "Current Qtr",
-                "+1q": "Next Qtr",
-                "0y": "Current Year",
-                "+1y": "Next Year",
-            }
             eps_list = []
             for idx, row in eps_df.iterrows():
-                label = period_labels.get(str(idx), str(idx))
+                key = str(idx)
+                label = _PERIOD_LABELS.get(key, key)
                 eps_list.append({
+                    "period_key": key,
                     "period": label,
                     "analysts": _safe_int(row.get("numberOfAnalysts")),
                     "avg": _safe_float(row.get("avg")),
@@ -333,19 +457,16 @@ def _parse_forward_estimates(tk) -> dict | None:
     try:
         rev_df = tk.get_revenue_estimate()
         if rev_df is not None and not rev_df.empty:
-            period_labels = {
-                "0q": "Current Qtr",
-                "+1q": "Next Qtr",
-                "0y": "Current Year",
-                "+1y": "Next Year",
-            }
             rev_list = []
             for idx, row in rev_df.iterrows():
-                label = period_labels.get(str(idx), str(idx))
+                key = str(idx)
+                label = _PERIOD_LABELS.get(key, key)
                 avg_val = _safe_float(row.get("avg"))
                 low_val = _safe_float(row.get("low"))
                 high_val = _safe_float(row.get("high"))
+                year_ago_val = _safe_float(row.get("yearAgoRevenue"))
                 rev_list.append({
+                    "period_key": key,
                     "period": label,
                     "analysts": _safe_int(row.get("numberOfAnalysts")),
                     "avg": avg_val,
@@ -354,6 +475,8 @@ def _parse_forward_estimates(tk) -> dict | None:
                     "avg_fmt": _fmt_revenue(avg_val),
                     "low_fmt": _fmt_revenue(low_val),
                     "high_fmt": _fmt_revenue(high_val),
+                    "year_ago": year_ago_val,
+                    "year_ago_fmt": _fmt_revenue(year_ago_val),
                     "growth": _safe_float(row.get("growth")),
                 })
             if rev_list:

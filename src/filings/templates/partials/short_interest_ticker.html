@@ -1,0 +1,323 @@
+{# Short Interest per-ticker — pill content for Signals tab #}
+
+{% if not history %}
+<div class="sig-card" style="max-width: 500px;">
+    <p class="text-muted" style="text-align: center; padding: 1em 0; margin: 0;">
+        No short interest data available for <strong>{{ ticker }}</strong>.
+    </p>
+</div>
+{% else %}
+
+{% set latest = history[0] %}
+{% set prior  = history[1] if history|length > 1 else None %}
+
+<style>
+    .si-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1em;
+        margin-bottom: 1.5em;
+    }
+    @media (max-width: 768px) {
+        .si-metrics { grid-template-columns: repeat(2, 1fr); }
+    }
+    .si-metric-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 10px;
+        padding: 1em 1.2em;
+        background: var(--pp-surface);
+    }
+    .si-metric-label {
+        font-size: 0.72em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--pp-sub-text-light);
+        margin-bottom: 0.3em;
+    }
+    .si-metric-value {
+        font-size: 1.4em;
+        font-weight: 700;
+        line-height: 1.2;
+        color: var(--pp-text);
+    }
+    .si-metric-sub {
+        font-size: 0.75em;
+        color: var(--pp-sub-text);
+        margin-top: 0.2em;
+    }
+    .si-change-up   { color: #c62828; font-weight: 600; }
+    .si-change-down { color: #2e7d32; font-weight: 600; }
+    .si-change-flat { color: var(--pp-text-muted); }
+    .si-badge {
+        display: inline-block;
+        font-size: 0.72em;
+        font-weight: 600;
+        padding: 2px 7px;
+        border-radius: 4px;
+    }
+    .si-badge-heavy    { background: rgba(198, 40, 40, 0.12); color: #c62828; }
+    .si-badge-elevated { background: rgba(230, 81, 0, 0.12);  color: #e65100; }
+    .si-history-toggle {
+        background: none;
+        border: none;
+        color: var(--pp-sub-text);
+        font-size: 0.82em;
+        cursor: pointer;
+        padding: 0.6em 0;
+        display: flex;
+        align-items: center;
+        gap: 0.3em;
+    }
+    .si-history-toggle:hover { color: var(--pp-text); }
+</style>
+
+{# ── Metric Cards ── #}
+<div class="si-metrics">
+    {# Shares Outstanding #}
+    <div class="si-metric-card">
+        <div class="si-metric-label">Shares Outstanding</div>
+        {% set outstanding = latest.shares_outstanding or latest.float_shares %}
+        <div class="si-metric-value">
+            {% if outstanding %}
+                {% if outstanding >= 1000000000 %}
+                    {{ "%.2f"|format(outstanding / 1000000000) }}B
+                {% elif outstanding >= 1000000 %}
+                    {{ "%.1f"|format(outstanding / 1000000) }}M
+                {% else %}
+                    {{ "{:,.0f}".format(outstanding) }}
+                {% endif %}
+            {% else %}
+                —
+            {% endif %}
+        </div>
+        {% if not latest.shares_outstanding and latest.float_shares %}
+        <div class="si-metric-sub">Float shares</div>
+        {% endif %}
+    </div>
+
+    {# Short % of Float #}
+    <div class="si-metric-card">
+        <div class="si-metric-label">Short % of Float</div>
+        <div class="si-metric-value" style="
+            {% if latest.short_pct_float and latest.short_pct_float >= 0.20 %}color: #c62828;
+            {% elif latest.short_pct_float and latest.short_pct_float >= 0.10 %}color: #e65100;
+            {% endif %}">
+            {% if latest.short_pct_float is not none %}
+                {{ "%.1f"|format(latest.short_pct_float * 100) }}%
+            {% else %}
+                —
+            {% endif %}
+        </div>
+        {% if latest.short_pct_float and latest.short_pct_float >= 0.20 %}
+            <div class="si-metric-sub"><span class="si-badge si-badge-heavy">Heavily Shorted</span></div>
+        {% elif latest.short_pct_float and latest.short_pct_float >= 0.10 %}
+            <div class="si-metric-sub"><span class="si-badge si-badge-elevated">Elevated</span></div>
+        {% endif %}
+    </div>
+
+    {# Change vs Prior #}
+    <div class="si-metric-card">
+        <div class="si-metric-label">Change vs Prior</div>
+        {% if prior and latest.shares_short and prior.shares_short %}
+            {% set share_diff = latest.shares_short - prior.shares_short %}
+            {% set pct_change = (share_diff / prior.shares_short * 100) %}
+            <div class="si-metric-value {% if share_diff > 0 %}si-change-up{% elif share_diff < 0 %}si-change-down{% else %}si-change-flat{% endif %}">
+                {% if share_diff > 0 %}
+                    ▲ +{{ "%.1f"|format(pct_change) }}%
+                {% elif share_diff < 0 %}
+                    ▼ {{ "%.1f"|format(pct_change) }}%
+                {% else %}
+                    — Flat
+                {% endif %}
+            </div>
+            <div class="si-metric-sub">
+                {% if share_diff > 0 %}Short interest increasing
+                {% elif share_diff < 0 %}Short interest decreasing
+                {% else %}No change
+                {% endif %}
+            </div>
+        {% else %}
+            <div class="si-metric-value si-change-flat">—</div>
+            <div class="si-metric-sub">No prior data</div>
+        {% endif %}
+    </div>
+
+    {# Last Report Date #}
+    <div class="si-metric-card">
+        <div class="si-metric-label">Last Report</div>
+        <div class="si-metric-value" style="font-size: 1.1em;">
+            {{ latest.report_date }}
+        </div>
+        {% if latest.short_ratio %}
+            <div class="si-metric-sub">Days to cover: {{ "%.1f"|format(latest.short_ratio) }}</div>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Short Interest Trend Chart ── #}
+<div class="sig-section">
+    <div class="sig-section-header">Short Interest Trend</div>
+    <div class="sig-card">
+        <div id="si-trend-chart" style="width: 100%; height: 280px;"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var history = {{ history | tojson }};
+    if (!history || history.length < 2) return;
+
+    // Reverse so oldest is on the left
+    var data = history.slice().reverse();
+
+    var chartEl = document.getElementById('si-trend-chart');
+    if (!chartEl || typeof echarts === 'undefined') return;
+
+    var rootStyle = getComputedStyle(document.documentElement);
+    var textColor  = rootStyle.getPropertyValue('--pp-chart-axis-label').trim() || '#71717a';
+    var gridColor  = rootStyle.getPropertyValue('--pp-border-light').trim() || 'rgba(128,128,128,0.15)';
+
+    var dates  = data.map(function(r) { return r.report_date; });
+    var values = data.map(function(r) { return r.short_pct_float != null ? +(r.short_pct_float * 100).toFixed(2) : null; });
+
+    var chart = echarts.init(chartEl);
+    chart.setOption({
+        animation: false,
+        backgroundColor: 'transparent',
+        tooltip: {
+            trigger: 'axis',
+            formatter: function(params) {
+                var p = params[0];
+                if (!p) return '';
+                var row = data[p.dataIndex];
+                var html = '<strong>' + row.report_date + '</strong><br/>';
+                html += 'Short % of Float: <strong>' + (p.value != null ? p.value.toFixed(1) + '%' : '—') + '</strong>';
+                if (row.shares_short) {
+                    var s = row.shares_short;
+                    var fmt = s >= 1e9 ? (s/1e9).toFixed(2) + 'B' : s >= 1e6 ? (s/1e6).toFixed(1) + 'M' : s.toLocaleString();
+                    html += '<br/>Shares Short: ' + fmt;
+                }
+                if (row.short_ratio) html += '<br/>Days to Cover: ' + row.short_ratio.toFixed(1);
+                return html;
+            }
+        },
+        grid: { left: 50, right: 20, top: 20, bottom: 35 },
+        xAxis: {
+            type: 'category',
+            data: dates,
+            axisLine: { lineStyle: { color: gridColor } },
+            axisTick: { show: false },
+            axisLabel: { color: textColor, fontSize: 10, rotate: 45 }
+        },
+        yAxis: {
+            type: 'value',
+            axisLine: { show: false },
+            axisTick: { show: false },
+            splitLine: { lineStyle: { color: gridColor } },
+            axisLabel: { color: textColor, fontSize: 11, formatter: '{value}%' }
+        },
+        series: [{
+            type: 'line',
+            data: values,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 6,
+            lineStyle: { color: '#c62828', width: 2 },
+            itemStyle: { color: '#c62828' },
+            areaStyle: {
+                color: {
+                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                    colorStops: [
+                        { offset: 0, color: 'rgba(198, 40, 40, 0.25)' },
+                        { offset: 1, color: 'rgba(198, 40, 40, 0.02)' }
+                    ]
+                }
+            }
+        }]
+    });
+
+    window.addEventListener('resize', function() { chart.resize(); });
+})();
+</script>
+
+{# ── History Table ── #}
+<div class="sig-section" style="margin-top: 1.5em;">
+    <div class="sig-section-header">Report History</div>
+    <div class="pp-table-wrap" style="overflow-x: auto;">
+        <table class="cluster-table" style="min-width: 500px;">
+            <thead>
+                <tr style="border-bottom: 2px solid var(--pp-border-light);">
+                    <td style="font-weight: 700; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--pp-sub-text-light); padding: 0.5em 0.6em;">Report Date</td>
+                    <td style="font-weight: 700; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--pp-sub-text-light); padding: 0.5em 0.6em; text-align: right;">Shares Short</td>
+                    <td style="font-weight: 700; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--pp-sub-text-light); padding: 0.5em 0.6em; text-align: right;">% of Float</td>
+                    <td style="font-weight: 700; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--pp-sub-text-light); padding: 0.5em 0.6em; text-align: right;">Days to Cover</td>
+                    <td style="font-weight: 700; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--pp-sub-text-light); padding: 0.5em 0.6em; text-align: right;">vs Prior</td>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in history %}
+                <tr{% if loop.index > 8 %} class="si-overflow-row" style="display: none;"{% endif %}>
+                    <td>{{ row.report_date }}</td>
+                    <td class="text-right">
+                        {% if row.shares_short %}
+                            {% if row.shares_short >= 1000000000 %}
+                                {{ "%.2f"|format(row.shares_short / 1000000000) }}B
+                            {% elif row.shares_short >= 1000000 %}
+                                {{ "%.1f"|format(row.shares_short / 1000000) }}M
+                            {% else %}
+                                {{ "{:,.0f}".format(row.shares_short) }}
+                            {% endif %}
+                        {% else %}—{% endif %}
+                    </td>
+                    <td class="text-right" style="
+                        {% if row.short_pct_float and row.short_pct_float >= 0.20 %}color: #c62828; font-weight: 600;
+                        {% elif row.short_pct_float and row.short_pct_float >= 0.10 %}color: #e65100; font-weight: 600;
+                        {% endif %}">
+                        {% if row.short_pct_float is not none %}
+                            {{ "%.1f"|format(row.short_pct_float * 100) }}%
+                        {% else %}—{% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if row.short_ratio %}{{ "%.1f"|format(row.short_ratio) }}{% else %}—{% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if not loop.last %}
+                            {% set next_row = history[loop.index] %}
+                            {% if row.shares_short and next_row.shares_short %}
+                                {% set chg = ((row.shares_short - next_row.shares_short) / next_row.shares_short * 100) %}
+                                {% if chg > 0.5 %}
+                                    <span class="si-change-up">▲ +{{ "%.1f"|format(chg) }}%</span>
+                                {% elif chg < -0.5 %}
+                                    <span class="si-change-down">▼ {{ "%.1f"|format(chg) }}%</span>
+                                {% else %}
+                                    <span class="si-change-flat">—</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="si-change-flat">—</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="si-change-flat">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if history|length > 8 %}
+    <button class="si-history-toggle" onclick="(function(btn){
+        var rows = document.querySelectorAll('.si-overflow-row');
+        var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+        rows.forEach(function(r){ r.style.display = expanded ? 'none' : ''; });
+        btn.innerHTML = expanded
+            ? '<span class=\"holders-expand-arrow\" style=\"transition: transform 0.2s;\">&#9660;</span> <span>Show all {{ history|length }} reports</span>'
+            : '<span class=\"holders-expand-arrow\" style=\"transform: rotate(180deg); transition: transform 0.2s;\">&#9660;</span> <span>Show fewer</span>';
+    })(this)">
+        <span class="holders-expand-arrow">&#9660;</span>
+        <span>Show all {{ history|length }} reports</span>
+    </button>
+    {% endif %}
+</div>
+
+{% endif %}
