@@ -2988,11 +2988,12 @@ def get_latest_short_interest_all(limit: int = 1600) -> list[dict]:
         return []
 
     try:
-        # Single-query approach via RPC (requires get_latest_short_interest function)
+        # Single-query approach via RPC (requires get_latest_short_interest function).
+        # .limit(limit) overrides PostgREST's default 1000-row ceiling on SETOF RPCs.
         resp = client.rpc(
             "get_latest_short_interest",
             {"row_limit": limit},
-        ).execute()
+        ).limit(limit).execute()
         return resp.data or []
     except Exception:
         pass  # RPC not available — fall back to two-query approach
