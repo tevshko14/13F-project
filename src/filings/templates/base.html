@@ -1515,15 +1515,15 @@
                     </span>
                 </button>
             </div>
-            <button onclick="ppOpenSignIn()" class="pp-sidebar-support-btn pp-auth-signin" style="background: var(--pp-overlay-5); border-color: var(--pp-border);{% if request.state.user %} display:none;{% endif %}">
+            <button onclick="ppOpenSignIn()" class="pp-sidebar-support-btn pp-auth-signin" style="background: var(--pp-overlay-5); border-color: var(--pp-border); color: var(--pp-text);{% if request.state.user %} display:none;{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
                 <span>Sign In</span>
             </button>
-            <a href="/profile" class="pp-sidebar-support-btn pp-auth-signout" style="background: var(--pp-overlay-5); border-color: var(--pp-border);{% if not request.state.user %} display:none;{% endif %}">
+            <a href="/profile" class="pp-sidebar-support-btn pp-auth-signout" style="background: var(--pp-overlay-5); border-color: var(--pp-border); color: var(--pp-text);{% if not request.state.user %} display:none;{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 <span>Profile</span>
             </a>
-            <button onclick="ppSignOut()" class="pp-sidebar-support-btn pp-auth-signout" style="background: var(--pp-overlay-5); border-color: var(--pp-border);{% if not request.state.user %} display:none;{% endif %}">
+            <button onclick="ppSignOut()" class="pp-sidebar-support-btn pp-auth-signout" style="background: var(--pp-overlay-5); border-color: var(--pp-border); color: var(--pp-text);{% if not request.state.user %} display:none;{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 <span>Sign Out</span>
             </button>
