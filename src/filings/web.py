@@ -2642,6 +2642,11 @@ async def support_page(request: Request):
     return templates.TemplateResponse("support.html", ctx)
 
 
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_page(request: Request):
+    return templates.TemplateResponse("privacy.html", {"request": request})
+
+
 @app.post("/api/create-checkout-session")
 async def create_checkout_session(request: Request):
     """Create a Stripe Embedded Checkout session."""

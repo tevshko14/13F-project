@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Privacy Policy - PaperPanda{% endblock %}
+{% block meta_description %}PaperPanda privacy policy — what data we collect, how we use it, and your rights.{% endblock %}
+
+{% block content %}
+<style>
+    .privacy-wrap {
+        max-width: 780px;
+        margin: 0 auto;
+        padding: 2.5em 1em 4em;
+    }
+    .privacy-wrap h1 {
+        font-size: 2em;
+        margin-bottom: 0.2em;
+    }
+    .privacy-wrap .last-updated {
+        color: var(--pp-text-muted);
+        font-size: 0.9em;
+        margin-bottom: 2.5em;
+    }
+    .privacy-wrap h2 {
+        font-size: 1.15em;
+        font-weight: 700;
+        margin: 2em 0 0.5em;
+        color: var(--pp-text);
+        border-bottom: 1px solid var(--pp-border);
+        padding-bottom: 0.35em;
+    }
+    .privacy-wrap p, .privacy-wrap li {
+        color: var(--pp-text-muted);
+        line-height: 1.75;
+        font-size: 0.97em;
+    }
+    .privacy-wrap ul {
+        padding-left: 1.4em;
+        margin: 0.5em 0;
+    }
+    .privacy-wrap a {
+        color: var(--pp-accent);
+        text-decoration: none;
+    }
+    .privacy-wrap a:hover {
+        text-decoration: underline;
+    }
+    .privacy-wrap .contact-box {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 10px;
+        padding: 1.2em 1.5em;
+        margin-top: 2em;
+        font-size: 0.95em;
+        color: var(--pp-text-muted);
+    }
+</style>
+
+<div class="privacy-wrap">
+    <h1>🐼 Privacy Policy</h1>
+    <p class="last-updated">Last updated: March 2026</p>
+
+    <p>
+        PaperPanda ("we", "us", or "our") is a financial data platform that helps investors
+        track institutional holdings, insider trades, congressional trades, analyst ratings,
+        and market signals. This policy explains what information we collect, how we use it,
+        and your rights regarding that information.
+    </p>
+
+    <h2>1. Information We Collect</h2>
+    <p><strong>Account information</strong> — When you sign in with Google, we receive your
+    name, email address, and profile picture from Google. We store your email to identify
+    your account and manage your subscription status.</p>
+
+    <p><strong>Usage data</strong> — We may collect anonymised information about how you use
+    PaperPanda (pages visited, features used) to improve the product. We do not fingerprint
+    individual users or sell behavioural data.</p>
+
+    <p><strong>Payment information</strong> — If you choose to support PaperPanda, payments
+    are processed by <a href="https://stripe.com" target="_blank" rel="noopener">Stripe</a>.
+    We never see or store your full card number. We only receive a confirmation of payment
+    and your email to record your supporter status.</p>
+
+    <p><strong>Communications</strong> — If you contact us via the support page or email,
+    we retain that correspondence to respond to you.</p>
+
+    <h2>2. How We Use Your Information</h2>
+    <ul>
+        <li>To authenticate you and maintain your session</li>
+        <li>To track your supporter / subscription status</li>
+        <li>To send product notifications you have opted into</li>
+        <li>To improve PaperPanda's features and fix bugs</li>
+        <li>To respond to support requests</li>
+    </ul>
+    <p>We do <strong>not</strong> sell, rent, or share your personal information with
+    third parties for advertising or marketing purposes.</p>
+
+    <h2>3. Third-Party Services</h2>
+    <p>PaperPanda uses the following third-party services, each of which has its own privacy policy:</p>
+    <ul>
+        <li><strong>Clerk</strong> — authentication and session management
+            (<a href="https://clerk.com/privacy" target="_blank" rel="noopener">clerk.com/privacy</a>)</li>
+        <li><strong>Google OAuth</strong> — sign-in via Google account
+            (<a href="https://policies.google.com/privacy" target="_blank" rel="noopener">policies.google.com/privacy</a>)</li>
+        <li><strong>Supabase</strong> — database and backend infrastructure
+            (<a href="https://supabase.com/privacy" target="_blank" rel="noopener">supabase.com/privacy</a>)</li>
+        <li><strong>Stripe</strong> — payment processing
+            (<a href="https://stripe.com/privacy" target="_blank" rel="noopener">stripe.com/privacy</a>)</li>
+        <li><strong>Railway</strong> — server hosting
+            (<a href="https://railway.app/legal/privacy" target="_blank" rel="noopener">railway.app/legal/privacy</a>)</li>
+    </ul>
+
+    <h2>4. Data We Do Not Collect</h2>
+    <ul>
+        <li>We do not collect or store passwords (handled entirely by Clerk / Google)</li>
+        <li>We do not collect your brokerage account or portfolio information</li>
+        <li>We do not use advertising trackers or sell data to data brokers</li>
+        <li>We do not collect sensitive financial data beyond payment confirmation</li>
+    </ul>
+
+    <h2>5. Data Retention</h2>
+    <p>We retain your account data for as long as your account is active. If you request
+    deletion, we will remove your account and associated personal data within 30 days.
+    Anonymised, aggregated usage data may be retained indefinitely.</p>
+
+    <h2>6. Your Rights</h2>
+    <p>Depending on your location you may have rights including:</p>
+    <ul>
+        <li><strong>Access</strong> — request a copy of the data we hold about you</li>
+        <li><strong>Correction</strong> — ask us to correct inaccurate data</li>
+        <li><strong>Deletion</strong> — request deletion of your account and personal data</li>
+        <li><strong>Portability</strong> — receive your data in a portable format</li>
+    </ul>
+    <p>To exercise any of these rights, contact us at the email below.</p>
+
+    <h2>7. Cookies</h2>
+    <p>PaperPanda uses strictly necessary cookies for authentication (session tokens managed
+    by Clerk) and local storage to remember your theme preference (dark / light mode) and
+    notification read state. We do not use advertising cookies or third-party tracking cookies.</p>
+
+    <h2>8. Children's Privacy</h2>
+    <p>PaperPanda is not directed at children under the age of 13. We do not knowingly
+    collect personal information from children. If you believe a child has provided us with
+    personal data, please contact us and we will delete it promptly.</p>
+
+    <h2>9. Changes to This Policy</h2>
+    <p>We may update this policy from time to time. We will note the "Last updated" date at
+    the top of this page. Continued use of PaperPanda after changes constitutes acceptance
+    of the updated policy.</p>
+
+    <h2>10. Contact</h2>
+    <div class="contact-box">
+        If you have any questions about this privacy policy or wish to exercise your data
+        rights, please contact us at:<br><br>
+        <strong>Email:</strong> <a href="mailto:privacy@paperpanda.io">privacy@paperpanda.io</a><br>
+        <strong>Website:</strong> <a href="https://paperpanda.io">paperpanda.io</a>
+    </div>
+</div>
+{% endblock %}
