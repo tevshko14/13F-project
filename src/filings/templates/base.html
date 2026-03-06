@@ -811,6 +811,18 @@
             background: rgba(239, 68, 68, 1);
             box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
         }
+        /* Auth buttons (Sign In / Profile / Sign Out) have a neutral bg — override white !important */
+        [data-theme="light"] .pp-auth-signin,
+        [data-theme="light"] .pp-auth-signout {
+            color: #18181b !important;
+            background: rgba(0, 0, 0, 0.06);
+            border-color: rgba(0, 0, 0, 0.12);
+        }
+        [data-theme="light"] .pp-auth-signin:hover,
+        [data-theme="light"] .pp-auth-signout:hover {
+            background: rgba(0, 0, 0, 0.1);
+            box-shadow: none;
+        }
 
         /* Expand/collapse toggle button — vertical pill on sidebar edge */
         .pp-sidebar-toggle {
