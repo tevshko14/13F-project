@@ -3214,6 +3214,13 @@ def upsert_analyst_estimates(rows: list[dict]) -> int:
     return upserted
 
 
+_ESTIMATE_COLS = (
+    "ticker,estimate_type,period_key,period_label,"
+    "num_analysts,avg_estimate,low_estimate,high_estimate,"
+    "year_ago_value,growth_pct,fetched_at"
+)
+
+
 def get_analyst_estimates(ticker: str) -> list[dict]:
     """Fetch cached forward estimates for *ticker*."""
     client = _get_client()
@@ -3223,7 +3230,7 @@ def get_analyst_estimates(ticker: str) -> list[dict]:
     try:
         resp = (
             client.table("analyst_estimates")
-            .select("*")
+            .select(_ESTIMATE_COLS)
             .eq("ticker", ticker.upper())
             .order("estimate_type")
             .order("period_key")
