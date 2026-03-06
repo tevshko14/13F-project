@@ -857,6 +857,10 @@
             margin: var(--pp-bento-inset) var(--pp-bento-inset) var(--pp-bento-inset) calc(var(--pp-sidebar-collapsed) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
             min-height: calc(100vh - var(--pp-bento-inset) * 2);
             padding-top: 1em;
+            /* Dynamic horizontal padding: centres a ~1200px content column when space allows,
+               but always keeps at least 1.5rem from the card edge (avoids content flush) */
+            padding-left:  max(1.5rem, calc((100vw - var(--pp-sidebar-collapsed) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
+            padding-right: max(1.5rem, calc((100vw - var(--pp-sidebar-collapsed) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
             background: var(--pp-bento-card-bg);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
@@ -865,16 +869,22 @@
             box-shadow: var(--pp-bento-card-shadow);
             overflow: hidden;
             position: relative;
-            transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                        padding-left 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                        padding-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .pp-sidebar.expanded ~ .pp-notif-dropdown--sidebar ~ .pp-content-wrapper,
         .pp-sidebar.expanded ~ .pp-content-wrapper {
             margin-left: calc(var(--pp-sidebar-width) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
+            padding-left:  max(1.5rem, calc((100vw - var(--pp-sidebar-width) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
+            padding-right: max(1.5rem, calc((100vw - var(--pp-sidebar-width) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
         }
         /* FOUC prevention: use html class set before body renders (desktop only) */
         @media (min-width: 1024px) {
             html.pp-sidebar-is-expanded .pp-content-wrapper {
                 margin-left: calc(var(--pp-sidebar-width) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
+                padding-left:  max(1.5rem, calc((100vw - var(--pp-sidebar-width) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
+                padding-right: max(1.5rem, calc((100vw - var(--pp-sidebar-width) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
             }
         }
 
@@ -935,6 +945,8 @@
                 border: none !important;
                 box-shadow: none !important;
                 min-height: 100vh !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
             }
             .pp-sidebar-toggle { display: none; }
             .pp-mobile-header {
@@ -1214,6 +1226,14 @@
         .pp-content-wrapper > .site-footer {
             position: relative;
             z-index: 1;
+        }
+        /* Let the dynamic padding on .pp-content-wrapper control the column width */
+        @media (min-width: 1024px) {
+            .pp-content-wrapper > main.container {
+                max-width: 100%;
+                padding-left: 0;
+                padding-right: 0;
+            }
         }
         .mesh-blob {
             position: absolute;
