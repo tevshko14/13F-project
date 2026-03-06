@@ -2446,6 +2446,30 @@ async def vitals_data(request: Request, ticker: str):
     )
 
 
+@app.get("/api/earnings/{ticker}", response_class=HTMLResponse)
+async def earnings_data(request: Request, ticker: str):
+    """Earnings history tab: quarterly EPS results + forward estimates."""
+    ticker = ticker.upper().strip()
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+
+    from filings import earnings
+
+    data = await _to_heavy(earnings.get_earnings_data, ticker)
+
+    return templates.TemplateResponse(
+        "partials/earnings.html",
+        {
+            "request": request,
+            "ticker": ticker,
+            "history": data.get("history", []),
+            "forward_estimates": data.get("forward_estimates"),
+            "streak": data.get("streak", {}),
+            "source": data.get("source", ""),
+        },
+    )
+
+
 @app.get("/api/web-traffic/{ticker}", response_class=HTMLResponse)
 async def web_traffic_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
