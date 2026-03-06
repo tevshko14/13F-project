@@ -45,6 +45,9 @@ _BATCH_DELAY = 1.5  # Seconds between batches (rate limiting)
 _MAX_RETRIES = 2
 _LEADERBOARD_TTL = 43200  # 12 hours
 
+# Persistent pool (avoids per-batch pool creation/teardown)
+_si_pool = ThreadPoolExecutor(max_workers=_BATCH_SIZE, thread_name_prefix="si-sync")
+
 
 # ── Fetch logic ──────────────────────────────────────────────────────
 
@@ -175,19 +178,18 @@ def sync_all_short_interest() -> dict:
         batch = tickers[batch_idx : batch_idx + _BATCH_SIZE]
         batch_num = batch_idx // _BATCH_SIZE + 1
 
-        with ThreadPoolExecutor(max_workers=_BATCH_SIZE) as pool:
-            futures = {pool.submit(_fetch_one, t): t for t in batch}
-            for future in as_completed(futures):
-                ticker = futures[future]
-                try:
-                    result = future.result()
-                    if result:
-                        all_results.append(result)
-                    else:
-                        failed += 1
-                except Exception as exc:
-                    logger.debug("Batch fetch error for %s: %s", ticker, exc)
+        futures = {_si_pool.submit(_fetch_one, t): t for t in batch}
+        for future in as_completed(futures):
+            ticker = futures[future]
+            try:
+                result = future.result()
+                if result:
+                    all_results.append(result)
+                else:
                     failed += 1
+            except Exception as exc:
+                logger.debug("Batch fetch error for %s: %s", ticker, exc)
+                failed += 1
 
         if batch_num % 20 == 0 or batch_num == total_batches:
             logger.info(

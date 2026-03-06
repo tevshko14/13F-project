@@ -1267,8 +1267,13 @@ _yf_info_lock = _threading.Lock()
 _YF_INFO_TTL = 3600  # 1 hour
 
 
-def _get_yfinance_info(ticker: str) -> dict:
-    """Fetch yfinance info for a ticker with TTL cache. Single network call."""
+def get_yfinance_info(ticker: str) -> dict:
+    """Fetch yfinance info for a ticker with TTL cache. Single network call.
+
+    This is the **canonical** cached accessor for ``yf.Ticker(ticker).info``.
+    All modules should import this instead of making independent yfinance calls
+    to avoid redundant HTTP requests for the same ticker.
+    """
     now = _time.monotonic()
     with _yf_info_lock:
         cached = _yf_info_cache.get(ticker)
@@ -1317,7 +1322,7 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
     ticker_upper = ticker.upper().strip()
 
     # Single yfinance fetch (cached with 1h TTL)
-    yf_info = _get_yfinance_info(ticker_upper)
+    yf_info = get_yfinance_info(ticker_upper)
     logo_domain = _resolve_logo_domain_from_info(yf_info)
 
     # 1. Try to find in 13F cache (any fund's holdings)

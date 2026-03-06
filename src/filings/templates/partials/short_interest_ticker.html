@@ -168,76 +168,83 @@
     var history = {{ history | tojson }};
     if (!history || history.length < 2) return;
 
-    // Reverse so oldest is on the left
-    var data = history.slice().reverse();
-
     var chartEl = document.getElementById('si-trend-chart');
-    if (!chartEl || typeof echarts === 'undefined') return;
+    if (!chartEl) return;
 
-    var rootStyle = getComputedStyle(document.documentElement);
-    var textColor  = rootStyle.getPropertyValue('--pp-chart-axis-label').trim() || '#71717a';
-    var gridColor  = rootStyle.getPropertyValue('--pp-border-light').trim() || 'rgba(128,128,128,0.15)';
+    window.requireECharts(function(err) {
+        if (err) {
+            chartEl.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>';
+            return;
+        }
 
-    var dates  = data.map(function(r) { return r.report_date; });
-    var values = data.map(function(r) { return r.short_pct_float != null ? +(r.short_pct_float * 100).toFixed(2) : null; });
+        // Reverse so oldest is on the left
+        var data = history.slice().reverse();
 
-    var chart = echarts.init(chartEl);
-    chart.setOption({
-        animation: false,
-        backgroundColor: 'transparent',
-        tooltip: {
-            trigger: 'axis',
-            formatter: function(params) {
-                var p = params[0];
-                if (!p) return '';
-                var row = data[p.dataIndex];
-                var html = '<strong>' + row.report_date + '</strong><br/>';
-                html += 'Short % of Float: <strong>' + (p.value != null ? p.value.toFixed(1) + '%' : '—') + '</strong>';
-                if (row.shares_short) {
-                    var s = row.shares_short;
-                    var fmt = s >= 1e9 ? (s/1e9).toFixed(2) + 'B' : s >= 1e6 ? (s/1e6).toFixed(1) + 'M' : s.toLocaleString();
-                    html += '<br/>Shares Short: ' + fmt;
+        var rootStyle = getComputedStyle(document.documentElement);
+        var textColor  = rootStyle.getPropertyValue('--pp-chart-axis-label').trim() || '#71717a';
+        var gridColor  = rootStyle.getPropertyValue('--pp-border-light').trim() || 'rgba(128,128,128,0.15)';
+
+        var dates  = data.map(function(r) { return r.report_date; });
+        var values = data.map(function(r) { return r.short_pct_float != null ? +(r.short_pct_float * 100).toFixed(2) : null; });
+
+        var chart = echarts.init(chartEl);
+        chart.setOption({
+            animation: false,
+            backgroundColor: 'transparent',
+            tooltip: {
+                trigger: 'axis',
+                formatter: function(params) {
+                    var p = params[0];
+                    if (!p) return '';
+                    var row = data[p.dataIndex];
+                    var html = '<strong>' + row.report_date + '</strong><br/>';
+                    html += 'Short % of Float: <strong>' + (p.value != null ? p.value.toFixed(1) + '%' : '—') + '</strong>';
+                    if (row.shares_short) {
+                        var s = row.shares_short;
+                        var fmt = s >= 1e9 ? (s/1e9).toFixed(2) + 'B' : s >= 1e6 ? (s/1e6).toFixed(1) + 'M' : s.toLocaleString();
+                        html += '<br/>Shares Short: ' + fmt;
+                    }
+                    if (row.short_ratio) html += '<br/>Days to Cover: ' + row.short_ratio.toFixed(1);
+                    return html;
                 }
-                if (row.short_ratio) html += '<br/>Days to Cover: ' + row.short_ratio.toFixed(1);
-                return html;
-            }
-        },
-        grid: { left: 50, right: 20, top: 20, bottom: 35 },
-        xAxis: {
-            type: 'category',
-            data: dates,
-            axisLine: { lineStyle: { color: gridColor } },
-            axisTick: { show: false },
-            axisLabel: { color: textColor, fontSize: 10, rotate: 45 }
-        },
-        yAxis: {
-            type: 'value',
-            axisLine: { show: false },
-            axisTick: { show: false },
-            splitLine: { lineStyle: { color: gridColor } },
-            axisLabel: { color: textColor, fontSize: 11, formatter: '{value}%' }
-        },
-        series: [{
-            type: 'line',
-            data: values,
-            smooth: true,
-            symbol: 'circle',
-            symbolSize: 6,
-            lineStyle: { color: '#c62828', width: 2 },
-            itemStyle: { color: '#c62828' },
-            areaStyle: {
-                color: {
-                    type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
-                    colorStops: [
-                        { offset: 0, color: 'rgba(198, 40, 40, 0.25)' },
-                        { offset: 1, color: 'rgba(198, 40, 40, 0.02)' }
-                    ]
+            },
+            grid: { left: 50, right: 20, top: 20, bottom: 35 },
+            xAxis: {
+                type: 'category',
+                data: dates,
+                axisLine: { lineStyle: { color: gridColor } },
+                axisTick: { show: false },
+                axisLabel: { color: textColor, fontSize: 10, rotate: 45 }
+            },
+            yAxis: {
+                type: 'value',
+                axisLine: { show: false },
+                axisTick: { show: false },
+                splitLine: { lineStyle: { color: gridColor } },
+                axisLabel: { color: textColor, fontSize: 11, formatter: '{value}%' }
+            },
+            series: [{
+                type: 'line',
+                data: values,
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 6,
+                lineStyle: { color: '#c62828', width: 2 },
+                itemStyle: { color: '#c62828' },
+                areaStyle: {
+                    color: {
+                        type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [
+                            { offset: 0, color: 'rgba(198, 40, 40, 0.25)' },
+                            { offset: 1, color: 'rgba(198, 40, 40, 0.02)' }
+                        ]
+                    }
                 }
-            }
-        }]
+            }]
+        });
+
+        if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
     });
-
-    window.addEventListener('resize', function() { chart.resize(); });
 })();
 </script>
 

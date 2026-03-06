@@ -314,14 +314,13 @@ def _fetch_apewisdom_pages() -> list[dict]:
         return raw.get("results") or []
 
     all_results: list[dict] = []
-    with ThreadPoolExecutor(max_workers=5) as pool:
-        futures = {pool.submit(_fetch_page, p): p for p in range(1, 6)}
-        # Collect in page order so ranking stays consistent
-        page_results: dict[int, list[dict]] = {}
-        for future in as_completed(futures):
-            page_results[futures[future]] = future.result()
-        for p in sorted(page_results):
-            all_results.extend(page_results[p])
+    futures = {_sentiment_executor.submit(_fetch_page, p): p for p in range(1, 6)}
+    # Collect in page order so ranking stays consistent
+    page_results: dict[int, list[dict]] = {}
+    for future in as_completed(futures):
+        page_results[futures[future]] = future.result()
+    for p in sorted(page_results):
+        all_results.extend(page_results[p])
 
     with _lock:
         _apewisdom_cache = (time.time(), all_results)
@@ -606,10 +605,9 @@ def _get_short_interest(ticker: str) -> dict | None:
                 return data
 
     try:
-        import yfinance as yf
+        from filings.client import get_yfinance_info
 
-        t = yf.Ticker(key)
-        info = t.info or {}
+        info = get_yfinance_info(key)
     except Exception as exc:
         logger.warning("Short interest fetch failed for %s: %s", key, exc)
         with _lock:
