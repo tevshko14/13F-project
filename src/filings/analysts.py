@@ -24,6 +24,9 @@ from filings.models import AnalystRating
 
 logger = logging.getLogger(__name__)
 
+# ── Shared thread pool (avoids per-call pool creation) ────────────────
+_analyst_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="analyst")
+
 # ── Thread lock + in-memory cache ────────────────────────────────────
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, list[AnalystRating]]] = {}
@@ -488,18 +491,17 @@ def get_analyst_ratings(ticker: str) -> list[AnalystRating]:
         _set_cached(ticker, db_ratings)
         return db_ratings
 
-    # 3. Live fetch from APIs
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        f_finnhub = executor.submit(_fetch_finnhub, ticker)
-        f_yf = executor.submit(_fetch_yfinance, ticker)
-        try:
-            finnhub_data = f_finnhub.result(timeout=15)
-        except Exception:
-            finnhub_data = []
-        try:
-            yf_data = f_yf.result(timeout=15)
-        except Exception:
-            yf_data = []
+    # 3. Live fetch from APIs (uses persistent thread pool)
+    f_finnhub = _analyst_pool.submit(_fetch_finnhub, ticker)
+    f_yf = _analyst_pool.submit(_fetch_yfinance, ticker)
+    try:
+        finnhub_data = f_finnhub.result(timeout=15)
+    except Exception:
+        finnhub_data = []
+    try:
+        yf_data = f_yf.result(timeout=15)
+    except Exception:
+        yf_data = []
 
     merged = _merge_ratings(finnhub_data, yf_data)
 

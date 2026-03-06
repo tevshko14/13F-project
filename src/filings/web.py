@@ -248,40 +248,83 @@ async def lifespan(app: FastAPI):
     )
     _heavy_sem = asyncio.Semaphore(int(os.environ.get("HEAVY_CONCURRENCY", "12")))
 
-    # ── Try Supabase first (persists across Railway deploys) ──
-    # Timeout after 30s so workers don't get killed by gunicorn if Supabase is slow
-    try:
-        app.state.fund_cache = await asyncio.wait_for(
-            asyncio.to_thread(cache.load_cache_from_supabase),
-            timeout=30,
-        )
-    except (asyncio.TimeoutError, Exception) as exc:
-        logger.warning(
-            "Supabase startup cache load failed (%s), falling back to disk", exc
-        )
-        app.state.fund_cache = {}
+    # ── Load all startup data concurrently ──────────────────────────
+    # Previously 5 sequential Supabase loads; now runs them in parallel
+    # for ~3-5× faster cold-start.
 
-    if not app.state.fund_cache:
-        # Fallback: load from disk (local dev, or Supabase unavailable)
-        app.state.fund_cache = cache.load_cache()
+    async def _load_funds():
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(cache.load_cache_from_supabase), timeout=30
+            )
+        except (asyncio.TimeoutError, Exception) as exc:
+            logger.warning(
+                "Supabase startup cache load failed (%s), falling back to disk",
+                exc,
+            )
+            return None
 
-    # Initialize background refresh state
+    async def _load_deploy():
+        try:
+            return await asyncio.to_thread(aum_data.load_all_deployment_data)
+        except Exception:
+            return {}
+
+    async def _load_logos():
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(supabase_cache.get_all_logos), timeout=120
+            )
+        except Exception as exc:
+            logger.warning("Logo cache load failed (%s), logos disabled", exc)
+            return None
+
+    async def _load_headshots():
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(supabase_cache.get_all_headshots), timeout=120
+            )
+        except Exception as exc:
+            logger.warning(
+                "Headshot cache load failed (%s), headshots disabled", exc
+            )
+            return None
+
+    async def _load_analyst_photos():
+        try:
+            sb = supabase_cache._get_client()
+            if sb is None:
+                return None
+            from filings import analyst_scraper as _as
+
+            return await asyncio.wait_for(
+                asyncio.to_thread(_as.get_all_analyst_photos, sb), timeout=60
+            )
+        except Exception as exc:
+            logger.warning("Analyst photo cache load failed (%s)", exc)
+            return None
+
+    (
+        fund_result,
+        deploy_result,
+        logo_rows,
+        headshot_rows,
+        analyst_photo_rows,
+    ) = await asyncio.gather(
+        _load_funds(),
+        _load_deploy(),
+        _load_logos(),
+        _load_headshots(),
+        _load_analyst_photos(),
+    )
+
+    # ── Process results ──────────────────────────────────────────
+    app.state.fund_cache = fund_result or cache.load_cache()
     app.state.refresh_status = "disabled"
     app.state.refresh_progress = {"total": 0, "done": 0, "failed": 0}
+    app.state.deployment_cache = deploy_result or {}
 
-    # Load deployment/AUM data from Supabase (non-blocking)
-    try:
-        app.state.deployment_cache = await asyncio.to_thread(
-            aum_data.load_all_deployment_data
-        )
-    except Exception:
-        app.state.deployment_cache = {}
-
-    # Load ticker logos from Supabase into memory (~20MB for ~4K tickers)
-    try:
-        logo_rows = await asyncio.wait_for(
-            asyncio.to_thread(supabase_cache.get_all_logos), timeout=120
-        )
+    if logo_rows:
         for row in logo_rows:
             t = row.get("ticker", "").upper()
             b64 = row.get("logo_b64", "")
@@ -290,15 +333,10 @@ async def lifespan(app: FastAPI):
         _logo_set.update(_logo_cache.keys())
         templates.env.globals["logo_tickers"] = _logo_set
         logger.info("Loaded %d ticker logos into memory", len(_logo_cache))
-    except Exception as exc:
-        logger.warning("Logo cache load failed (%s), logos disabled", exc)
+    else:
         templates.env.globals["logo_tickers"] = set()
 
-    # Load congress headshots from Supabase into memory (~5MB for ~535 members)
-    try:
-        headshot_rows = await asyncio.wait_for(
-            asyncio.to_thread(supabase_cache.get_all_headshots), timeout=120
-        )
+    if headshot_rows:
         for row in headshot_rows:
             mid = row.get("member_id", "")
             b64 = row.get("photo_b64", "")
@@ -306,36 +344,23 @@ async def lifespan(app: FastAPI):
                 _headshot_cache[mid] = _b64.b64decode(b64)
         _headshot_set.update(_headshot_cache.keys())
         templates.env.globals["headshot_members"] = _headshot_set
-        logger.info("Loaded %d congress headshots into memory", len(_headshot_cache))
-    except Exception as exc:
-        logger.warning("Headshot cache load failed (%s), headshots disabled", exc)
+        logger.info(
+            "Loaded %d congress headshots into memory", len(_headshot_cache)
+        )
+    else:
         templates.env.globals["headshot_members"] = set()
 
-    # Load analyst headshots from Supabase into memory
-    try:
-        _sb_client_for_analysts = supabase_cache._get_client()
-        if _sb_client_for_analysts is not None:
-            from filings import analyst_scraper as _as
-
-            analyst_photo_rows = await asyncio.wait_for(
-                asyncio.to_thread(
-                    _as.get_all_analyst_photos, _sb_client_for_analysts
-                ),
-                timeout=60,
-            )
-            for row in analyst_photo_rows:
-                aid = row.get("analyst_id", "")
-                b64 = row.get("photo_b64", "")
-                if aid and b64:
-                    _analyst_photo_cache[aid] = _b64.b64decode(b64)
-            _analyst_photo_set.update(_analyst_photo_cache.keys())
-        templates.env.globals["analyst_photo_set"] = _analyst_photo_set
-        logger.info(
-            "Loaded %d analyst headshots into memory", len(_analyst_photo_cache)
-        )
-    except Exception as exc:
-        logger.warning("Analyst photo cache load failed (%s)", exc)
-        templates.env.globals["analyst_photo_set"] = set()
+    if analyst_photo_rows:
+        for row in analyst_photo_rows:
+            aid = row.get("analyst_id", "")
+            b64 = row.get("photo_b64", "")
+            if aid and b64:
+                _analyst_photo_cache[aid] = _b64.b64decode(b64)
+        _analyst_photo_set.update(_analyst_photo_cache.keys())
+    templates.env.globals["analyst_photo_set"] = _analyst_photo_set
+    logger.info(
+        "Loaded %d analyst headshots into memory", len(_analyst_photo_cache)
+    )
 
     # Track background tasks for clean shutdown
     _bg_tasks: set[asyncio.Task] = set()
@@ -2354,23 +2379,24 @@ async def analyst_ratings(request: Request, ticker: str):
     ticker = ticker.upper().strip()
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
-    ratings, profiles, data_view = await _to_heavy(
-        analysts.get_analyst_ratings_with_profiles, ticker
-    )
-    consensus = analysts.get_consensus_summary_from_raw(ratings, data_view)
+    # Run ratings + price fetch concurrently (independent)
+    from filings import market_data
     from filings import analyst_scraper as _as
 
-    # Fetch current stock price for upside/downside calculation
-    current_price = None
-    try:
-        from filings import market_data
+    async def _fetch_price():
+        try:
+            prices = await asyncio.to_thread(
+                market_data.get_current_prices_batch, [ticker]
+            )
+            return prices.get(ticker)
+        except Exception:
+            return None
 
-        prices = await asyncio.to_thread(
-            market_data.get_current_prices_batch, [ticker]
-        )
-        current_price = prices.get(ticker)
-    except Exception:
-        pass
+    (ratings, profiles, data_view), current_price = await asyncio.gather(
+        _to_heavy(analysts.get_analyst_ratings_with_profiles, ticker),
+        _fetch_price(),
+    )
+    consensus = analysts.get_consensus_summary_from_raw(ratings, data_view)
 
     # Pre-group ratings by firm (ordered by most recent rating date per firm)
     # Each group: {firm, logo_url, latest: <most recent rating dict>, ratings: [...all desc]}
@@ -3668,14 +3694,15 @@ async def politician_page(request: Request, member_id: str):
         _politician_cache.move_to_end(member_id)  # mark as recently used
         display = cached[1]
     else:
-        member = await asyncio.to_thread(
-            supabase_cache.get_congress_member, member_id
+        # Run member + trades fetch concurrently (independent queries)
+        member, trades = await asyncio.gather(
+            asyncio.to_thread(supabase_cache.get_congress_member, member_id),
+            asyncio.to_thread(
+                supabase_cache.get_congress_trades_by_member, member_id
+            ),
         )
         if not member:
             raise HTTPException(status_code=404, detail="Politician not found")
-        trades = await asyncio.to_thread(
-            supabase_cache.get_congress_trades_by_member, member_id
-        )
         display = congress_trading.prepare_politician_display(trades or [], member)
         # LRU eviction: remove oldest (first item) if at capacity
         if len(_politician_cache) >= _POLITICIAN_CACHE_MAX:
@@ -4027,9 +4054,9 @@ async def _get_current_price_yf(ticker: str) -> float | None:
     """
 
     def _fetch():
-        import yfinance as yf
-        from filings.market_data import _yf_session
-        info = yf.Ticker(ticker, session=_yf_session).info
+        from filings.client import get_yfinance_info
+
+        info = get_yfinance_info(ticker)
         p = info.get("currentPrice") or info.get("regularMarketPrice")
         if p and isinstance(p, (int, float)) and p > 0:
             return float(p)

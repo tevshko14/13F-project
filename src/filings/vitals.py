@@ -26,13 +26,16 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from datetime import datetime
 
 from filings import supabase_cache
 from filings.cache import CACHE_DIR
 
 logger = logging.getLogger(__name__)
+
+# ── Shared thread pool (avoids per-call pool creation) ────────────────
+_vitals_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="vitals")
 
 # ── Thread lock for all cache reads/writes ────────────────────────────
 _lock = threading.Lock()
@@ -430,13 +433,11 @@ def _http_get_json(
 
 
 def _resolve_company_name(ticker: str) -> str | None:
-    """Resolve ticker to company name via yfinance (reuses existing pattern)."""
+    """Resolve ticker to company name via centralized yfinance cache."""
     try:
-        import yfinance as yf
-        from filings.market_data import _yf_session
+        from filings.client import get_yfinance_info
 
-        tk = yf.Ticker(ticker.upper(), session=_yf_session)
-        info = tk.info or {}
+        info = get_yfinance_info(ticker.upper())
         return info.get("longName") or info.get("shortName")
     except Exception as exc:
         logger.debug("yfinance company name lookup failed for %s: %s", ticker, exc)
@@ -1219,15 +1220,14 @@ def get_vitals_data(ticker: str) -> dict:
     }
     result: dict[str, dict | None] = {}
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(fn): key for key, fn in tasks.items()}
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                result[key] = future.result()
-            except Exception as exc:
-                logger.warning("%s vitals failed: %s", key, exc)
-                result[key] = None
+    futures = {_vitals_pool.submit(fn): key for key, fn in tasks.items()}
+    for future in as_completed(futures):
+        key = futures[future]
+        try:
+            result[key] = future.result()
+        except Exception as exc:
+            logger.warning("%s vitals failed: %s", key, exc)
+            result[key] = None
 
     # Fallback: derive company info from Glassdoor when PDL unavailable
     if not result.get("pdl") and not has_pdl_key() and result.get("glassdoor"):

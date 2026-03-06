@@ -300,15 +300,16 @@ _TICKER_PROFILES: dict[str, dict] = {
 
 
 def _get_yf_info(ticker: str) -> dict | None:
-    """Fetch company name + sector from yfinance (cached 7 days)."""
+    """Fetch company name + sector from yfinance (cached 7 days locally, 1h in central cache)."""
     with _lock:
         cached = _sector_cache.get(ticker)
         if cached and time.time() - cached[0] < _SECTOR_TTL:
             return cached[1]
 
     try:
-        import yfinance as yf
-        info = yf.Ticker(ticker).info
+        from filings.client import get_yfinance_info
+
+        info = get_yfinance_info(ticker)
         result = {
             "name": info.get("shortName", ""),
             "sector": info.get("sector", ""),

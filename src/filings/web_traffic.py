@@ -210,16 +210,16 @@ _TICKER_TO_WIKI: dict[str, str] = {
 
 
 def _get_yf_sector(ticker: str) -> dict | None:
-    """Fetch sector/industry from yfinance (cached 7 days)."""
+    """Fetch sector/industry from yfinance (cached 7 days locally, 1h in central cache)."""
     with _lock:
         cached = _sector_cache.get(ticker)
         if cached and time.time() - cached[0] < _SECTOR_TTL:
             return cached[1]
 
     try:
-        import yfinance as yf
+        from filings.client import get_yfinance_info
 
-        info = yf.Ticker(ticker).info
+        info = get_yfinance_info(ticker)
         result = {
             "sector": info.get("sector", ""),
             "industry": info.get("industry", ""),
