@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Macro — Earnings Scorecard | PaperPanda{% endblock %}
+{% block meta_description %}Track earnings season performance — beat rates, revenue surprises, market reactions, and detailed company results across the S&P 500 and NASDAQ.{% endblock %}
+{% block og_title %}Earnings Scorecard | PaperPanda{% endblock %}
+{% block og_description %}Aggregated earnings season metrics — EPS beat rates, revenue surprises, market reaction deltas, and detailed company results.{% endblock %}
+{% block twitter_title %}Earnings Scorecard | PaperPanda{% endblock %}
+{% block twitter_description %}Earnings season scorecard — beat rates, revenue surprises, and market reactions.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Macro"}
+    ]
+}
+</script>
+{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>Macro — Earnings Scorecard</h1>
+    <p>High-level view of market performance during earnings season</p>
+</hgroup>
+
+<style>
+    .es-index-toggle {
+        display: flex; gap: 0; margin-bottom: 1.2em;
+        border-bottom: 2px solid var(--pp-overlay-8);
+    }
+    .es-index-btn {
+        padding: 0.6em 1.4em; font-size: 0.9em; font-weight: 600;
+        color: var(--pp-sub-text); cursor: pointer;
+        border: none; background: none;
+        border-bottom: 2px solid transparent; margin-bottom: -2px;
+        transition: color 0.2s, border-color 0.2s;
+    }
+    .es-index-btn:hover { color: var(--pp-text); }
+    .es-index-btn.active { color: #ef4444; border-bottom-color: #ef4444; }
+    .es-filters {
+        display: flex; flex-wrap: wrap; gap: 0.8em;
+        margin-bottom: 1.5em; align-items: center;
+    }
+    .es-filters select {
+        padding: 0.45em 0.9em; font-size: 0.85em;
+        border-radius: 8px; border: 1px solid var(--pp-border);
+        background: var(--pp-surface); color: var(--pp-text);
+        min-width: 140px;
+    }
+</style>
+
+{# ── Index Toggle ── #}
+<div class="es-index-toggle">
+    {% for key, label in indices.items() %}
+    <button class="es-index-btn {% if key == current_index %}active{% endif %}"
+            onclick="esChangeIndex('{{ key }}')">{{ label }}</button>
+    {% endfor %}
+</div>
+
+{# ── Filters ── #}
+<div class="es-filters">
+    <select id="es-quarter" onchange="esReload()">
+        {% for q in quarters %}
+        <option value="{{ q }}" {% if q == current_quarter %}selected{% endif %}>{{ q }}</option>
+        {% endfor %}
+    </select>
+    <select id="es-sector" onchange="esReload()">
+        <option value="">All Sectors</option>
+        {% for s in sectors %}
+        <option value="{{ s }}" {% if s == current_sector %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+{# ── HTMX target ── #}
+<div id="es-content"
+     hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+    <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+        <span aria-busy="true">Loading earnings scorecard…</span>
+    </div>
+</div>
+
+<script>
+(function() {
+    var currentIndex = '{{ current_index }}';
+    var indexLabels = { sp500: 'S&P 500', nasdaq: 'NASDAQ 100' };
+
+    window.esChangeIndex = function(idx) {
+        currentIndex = idx;
+        document.querySelectorAll('.es-index-btn').forEach(function(btn) {
+            btn.classList.toggle('active', btn.textContent.trim() === (indexLabels[idx] || idx));
+        });
+        esReload();
+    };
+
+    window.esReload = function() {
+        var quarter = document.getElementById('es-quarter').value;
+        var sector = document.getElementById('es-sector').value;
+        var url = '/api/macro/scorecard?index=' + currentIndex + '&quarter=' + encodeURIComponent(quarter);
+        if (sector) url += '&sector=' + encodeURIComponent(sector);
+        htmx.ajax('GET', url, '#es-content');
+    };
+})();
+</script>
+{% endblock %}
