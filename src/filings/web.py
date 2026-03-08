@@ -3530,6 +3530,7 @@ async def macro_page(
 
     from filings import earnings_scorecard
     from filings import market_breadth
+    from filings import economic_calendar
 
     if index not in earnings_scorecard.INDEX_CHOICES:
         index = "sp500"
@@ -3553,6 +3554,9 @@ async def macro_page(
             "breadth_indices": market_breadth.INDEX_CHOICES,
             "breadth_periods": market_breadth.PERIOD_CHOICES,
             "calendar_periods": earnings_scorecard.CALENDAR_PERIODS,
+            "economic_periods": economic_calendar.PERIOD_CHOICES,
+            "economic_impacts": economic_calendar.IMPACT_CHOICES,
+            "economic_countries": economic_calendar.COUNTRY_CHOICES,
         },
     )
 
@@ -3679,6 +3683,37 @@ async def macro_calendar_api(
             "periods": earnings_scorecard.CALENDAR_PERIODS,
             "current_period": period,
         },
+    )
+
+
+@app.get("/api/macro/economic", response_class=HTMLResponse)
+async def macro_economic_api(
+    request: Request,
+    period: str = "this_week",
+    country: str = "us",
+    impact: str = "all",
+):
+    """HTMX endpoint — returns the economic dashboard partial."""
+    if not _check_macro_key(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    from filings import economic_calendar
+
+    if period not in economic_calendar.PERIOD_CHOICES:
+        period = "this_week"
+    if country not in economic_calendar.COUNTRY_CHOICES:
+        country = "us"
+    if impact not in economic_calendar.IMPACT_CHOICES:
+        impact = "all"
+
+    data = await _to_heavy(
+        economic_calendar.fetch_economic_events,
+        period, country, impact,
+    )
+
+    return templates.TemplateResponse(
+        "partials/economic_dashboard.html",
+        {"request": request, "data": data},
     )
 
 
