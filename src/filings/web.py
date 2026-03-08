@@ -3561,6 +3561,13 @@ async def alt_signals_short_interest(request: Request):
 
 # --- Macro Earnings Scorecard ---
 
+_MACRO_KEY = os.environ.get("MACRO_PAGE_KEY", "panda2026")
+
+
+def _check_macro_key(request: Request) -> bool:
+    """Return True if the request carries a valid macro page key."""
+    return request.query_params.get("key") == _MACRO_KEY
+
 
 @app.get("/macro", response_class=HTMLResponse)
 async def macro_page(
@@ -3570,6 +3577,13 @@ async def macro_page(
     sector: str = "",
 ):
     """Macro page — aggregated earnings-season dashboard + market breadth."""
+    if not _check_macro_key(request):
+        return templates.TemplateResponse(
+            "under_construction.html",
+            {"request": request},
+            status_code=200,
+        )
+
     from filings import earnings_scorecard
     from filings import market_breadth
 
@@ -3585,6 +3599,7 @@ async def macro_page(
         "macro.html",
         {
             "request": request,
+            "macro_key": _MACRO_KEY,
             "indices": earnings_scorecard.INDEX_CHOICES,
             "current_index": index,
             "quarters": quarters,
@@ -3605,6 +3620,9 @@ async def macro_scorecard_api(
     sector: str = "",
 ):
     """HTMX endpoint — returns the earnings scorecard partial."""
+    if not _check_macro_key(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     from filings import earnings_scorecard
 
     if index not in earnings_scorecard.INDEX_CHOICES:
@@ -3641,6 +3659,9 @@ async def macro_breadth_api(
     period: str = "1d",
 ):
     """HTMX endpoint — returns the market breadth partial."""
+    if not _check_macro_key(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
     from filings import market_breadth
 
     if index not in market_breadth.INDEX_CHOICES:

@@ -67,7 +67,7 @@
         </div>
     </div>
     <div id="es-content"
-         hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
+         hx-get="/api/macro/scorecard?key={{ macro_key }}&index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
          hx-trigger="load"
          hx-swap="innerHTML">
         <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
@@ -133,6 +133,7 @@
 
     /* ── Earnings Scorecard controls ── */
     var esCurrentIndex = '{{ current_index }}';
+    var macroKey = '{{ macro_key }}';
 
     window.esChangeIndex = function(idx) {
         esCurrentIndex = idx;
@@ -143,7 +144,7 @@
     window.esReload = function() {
         var quarter = document.getElementById('es-quarter').value;
         var sector = document.getElementById('es-sector').value;
-        var url = '/api/macro/scorecard?index=' + esCurrentIndex + '&quarter=' + encodeURIComponent(quarter);
+        var url = '/api/macro/scorecard?key=' + macroKey + '&index=' + esCurrentIndex + '&quarter=' + encodeURIComponent(quarter);
         if (sector) url += '&sector=' + encodeURIComponent(sector);
         htmx.ajax('GET', url, '#es-content');
     };
@@ -153,7 +154,7 @@
     var mbCurrentPeriod = '1d';
 
     function mbReload() {
-        htmx.ajax('GET', '/api/macro/breadth?index=' + mbCurrentIndex + '&period=' + mbCurrentPeriod, '#mb-content');
+        htmx.ajax('GET', '/api/macro/breadth?key=' + macroKey + '&index=' + mbCurrentIndex + '&period=' + mbCurrentPeriod, '#mb-content');
     }
 
     window.mbChangeIndex = function(idx) {
