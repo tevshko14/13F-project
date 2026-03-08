@@ -14,8 +14,11 @@ Data flow:
 from __future__ import annotations
 
 import logging
+import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +26,10 @@ logger = logging.getLogger(__name__)
 _EARNINGS_TTL = 86_400  # 24 hours — earnings don't change once reported
 _FWD_TTL = 3_600  # 1 hour — forward estimates update more often
 _FWD_DB_TTL = 21_600  # 6 hours — DB freshness threshold for estimates
+
+_FMP_BASE = "https://financialmodelingprep.com/api/v3"
+_FMP_TIMEOUT = 15
+_fmp_revenue_available: bool | None = None  # None = untested, False = plan lacks access
 
 EST_EPS = "eps"
 EST_REVENUE = "revenue"
@@ -299,6 +306,103 @@ def _infer_fiscal_quarter(report_date_str: str, fy_end_month: int) -> str:
     return f"Q{qnum} FY{fy_year}"
 
 
+def _fetch_fmp_revenue(ticker: str) -> dict[str, dict] | None:
+    """Fetch historical revenue data from FMP for a single ticker.
+
+    Returns ``{date_str: {"revenue": int, "revenueEstimated": int}}``
+    or *None* if FMP is unavailable / key not set / plan lacks access.
+    """
+    global _fmp_revenue_available
+
+    # Skip if we already know the endpoint is inaccessible
+    if _fmp_revenue_available is False:
+        return None
+
+    key = os.environ.get("FMP_API_KEY", "").strip()
+    if not key:
+        return None
+
+    try:
+        url = f"{_FMP_BASE}/historical/earning_calendar/{ticker}"
+        r = httpx.get(url, params={"apikey": key, "limit": 20}, timeout=_FMP_TIMEOUT)
+        r.raise_for_status()
+        data = r.json()
+
+        # FMP returns {"Error Message": "..."} when plan lacks access
+        if isinstance(data, dict):
+            err = data.get("Error Message") or data.get("message") or data.get("error")
+            if err:
+                logger.warning(
+                    "FMP historical/earning_calendar unavailable (plan issue): %s", err
+                )
+                _fmp_revenue_available = False
+                return None
+
+        if not isinstance(data, list):
+            return None
+
+        _fmp_revenue_available = True
+        lookup: dict[str, dict] = {}
+        for item in data:
+            d = item.get("date")
+            rev = item.get("revenue")
+            rev_est = item.get("revenueEstimated")
+            if d and (rev is not None or rev_est is not None):
+                lookup[d] = {"revenue": rev, "revenueEstimated": rev_est}
+        return lookup if lookup else None
+
+    except Exception:
+        logger.debug("FMP revenue fetch failed for %s", ticker, exc_info=True)
+        return None
+
+
+def _enrich_rows_with_revenue(
+    rows: list[dict], fmp_data: dict[str, dict],
+) -> list[dict]:
+    """Merge FMP revenue data into yfinance EPS rows by matching report_date.
+
+    FMP and yfinance dates can differ by ±1 day, so we try exact match first,
+    then ±1 day.
+    """
+    for row in rows:
+        rd = row.get("report_date", "")
+        if not rd:
+            continue
+
+        # Try exact date match, then ±1 day
+        match = fmp_data.get(rd)
+        if match is None:
+            try:
+                dt = datetime.strptime(rd, "%Y-%m-%d")
+                for delta in (1, -1):
+                    alt = (dt + timedelta(days=delta)).strftime("%Y-%m-%d")
+                    match = fmp_data.get(alt)
+                    if match is not None:
+                        break
+            except ValueError:
+                pass
+
+        if match is None:
+            continue
+
+        rev_actual = match.get("revenue")
+        rev_est = match.get("revenueEstimated")
+
+        row["revenue_actual"] = int(rev_actual) if rev_actual is not None else None
+        row["revenue_estimate"] = int(rev_est) if rev_est is not None else None
+
+        if rev_actual is not None and rev_est is not None and rev_est != 0:
+            row["revenue_surprise_pct"] = round(
+                ((rev_actual - rev_est) / abs(rev_est)) * 100, 4,
+            )
+            row["beat_revenue"] = rev_actual >= rev_est
+        elif rev_actual is not None and rev_est is not None:
+            row["revenue_surprise_pct"] = None
+            row["beat_revenue"] = rev_actual >= rev_est
+
+    return rows
+
+
 def _fetch_from_yfinance(ticker: str) -> tuple[list[dict], dict | None]:
     """Fetch earnings history + forward estimates from yfinance.
 
@@ -313,6 +417,11 @@ def _fetch_from_yfinance(ticker: str) -> tuple[list[dict], dict | None]:
 
     fy_end_month = _get_fy_end_month(tk)
     rows = _parse_earnings_dates(ticker, tk, fy_end_month)
+
+    # Enrich with FMP revenue data (non-blocking — revenue stays None if unavailable)
+    fmp_rev = _fetch_fmp_revenue(ticker)
+    if fmp_rev:
+        rows = _enrich_rows_with_revenue(rows, fmp_rev)
 
     fwd = None
     try:
