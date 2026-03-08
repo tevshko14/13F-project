@@ -1,0 +1,332 @@
+<style>
+    .ec-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1em;
+        margin-bottom: 1.5em;
+    }
+    .ec-metric-card {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-radius: 10px;
+        padding: 1.1em 1.2em;
+        text-align: center;
+        box-shadow: var(--pp-card-shadow-sm, none);
+    }
+    .ec-metric-value {
+        font-size: 1.6em;
+        font-weight: 700;
+        color: var(--pp-text);
+        line-height: 1.2;
+    }
+    .ec-metric-label {
+        font-size: 0.78em;
+        color: var(--pp-text-muted);
+        margin-top: 0.3em;
+        font-weight: 500;
+    }
+    .ec-date-group { margin-bottom: 1.2em; }
+    .ec-date-header {
+        font-size: 0.88em;
+        font-weight: 700;
+        color: var(--pp-text);
+        padding: 0.6em 1em;
+        background: var(--pp-overlay-5, var(--pp-surface-alt, #f4f4f5));
+        border-radius: 8px 8px 0 0;
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-bottom: none;
+    }
+    .ec-date-group .pp-table-wrap {
+        border-radius: 0 0 12px 12px;
+        border-top: none;
+    }
+    .ec-hour-badge {
+        display: inline-block;
+        font-size: 0.72em;
+        font-weight: 600;
+        padding: 0.25em 0.6em;
+        border-radius: 5px;
+        white-space: nowrap;
+        line-height: 1;
+    }
+    .ec-hour-bmo {
+        background: rgba(59, 130, 246, 0.12);
+        color: #2563eb;
+    }
+    .ec-hour-amc {
+        background: rgba(139, 92, 246, 0.12);
+        color: #7c3aed;
+    }
+    .ec-hour-dmh, .ec-hour- {
+        background: var(--pp-overlay-8, rgba(0,0,0,0.06));
+        color: var(--pp-text-muted);
+    }
+    .ec-si-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25em;
+        font-size: 0.7em;
+        font-weight: 700;
+        padding: 0.2em 0.55em;
+        border-radius: 5px;
+        background: rgba(245, 158, 11, 0.15);
+        color: #d97706;
+        cursor: help;
+        white-space: nowrap;
+    }
+    .ec-ticker-link {
+        color: var(--pp-text);
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .ec-ticker-link:hover {
+        color: var(--pp-accent, #ef4444);
+        text-decoration: underline;
+    }
+    .ec-name {
+        max-width: 180px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .ec-beat { color: #22c55e; font-weight: 600; }
+    .ec-miss { color: #ef4444; font-weight: 600; }
+    .ec-just-reported {
+        margin-top: 1.5em;
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .ec-just-reported summary {
+        padding: 0.8em 1.2em;
+        font-weight: 600;
+        font-size: 0.9em;
+        cursor: pointer;
+        background: var(--pp-overlay-5, var(--pp-surface-alt, #f4f4f5));
+        color: var(--pp-text);
+        list-style: none;
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
+    }
+    .ec-just-reported summary::before {
+        content: "\25B6";
+        font-size: 0.7em;
+        transition: transform 0.2s;
+    }
+    .ec-just-reported[open] summary::before {
+        transform: rotate(90deg);
+    }
+    .ec-just-reported .pp-table-wrap {
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+    }
+    .ec-search-wrap {
+        margin-bottom: 1em;
+    }
+    .ec-search {
+        width: 100%;
+        max-width: 320px;
+        padding: 0.55em 1em;
+        border: 1px solid var(--pp-border);
+        border-radius: 8px;
+        font-size: 0.85em;
+        background: var(--pp-surface);
+        color: var(--pp-text);
+    }
+    .ec-search:focus {
+        outline: none;
+        border-color: var(--pp-accent, #ef4444);
+    }
+    .ec-mock-banner {
+        padding: 0.6em 1em;
+        background: rgba(245, 158, 11, 0.12);
+        color: #92400e;
+        border-radius: 8px;
+        font-size: 0.82em;
+        margin-bottom: 1em;
+        text-align: center;
+    }
+    .ec-error-banner {
+        padding: 0.6em 1em;
+        background: rgba(239, 68, 68, 0.08);
+        color: #991b1b;
+        border-radius: 8px;
+        font-size: 0.82em;
+        margin-bottom: 1em;
+        text-align: center;
+    }
+    .ec-empty {
+        text-align: center;
+        padding: 3em;
+        color: var(--pp-text-muted);
+    }
+    @media (max-width: 700px) {
+        .ec-metrics { grid-template-columns: repeat(2, 1fr); }
+        .ec-col-name { display: none; }
+        .ec-col-rev { display: none; }
+        .ec-name { max-width: 120px; }
+    }
+</style>
+
+{# ── Banners ── #}
+{% if data.get('is_mock') %}
+<div class="ec-mock-banner">
+    Demo data — set <code>FINNHUB_API_KEY</code> for live earnings calendar.
+</div>
+{% endif %}
+{% if data.get('is_unavailable') %}
+<div class="ec-error-banner">
+    Earnings calendar data is temporarily unavailable. Please try again later.
+</div>
+{% endif %}
+
+{# ── Summary Cards ── #}
+{% set m = data.metrics %}
+<div class="ec-metrics">
+    <div class="ec-metric-card">
+        <div class="ec-metric-value">{{ m.reporting_count }}</div>
+        <div class="ec-metric-label">Reporting {{ data.period_label }}</div>
+    </div>
+    <div class="ec-metric-card">
+        <div class="ec-metric-value">{{ m.bmo_count }}</div>
+        <div class="ec-metric-label">Before Open</div>
+    </div>
+    <div class="ec-metric-card">
+        <div class="ec-metric-value">{{ m.amc_count }}</div>
+        <div class="ec-metric-label">After Close</div>
+    </div>
+    <div class="ec-metric-card">
+        <div class="ec-metric-value" style="{% if m.si_reporting_count > 0 %}color: #d97706;{% endif %}">{{ m.si_reporting_count }}</div>
+        <div class="ec-metric-label">SI Holdings Reporting</div>
+    </div>
+</div>
+
+{# ── Search ── #}
+{% if data.upcoming %}
+<div class="ec-search-wrap">
+    <input type="text" class="ec-search" id="ec-table-search"
+           placeholder="Search ticker or company…"
+           oninput="ecFilterTable(this.value)">
+</div>
+{% endif %}
+
+{# ── Calendar Table (grouped by date) ── #}
+{% if data.upcoming %}
+    {% for day in data.upcoming %}
+    <div class="ec-date-group" data-ec-day>
+        <div class="ec-date-header">{{ day.date_label }}</div>
+        <div class="pp-table-wrap">
+            <table class="pp-table ec-table">
+                <thead>
+                    <tr>
+                        <th style="width: 100px;">Time</th>
+                        <th style="width: 80px;">Ticker</th>
+                        <th class="ec-col-name">Company</th>
+                        <th style="text-align:right;">EPS Est.</th>
+                        <th class="ec-col-rev" style="text-align:right;">Rev Est.</th>
+                        <th style="width: 40px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in day.entries %}
+                    <tr data-ec-row>
+                        <td><span class="ec-hour-badge ec-hour-{{ e.hour }}">{{ e.hour_label }}</span></td>
+                        <td>
+                            {% if e.has_page %}
+                            <a href="/stock/{{ e.symbol }}" class="ec-ticker-link">{{ e.symbol }}</a>
+                            {% else %}
+                            <span class="ec-ticker-link">{{ e.symbol }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="ec-col-name ec-name" title="{{ e.name }}">{{ e.name }}</td>
+                        <td style="text-align:right;">
+                            {% if e.epsEstimate is not none %}${{ "%.2f"|format(e.epsEstimate) }}{% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="ec-col-rev" style="text-align:right;">{{ e.revenueEstimate_fmt or '&mdash;' }}</td>
+                        <td>
+                            {% if e.is_superinvestor %}
+                            <span class="ec-si-badge" title="Held by: {{ e.si_names|join(', ') }}">SI</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+<div class="ec-empty">
+    No upcoming earnings found for {{ data.index }} ({{ data.period_label }}).
+</div>
+{% endif %}
+
+{# ── Just Reported (collapsible) ── #}
+{% if data.just_reported %}
+<details class="ec-just-reported">
+    <summary>Just Reported ({{ data.just_reported|length }})</summary>
+    <div class="pp-table-wrap">
+        <table class="pp-table ec-table">
+            <thead>
+                <tr>
+                    <th>Ticker</th>
+                    <th class="ec-col-name">Company</th>
+                    <th>Date</th>
+                    <th style="text-align:right;">EPS Act.</th>
+                    <th style="text-align:right;">EPS Est.</th>
+                    <th class="ec-col-rev" style="text-align:right;">Rev Act.</th>
+                    <th class="ec-col-rev" style="text-align:right;">Rev Est.</th>
+                    <th style="width: 40px;"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in data.just_reported %}
+                <tr>
+                    <td>
+                        <a href="/stock/{{ r.symbol }}" class="ec-ticker-link">{{ r.symbol }}</a>
+                    </td>
+                    <td class="ec-col-name ec-name" title="{{ r.name }}">{{ r.name }}</td>
+                    <td style="white-space:nowrap;">{{ r.date | format_short_date }}</td>
+                    <td style="text-align:right;" class="{% if r.eps_beat == true %}ec-beat{% elif r.eps_beat == false %}ec-miss{% endif %}">
+                        {% if r.epsActual is not none %}${{ "%.2f"|format(r.epsActual) }}{% else %}&mdash;{% endif %}
+                    </td>
+                    <td style="text-align:right; color:var(--pp-text-muted);">
+                        {% if r.epsEstimate is not none %}${{ "%.2f"|format(r.epsEstimate) }}{% else %}&mdash;{% endif %}
+                    </td>
+                    <td class="ec-col-rev {% if r.rev_beat == true %}ec-beat{% elif r.rev_beat == false %}ec-miss{% endif %}" style="text-align:right;">
+                        {{ r.revenueActual_fmt or '&mdash;' }}
+                    </td>
+                    <td class="ec-col-rev" style="text-align:right; color:var(--pp-text-muted);">
+                        {{ r.revenueEstimate_fmt or '&mdash;' }}
+                    </td>
+                    <td>
+                        {% if r.is_superinvestor %}
+                        <span class="ec-si-badge" title="Held by: {{ r.si_names|join(', ') }}">SI</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</details>
+{% endif %}
+
+<script>
+(function() {
+    /* Client-side search filtering */
+    window.ecFilterTable = function(query) {
+        query = query.toLowerCase();
+        document.querySelectorAll('[data-ec-row]').forEach(function(row) {
+            row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
+        });
+        /* Show/hide date group headers based on whether any rows are visible */
+        document.querySelectorAll('[data-ec-day]').forEach(function(group) {
+            var visible = group.querySelectorAll('[data-ec-row]:not([style*="display: none"])');
+            group.style.display = visible.length > 0 || !query ? '' : 'none';
+        });
+    };
+})();
+</script>

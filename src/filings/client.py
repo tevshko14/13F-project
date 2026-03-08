@@ -1003,15 +1003,18 @@ def build_grand_portfolio(
                     "cusip": cusip,
                     "combined_value": 0,
                     "holders": [],
+                    "weights": [],
                 }
             by_cusip[cusip]["combined_value"] += val
             by_cusip[cusip]["holders"].append(si.display_name)
+            by_cusip[cusip]["weights"].append(h.get("pct", 0))
             # Prefer a non-None ticker
             if h.get("ticker") and not by_cusip[cusip]["ticker"]:
                 by_cusip[cusip]["ticker"] = h["ticker"]
 
     entries = []
     for data in by_cusip.values():
+        weights = data["weights"]
         entries.append(
             GrandPortfolioEntry(
                 issuer_name=data["issuer_name"],
@@ -1025,6 +1028,7 @@ def build_grand_portfolio(
                 if total_aggregate > 0
                 else 0,
                 holders=data["holders"],
+                avg_weight=sum(weights) / len(weights) if weights else 0,
             )
         )
 
