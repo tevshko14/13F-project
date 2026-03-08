@@ -77,9 +77,16 @@ def _fmp_get(path: str, params: dict | None = None) -> list | dict | None:
     p = dict(params or {})
     p["apikey"] = key
     try:
-        r = httpx.get(f"{_FMP_BASE}{path}", params=p, timeout=_TIMEOUT)
+        url = f"{_FMP_BASE}{path}"
+        logger.info("FMP request: %s params=%s", url, {k: v for k, v in p.items() if k != "apikey"})
+        r = httpx.get(url, params=p, timeout=_TIMEOUT)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        if isinstance(data, list):
+            logger.info("FMP %s returned %d items", path, len(data))
+        else:
+            logger.warning("FMP %s returned non-list: %s", path, str(data)[:200])
+        return data
     except Exception:
         logger.exception("FMP API error: %s", path)
         return None
@@ -142,6 +149,23 @@ def fetch_earnings_data(
     return data
 
 
+def _build_company_lookup(index: str) -> dict[str, dict]:
+    """Build {symbol: {name, sector}} from market_data constituents."""
+    try:
+        from filings import market_data
+
+        if index == "sp500":
+            rows = market_data.get_sp500_constituents()
+        else:
+            rows = market_data.get_sp500_constituents()  # fallback
+        return {
+            r["ticker"]: {"name": r.get("name", ""), "sector": r.get("sector", "")}
+            for r in rows
+        }
+    except Exception:
+        return {}
+
+
 def _fetch_from_fmp(
     index: str, quarter: str | None, sector: str | None,
 ) -> dict:
@@ -160,29 +184,37 @@ def _fetch_from_fmp(
         start, end = _quarter_dates(now.year, q)
         quarter = f"Q{q} {now.year}"
 
-    surprises = _fmp_get("/earnings-surprises", {"from": start, "to": end})
-    if not surprises or not isinstance(surprises, list):
-        # Only show mock data in dev (no API key). In production (key set
-        # but API down), return an empty result so users never see fake data.
+    # FMP bulk endpoint: /earning_calendar (not /earnings-surprises which is per-symbol)
+    calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    if not calendar or not isinstance(calendar, list):
         if not _api_key():
             return _build_mock_data(quarter, index, sector)
         return _build_empty_data(quarter, index, sector)
 
     constituents = _get_index_constituents(index)
+    company_info = _build_company_lookup(index)
 
     results: list[dict] = []
-    for item in surprises:
+    for item in calendar:
         symbol = item.get("symbol", "")
         if constituents and symbol not in constituents:
             continue
-        item_sector = item.get("sector", "")
+
+        # Company name + sector from Wikipedia constituents lookup
+        info = company_info.get(symbol, {})
+        item_sector = info.get("sector", "")
         if sector and item_sector and item_sector != sector:
             continue
 
-        actual_eps = item.get("actualEarningResult")
-        est_eps = item.get("estimatedEarning")
-        actual_rev = item.get("actualRevenue")
-        est_rev = item.get("estimatedRevenue")
+        # earning_calendar fields: eps, epsEstimated, revenue, revenueEstimated
+        actual_eps = item.get("eps")
+        est_eps = item.get("epsEstimated")
+        actual_rev = item.get("revenue")
+        est_rev = item.get("revenueEstimated")
+
+        # Skip rows where actuals haven't been reported yet
+        if actual_eps is None and actual_rev is None:
+            continue
 
         eps_beat = (
             actual_eps > est_eps
@@ -207,7 +239,7 @@ def _fetch_from_fmp(
 
         results.append({
             "symbol": symbol,
-            "name": item.get("companyName", symbol),
+            "name": info.get("name") or symbol,
             "date": item.get("date", ""),
             "sector": item_sector,
             "actual_eps": actual_eps,
@@ -216,8 +248,8 @@ def _fetch_from_fmp(
             "eps_surprise_pct": eps_surprise_pct,
             "rev_beat": rev_beat,
             "rev_surprise_pct": rev_surprise_pct,
-            "price_change": item.get("priceReaction"),
-            "guide": item.get("guidance") or "—",
+            "price_change": None,  # not available from earning_calendar
+            "guide": "—",  # not available from earning_calendar
         })
 
     results.sort(key=lambda r: r["date"] or "", reverse=True)
@@ -318,27 +350,28 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
         y, q = parsed
         start, end = _quarter_dates(y, q)
 
-        surprises = _fmp_get("/earnings-surprises", {"from": start, "to": end})
-        if surprises and isinstance(surprises, list):
+        calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
+        if calendar and isinstance(calendar, list):
             has_real_data = True
             rows = [
                 {
                     "eps_beat": (
-                        s.get("actualEarningResult", 0) > s.get("estimatedEarning", 0)
-                        if s.get("actualEarningResult") is not None
-                        and s.get("estimatedEarning") is not None
+                        s.get("eps", 0) > s.get("epsEstimated", 0)
+                        if s.get("eps") is not None
+                        and s.get("epsEstimated") is not None
                         else None
                     ),
                     "rev_beat": (
-                        s.get("actualRevenue", 0) > s.get("estimatedRevenue", 0)
-                        if s.get("actualRevenue") is not None
-                        and s.get("estimatedRevenue") is not None
+                        s.get("revenue", 0) > s.get("revenueEstimated", 0)
+                        if s.get("revenue") is not None
+                        and s.get("revenueEstimated") is not None
                         else None
                     ),
                     "eps_surprise_pct": None,
-                    "price_change": s.get("priceReaction"),
+                    "price_change": None,
                 }
-                for s in surprises
+                for s in calendar
+                if s.get("eps") is not None  # skip unannounced
             ]
             m = _compute_metrics(rows)
             trend.append({
