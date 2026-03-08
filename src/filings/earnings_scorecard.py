@@ -538,6 +538,107 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
     return trend
 
 
+# ── Revenue backfill ─────────────────────────────────────────────
+
+def backfill_revenue(index: str = "sp500") -> dict:
+    """Backfill revenue data for index constituents via FMP per-symbol API.
+
+    Iterates over S&P 500 / NASDAQ 100 tickers, fetches FMP historical
+    revenue data, and updates ``earnings_history`` rows that have NULL
+    revenue columns.
+
+    Returns ``{updated: int, skipped: int, failed: int, total: int}``.
+    """
+    from filings.earnings import _fetch_fmp_revenue, _enrich_rows_with_revenue
+    from filings import supabase_cache
+
+    company_info = _build_company_lookup(index)
+    tickers = sorted(company_info.keys())
+    updated = 0
+    skipped = 0
+    failed = 0
+
+    for i, ticker in enumerate(tickers):
+        if i > 0 and i % 50 == 0:
+            logger.info("backfill_revenue progress: %d/%d tickers (updated=%d)", i, len(tickers), updated)
+
+        try:
+            # Get existing rows for this ticker that lack revenue
+            client = supabase_cache._get_client()
+            if client is None:
+                failed += len(tickers) - i
+                break
+
+            resp = (
+                client.table("earnings_history")
+                .select("ticker,report_date,fiscal_quarter,eps_estimate,eps_actual,"
+                        "eps_surprise_pct,beat_eps,updated_at")
+                .eq("ticker", ticker)
+                .is_("revenue_actual", "null")
+                .order("report_date", desc=True)
+                .limit(20)
+                .execute()
+            )
+            db_rows = resp.data
+            if not db_rows:
+                skipped += 1
+                continue
+
+            # Fetch FMP revenue data for this ticker
+            fmp_data = _fetch_fmp_revenue(ticker)
+            if fmp_data is None:
+                # FMP unavailable (plan issue) — stop trying
+                failed += len(tickers) - i
+                logger.warning("backfill_revenue: FMP unavailable, stopping at ticker %d/%d", i, len(tickers))
+                break
+
+            # Build complete rows with revenue merged in
+            now_iso = datetime.utcnow().isoformat()
+            rows_to_update: list[dict] = []
+            for row in db_rows:
+                rd = row.get("report_date", "")
+                # Construct a full row for upsert
+                full_row = {
+                    "ticker": ticker,
+                    "report_date": rd,
+                    "fiscal_quarter": row.get("fiscal_quarter", ""),
+                    "eps_estimate": row.get("eps_estimate"),
+                    "eps_actual": row.get("eps_actual"),
+                    "eps_surprise_pct": row.get("eps_surprise_pct"),
+                    "revenue_estimate": None,
+                    "revenue_actual": None,
+                    "revenue_surprise_pct": None,
+                    "beat_eps": row.get("beat_eps"),
+                    "beat_revenue": None,
+                    "updated_at": now_iso,
+                }
+                rows_to_update.append(full_row)
+
+            # Enrich with FMP revenue
+            rows_to_update = _enrich_rows_with_revenue(rows_to_update, fmp_data)
+
+            # Only upsert rows that actually got revenue data
+            enriched = [r for r in rows_to_update if r.get("revenue_actual") is not None]
+            if enriched:
+                supabase_cache.upsert_earnings_history(enriched)
+                updated += len(enriched)
+            else:
+                skipped += 1
+
+            # Throttle: 200ms between tickers to respect FMP rate limits
+            time.sleep(0.2)
+
+        except Exception:
+            logger.exception("backfill_revenue failed for %s", ticker)
+            failed += 1
+
+    logger.info(
+        "backfill_revenue complete: updated=%d skipped=%d failed=%d total=%d",
+        updated, skipped, failed, len(tickers),
+    )
+    return {"updated": updated, "skipped": skipped, "failed": failed, "total": len(tickers)}
+
+
 # ── Mock data fallback ───────────────────────────────────────────
 
 _MOCK_COMPANIES_SP500 = [

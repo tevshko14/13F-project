@@ -1848,6 +1848,20 @@ async def sync_announcements():
     })
 
 
+@app.post("/api/admin/backfill-revenue")
+async def admin_backfill_revenue(request: Request, index: str = "sp500"):
+    """Backfill revenue data from FMP for all index constituents.
+
+    Iterates over tickers, calling FMP ``/historical/earning_calendar``
+    per-symbol, and updates ``earnings_history`` rows that have NULL
+    revenue columns.  Runs in the heavy thread pool.
+    """
+    from filings import earnings_scorecard
+
+    result = await _to_heavy(earnings_scorecard.backfill_revenue, index)
+    return JSONResponse(result)
+
+
 # --- Homepage: dashboard with market data & widgets ---
 
 
