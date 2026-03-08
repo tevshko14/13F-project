@@ -541,33 +541,52 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
 # ── Revenue backfill ─────────────────────────────────────────────
 
 def backfill_revenue(index: str = "sp500") -> dict:
-    """Backfill revenue data for index constituents.
+    """Backfill revenue data using Finnhub bulk earnings calendar.
 
-    Tries **Finnhub** first (free tier), then **FMP** (premium) per ticker.
-    Updates ``earnings_history`` rows that have NULL revenue columns.
+    Fetches the Finnhub ``/calendar/earnings`` bulk endpoint (last 7 weeks),
+    then matches entries to ``earnings_history`` rows that have NULL revenue.
+    Only 1-2 API calls needed — far faster than per-ticker fetching.
 
     Returns ``{updated: int, skipped: int, failed: int, total: int}``.
     """
-    from filings.earnings import _fetch_fmp_revenue, _enrich_rows_with_revenue
+    from filings.earnings import _load_finnhub_bulk_calendar, _enrich_rows_with_revenue
     from filings import supabase_cache
 
     company_info = _build_company_lookup(index)
     tickers = sorted(company_info.keys())
+
+    # ── Step 1: fetch bulk calendar from Finnhub ──────────────
+    cal = _load_finnhub_bulk_calendar()
+    if cal is None:
+        logger.warning("backfill_revenue: Finnhub bulk calendar unavailable")
+        return {"updated": 0, "skipped": 0, "failed": len(tickers), "total": len(tickers)}
+
+    # Filter to index constituents
+    index_tickers = set(tickers)
+    matched_tickers = {sym for sym in cal if sym in index_tickers}
+    logger.info(
+        "backfill_revenue: Finnhub calendar has %d symbols, %d match %s",
+        len(cal), len(matched_tickers), index,
+    )
+
+    # ── Step 2: update DB rows per matched ticker ─────────────
     updated = 0
     skipped = 0
     failed = 0
+    client = supabase_cache._get_client()
+    if client is None:
+        return {"updated": 0, "skipped": 0, "failed": len(tickers), "total": len(tickers)}
 
     for i, ticker in enumerate(tickers):
-        if i > 0 and i % 50 == 0:
-            logger.info("backfill_revenue progress: %d/%d tickers (updated=%d)", i, len(tickers), updated)
+        if i > 0 and i % 100 == 0:
+            logger.info("backfill_revenue progress: %d/%d (updated=%d)", i, len(tickers), updated)
+
+        rev_data = cal.get(ticker)
+        if not rev_data:
+            skipped += 1
+            continue
 
         try:
-            # Get existing rows for this ticker that lack revenue
-            client = supabase_cache._get_client()
-            if client is None:
-                failed += len(tickers) - i
-                break
-
             resp = (
                 client.table("earnings_history")
                 .select("ticker,report_date,fiscal_quarter,eps_estimate,eps_actual,"
@@ -583,21 +602,12 @@ def backfill_revenue(index: str = "sp500") -> dict:
                 skipped += 1
                 continue
 
-            # Fetch revenue data (Finnhub primary, FMP fallback)
-            rev_data = _fetch_fmp_revenue(ticker)
-            if rev_data is None:
-                # No revenue data available for this ticker — skip, don't break
-                failed += 1
-                continue
-
-            # Build complete rows with revenue merged in
             now_iso = datetime.now().isoformat()
             rows_to_update: list[dict] = []
             for row in db_rows:
-                rd = row.get("report_date", "")
                 full_row = {
                     "ticker": ticker,
-                    "report_date": rd,
+                    "report_date": row.get("report_date", ""),
                     "fiscal_quarter": row.get("fiscal_quarter", ""),
                     "eps_estimate": row.get("eps_estimate"),
                     "eps_actual": row.get("eps_actual"),
@@ -611,19 +621,14 @@ def backfill_revenue(index: str = "sp500") -> dict:
                 }
                 rows_to_update.append(full_row)
 
-            # Enrich with revenue
             rows_to_update = _enrich_rows_with_revenue(rows_to_update, rev_data)
-
-            # Only upsert rows that actually got revenue data
             enriched = [r for r in rows_to_update if r.get("revenue_actual") is not None]
+
             if enriched:
                 supabase_cache.upsert_earnings_history(enriched)
                 updated += len(enriched)
             else:
                 skipped += 1
-
-            # Throttle: 1.1s between tickers (Finnhub free = 60 req/min)
-            time.sleep(1.1)
 
         except Exception:
             logger.exception("backfill_revenue failed for %s", ticker)
