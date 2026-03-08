@@ -1,0 +1,619 @@
+"""FRED Economic Calendar — upcoming & recent US economic events.
+
+Uses the Federal Reserve Bank of St. Louis (FRED) API as the primary
+data source.  FRED is free, official, and covers all major US macro
+releases (CPI, NFP, FOMC, GDP, PCE, PPI, Retail Sales, etc.).
+
+Caching strategy mirrors the 13F filings pattern:
+  L1 — in-memory dict (TTL 1 hr): avoids repeated Supabase reads within
+        the same process lifetime.
+  L2 — Supabase cache (TTL 6 hr): survives deploys, shared across
+        workers, and serves stale data if FRED is temporarily down.
+  L3 — FRED REST API: fetched only when both caches are cold/expired.
+
+Fallback: deterministic mock data when no FRED_API_KEY is configured.
+
+Public surface (same interface as economic_calendar.py so web.py needs
+zero changes):
+  PERIOD_CHOICES, IMPACT_CHOICES, COUNTRY_CHOICES
+  fetch_economic_events(period, country, impact_filter) -> dict
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import threading
+import time
+from datetime import datetime, timedelta
+
+import httpx
+
+from filings import supabase_cache
+
+logger = logging.getLogger(__name__)
+
+# ── FRED API config ──────────────────────────────────────────────
+_FRED_BASE = "https://api.stlouisfed.org/fred"
+_TIMEOUT = 20
+
+
+def _fred_key() -> str:
+    return os.environ.get("FRED_API_KEY", "").strip()
+
+
+# ── Public filter choices (same keys as economic_calendar.py) ───
+PERIOD_CHOICES = {
+    "this_week": "This Week",
+    "next_week": "Next Week",
+    "next_2w":   "Next 2 Weeks",
+    "all":       "All Upcoming",
+}
+
+IMPACT_CHOICES = {
+    "all":  "All Events",
+    "high": "High Impact Only",
+}
+
+COUNTRY_CHOICES = {
+    "us":  "US Only",
+    "all": "All Countries",  # kept for UI parity; FRED is US-only
+}
+
+
+# ── Tracked FRED series ──────────────────────────────────────────
+# Each entry maps a FRED series ID to display metadata.
+# `units`:        FRED API transform — "lin" (raw), "pch" (MoM %),
+#                 "chg" (absolute change from prior period)
+# `display_unit`: what to show in the UI ("%", "K", "")
+# `release_id`:   FRED release ID (used to fetch scheduled dates)
+# `time`:         typical ET time the data is released (hardcoded)
+_SERIES: dict[str, dict] = {
+    # ── Inflation ────────────────────────────────────────────────
+    "CPIAUCSL": {
+        "name": "CPI (MoM)", "impact": "high", "category": "inflation",
+        "units": "pch", "display_unit": "%", "release_id": 10, "time": "08:30",
+    },
+    "CPILFESL": {
+        "name": "Core CPI (MoM)", "impact": "high", "category": "inflation",
+        "units": "pch", "display_unit": "%", "release_id": 10, "time": "08:30",
+    },
+    "PCEPILFE": {
+        "name": "Core PCE (MoM)", "impact": "high", "category": "inflation",
+        "units": "pch", "display_unit": "%", "release_id": 54, "time": "08:30",
+    },
+    "PPIFID": {
+        "name": "PPI Final Demand (MoM)", "impact": "medium", "category": "inflation",
+        "units": "pch", "display_unit": "%", "release_id": 101, "time": "08:30",
+    },
+    # ── Employment ───────────────────────────────────────────────
+    "PAYEMS": {
+        "name": "Nonfarm Payrolls", "impact": "high", "category": "employment",
+        "units": "chg", "display_unit": "K", "release_id": 50, "time": "08:30",
+    },
+    "UNRATE": {
+        "name": "Unemployment Rate", "impact": "high", "category": "employment",
+        "units": "lin", "display_unit": "%", "release_id": 50, "time": "08:30",
+    },
+    "ICSA": {
+        "name": "Initial Jobless Claims", "impact": "medium", "category": "employment",
+        "units": "lin", "display_unit": "K", "release_id": 176, "time": "08:30",
+    },
+    # ── Growth ───────────────────────────────────────────────────
+    "A191RL1Q225SBEA": {
+        "name": "GDP (QoQ, Annualized)", "impact": "high", "category": "growth",
+        "units": "lin", "display_unit": "%", "release_id": 53, "time": "08:30",
+    },
+    # ── Consumer ─────────────────────────────────────────────────
+    "RSXFS": {
+        "name": "Retail Sales (MoM)", "impact": "high", "category": "consumer",
+        "units": "pch", "display_unit": "%", "release_id": 337, "time": "08:30",
+    },
+    "UMCSENT": {
+        "name": "Michigan Consumer Sentiment", "impact": "medium", "category": "consumer",
+        "units": "lin", "display_unit": "", "release_id": 175, "time": "10:00",
+    },
+    # ── Manufacturing ────────────────────────────────────────────
+    "DGORDER": {
+        "name": "Durable Goods Orders (MoM)", "impact": "medium", "category": "manufacturing",
+        "units": "pch", "display_unit": "%", "release_id": 97, "time": "08:30",
+    },
+    # ── Housing ──────────────────────────────────────────────────
+    "HOUST": {
+        "name": "Housing Starts", "impact": "medium", "category": "housing",
+        "units": "lin", "display_unit": "K", "release_id": 60, "time": "08:30",
+    },
+}
+
+# FOMC rate-decision dates (ET 14:00).  The Fed publishes these a year in
+# advance; update _FOMC_DATES when the next year's schedule is released.
+_FOMC_DATES: list[tuple[str, str]] = [
+    # 2026 schedule
+    ("2026-01-29", "14:00"),
+    ("2026-03-18", "14:00"),
+    ("2026-04-29", "14:00"),
+    ("2026-06-17", "14:00"),
+    ("2026-07-29", "14:00"),
+    ("2026-09-16", "14:00"),
+    ("2026-10-28", "14:00"),
+    ("2026-12-16", "14:00"),
+]
+
+# ── Caching ──────────────────────────────────────────────────────
+_lock = threading.Lock()
+
+# L1 in-memory cache: {"events": [...], "fetched_at": float}
+_l1_cache: dict | None = None
+_L1_TTL = 3600          # 1 hour
+
+# Supabase L2
+_SUPABASE_KEY = "fred:events"
+_SUPABASE_CAT = "fred_events"
+_SUPABASE_TTL = 6 * 3600   # 6 hours
+
+# L1 result cache (filtered views, keyed by period/country/impact)
+_result_cache: dict[str, tuple[float, dict]] = {}
+_RESULT_TTL = 1800      # 30 min
+
+
+# ── FRED API helpers ─────────────────────────────────────────────
+
+def _fred_api(endpoint: str, params: dict) -> dict | None:
+    """Call FRED REST API. Returns parsed JSON or None on error."""
+    key = _fred_key()
+    if not key:
+        return None
+    try:
+        r = httpx.get(
+            f"{_FRED_BASE}/{endpoint}",
+            params={**params, "api_key": key, "file_type": "json"},
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        logger.warning("FRED API call failed: %s %s", endpoint, params, exc_info=True)
+        return None
+
+
+def _fetch_series_obs(series_id: str, units: str) -> list[dict]:
+    """Return up to 3 recent observations [{date, value}] newest-first."""
+    data = _fred_api("series/observations", {
+        "series_id": series_id,
+        "units": units,
+        "sort_order": "desc",
+        "limit": 3,
+        "output_type": 1,
+    })
+    if not data:
+        return []
+    result = []
+    for obs in data.get("observations", []):
+        v = obs.get("value", ".")
+        if v == ".":          # FRED uses "." for missing/not-yet-released
+            continue
+        try:
+            result.append({"date": obs["date"], "value": float(v)})
+        except (ValueError, KeyError):
+            continue
+    return result
+
+
+def _fetch_release_dates(release_id: int, from_date: str, to_date: str) -> list[str]:
+    """Return release dates (YYYY-MM-DD) for a FRED release within window."""
+    data = _fred_api("release/dates", {
+        "release_id": release_id,
+        "include_release_dates_with_no_data": True,
+        "sort_order": "asc",
+        "limit": 30,
+    })
+    if not data:
+        return []
+    return [
+        rd["date"]
+        for rd in data.get("release_dates", [])
+        if from_date <= rd.get("date", "") <= to_date
+    ]
+
+
+# ── Main FRED fetcher ────────────────────────────────────────────
+
+def _fetch_all_events() -> list[dict] | None:
+    """
+    Hit FRED API for every tracked series + FOMC dates.
+    Returns a flat list of normalised event dicts, or None on total failure.
+    Called by fetch_with_cache as the api_fetch_fn.
+    """
+    today = datetime.now()
+    window_start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+    window_end = (today + timedelta(days=28)).strftime("%Y-%m-%d")
+    today_str = today.strftime("%Y-%m-%d")
+
+    events: list[dict] = []
+    failed = 0
+
+    # ── Per-series events from FRED ──────────────────────────────
+    for series_id, meta in _SERIES.items():
+        # 1. Fetch recent observations (actual & previous)
+        obs = _fetch_series_obs(series_id, meta["units"])
+        latest = obs[0] if obs else None
+        previous = obs[1] if len(obs) > 1 else None
+
+        # 2. Fetch scheduled release dates for this series' release
+        dates = _fetch_release_dates(meta["release_id"], window_start, window_end)
+
+        if not dates:
+            failed += 1
+            continue
+
+        for date_str in dates:
+            is_past = date_str <= today_str
+            events.append({
+                "event":    meta["name"],
+                "date":     date_str,
+                "time":     meta["time"],
+                "country":  "US",
+                "impact":   meta["impact"],
+                "category": meta["category"],
+                # Actual: only show if the release date has passed and we have data
+                "actual":   round(latest["value"], 2) if (is_past and latest) else None,
+                # Previous: the observation before the latest
+                "previous": round(previous["value"], 2) if previous else None,
+                "estimate": None,   # FRED does not publish consensus forecasts
+                "unit":     meta["display_unit"],
+                "source":   "fred",
+            })
+
+    # ── FOMC rate-decision events (hardcoded schedule) ───────────
+    for fomc_date, fomc_time in _FOMC_DATES:
+        if not (window_start <= fomc_date <= window_end):
+            continue
+        is_past = fomc_date <= today_str
+        # Fetch the effective fed funds rate for past meetings
+        actual_rate = None
+        if is_past:
+            obs = _fetch_series_obs("FEDFUNDS", "lin")
+            if obs:
+                actual_rate = round(obs[0]["value"], 2)
+        events.append({
+            "event":    "FOMC Rate Decision",
+            "date":     fomc_date,
+            "time":     fomc_time,
+            "country":  "US",
+            "impact":   "high",
+            "category": "monetary_policy",
+            "actual":   actual_rate,
+            "previous": None,
+            "estimate": None,
+            "unit":     "%",
+            "source":   "fred",
+        })
+
+    if not events and failed == len(_SERIES):
+        logger.warning("FRED: all series failed to return data")
+        return None
+
+    logger.info("FRED calendar: %d events fetched", len(events))
+    return events
+
+
+# ── Cache orchestration ──────────────────────────────────────────
+
+def _load_raw_events() -> tuple[list[dict], bool]:
+    """
+    Returns (events, is_mock).
+
+    Cache hierarchy:
+      L1 in-memory (1 hr) → L2 Supabase (6 hr) → L3 FRED API → mock
+    """
+    global _l1_cache
+
+    now = time.time()
+
+    # ── L1: in-memory ────────────────────────────────────────────
+    with _lock:
+        if _l1_cache and (now - _l1_cache["fetched_at"]) < _L1_TTL:
+            return _l1_cache["events"], _l1_cache.get("is_mock", False)
+
+    # ── No FRED key → mock immediately ───────────────────────────
+    if not _fred_key():
+        mock = _build_mock_events()
+        with _lock:
+            _l1_cache = {"events": mock, "fetched_at": now, "is_mock": True}
+        return mock, True
+
+    # ── L2 + L3: Supabase cache with FRED as api_fetch_fn ────────
+    # fetch_with_cache handles: Supabase read → FRED API → stale fallback
+    result = supabase_cache.fetch_with_cache(
+        cache_key=_SUPABASE_KEY,
+        category=_SUPABASE_CAT,
+        ttl_days=_SUPABASE_TTL / 86400,
+        api_fetch_fn=_fetch_all_events,
+    )
+
+    is_mock = False
+    if not result:
+        # Both Supabase and FRED failed — fall back to mock
+        result = _build_mock_events()
+        is_mock = True
+        logger.warning("FRED calendar unavailable; using mock data")
+
+    # Populate L1
+    with _lock:
+        _l1_cache = {"events": result, "fetched_at": now, "is_mock": is_mock}
+
+    return result, is_mock
+
+
+# ── Value formatting ─────────────────────────────────────────────
+
+def _fmt_val(val: float | None, unit: str) -> str:
+    if val is None:
+        return "—"
+    if unit == "%":
+        return f"{val:+.2f}%"
+    if unit == "K":
+        return f"{val:,.0f}K"
+    if unit in ("B", "b"):
+        return f"{val:.1f}B"
+    return f"{val:.2f}"
+
+
+def _date_label(date_str: str) -> str:
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        today = datetime.now().date()
+        d = dt.date()
+        if d == today:
+            return f"Today — {dt.strftime('%A, %B %-d')}"
+        if d == today + timedelta(days=1):
+            return f"Tomorrow — {dt.strftime('%A, %B %-d')}"
+        return dt.strftime("%A, %B %-d, %Y")
+    except ValueError:
+        return date_str
+
+
+def _date_range_for_period(period: str) -> tuple[str, str]:
+    today = datetime.now()
+    weekday = today.weekday()
+    monday = today - timedelta(days=weekday)
+    if weekday >= 5:
+        monday = today + timedelta(days=(7 - weekday))
+
+    if period == "this_week":
+        start, end = monday, monday + timedelta(days=4)
+    elif period == "next_week":
+        start = monday + timedelta(weeks=1)
+        end = start + timedelta(days=4)
+    elif period == "next_2w":
+        start = monday
+        end = monday + timedelta(weeks=2, days=4)
+    else:  # "all"
+        start = today - timedelta(days=7)
+        end = today + timedelta(days=28)
+
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+# ── Public API ───────────────────────────────────────────────────
+
+def fetch_economic_events(
+    period: str = "this_week",
+    country: str = "us",
+    impact_filter: str = "all",
+) -> dict:
+    """
+    Fetch, filter, enrich and group economic events.
+
+    Identical signature to economic_calendar.fetch_economic_events so
+    web.py needs no changes beyond the import swap.
+
+    Returns:
+        events_by_date, metrics, countdown_target, period,
+        period_label, country, impact_filter, is_mock, is_unavailable
+    """
+    if period not in PERIOD_CHOICES:
+        period = "this_week"
+    if country not in COUNTRY_CHOICES:
+        country = "us"
+    if impact_filter not in IMPACT_CHOICES:
+        impact_filter = "all"
+
+    # ── L1 result cache ──────────────────────────────────────────
+    cache_key = f"fred_result:{period}:{country}:{impact_filter}"
+    now = time.time()
+    with _lock:
+        cached = _result_cache.get(cache_key)
+        if cached and (now - cached[0]) < _RESULT_TTL:
+            return cached[1]
+
+    # ── Load raw events ──────────────────────────────────────────
+    raw_events, is_mock = _load_raw_events()
+
+    # ── Filter ───────────────────────────────────────────────────
+    start_str, end_str = _date_range_for_period(period)
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    filtered = []
+    for ev in raw_events:
+        d = ev.get("date", "")
+        if not (start_str <= d <= end_str):
+            continue
+        if impact_filter == "high" and ev.get("impact") != "high":
+            continue
+        filtered.append(ev)
+
+    # ── Enrich ───────────────────────────────────────────────────
+    for ev in filtered:
+        actual = ev.get("actual")
+        previous = ev.get("previous")
+        unit = ev.get("unit", "")
+
+        ev["is_released"] = actual is not None
+
+        # Delta vs previous (FRED has no estimates, so we compare actual vs previous)
+        if actual is not None and previous is not None:
+            try:
+                delta = float(actual) - float(previous)
+                ev["delta"] = delta
+                ev["delta_direction"] = "hot" if delta > 0 else ("cold" if delta < 0 else "neutral")
+            except (TypeError, ValueError):
+                ev["delta"] = None
+                ev["delta_direction"] = None
+        else:
+            ev["delta"] = None
+            ev["delta_direction"] = None
+
+        ev["impact_class"] = {
+            "high":   "ed-impact-high",
+            "medium": "ed-impact-medium",
+            "low":    "ed-impact-low",
+        }.get(ev.get("impact", "low"), "ed-impact-low")
+
+        ev["actual_fmt"]   = _fmt_val(actual, unit)
+        ev["estimate_fmt"] = "—"            # FRED doesn't provide forecasts
+        ev["previous_fmt"] = _fmt_val(previous, unit)
+        ev["time_label"]   = ev.get("time", "") or "TBD"
+
+    # ── Group by date ────────────────────────────────────────────
+    date_groups: dict[str, list[dict]] = {}
+    for ev in filtered:
+        date_groups.setdefault(ev["date"], []).append(ev)
+
+    for entries in date_groups.values():
+        entries.sort(key=lambda e: e.get("time", "") or "99:99")
+
+    events_by_date = [
+        {
+            "date":       d,
+            "date_label": _date_label(d),
+            "entries":    date_groups[d],
+        }
+        for d in sorted(date_groups)
+    ]
+
+    # ── Countdown target ─────────────────────────────────────────
+    countdown_target = None
+    for day in events_by_date:
+        for ev in day["entries"]:
+            if ev["is_released"]:
+                continue
+            if ev.get("impact") != "high":
+                continue
+            d = ev["date"]
+            t = ev.get("time", "") or "08:30"
+            countdown_target = {
+                "event":        ev["event"],
+                "date":         d,
+                "time":         t,
+                "iso_datetime": f"{d}T{t}:00",
+            }
+            break
+        if countdown_target:
+            break
+
+    # ── Metrics ──────────────────────────────────────────────────
+    total     = len(filtered)
+    high_cnt  = sum(1 for e in filtered if e.get("impact") == "high")
+    released  = sum(1 for e in filtered if e["is_released"])
+    upcoming  = total - released
+
+    result = {
+        "events_by_date":  events_by_date,
+        "metrics": {
+            "total_events":      total,
+            "high_impact_count": high_cnt,
+            "released_count":    released,
+            "upcoming_count":    upcoming,
+        },
+        "countdown_target": countdown_target,
+        "period":           period,
+        "period_label":     PERIOD_CHOICES.get(period, period),
+        "country":          country,
+        "impact_filter":    impact_filter,
+        "is_mock":          is_mock,
+        "is_unavailable":   not raw_events and not is_mock,
+        "source":           "fred",   # lets template show attribution
+    }
+
+    with _lock:
+        _result_cache[cache_key] = (now, result)
+
+    return result
+
+
+# ── Mock data ────────────────────────────────────────────────────
+
+def _build_mock_events() -> list[dict]:
+    """Deterministic mock US economic events (seed 42) for dev/demo."""
+    import random
+    rng = random.Random(42)
+    today = datetime.now()
+
+    _MOCK = [
+        ("CPI (MoM)",                "08:30", "high",   "%",  0.2,  0.3),
+        ("Core CPI (MoM)",           "08:30", "high",   "%",  0.3,  0.3),
+        ("Core PCE (MoM)",           "08:30", "high",   "%",  0.3,  0.2),
+        ("PPI Final Demand (MoM)",   "08:30", "medium", "%",  0.1,  0.2),
+        ("Nonfarm Payrolls",         "08:30", "high",   "K",  180,  200),
+        ("Unemployment Rate",        "08:30", "high",   "%",  3.8,  3.9),
+        ("Initial Jobless Claims",   "08:30", "medium", "K",  210,  215),
+        ("GDP (QoQ, Annualized)",    "08:30", "high",   "%",  3.2,  2.8),
+        ("Retail Sales (MoM)",       "08:30", "high",   "%",  0.4,  0.3),
+        ("Durable Goods Orders (MoM)","08:30","medium", "%", -0.8,  1.2),
+        ("Housing Starts",           "08:30", "medium", "K", 1480, 1500),
+        ("Michigan Consumer Sentiment","10:00","medium","",   69.7, 67.4),
+        ("FOMC Rate Decision",       "14:00", "high",   "%",  5.25, 5.50),
+    ]
+
+    events = []
+    used_slots: set[tuple[str, str]] = set()
+    for i, (name, t, impact, unit, est, prev) in enumerate(_MOCK):
+        day_offset = (i * 17 + rng.randint(0, 3)) % 14 - 3
+        d = today + timedelta(days=day_offset)
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        date_str = d.strftime("%Y-%m-%d")
+
+        slot = (date_str, t)
+        orig_t = t
+        while slot in used_slots:
+            hh, mm = orig_t.split(":")
+            mm = str((int(mm) + 30) % 60).zfill(2)
+            if mm == "00":
+                hh = str(int(hh) + 1).zfill(2)
+            orig_t = f"{hh}:{mm}"
+            slot = (date_str, orig_t)
+        t = orig_t
+        used_slots.add(slot)
+
+        is_past = d.date() < today.date()
+        actual = None
+        if is_past:
+            actual = round(est + rng.uniform(-0.15, 0.15) * abs(est or 1), 2)
+
+        cat = {
+            "CPI": "inflation", "PCE": "inflation", "PPI": "inflation",
+            "Nonfarm": "employment", "Unemployment": "employment",
+            "Initial": "employment", "GDP": "growth",
+            "Retail": "consumer", "Michigan": "consumer",
+            "Durable": "manufacturing", "Housing": "housing",
+            "FOMC": "monetary_policy",
+        }
+        category = next((v for k, v in cat.items() if k in name), "other")
+
+        events.append({
+            "event":    name,
+            "date":     date_str,
+            "time":     t,
+            "country":  "US",
+            "impact":   impact,
+            "category": category,
+            "actual":   actual,
+            "estimate": None,
+            "previous": prev,
+            "unit":     unit,
+            "source":   "mock",
+        })
+
+    return events
