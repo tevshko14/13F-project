@@ -1,0 +1,374 @@
+<style>
+    .ed-countdown {
+        background: linear-gradient(135deg, var(--pp-surface), var(--pp-overlay-5, var(--pp-surface-alt, #f8f8fa)));
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-radius: 12px;
+        padding: 1.3em 1.5em;
+        margin-bottom: 1.5em;
+        display: flex;
+        align-items: center;
+        gap: 1.5em;
+        box-shadow: var(--pp-card-shadow-sm, none);
+    }
+    .ed-countdown-label {
+        flex: 1;
+    }
+    .ed-countdown-event {
+        font-weight: 700;
+        font-size: 1em;
+        color: var(--pp-text);
+        margin-bottom: 0.15em;
+    }
+    .ed-countdown-sub {
+        font-size: 0.78em;
+        color: var(--pp-text-muted);
+    }
+    .ed-countdown-timer {
+        display: flex;
+        gap: 0.6em;
+        text-align: center;
+    }
+    .ed-cd-unit {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        min-width: 48px;
+    }
+    .ed-cd-val {
+        font-size: 1.6em;
+        font-weight: 800;
+        color: var(--pp-accent, #ef4444);
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+    }
+    .ed-cd-lbl {
+        font-size: 0.65em;
+        color: var(--pp-text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        font-weight: 600;
+    }
+    .ed-cd-sep {
+        font-size: 1.4em;
+        font-weight: 700;
+        color: var(--pp-text-muted);
+        align-self: flex-start;
+        margin-top: 0.15em;
+    }
+    .ed-metrics {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1em;
+        margin-bottom: 1.5em;
+    }
+    .ed-metric-card {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-radius: 10px;
+        padding: 1.1em 1.2em;
+        text-align: center;
+        box-shadow: var(--pp-card-shadow-sm, none);
+    }
+    .ed-metric-value {
+        font-size: 1.6em;
+        font-weight: 700;
+        color: var(--pp-text);
+        line-height: 1.2;
+    }
+    .ed-metric-label {
+        font-size: 0.78em;
+        color: var(--pp-text-muted);
+        margin-top: 0.3em;
+        font-weight: 500;
+    }
+    .ed-date-group { margin-bottom: 1.2em; }
+    .ed-date-header {
+        font-size: 0.88em;
+        font-weight: 700;
+        color: var(--pp-text);
+        padding: 0.6em 1em;
+        background: var(--pp-overlay-5, var(--pp-surface-alt, #f4f4f5));
+        border-radius: 8px 8px 0 0;
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-bottom: none;
+    }
+    .ed-date-group .pp-table-wrap {
+        border-radius: 0 0 12px 12px;
+        border-top: none;
+    }
+    .ed-impact-badge {
+        display: inline-block;
+        font-size: 0.7em;
+        font-weight: 700;
+        padding: 0.25em 0.6em;
+        border-radius: 5px;
+        white-space: nowrap;
+        line-height: 1;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    .ed-impact-high {
+        background: rgba(239, 68, 68, 0.12);
+        color: #dc2626;
+    }
+    .ed-impact-medium {
+        background: rgba(245, 158, 11, 0.12);
+        color: #d97706;
+    }
+    .ed-impact-low {
+        background: var(--pp-overlay-8, rgba(0,0,0,0.06));
+        color: var(--pp-text-muted);
+    }
+    .ed-hot {
+        color: #dc2626;
+        font-weight: 700;
+    }
+    .ed-cold {
+        color: #2563eb;
+        font-weight: 700;
+    }
+    .ed-neutral-val {
+        color: var(--pp-text);
+        font-weight: 600;
+    }
+    .ed-time {
+        font-size: 0.82em;
+        font-weight: 600;
+        color: var(--pp-text-muted);
+        white-space: nowrap;
+    }
+    .ed-event-name {
+        font-weight: 600;
+        color: var(--pp-text);
+    }
+    .ed-cat-badge {
+        display: inline-block;
+        font-size: 0.65em;
+        font-weight: 600;
+        padding: 0.15em 0.45em;
+        border-radius: 4px;
+        background: var(--pp-overlay-5, rgba(0,0,0,0.04));
+        color: var(--pp-text-muted);
+        text-transform: capitalize;
+        margin-left: 0.4em;
+        vertical-align: middle;
+    }
+    .ed-search-wrap {
+        margin-bottom: 1em;
+    }
+    .ed-search {
+        width: 100%;
+        max-width: 320px;
+        padding: 0.55em 1em;
+        border: 1px solid var(--pp-border);
+        border-radius: 8px;
+        font-size: 0.85em;
+        background: var(--pp-surface);
+        color: var(--pp-text);
+    }
+    .ed-search:focus {
+        outline: none;
+        border-color: var(--pp-accent, #ef4444);
+    }
+    .ed-mock-banner {
+        padding: 0.6em 1em;
+        background: rgba(245, 158, 11, 0.12);
+        color: #92400e;
+        border-radius: 8px;
+        font-size: 0.82em;
+        margin-bottom: 1em;
+        text-align: center;
+    }
+    .ed-error-banner {
+        padding: 0.6em 1em;
+        background: rgba(239, 68, 68, 0.08);
+        color: #991b1b;
+        border-radius: 8px;
+        font-size: 0.82em;
+        margin-bottom: 1em;
+        text-align: center;
+    }
+    .ed-empty {
+        text-align: center;
+        padding: 3em;
+        color: var(--pp-text-muted);
+    }
+    @media (max-width: 700px) {
+        .ed-metrics { grid-template-columns: repeat(2, 1fr); }
+        .ed-col-prev { display: none; }
+        .ed-countdown { flex-direction: column; text-align: center; }
+        .ed-countdown-label { text-align: center; }
+    }
+</style>
+
+{# ── Banners ── #}
+{% if data.is_mock %}
+<div class="ed-mock-banner">
+    Demo data — set <code>FINNHUB_API_KEY</code> or <code>FMP_API_KEY</code> for live economic calendar.
+</div>
+{% endif %}
+{% if data.is_unavailable %}
+<div class="ed-error-banner">
+    Economic calendar data is temporarily unavailable. Please try again later.
+</div>
+{% endif %}
+
+{# ── Countdown Widget ── #}
+{% if data.countdown_target %}
+<div class="ed-countdown" id="ed-countdown-wrap">
+    <div class="ed-countdown-label">
+        <div class="ed-countdown-event">{{ data.countdown_target.event }}</div>
+        <div class="ed-countdown-sub">{{ data.countdown_target.date }} at {{ data.countdown_target.time or 'TBD' }} ET</div>
+    </div>
+    <div class="ed-countdown-timer" id="ed-cd-timer">
+        <div class="ed-cd-unit">
+            <span class="ed-cd-val" id="ed-cd-d">--</span>
+            <span class="ed-cd-lbl">Days</span>
+        </div>
+        <span class="ed-cd-sep">:</span>
+        <div class="ed-cd-unit">
+            <span class="ed-cd-val" id="ed-cd-h">--</span>
+            <span class="ed-cd-lbl">Hours</span>
+        </div>
+        <span class="ed-cd-sep">:</span>
+        <div class="ed-cd-unit">
+            <span class="ed-cd-val" id="ed-cd-m">--</span>
+            <span class="ed-cd-lbl">Min</span>
+        </div>
+        <span class="ed-cd-sep">:</span>
+        <div class="ed-cd-unit">
+            <span class="ed-cd-val" id="ed-cd-s">--</span>
+            <span class="ed-cd-lbl">Sec</span>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# ── Summary Cards ── #}
+{% set m = data.metrics %}
+<div class="ed-metrics">
+    <div class="ed-metric-card">
+        <div class="ed-metric-value">{{ m.total_events }}</div>
+        <div class="ed-metric-label">Total Events</div>
+    </div>
+    <div class="ed-metric-card">
+        <div class="ed-metric-value" style="{% if m.high_impact_count > 0 %}color: #dc2626;{% endif %}">{{ m.high_impact_count }}</div>
+        <div class="ed-metric-label">High Impact</div>
+    </div>
+    <div class="ed-metric-card">
+        <div class="ed-metric-value">{{ m.released_count }}</div>
+        <div class="ed-metric-label">Released</div>
+    </div>
+    <div class="ed-metric-card">
+        <div class="ed-metric-value">{{ m.upcoming_count }}</div>
+        <div class="ed-metric-label">Upcoming</div>
+    </div>
+</div>
+
+{# ── Search ── #}
+{% if data.events_by_date %}
+<div class="ed-search-wrap">
+    <input type="text" class="ed-search" id="ed-table-search"
+           placeholder="Search events..."
+           oninput="edFilterTable(this.value)">
+</div>
+{% endif %}
+
+{# ── Events Table (grouped by date) ── #}
+{% if data.events_by_date %}
+    {% for day in data.events_by_date %}
+    <div class="ed-date-group" data-ed-day>
+        <div class="ed-date-header">{{ day.date_label }}</div>
+        <div class="pp-table-wrap">
+            <table class="pp-table ed-table">
+                <thead>
+                    <tr>
+                        <th style="width: 60px;">Time</th>
+                        <th>Event</th>
+                        <th style="width: 80px;">Impact</th>
+                        <th style="text-align:right;">Forecast</th>
+                        <th style="text-align:right;">Actual</th>
+                        <th class="ed-col-prev" style="text-align:right;">Previous</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in day.entries %}
+                    <tr data-ed-row>
+                        <td><span class="ed-time">{{ e.time_label }}</span></td>
+                        <td>
+                            <span class="ed-event-name">{{ e.event }}</span>
+                            {% if e.category and e.category != 'other' %}
+                            <span class="ed-cat-badge">{{ e.category }}</span>
+                            {% endif %}
+                        </td>
+                        <td><span class="ed-impact-badge {{ e.impact_class }}">{{ e.impact }}</span></td>
+                        <td style="text-align:right; color:var(--pp-text-muted);">{{ e.estimate_fmt }}</td>
+                        <td style="text-align:right;">
+                            {% if e.is_released %}
+                                {% if e.delta_direction == 'hot' %}
+                                <span class="ed-hot">{{ e.actual_fmt }}</span>
+                                {% elif e.delta_direction == 'cold' %}
+                                <span class="ed-cold">{{ e.actual_fmt }}</span>
+                                {% else %}
+                                <span class="ed-neutral-val">{{ e.actual_fmt }}</span>
+                                {% endif %}
+                            {% else %}
+                            <span style="color:var(--pp-text-muted);">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="ed-col-prev" style="text-align:right; color:var(--pp-text-muted);">{{ e.previous_fmt }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+<div class="ed-empty">
+    No economic events found for {{ data.period_label }}.
+</div>
+{% endif %}
+
+<script>
+(function() {
+    /* ── Countdown timer ── */
+    {% if data.countdown_target %}
+    var edTarget = new Date('{{ data.countdown_target.iso_datetime }}');
+    function edUpdateCountdown() {
+        var now = new Date();
+        var diff = edTarget - now;
+        if (diff <= 0) {
+            document.getElementById('ed-cd-d').textContent = '0';
+            document.getElementById('ed-cd-h').textContent = '00';
+            document.getElementById('ed-cd-m').textContent = '00';
+            document.getElementById('ed-cd-s').textContent = '00';
+            clearInterval(edInterval);
+            return;
+        }
+        var d = Math.floor(diff / 86400000);
+        var h = Math.floor((diff % 86400000) / 3600000);
+        var m = Math.floor((diff % 3600000) / 60000);
+        var s = Math.floor((diff % 60000) / 1000);
+        document.getElementById('ed-cd-d').textContent = d;
+        document.getElementById('ed-cd-h').textContent = String(h).padStart(2, '0');
+        document.getElementById('ed-cd-m').textContent = String(m).padStart(2, '0');
+        document.getElementById('ed-cd-s').textContent = String(s).padStart(2, '0');
+    }
+    edUpdateCountdown();
+    var edInterval = setInterval(edUpdateCountdown, 1000);
+    {% endif %}
+
+    /* ── Client-side search filtering ── */
+    window.edFilterTable = function(query) {
+        query = query.toLowerCase();
+        document.querySelectorAll('[data-ed-row]').forEach(function(row) {
+            row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
+        });
+        document.querySelectorAll('[data-ed-day]').forEach(function(group) {
+            var visible = group.querySelectorAll('[data-ed-row]:not([style*="display: none"])');
+            group.style.display = visible.length > 0 || !query ? '' : 'none';
+        });
+    };
+})();
+</script>

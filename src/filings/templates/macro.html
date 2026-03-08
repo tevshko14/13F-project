@@ -54,6 +54,7 @@
     <button class="macro-tab active" id="tab-earnings" data-macro-tab="earnings" role="tab" aria-selected="true" aria-controls="macro-panel-earnings">Earnings Scorecard</button>
     <button class="macro-tab" id="tab-breadth" data-macro-tab="breadth" role="tab" aria-selected="false" aria-controls="macro-panel-breadth">Market Performance</button>
     <button class="macro-tab" id="tab-calendar" data-macro-tab="calendar" role="tab" aria-selected="false" aria-controls="macro-panel-calendar">Earnings Calendar</button>
+    <button class="macro-tab" id="tab-economic" data-macro-tab="economic" role="tab" aria-selected="false" aria-controls="macro-panel-economic">Macro Dashboard</button>
 </div>
 
 {# ═══ Panel: Earnings Scorecard ═══ #}
@@ -125,11 +126,42 @@
     </div>
 </div>
 
+{# ═══ Panel: Macro Dashboard (Economic Calendar) ═══ #}
+<div class="macro-panel" id="macro-panel-economic" role="tabpanel" aria-labelledby="tab-economic">
+    <div class="macro-controls">
+        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Macro Dashboard</h2>
+        <div class="pp-pill-nav" id="ed-period-nav" style="margin-bottom: 0;">
+            {% for key, label in economic_periods.items() %}
+            <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
+                    data-key="{{ key }}" onclick="edChangePeriod('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+        <div class="pp-pill-nav" id="ed-impact-nav" style="margin-bottom: 0;">
+            {% for key, label in economic_impacts.items() %}
+            <button class="pp-pill-btn {% if key == 'all' %}active{% endif %}"
+                    data-key="{{ key }}" onclick="edChangeImpact('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+        <div class="pp-pill-nav" id="ed-country-nav" style="margin-bottom: 0;">
+            {% for key, label in economic_countries.items() %}
+            <button class="pp-pill-btn {% if key == 'us' %}active{% endif %}"
+                    data-key="{{ key }}" onclick="edChangeCountry('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    <div id="ed-content">
+        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+            <span aria-busy="true">Loading macro dashboard…</span>
+        </div>
+    </div>
+</div>
+
 <script>
 (function() {
     /* ── Top-level tab switching ── */
     var mbLoaded = false;
     var ecLoaded = false;
+    var edLoaded = false;
     document.querySelectorAll('.macro-tab').forEach(function(tab) {
         tab.addEventListener('click', function() {
             document.querySelectorAll('.macro-tab').forEach(function(t) {
@@ -151,6 +183,11 @@
             if (tab.dataset.macroTab === 'calendar' && !ecLoaded) {
                 ecLoaded = true;
                 ecReload();
+            }
+            /* Lazy-load Macro Dashboard on first tab click */
+            if (tab.dataset.macroTab === 'economic' && !edLoaded) {
+                edLoaded = true;
+                edReload();
             }
         });
     });
@@ -218,6 +255,36 @@
         ecCurrentPeriod = p;
         activatePill('ec-period-nav', p);
         ecReload();
+    };
+
+    /* ── Macro Dashboard (Economic Calendar) controls ── */
+    var edCurrentPeriod = 'this_week';
+    var edCurrentImpact = 'all';
+    var edCurrentCountry = 'us';
+
+    function edReload() {
+        htmx.ajax('GET', '/api/macro/economic?key=' + macroKey
+            + '&period=' + edCurrentPeriod
+            + '&impact=' + edCurrentImpact
+            + '&country=' + edCurrentCountry, '#ed-content');
+    }
+
+    window.edChangePeriod = function(p) {
+        edCurrentPeriod = p;
+        activatePill('ed-period-nav', p);
+        edReload();
+    };
+
+    window.edChangeImpact = function(imp) {
+        edCurrentImpact = imp;
+        activatePill('ed-impact-nav', imp);
+        edReload();
+    };
+
+    window.edChangeCountry = function(c) {
+        edCurrentCountry = c;
+        activatePill('ed-country-nav', c);
+        edReload();
     };
 })();
 </script>
