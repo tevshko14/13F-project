@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Earnings Calendar — Upcoming Earnings Reports | PaperPanda{% endblock %}
+{% block meta_description %}Interactive earnings calendar showing upcoming quarterly earnings reports with BMO/AMC timing, EPS estimates, and revenue forecasts.{% endblock %}
+{% block og_title %}Earnings Calendar | PaperPanda{% endblock %}
+{% block og_description %}Visual earnings calendar — see who's reporting this week with consensus EPS & revenue estimates.{% endblock %}
+{% block twitter_title %}Earnings Calendar | PaperPanda{% endblock %}
+{% block twitter_description %}Visual earnings calendar — see who's reporting this week with consensus EPS & revenue estimates.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Earnings Calendar"}
+    ]
+}
+</script>
+{% endblock %}
+{% block content %}
+<hgroup>
+    <h1>Earnings Calendar</h1>
+    <p>Upcoming quarterly earnings reports with consensus estimates</p>
+</hgroup>
+
+<style>
+    /* ── View toggle ── */
+    .ec-controls {
+        display: flex; align-items: center; flex-wrap: wrap;
+        gap: 1em; margin-bottom: 1.5em;
+    }
+    .ec-view-toggle {
+        display: inline-flex; border: 1px solid var(--pp-border);
+        border-radius: 8px; overflow: hidden;
+    }
+    .ec-view-btn {
+        padding: 0.5em 1.2em; font-size: 0.85em; font-weight: 600;
+        background: none; border: none; cursor: pointer;
+        color: var(--pp-text-muted); transition: all 0.15s;
+    }
+    .ec-view-btn:hover { background: var(--pp-surface-hover); color: var(--pp-text); }
+    .ec-view-btn.active {
+        background: var(--pp-sidebar-active-bg);
+        color: var(--pp-sidebar-active-text);
+    }
+    .ec-nav-btns {
+        display: inline-flex; gap: 0.3em; align-items: center;
+    }
+    .ec-nav-btn {
+        padding: 0.4em 0.7em; font-size: 0.85em; border-radius: 6px;
+        background: var(--pp-surface); border: 1px solid var(--pp-border);
+        cursor: pointer; color: var(--pp-text); transition: all 0.15s;
+    }
+    .ec-nav-btn:hover { background: var(--pp-surface-hover); }
+    .ec-period-label {
+        font-size: 0.95em; font-weight: 600; color: var(--pp-text);
+        min-width: 200px; text-align: center;
+    }
+    .ec-today-btn {
+        padding: 0.4em 1em; font-size: 0.82em; border-radius: 6px;
+        background: var(--pp-overlay-5); border: 1px solid var(--pp-border);
+        cursor: pointer; color: var(--pp-text-muted); font-weight: 500;
+    }
+    .ec-today-btn:hover { background: var(--pp-surface-hover); color: var(--pp-text); }
+
+    /* ── Stats bar ── */
+    .ec-stats {
+        display: flex; gap: 1.5em; flex-wrap: wrap;
+        margin-bottom: 1.5em; padding: 0.8em 1.2em;
+        background: var(--pp-surface); border: 1px solid var(--pp-border);
+        border-radius: 12px;
+    }
+    .ec-stat { display: flex; align-items: center; gap: 0.4em; }
+    .ec-stat-val { font-weight: 700; font-size: 1.05em; color: var(--pp-text); }
+    .ec-stat-label { font-size: 0.8em; color: var(--pp-text-muted); }
+</style>
+
+{# ── Controls bar ── #}
+<div class="ec-controls">
+    <div class="ec-view-toggle">
+        <button class="ec-view-btn active" data-view="weekly" onclick="ecSwitchView('weekly')">Weekly</button>
+        <button class="ec-view-btn" data-view="monthly" onclick="ecSwitchView('monthly')">Monthly</button>
+    </div>
+    <div class="ec-nav-btns">
+        <button class="ec-nav-btn" onclick="ecNavigate(-1)" title="Previous">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <span class="ec-period-label" id="ec-period-label">This Week</span>
+        <button class="ec-nav-btn" onclick="ecNavigate(1)" title="Next">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+    </div>
+    <button class="ec-today-btn" onclick="ecGoToday()">Today</button>
+</div>
+
+{# ── Calendar content (loaded via HTMX) ── #}
+<div id="ec-content"
+     hx-get="/api/earnings-calendar/grid?view=weekly"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+    <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+        <span aria-busy="true">Loading earnings calendar…</span>
+    </div>
+</div>
+
+{# ── Day detail panel (appears when clicking a day) ── #}
+<div id="ec-day-detail" style="display:none;"></div>
+
+<script>
+(function() {
+    var _view = 'weekly';
+    var _offset = 0;  // weeks offset from current for weekly, months for monthly
+
+    window.ecSwitchView = function(view) {
+        _view = view;
+        _offset = 0;
+        document.querySelectorAll('.ec-view-btn').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.view === view);
+        });
+        ecLoadGrid();
+    };
+
+    window.ecNavigate = function(dir) {
+        _offset += dir;
+        ecLoadGrid();
+    };
+
+    window.ecGoToday = function() {
+        _offset = 0;
+        ecLoadGrid();
+    };
+
+    function ecLoadGrid() {
+        var url = '/api/earnings-calendar/grid?view=' + _view + '&offset=' + _offset;
+        htmx.ajax('GET', url, {target: '#ec-content', swap: 'innerHTML'});
+        updatePeriodLabel();
+    }
+
+    function updatePeriodLabel() {
+        var label = document.getElementById('ec-period-label');
+        if (!label) return;
+
+        var now = new Date();
+        if (_view === 'weekly') {
+            var target = new Date(now);
+            target.setDate(target.getDate() + (_offset * 7));
+            var dayOfWeek = target.getDay();
+            var monday = new Date(target);
+            monday.setDate(monday.getDate() - ((dayOfWeek + 6) % 7));
+            var friday = new Date(monday);
+            friday.setDate(friday.getDate() + 4);
+
+            if (_offset === 0) label.textContent = 'This Week';
+            else if (_offset === 1) label.textContent = 'Next Week';
+            else if (_offset === -1) label.textContent = 'Last Week';
+            else label.textContent = formatDateShort(monday) + ' – ' + formatDateShort(friday);
+        } else {
+            var targetMonth = new Date(now.getFullYear(), now.getMonth() + _offset, 1);
+            label.textContent = targetMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        }
+    }
+
+    function formatDateShort(d) {
+        return d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    window.ecShowDayDetail = function(date) {
+        var detail = document.getElementById('ec-day-detail');
+        detail.style.display = 'block';
+        htmx.ajax('GET', '/api/earnings-calendar/day?date=' + date, {target: '#ec-day-detail', swap: 'innerHTML'});
+        detail.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    };
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,559 @@
+<style>
+    /* ── Stats bar ── */
+    .ec-stats {
+        display: flex; gap: 1.5em; flex-wrap: wrap;
+        margin-bottom: 1.5em; padding: 0.8em 1.2em;
+        background: var(--pp-surface); border: 1px solid var(--pp-border);
+        border-radius: 12px;
+    }
+    .ec-stat { display: flex; align-items: center; gap: 0.4em; }
+    .ec-stat-val { font-weight: 700; font-size: 1.05em; color: var(--pp-text); }
+    .ec-stat-label { font-size: 0.8em; color: var(--pp-text-muted); }
+
+    /* ── Weekly view ── */
+    .ec-week {
+        margin-bottom: 1.5em;
+    }
+    .ec-week-header {
+        font-size: 0.85em; font-weight: 600; color: var(--pp-text-muted);
+        margin-bottom: 0.8em; display: flex; justify-content: space-between;
+        align-items: center;
+    }
+    .ec-week-count {
+        font-size: 0.78em; padding: 0.2em 0.6em;
+        background: var(--pp-overlay-5); border-radius: 20px;
+        color: var(--pp-text-muted);
+    }
+    .ec-days {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 8px;
+    }
+    @media (max-width: 900px) {
+        .ec-days { grid-template-columns: repeat(3, 1fr); }
+    }
+    @media (max-width: 600px) {
+        .ec-days { grid-template-columns: 1fr; }
+    }
+
+    .ec-day {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 12px;
+        overflow: hidden;
+        cursor: pointer;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .ec-day:hover {
+        border-color: var(--pp-sidebar-active-text);
+        box-shadow: 0 2px 12px rgba(239, 68, 68, 0.08);
+    }
+    .ec-day.is-today {
+        border-color: var(--pp-sidebar-active-text);
+        border-width: 2px;
+    }
+
+    .ec-day-head {
+        padding: 0.6em 0.8em;
+        display: flex; justify-content: space-between; align-items: center;
+        border-bottom: 1px solid var(--pp-border-light);
+        background: var(--pp-surface-alt);
+    }
+    .ec-day-name {
+        font-weight: 700; font-size: 0.82em; color: var(--pp-text);
+    }
+    .ec-day-date {
+        font-size: 0.75em; color: var(--pp-text-muted);
+    }
+    .ec-day-count {
+        font-size: 0.72em; font-weight: 600;
+        padding: 0.15em 0.5em; border-radius: 20px;
+        background: var(--pp-overlay-5); color: var(--pp-text-muted);
+    }
+    .ec-day-count.busy {
+        background: rgba(239, 68, 68, 0.1);
+        color: #ef4444;
+    }
+
+    /* ── BMO / AMC sections ── */
+    .ec-timing-section {
+        padding: 0.4em 0.8em;
+    }
+    .ec-timing-section + .ec-timing-section {
+        border-top: 1px dashed var(--pp-border-light);
+    }
+    .ec-timing-label {
+        display: flex; align-items: center; gap: 0.35em;
+        font-size: 0.7em; font-weight: 600; color: var(--pp-text-muted);
+        margin-bottom: 0.3em; text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .ec-timing-icon { width: 13px; height: 13px; opacity: 0.7; }
+
+    /* ── Logo grid ── */
+    .ec-logos {
+        display: flex; flex-wrap: wrap; gap: 4px;
+        padding: 0.2em 0;
+    }
+    .ec-logo-item {
+        position: relative;
+        width: 36px; height: 36px;
+        border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        background: var(--pp-surface-alt);
+        border: 1px solid var(--pp-border-light);
+        cursor: pointer;
+        transition: all 0.15s;
+        overflow: hidden;
+    }
+    .ec-logo-item:hover {
+        border-color: var(--pp-sidebar-active-text);
+        transform: scale(1.1);
+        z-index: 5;
+    }
+    .ec-logo-item img {
+        width: 24px; height: 24px; object-fit: contain;
+        border-radius: 4px;
+    }
+    .ec-logo-item .ec-ticker-fallback {
+        font-size: 0.55em; font-weight: 700;
+        color: var(--pp-text-muted); line-height: 1;
+        text-align: center;
+    }
+    .ec-logo-item.beat-eps { border-color: #22c55e; background: rgba(34, 197, 94, 0.05); }
+    .ec-logo-item.miss-eps { border-color: #ef4444; background: rgba(239, 68, 68, 0.05); }
+
+    .ec-overflow-count {
+        font-size: 0.7em; font-weight: 600;
+        color: var(--pp-text-muted); padding: 0.2em 0;
+    }
+
+    /* ── Hover card (tooltip) ── */
+    .ec-hover-card {
+        display: none;
+        position: absolute;
+        z-index: 100;
+        width: 280px;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+        padding: 1em;
+        pointer-events: none;
+    }
+    .ec-hover-card.visible {
+        display: block;
+    }
+    .ec-hover-card-header {
+        display: flex; align-items: center; gap: 0.5em;
+        margin-bottom: 0.7em; padding-bottom: 0.6em;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .ec-hover-card-logo {
+        width: 32px; height: 32px; border-radius: 6px;
+        object-fit: contain;
+    }
+    .ec-hover-card-name {
+        font-weight: 700; font-size: 0.9em; color: var(--pp-text);
+        line-height: 1.2;
+    }
+    .ec-hover-card-ticker {
+        font-size: 0.78em; color: var(--pp-text-muted); font-weight: 500;
+    }
+    .ec-hover-card-row {
+        display: flex; justify-content: space-between;
+        padding: 0.25em 0; font-size: 0.82em;
+    }
+    .ec-hover-card-label { color: var(--pp-text-muted); }
+    .ec-hover-card-value { font-weight: 600; color: var(--pp-text); }
+    .ec-hover-card-timing {
+        display: inline-flex; align-items: center; gap: 0.3em;
+        font-size: 0.72em; padding: 0.15em 0.5em;
+        border-radius: 4px; font-weight: 600;
+    }
+    .ec-timing-bmo {
+        background: rgba(251, 191, 36, 0.12); color: #d97706;
+    }
+    .ec-timing-amc {
+        background: rgba(99, 102, 241, 0.12); color: #6366f1;
+    }
+
+    /* ── Monthly heatmap view ── */
+    .ec-month-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 4px;
+    }
+    .ec-month-day-header {
+        text-align: center; font-size: 0.72em; font-weight: 600;
+        color: var(--pp-text-muted); padding: 0.4em;
+        text-transform: uppercase;
+    }
+    .ec-month-cell {
+        aspect-ratio: 1;
+        border-radius: 8px;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        cursor: pointer; position: relative;
+        transition: all 0.15s; min-height: 60px;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border-light);
+    }
+    .ec-month-cell:hover {
+        border-color: var(--pp-sidebar-active-text);
+        box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);
+    }
+    .ec-month-cell.empty {
+        background: transparent; border-color: transparent;
+        cursor: default;
+    }
+    .ec-month-cell.empty:hover { border-color: transparent; box-shadow: none; }
+    .ec-month-cell.is-today { border-color: var(--pp-sidebar-active-text); border-width: 2px; }
+    .ec-month-cell.weekend { opacity: 0.4; }
+
+    .ec-month-day-num {
+        font-size: 0.82em; font-weight: 600; color: var(--pp-text);
+    }
+    .ec-month-cell-count {
+        font-size: 0.7em; font-weight: 700; margin-top: 2px;
+    }
+    /* Heatmap intensity */
+    .ec-heat-0 { background: var(--pp-surface); }
+    .ec-heat-1 { background: rgba(239, 68, 68, 0.05); }
+    .ec-heat-2 { background: rgba(239, 68, 68, 0.1); }
+    .ec-heat-3 { background: rgba(239, 68, 68, 0.18); }
+    .ec-heat-4 { background: rgba(239, 68, 68, 0.28); }
+    .ec-heat-1 .ec-month-cell-count { color: #f87171; }
+    .ec-heat-2 .ec-month-cell-count { color: #ef4444; }
+    .ec-heat-3 .ec-month-cell-count { color: #dc2626; }
+    .ec-heat-4 .ec-month-cell-count { color: #b91c1c; }
+
+    /* ── Mini logo strip in month cell ── */
+    .ec-mini-logos {
+        display: flex; gap: 1px; margin-top: 2px; justify-content: center;
+    }
+    .ec-mini-logo {
+        width: 14px; height: 14px; border-radius: 3px;
+        object-fit: contain;
+    }
+</style>
+
+{# ── Stats bar ── #}
+<div class="ec-stats">
+    <div class="ec-stat">
+        <span class="ec-stat-val">{{ stats.total }}</span>
+        <span class="ec-stat-label">Reports</span>
+    </div>
+    <div class="ec-stat">
+        <span class="ec-stat-val" style="color: #d97706;">{{ stats.bmo }}</span>
+        <span class="ec-stat-label">
+            <svg class="ec-timing-icon" viewBox="0 0 24 24" fill="none" stroke="#d97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            BMO
+        </span>
+    </div>
+    <div class="ec-stat">
+        <span class="ec-stat-val" style="color: #6366f1;">{{ stats.amc }}</span>
+        <span class="ec-stat-label">
+            <svg class="ec-timing-icon" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            AMC
+        </span>
+    </div>
+    {% if stats.peak_date %}
+    <div class="ec-stat">
+        <span class="ec-stat-val">{{ stats.peak_count }}</span>
+        <span class="ec-stat-label">Peak Day ({{ stats.peak_date }})</span>
+    </div>
+    {% endif %}
+    {% if stats.confirmed > 0 %}
+    <div class="ec-stat">
+        <span class="ec-stat-val">{{ stats.confirmed }}</span>
+        <span class="ec-stat-label">Confirmed</span>
+    </div>
+    {% endif %}
+</div>
+
+{% if view == "weekly" %}
+{# ═══════════════ WEEKLY VIEW ═══════════════ #}
+{% for week in weeks %}
+<div class="ec-week">
+    <div class="ec-week-header">
+        <span>{{ week.label }}</span>
+        <span class="ec-week-count">{{ week.total }} report{{ 's' if week.total != 1 else '' }}</span>
+    </div>
+    <div class="ec-days">
+        {% for day in week.days %}
+        <div class="ec-day{% if day.is_today %} is-today{% endif %}" onclick="ecShowDayDetail('{{ day.date }}')">
+            <div class="ec-day-head">
+                <div>
+                    <span class="ec-day-name">{{ day.day_short }}</span>
+                    <span class="ec-day-date">{{ day.month_day }}</span>
+                </div>
+                <span class="ec-day-count{% if day.count >= 10 %} busy{% endif %}">{{ day.count }}</span>
+            </div>
+
+            {# ── BMO section ── #}
+            {% if day.bmo %}
+            <div class="ec-timing-section">
+                <div class="ec-timing-label">
+                    <svg class="ec-timing-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+                    BMO
+                </div>
+                <div class="ec-logos">
+                    {% for e in day.bmo[:12] %}
+                    <div class="ec-logo-item{% if e.beat_eps == true %} beat-eps{% elif e.beat_eps == false %} miss-eps{% endif %}"
+                         onmouseenter="ecShowHoverCard(event, this)" onmouseleave="ecHideHoverCard()"
+                         data-ticker="{{ e.ticker }}" data-name="{{ e.name }}"
+                         data-eps-est="{{ e.eps_estimate_fmt }}" data-rev-est="{{ e.revenue_estimate_fmt }}"
+                         data-eps-act="{{ e.eps_actual_fmt }}" data-rev-act="{{ e.revenue_actual_fmt }}"
+                         data-timing="bmo" data-sector="{{ e.sector }}"
+                         data-confirmed="{{ 'yes' if e.confirmed else 'no' }}"
+                         onclick="event.stopPropagation(); window.location.href='/stock/{{ e.ticker }}';">
+                        {% if logo_tickers is defined and e.ticker in logo_tickers %}
+                        <img src="/api/logo/{{ e.ticker }}.png" alt="{{ e.ticker }}" loading="lazy" decoding="async"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                        <span class="ec-ticker-fallback" style="display:none;">{{ e.ticker }}</span>
+                        {% else %}
+                        <span class="ec-ticker-fallback">{{ e.ticker }}</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if day.bmo|length > 12 %}
+                    <span class="ec-overflow-count">+{{ day.bmo|length - 12 }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {# ── AMC section ── #}
+            {% if day.amc %}
+            <div class="ec-timing-section">
+                <div class="ec-timing-label">
+                    <svg class="ec-timing-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                    AMC
+                </div>
+                <div class="ec-logos">
+                    {% for e in day.amc[:12] %}
+                    <div class="ec-logo-item{% if e.beat_eps == true %} beat-eps{% elif e.beat_eps == false %} miss-eps{% endif %}"
+                         onmouseenter="ecShowHoverCard(event, this)" onmouseleave="ecHideHoverCard()"
+                         data-ticker="{{ e.ticker }}" data-name="{{ e.name }}"
+                         data-eps-est="{{ e.eps_estimate_fmt }}" data-rev-est="{{ e.revenue_estimate_fmt }}"
+                         data-eps-act="{{ e.eps_actual_fmt }}" data-rev-act="{{ e.revenue_actual_fmt }}"
+                         data-timing="amc" data-sector="{{ e.sector }}"
+                         data-confirmed="{{ 'yes' if e.confirmed else 'no' }}"
+                         onclick="event.stopPropagation(); window.location.href='/stock/{{ e.ticker }}';">
+                        {% if logo_tickers is defined and e.ticker in logo_tickers %}
+                        <img src="/api/logo/{{ e.ticker }}.png" alt="{{ e.ticker }}" loading="lazy" decoding="async"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                        <span class="ec-ticker-fallback" style="display:none;">{{ e.ticker }}</span>
+                        {% else %}
+                        <span class="ec-ticker-fallback">{{ e.ticker }}</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if day.amc|length > 12 %}
+                    <span class="ec-overflow-count">+{{ day.amc|length - 12 }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {# ── Unconfirmed timing ── #}
+            {% if day.other %}
+            <div class="ec-timing-section">
+                <div class="ec-timing-label">
+                    <svg class="ec-timing-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                    TBD
+                </div>
+                <div class="ec-logos">
+                    {% for e in day.other[:12] %}
+                    <div class="ec-logo-item"
+                         onmouseenter="ecShowHoverCard(event, this)" onmouseleave="ecHideHoverCard()"
+                         data-ticker="{{ e.ticker }}" data-name="{{ e.name }}"
+                         data-eps-est="{{ e.eps_estimate_fmt }}" data-rev-est="{{ e.revenue_estimate_fmt }}"
+                         data-eps-act="{{ e.eps_actual_fmt }}" data-rev-act="{{ e.revenue_actual_fmt }}"
+                         data-timing="tbd" data-sector="{{ e.sector }}"
+                         data-confirmed="no"
+                         onclick="event.stopPropagation(); window.location.href='/stock/{{ e.ticker }}';">
+                        {% if logo_tickers is defined and e.ticker in logo_tickers %}
+                        <img src="/api/logo/{{ e.ticker }}.png" alt="{{ e.ticker }}" loading="lazy" decoding="async"
+                             onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                        <span class="ec-ticker-fallback" style="display:none;">{{ e.ticker }}</span>
+                        {% else %}
+                        <span class="ec-ticker-fallback">{{ e.ticker }}</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    {% if day.other|length > 12 %}
+                    <span class="ec-overflow-count">+{{ day.other|length - 12 }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if day.count == 0 %}
+            <div style="padding: 1.5em; text-align: center; color: var(--pp-text-faint); font-size: 0.78em;">
+                No reports
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endfor %}
+
+{% elif view == "monthly" %}
+{# ═══════════════ MONTHLY VIEW (Heatmap) ═══════════════ #}
+<div class="ec-month-grid">
+    <div class="ec-month-day-header">Mon</div>
+    <div class="ec-month-day-header">Tue</div>
+    <div class="ec-month-day-header">Wed</div>
+    <div class="ec-month-day-header">Thu</div>
+    <div class="ec-month-day-header">Fri</div>
+    <div class="ec-month-day-header">Sat</div>
+    <div class="ec-month-day-header">Sun</div>
+
+    {% for cell in month_cells %}
+    {% if cell.empty %}
+    <div class="ec-month-cell empty"></div>
+    {% else %}
+    <div class="ec-month-cell ec-heat-{{ cell.heat }}{% if cell.is_today %} is-today{% endif %}{% if cell.is_weekend %} weekend{% endif %}"
+         onclick="ecShowDayDetail('{{ cell.date }}')">
+        <span class="ec-month-day-num">{{ cell.day }}</span>
+        {% if cell.count > 0 %}
+        <span class="ec-month-cell-count">{{ cell.count }}</span>
+        <div class="ec-mini-logos">
+            {% for ticker in cell.top_tickers[:3] %}
+            {% if logo_tickers is defined and ticker in logo_tickers %}
+            <img src="/api/logo/{{ ticker }}.png" alt="{{ ticker }}" class="ec-mini-logo" loading="lazy" decoding="async"
+                 onerror="this.style.display='none';">
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+
+{# ── Hover card container ── #}
+<div class="ec-hover-card" id="ec-hover-card">
+    <div class="ec-hover-card-header">
+        <img id="ec-hc-logo" class="ec-hover-card-logo" src="" alt="" onerror="this.style.display='none';">
+        <div>
+            <div class="ec-hover-card-name" id="ec-hc-name"></div>
+            <div class="ec-hover-card-ticker" id="ec-hc-ticker"></div>
+        </div>
+    </div>
+    <div id="ec-hc-timing" class="ec-hover-card-timing" style="margin-bottom: 0.6em;"></div>
+    <div class="ec-hover-card-row">
+        <span class="ec-hover-card-label">Est. EPS</span>
+        <span class="ec-hover-card-value" id="ec-hc-eps-est"></span>
+    </div>
+    <div class="ec-hover-card-row">
+        <span class="ec-hover-card-label">Est. Revenue</span>
+        <span class="ec-hover-card-value" id="ec-hc-rev-est"></span>
+    </div>
+    <div class="ec-hover-card-row" id="ec-hc-eps-act-row" style="display:none;">
+        <span class="ec-hover-card-label">Actual EPS</span>
+        <span class="ec-hover-card-value" id="ec-hc-eps-act"></span>
+    </div>
+    <div class="ec-hover-card-row" id="ec-hc-rev-act-row" style="display:none;">
+        <span class="ec-hover-card-label">Actual Revenue</span>
+        <span class="ec-hover-card-value" id="ec-hc-rev-act"></span>
+    </div>
+    <div class="ec-hover-card-row">
+        <span class="ec-hover-card-label">Sector</span>
+        <span class="ec-hover-card-value" id="ec-hc-sector" style="font-size: 0.78em;"></span>
+    </div>
+    <div class="ec-hover-card-row" id="ec-hc-confirmed-row">
+        <span class="ec-hover-card-label">Date Status</span>
+        <span class="ec-hover-card-value" id="ec-hc-confirmed"></span>
+    </div>
+</div>
+
+<script>
+(function() {
+    var hoverCard = document.getElementById('ec-hover-card');
+    var hideTimer = null;
+
+    window.ecShowHoverCard = function(event, el) {
+        clearTimeout(hideTimer);
+        var d = el.dataset;
+
+        document.getElementById('ec-hc-name').textContent = d.name || d.ticker;
+        document.getElementById('ec-hc-ticker').textContent = d.ticker;
+        document.getElementById('ec-hc-eps-est').textContent = d.epsEst || '—';
+        document.getElementById('ec-hc-rev-est').textContent = d.revEst || '—';
+        document.getElementById('ec-hc-sector').textContent = d.sector || '—';
+
+        // Logo
+        var logo = document.getElementById('ec-hc-logo');
+        logo.src = '/api/logo/' + d.ticker + '.png';
+        logo.style.display = '';
+
+        // Timing badge
+        var timingEl = document.getElementById('ec-hc-timing');
+        if (d.timing === 'bmo') {
+            timingEl.className = 'ec-hover-card-timing ec-timing-bmo';
+            timingEl.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg> Before Market Open';
+        } else if (d.timing === 'amc') {
+            timingEl.className = 'ec-hover-card-timing ec-timing-amc';
+            timingEl.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg> After Market Close';
+        } else {
+            timingEl.className = 'ec-hover-card-timing';
+            timingEl.textContent = 'Time TBD';
+            timingEl.style.background = 'var(--pp-overlay-5)';
+            timingEl.style.color = 'var(--pp-text-muted)';
+        }
+
+        // Actuals (if reported)
+        var epsAct = d.epsAct || '—';
+        var revAct = d.revAct || '—';
+        var epsActRow = document.getElementById('ec-hc-eps-act-row');
+        var revActRow = document.getElementById('ec-hc-rev-act-row');
+        if (epsAct !== '—') {
+            document.getElementById('ec-hc-eps-act').textContent = epsAct;
+            epsActRow.style.display = '';
+        } else {
+            epsActRow.style.display = 'none';
+        }
+        if (revAct !== '—') {
+            document.getElementById('ec-hc-rev-act').textContent = revAct;
+            revActRow.style.display = '';
+        } else {
+            revActRow.style.display = 'none';
+        }
+
+        // Confirmed
+        var confirmed = d.confirmed === 'yes';
+        document.getElementById('ec-hc-confirmed').textContent = confirmed ? 'Confirmed' : 'Estimated';
+        document.getElementById('ec-hc-confirmed').style.color = confirmed ? '#22c55e' : '#d97706';
+
+        // Position
+        var rect = el.getBoundingClientRect();
+        var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+        var scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+        hoverCard.style.left = (rect.right + scrollLeft + 8) + 'px';
+        hoverCard.style.top = (rect.top + scrollTop - 20) + 'px';
+
+        // If overflows right edge, show to the left
+        if (rect.right + 290 > window.innerWidth) {
+            hoverCard.style.left = (rect.left + scrollLeft - 290) + 'px';
+        }
+        // If overflows bottom
+        if (rect.top + 250 > window.innerHeight) {
+            hoverCard.style.top = (rect.bottom + scrollTop - 250) + 'px';
+        }
+
+        hoverCard.classList.add('visible');
+    };
+
+    window.ecHideHoverCard = function() {
+        hideTimer = setTimeout(function() {
+            hoverCard.classList.remove('visible');
+        }, 100);
+    };
+})();
+</script>

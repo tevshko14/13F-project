@@ -3688,6 +3688,177 @@ async def macro_breadth_api(
     )
 
 
+# --- Earnings Calendar ---
+
+
+@app.get("/earnings-calendar", response_class=HTMLResponse)
+async def earnings_calendar_page(request: Request):
+    """Earnings Calendar page — interactive visual calendar of upcoming earnings."""
+    from filings import earnings_calendar
+
+    if not earnings_calendar.FEATURE_ENABLED:
+        return templates.TemplateResponse(
+            "under_construction.html",
+            {"request": request},
+            status_code=200,
+        )
+
+    return templates.TemplateResponse(
+        "earnings_calendar.html",
+        {"request": request},
+    )
+
+
+@app.get("/api/earnings-calendar/grid", response_class=HTMLResponse)
+async def earnings_calendar_grid_api(
+    request: Request,
+    view: str = "weekly",
+    offset: int = 0,
+):
+    """HTMX endpoint — returns the earnings calendar grid partial."""
+    from filings import earnings_calendar
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+
+    if view == "monthly":
+        target_month = now.month + offset
+        target_year = now.year
+        while target_month > 12:
+            target_month -= 12
+            target_year += 1
+        while target_month < 1:
+            target_month += 12
+            target_year -= 1
+
+        data = await _to_heavy(
+            earnings_calendar.get_month_view, target_year, target_month,
+        )
+
+        # Build month cells for template
+        import calendar as cal_mod
+        first_day = datetime(target_year, target_month, 1)
+        # weekday(): Monday=0 ... Sunday=6
+        start_weekday = first_day.weekday()
+        days_in_month = cal_mod.monthrange(target_year, target_month)[1]
+
+        by_date = data.get("by_date", {})
+        max_count = max((len(v) for v in by_date.values()), default=0) or 1
+
+        month_cells = []
+        # Pad leading empty cells
+        for _ in range(start_weekday):
+            month_cells.append({"empty": True})
+
+        for day_num in range(1, days_in_month + 1):
+            d = datetime(target_year, target_month, day_num)
+            date_str = d.strftime("%Y-%m-%d")
+            day_entries = by_date.get(date_str, [])
+            count = len(day_entries)
+            top_tickers = [e["ticker"] for e in day_entries[:3]]
+
+            # Heat level 0-4
+            if count == 0:
+                heat = 0
+            elif count <= max_count * 0.25:
+                heat = 1
+            elif count <= max_count * 0.5:
+                heat = 2
+            elif count <= max_count * 0.75:
+                heat = 3
+            else:
+                heat = 4
+
+            month_cells.append({
+                "empty": False,
+                "day": day_num,
+                "date": date_str,
+                "count": count,
+                "heat": heat,
+                "top_tickers": top_tickers,
+                "is_today": date_str == now.strftime("%Y-%m-%d"),
+                "is_weekend": d.weekday() >= 5,
+            })
+
+        # Pad trailing empty cells
+        trailing = (7 - len(month_cells) % 7) % 7
+        for _ in range(trailing):
+            month_cells.append({"empty": True})
+
+        return templates.TemplateResponse(
+            "partials/earnings_calendar_grid.html",
+            {
+                "request": request,
+                "view": "monthly",
+                "stats": data.get("stats", {}),
+                "weeks": [],
+                "month_cells": month_cells,
+                "logo_tickers": _logo_set,
+            },
+        )
+    else:
+        # Weekly view
+        days_since_monday = now.weekday()
+        target_monday = now - timedelta(days=days_since_monday) + timedelta(weeks=offset)
+        target_friday = target_monday + timedelta(days=4)
+
+        data = await _to_heavy(
+            earnings_calendar.get_earnings_calendar,
+            target_monday.strftime("%Y-%m-%d"),
+            target_friday.strftime("%Y-%m-%d"),
+            1,
+        )
+
+        return templates.TemplateResponse(
+            "partials/earnings_calendar_grid.html",
+            {
+                "request": request,
+                "view": "weekly",
+                "stats": data.get("stats", {}),
+                "weeks": data.get("weeks", []),
+                "month_cells": [],
+                "logo_tickers": _logo_set,
+            },
+        )
+
+
+@app.get("/api/earnings-calendar/day", response_class=HTMLResponse)
+async def earnings_calendar_day_api(
+    request: Request,
+    date: str = "",
+):
+    """HTMX endpoint — returns the day detail table partial."""
+    from filings import earnings_calendar
+    from datetime import datetime
+
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    data = await _to_heavy(
+        earnings_calendar.get_earnings_calendar, date, date, 1,
+    )
+    entries = data.get("by_date", {}).get(date, [])
+    has_actuals = any(e.get("eps_actual") is not None for e in entries)
+
+    try:
+        dt = datetime.strptime(date, "%Y-%m-%d")
+        date_label = dt.strftime("%A, %B %d, %Y")
+    except ValueError:
+        date_label = date
+
+    return templates.TemplateResponse(
+        "partials/earnings_calendar_day.html",
+        {
+            "request": request,
+            "entries": entries,
+            "date": date,
+            "date_label": date_label,
+            "has_actuals": has_actuals,
+            "logo_tickers": _logo_set,
+        },
+    )
+
+
 @app.get("/retail", response_class=HTMLResponse)
 async def retail_page(request: Request, view: str = "sentiment"):
     if view not in ("sentiment", "leaderboard", "calendar"):
