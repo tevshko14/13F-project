@@ -1,4 +1,5 @@
 <style>
+    /* ── Existing list-view styles ── */
     .ec-metrics {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -49,119 +50,260 @@
         white-space: nowrap;
         line-height: 1;
     }
-    .ec-hour-bmo {
-        background: rgba(59, 130, 246, 0.12);
-        color: #2563eb;
-    }
-    .ec-hour-amc {
-        background: rgba(139, 92, 246, 0.12);
-        color: #7c3aed;
-    }
-    .ec-hour-dmh, .ec-hour- {
-        background: var(--pp-overlay-8, rgba(0,0,0,0.06));
-        color: var(--pp-text-muted);
-    }
+    .ec-hour-bmo { background: rgba(59,130,246,0.12); color: #2563eb; }
+    .ec-hour-amc { background: rgba(139,92,246,0.12); color: #7c3aed; }
+    .ec-hour-dmh, .ec-hour- { background: var(--pp-overlay-8, rgba(0,0,0,0.06)); color: var(--pp-text-muted); }
     .ec-si-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.25em;
-        font-size: 0.7em;
-        font-weight: 700;
-        padding: 0.2em 0.55em;
-        border-radius: 5px;
-        background: rgba(245, 158, 11, 0.15);
-        color: #d97706;
-        cursor: help;
-        white-space: nowrap;
+        display: inline-flex; align-items: center; gap: 0.25em;
+        font-size: 0.7em; font-weight: 700;
+        padding: 0.2em 0.55em; border-radius: 5px;
+        background: rgba(245,158,11,0.15); color: #d97706;
+        cursor: help; white-space: nowrap;
     }
-    .ec-ticker-link {
-        color: var(--pp-text);
-        font-weight: 600;
-        text-decoration: none;
-    }
-    .ec-ticker-link:hover {
-        color: var(--pp-accent, #ef4444);
-        text-decoration: underline;
-    }
-    .ec-name {
-        max-width: 180px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
+    .ec-ticker-link { color: var(--pp-text); font-weight: 600; text-decoration: none; }
+    .ec-ticker-link:hover { color: var(--pp-accent, #ef4444); text-decoration: underline; }
+    .ec-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ec-beat { color: #22c55e; font-weight: 600; }
     .ec-miss { color: #ef4444; font-weight: 600; }
     .ec-just-reported {
         margin-top: 1.5em;
         border: 1px solid var(--pp-border-light, var(--pp-border));
-        border-radius: 10px;
-        overflow: hidden;
+        border-radius: 10px; overflow: hidden;
     }
     .ec-just-reported summary {
-        padding: 0.8em 1.2em;
-        font-weight: 600;
-        font-size: 0.9em;
-        cursor: pointer;
-        background: var(--pp-overlay-5, var(--pp-surface-alt, #f4f4f5));
-        color: var(--pp-text);
-        list-style: none;
-        display: flex;
-        align-items: center;
-        gap: 0.5em;
+        padding: 0.8em 1.2em; font-weight: 600; font-size: 0.9em;
+        cursor: pointer; background: var(--pp-overlay-5, var(--pp-surface-alt, #f4f4f5));
+        color: var(--pp-text); list-style: none;
+        display: flex; align-items: center; gap: 0.5em;
     }
-    .ec-just-reported summary::before {
-        content: "\25B6";
-        font-size: 0.7em;
-        transition: transform 0.2s;
-    }
-    .ec-just-reported[open] summary::before {
-        transform: rotate(90deg);
-    }
-    .ec-just-reported .pp-table-wrap {
-        border: none;
-        border-radius: 0;
-        box-shadow: none;
-    }
-    .ec-search-wrap {
-        margin-bottom: 1em;
-    }
+    .ec-just-reported summary::before { content: "\25B6"; font-size: 0.7em; transition: transform 0.2s; }
+    .ec-just-reported[open] summary::before { transform: rotate(90deg); }
+    .ec-just-reported .pp-table-wrap { border: none; border-radius: 0; box-shadow: none; }
+    .ec-search-wrap { margin-bottom: 1em; }
     .ec-search {
-        width: 100%;
-        max-width: 320px;
-        padding: 0.55em 1em;
-        border: 1px solid var(--pp-border);
-        border-radius: 8px;
-        font-size: 0.85em;
-        background: var(--pp-surface);
-        color: var(--pp-text);
+        width: 100%; max-width: 320px;
+        padding: 0.55em 1em; border: 1px solid var(--pp-border);
+        border-radius: 8px; font-size: 0.85em;
+        background: var(--pp-surface); color: var(--pp-text);
     }
-    .ec-search:focus {
-        outline: none;
-        border-color: var(--pp-accent, #ef4444);
-    }
+    .ec-search:focus { outline: none; border-color: var(--pp-accent, #ef4444); }
     .ec-mock-banner {
-        padding: 0.6em 1em;
-        background: rgba(245, 158, 11, 0.12);
-        color: #92400e;
-        border-radius: 8px;
-        font-size: 0.82em;
-        margin-bottom: 1em;
-        text-align: center;
+        padding: 0.6em 1em; background: rgba(245,158,11,0.12); color: #92400e;
+        border-radius: 8px; font-size: 0.82em; margin-bottom: 1em; text-align: center;
     }
     .ec-error-banner {
-        padding: 0.6em 1em;
-        background: rgba(239, 68, 68, 0.08);
-        color: #991b1b;
-        border-radius: 8px;
-        font-size: 0.82em;
-        margin-bottom: 1em;
-        text-align: center;
+        padding: 0.6em 1em; background: rgba(239,68,68,0.08); color: #991b1b;
+        border-radius: 8px; font-size: 0.82em; margin-bottom: 1em; text-align: center;
     }
-    .ec-empty {
-        text-align: center;
-        padding: 3em;
-        color: var(--pp-text-muted);
+    .ec-empty { text-align: center; padding: 3em; color: var(--pp-text-muted); }
+
+    /* ── Grid view styles (.ecg-) ── */
+    .ecg-controls-bar {
+        display: flex; align-items: center; flex-wrap: wrap;
+        gap: 0.75em; margin-bottom: 1em;
     }
+    .ecg-nav-bar {
+        display: flex; align-items: center; gap: 0.5em;
+    }
+    .ecg-nav-btn {
+        padding: 0.38em 0.75em; border-radius: 6px; font-size: 0.84em; font-weight: 600;
+        cursor: pointer; border: 1px solid var(--pp-border);
+        background: var(--pp-overlay-5, #f4f4f5); color: var(--pp-text);
+        transition: background 0.12s;
+    }
+    .ecg-nav-btn:hover { background: var(--pp-overlay-8, #e8e8e8); }
+    .ecg-nav-today {
+        background: var(--pp-accent, #ef4444); color: #fff; border-color: transparent;
+    }
+    .ecg-nav-today:hover { opacity: 0.88; }
+    .ecg-nav-label {
+        font-weight: 600; font-size: 0.88em; min-width: 170px;
+        text-align: center; color: var(--pp-text);
+    }
+
+    /* Scroll wrapper so week grid doesn't crush on narrow screens */
+    .ecg-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+    /* Week grid */
+    .ecg-week-grid {
+        display: grid; grid-template-columns: repeat(5, 1fr);
+        gap: 6px; min-width: 580px;
+    }
+
+    /* Month grid */
+    .ecg-month-grid { display: flex; flex-direction: column; gap: 4px; }
+    .ecg-month-header-row {
+        display: grid; grid-template-columns: repeat(5, 1fr);
+        gap: 4px; padding: 0 2px;
+    }
+    .ecg-month-header-cell {
+        text-align: center; font-size: 0.74em; font-weight: 600;
+        color: var(--pp-text-muted); padding: 4px 0;
+    }
+    .ecg-month-week { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+
+    /* Day column */
+    .ecg-day-col {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-radius: 8px; overflow: hidden;
+        display: flex; flex-direction: column;
+    }
+    .ecg-day-col.ecg-today { border-color: var(--pp-accent, #ef4444); border-width: 2px; }
+    .ecg-out-of-month { opacity: 0.35; }
+
+    /* Day header */
+    .ecg-day-header {
+        display: flex; align-items: center; gap: 4px;
+        padding: 5px 7px; font-size: 0.78em;
+        background: var(--pp-overlay-5, #f4f4f5);
+        border-bottom: 1px solid var(--pp-border-light, var(--pp-border));
+    }
+    .ecg-today .ecg-day-header { background: rgba(239,68,68,0.08); }
+    .ecg-past .ecg-day-header { opacity: 0.65; }
+    .ecg-day-name { color: var(--pp-text-muted); font-weight: 500; flex-shrink: 0; }
+    .ecg-day-num { font-weight: 700; color: var(--pp-text); }
+    .ecg-day-mon { font-size: 0.85em; color: var(--pp-text-muted); }
+    .ecg-today-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--pp-accent, #ef4444); margin-left: auto; flex-shrink: 0;
+    }
+
+    /* Halves */
+    .ecg-half { padding: 5px; flex: 1; min-height: 72px; }
+    .ecg-half-bmo { border-bottom: 1px dashed var(--pp-border-light, var(--pp-border)); }
+    .ecg-half-label {
+        font-size: 0.64em; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; margin-bottom: 4px; line-height: 1;
+    }
+    .ecg-half-bmo .ecg-half-label { color: #2563eb; }
+    .ecg-half-amc .ecg-half-label { color: #7c3aed; }
+
+    /* Tiles container */
+    .ecg-tiles { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; }
+
+    /* Individual tile */
+    .ecg-tile {
+        display: flex; flex-direction: column; align-items: center;
+        cursor: pointer; border-radius: 7px; padding: 3px;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+        outline: none; width: 52px;
+        position: relative; /* needed for z-index stacking on hover */
+    }
+    .ecg-tile:hover, .ecg-tile:focus-visible {
+        transform: scale(1.14); box-shadow: 0 4px 14px rgba(0,0,0,0.16);
+        z-index: 20;
+    }
+    .ecg-tile-si { box-shadow: 0 0 0 2px #d97706; }
+    .ecg-tile-si:hover, .ecg-tile-si:focus-visible {
+        box-shadow: 0 0 0 2px #d97706, 0 4px 14px rgba(0,0,0,0.16);
+    }
+
+    /* Small tile (month view) */
+    .ecg-tile.ecg-tile-sm { width: 36px; padding: 2px; }
+
+    /* Logo */
+    .ecg-logo-wrap {
+        width: 40px; height: 40px; border-radius: 8px; overflow: hidden;
+        background: var(--pp-overlay-5, #f5f5f5);
+        display: flex; align-items: center; justify-content: center;
+    }
+    .ecg-tile-sm .ecg-logo-wrap { width: 28px; height: 28px; border-radius: 6px; }
+    .ecg-logo-img { width: 100%; height: 100%; object-fit: contain; }
+    .ecg-logo-fallback {
+        width: 100%; height: 100%; border-radius: 8px;
+        display: none; align-items: center; justify-content: center;
+        font-size: 0.72em; font-weight: 800; color: #fff;
+        text-transform: uppercase; letter-spacing: -0.02em;
+        pointer-events: none;
+    }
+    .ecg-tile-sm .ecg-logo-fallback { border-radius: 6px; font-size: 0.62em; }
+
+    /* Ticker label */
+    .ecg-tile-ticker {
+        font-size: 0.6em; font-weight: 600; color: var(--pp-text);
+        max-width: 50px; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; margin-top: 2px; text-align: center; line-height: 1;
+    }
+    .ecg-tile-sm .ecg-tile-ticker { font-size: 0.55em; max-width: 34px; }
+
+    /* "+X more" badge */
+    .ecg-more-btn {
+        width: 40px; height: 40px; border-radius: 8px;
+        background: var(--pp-overlay-8, rgba(0,0,0,0.06));
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.7em; font-weight: 700; color: var(--pp-text-muted);
+        cursor: pointer; transition: background 0.12s;
+    }
+    .ecg-more-btn:hover { background: var(--pp-overlay-12, rgba(0,0,0,0.11)); color: var(--pp-text); }
+
+    /* Hover card */
+    .ecg-hover-card {
+        position: fixed; z-index: 1000; display: none;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+        padding: 0.9em 1em;
+        min-width: 196px; max-width: 256px;
+        pointer-events: none;
+    }
+    .ecg-hc-header { display: flex; align-items: center; gap: 0.65em; margin-bottom: 0.6em; }
+    .ecg-hc-logo-wrap {
+        width: 38px; height: 38px; border-radius: 8px; flex-shrink: 0;
+        background: var(--pp-overlay-5, #f5f5f5); overflow: hidden;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .ecg-hc-logo { width: 100%; height: 100%; object-fit: contain; }
+    .ecg-hc-fb {
+        width: 100%; height: 100%; border-radius: 8px;
+        display: none; align-items: center; justify-content: center;
+        font-size: 0.72em; font-weight: 800; color: #fff; text-transform: uppercase;
+    }
+    .ecg-hc-name { font-weight: 700; font-size: 0.88em; color: var(--pp-text); line-height: 1.3; }
+    .ecg-hc-sub { font-size: 0.75em; color: var(--pp-text-muted); margin-top: 1px; }
+    .ecg-hc-row {
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 0.78em; padding: 0.22em 0;
+        border-top: 1px solid var(--pp-border-light, var(--pp-border));
+    }
+    .ecg-hc-label { color: var(--pp-text-muted); }
+    .ecg-hc-val { font-weight: 600; color: var(--pp-text); text-align: right; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ecg-hc-si .ecg-hc-val { color: #d97706; }
+
+    /* Modal */
+    .ecg-modal-overlay {
+        position: fixed; inset: 0; z-index: 2000;
+        background: rgba(0,0,0,0.42);
+        display: none; align-items: center; justify-content: center;
+        padding: 1em;
+    }
+    .ecg-modal-overlay.open { display: flex; }
+    .ecg-modal {
+        background: var(--pp-surface);
+        border-radius: 14px;
+        max-width: 560px; width: 100%; max-height: 80vh;
+        overflow-y: auto; padding: 1.25em 1.4em;
+        box-shadow: 0 16px 48px rgba(0,0,0,0.22);
+    }
+    .ecg-modal-header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 1.1em;
+    }
+    .ecg-modal-title { font-weight: 700; font-size: 0.95em; color: var(--pp-text); }
+    .ecg-modal-close {
+        background: none; border: none; cursor: pointer; font-size: 1.25em;
+        color: var(--pp-text-muted); padding: 0 0.2em; line-height: 1;
+    }
+    .ecg-modal-close:hover { color: var(--pp-text); }
+    .ecg-modal-section { margin-bottom: 1.1em; }
+    .ecg-modal-section-label {
+        font-size: 0.74em; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.05em; color: var(--pp-text-muted); margin-bottom: 0.6em;
+    }
+    .ecg-modal-tiles { gap: 8px; }
+
+    /* Responsive */
     @media (max-width: 700px) {
         .ec-metrics { grid-template-columns: repeat(2, 1fr); }
         .ec-col-name { display: none; }
@@ -169,6 +311,12 @@
         .ec-name { max-width: 120px; }
     }
 </style>
+
+{# ── Embed all upcoming data for client-side grid rendering ── #}
+<script>
+window._ecAllUpcoming  = {{ data.upcoming | tojson }};
+window._ecAllReported  = {{ data.just_reported | tojson }};
+</script>
 
 {# ── Banners ── #}
 {% if data.get('is_mock') %}
@@ -203,67 +351,88 @@
     </div>
 </div>
 
-{# ── Search ── #}
-{% if data.upcoming %}
-<div class="ec-search-wrap">
-    <input type="text" class="ec-search" id="ec-table-search"
-           placeholder="Search ticker or company…"
-           oninput="ecFilterTable(this.value)">
-</div>
-{% endif %}
-
-{# ── Calendar Table (grouped by date) ── #}
-{% if data.upcoming %}
-    {% for day in data.upcoming %}
-    <div class="ec-date-group" data-ec-day>
-        <div class="ec-date-header">{{ day.date_label }}</div>
-        <div class="pp-table-wrap">
-            <table class="pp-table ec-table">
-                <thead>
-                    <tr>
-                        <th style="width: 100px;">Time</th>
-                        <th style="width: 80px;">Ticker</th>
-                        <th class="ec-col-name">Company</th>
-                        <th style="text-align:right;">EPS Est.</th>
-                        <th class="ec-col-rev" style="text-align:right;">Rev Est.</th>
-                        <th style="width: 40px;"></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for e in day.entries %}
-                    <tr data-ec-row>
-                        <td><span class="ec-hour-badge ec-hour-{{ e.hour }}">{{ e.hour_label }}</span></td>
-                        <td>
-                            {% if e.has_page %}
-                            <a href="/stock/{{ e.symbol }}" class="ec-ticker-link">{{ e.symbol }}</a>
-                            {% else %}
-                            <span class="ec-ticker-link">{{ e.symbol }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="ec-col-name ec-name" title="{{ e.name }}">{{ e.name }}</td>
-                        <td style="text-align:right;">
-                            {% if e.epsEstimate is not none %}${{ "%.2f"|format(e.epsEstimate) }}{% else %}&mdash;{% endif %}
-                        </td>
-                        <td class="ec-col-rev" style="text-align:right;">{{ e.revenueEstimate_fmt or '&mdash;' }}</td>
-                        <td>
-                            {% if e.is_superinvestor %}
-                            <span class="ec-si-badge" title="Held by: {{ e.si_names|join(', ') }}">SI</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+{# ── View Toggle + Navigation ── #}
+<div class="ecg-controls-bar">
+    <div class="pp-pill-nav" id="ecg-view-nav" style="margin-bottom:0">
+        <button class="pp-pill-btn ecg-view-btn" data-view="week"  onclick="ecgSetView('week')">Week Grid</button>
+        <button class="pp-pill-btn ecg-view-btn" data-view="month" onclick="ecgSetView('month')">Month Grid</button>
+        <button class="pp-pill-btn ecg-view-btn" data-view="list"  onclick="ecgSetView('list')">List View</button>
     </div>
-    {% endfor %}
-{% else %}
-<div class="ec-empty">
-    No upcoming earnings found for {{ data.index }} ({{ data.period_label }}).
+    <div id="ecg-nav" class="ecg-nav-bar">
+        <button class="ecg-nav-btn" onclick="ecgNavPrev()" aria-label="Previous">&#8592;</button>
+        <span id="ecg-nav-label" class="ecg-nav-label"></span>
+        <button class="ecg-nav-btn ecg-nav-today" onclick="ecgNavToday()">Today</button>
+        <button class="ecg-nav-btn" onclick="ecgNavNext()" aria-label="Next">&#8594;</button>
+    </div>
 </div>
-{% endif %}
 
-{# ── Just Reported (collapsible) ── #}
+{# ── Grid container (JS renders here) ── #}
+<div class="ecg-scroll"><div id="ecg-container"></div></div>
+
+{# ── List view (original content, wrapped) ── #}
+<div id="ec-list-view">
+    {# Search #}
+    {% if data.upcoming %}
+    <div class="ec-search-wrap">
+        <input type="text" class="ec-search" id="ec-table-search"
+               placeholder="Search ticker or company…"
+               oninput="ecFilterTable(this.value)">
+    </div>
+    {% endif %}
+
+    {# Calendar Table (grouped by date) #}
+    {% if data.upcoming %}
+        {% for day in data.upcoming %}
+        <div class="ec-date-group" data-ec-day>
+            <div class="ec-date-header">{{ day.date_label }}</div>
+            <div class="pp-table-wrap">
+                <table class="pp-table ec-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 100px;">Time</th>
+                            <th style="width: 80px;">Ticker</th>
+                            <th class="ec-col-name">Company</th>
+                            <th style="text-align:right;">EPS Est.</th>
+                            <th class="ec-col-rev" style="text-align:right;">Rev Est.</th>
+                            <th style="width: 40px;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for e in day.entries %}
+                        <tr data-ec-row>
+                            <td><span class="ec-hour-badge ec-hour-{{ e.hour }}">{{ e.hour_label }}</span></td>
+                            <td>
+                                {% if e.has_page %}
+                                <a href="/stock/{{ e.symbol }}" class="ec-ticker-link">{{ e.symbol }}</a>
+                                {% else %}
+                                <span class="ec-ticker-link">{{ e.symbol }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="ec-col-name ec-name" title="{{ e.name }}">{{ e.name }}</td>
+                            <td style="text-align:right;">
+                                {% if e.epsEstimate is not none %}${{ "%.2f"|format(e.epsEstimate) }}{% else %}&mdash;{% endif %}
+                            </td>
+                            <td class="ec-col-rev" style="text-align:right;">{{ e.revenueEstimate_fmt or '&mdash;' }}</td>
+                            <td>
+                                {% if e.is_superinvestor %}
+                                <span class="ec-si-badge" title="Held by: {{ e.si_names|join(', ') }}">SI</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+    <div class="ec-empty">
+        No upcoming earnings found for {{ data.index }} ({{ data.period_label }}).
+    </div>
+    {% endif %}
+</div>{# /ec-list-view #}
+
+{# ── Just Reported (collapsible, always visible regardless of view) ── #}
 {% if data.just_reported %}
 <details class="ec-just-reported">
     <summary>Just Reported ({{ data.just_reported|length }})</summary>
@@ -284,9 +453,7 @@
             <tbody>
                 {% for r in data.just_reported %}
                 <tr>
-                    <td>
-                        <a href="/stock/{{ r.symbol }}" class="ec-ticker-link">{{ r.symbol }}</a>
-                    </td>
+                    <td><a href="/stock/{{ r.symbol }}" class="ec-ticker-link">{{ r.symbol }}</a></td>
                     <td class="ec-col-name ec-name" title="{{ r.name }}">{{ r.name }}</td>
                     <td style="white-space:nowrap;">{{ r.date | format_short_date }}</td>
                     <td style="text-align:right;" class="{% if r.eps_beat == true %}ec-beat{% elif r.eps_beat == false %}ec-miss{% endif %}">
@@ -314,19 +481,468 @@
 </details>
 {% endif %}
 
+{# ── Hover Card ── #}
+<div id="ecg-hover-card" class="ecg-hover-card" role="tooltip" aria-live="polite">
+    <div class="ecg-hc-header">
+        <div class="ecg-hc-logo-wrap">
+            <img id="ecg-hc-logo" class="ecg-hc-logo" src="" alt="">
+            <div id="ecg-hc-fb" class="ecg-hc-fb"></div>
+        </div>
+        <div style="min-width:0">
+            <div id="ecg-hc-name" class="ecg-hc-name"></div>
+            <div id="ecg-hc-sub"  class="ecg-hc-sub"></div>
+        </div>
+    </div>
+    <div class="ecg-hc-row">
+        <span class="ecg-hc-label">EPS Est.</span>
+        <span id="ecg-hc-eps" class="ecg-hc-val"></span>
+    </div>
+    <div class="ecg-hc-row">
+        <span class="ecg-hc-label">Rev Est.</span>
+        <span id="ecg-hc-rev" class="ecg-hc-val"></span>
+    </div>
+    <div class="ecg-hc-row ecg-hc-si" id="ecg-hc-si-row">
+        <span class="ecg-hc-label">SI Holdings</span>
+        <span id="ecg-hc-si" class="ecg-hc-val"></span>
+    </div>
+</div>
+
+{# ── Day Modal ("+X more" expansion) ── #}
+<div id="ecg-modal" class="ecg-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="ecg-modal-title"
+     onclick="if(event.target===this)ecgCloseModal()">
+    <div class="ecg-modal">
+        <div class="ecg-modal-header">
+            <span id="ecg-modal-title" class="ecg-modal-title"></span>
+            <button class="ecg-modal-close" onclick="ecgCloseModal()" aria-label="Close">&#x2715;</button>
+        </div>
+        <div id="ecg-modal-body"></div>
+    </div>
+</div>
+
 <script>
-(function() {
-    /* Client-side search filtering */
-    window.ecFilterTable = function(query) {
-        query = query.toLowerCase();
-        document.querySelectorAll('[data-ec-row]').forEach(function(row) {
-            row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
+(function () {
+    'use strict';
+
+    /* ============================================================
+       STATE — shared with macro.html outer scope
+    ============================================================ */
+    var _s = window.ecGridState = window.ecGridState || { view: 'week', weekOffset: 0, monthOffset: 0 };
+
+    /* ============================================================
+       LOGO COLOR HASH (for initials fallback)
+    ============================================================ */
+    var _colors = ['#3b82f6','#7c3aed','#059669','#d97706','#dc2626','#0891b2','#be185d','#0e7490'];
+    function _symColor(sym) {
+        var h = 0;
+        for (var i = 0; i < sym.length; i++) h = (h * 31 + sym.charCodeAt(i)) & 0xffff;
+        return _colors[h % _colors.length];
+    }
+
+    window.ecgLogoError = function (img) {
+        img.style.display = 'none';
+        var fb = img.nextElementSibling;
+        if (!fb) return;
+        fb.style.display = 'flex';
+        var sym = (img.closest('[data-symbol]') || {}).dataset && img.closest('[data-symbol]').dataset.symbol || '';
+        fb.style.background = _symColor(sym);
+    };
+
+    /* ============================================================
+       DATE MAP — index upcoming events by date, split BMO vs AMC
+    ============================================================ */
+    var _dateMap = null;
+    function _getDateMap() {
+        if (_dateMap) return _dateMap;
+        _dateMap = {};
+        (_ecAllUpcoming || []).forEach(function (dayGroup) {
+            var date = dayGroup.date;
+            if (!_dateMap[date]) _dateMap[date] = { bmo: [], amc: [] };
+            dayGroup.entries.forEach(function (e) {
+                _dateMap[date][e.hour === 'amc' || e.hour === 'dmh' ? 'amc' : 'bmo'].push(e);
+            });
         });
-        /* Show/hide date group headers based on whether any rows are visible */
-        document.querySelectorAll('[data-ec-day]').forEach(function(group) {
-            var visible = group.querySelectorAll('[data-ec-row]:not([style*="display: none"])');
-            group.style.display = visible.length > 0 || !query ? '' : 'none';
+        return _dateMap;
+    }
+
+    /* ============================================================
+       DATE UTILITIES
+    ============================================================ */
+    function _today() { var d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+    function _fmt(d)  { return d.toISOString().split('T')[0]; }
+
+    function _weekDates(offset) {
+        var t = _today();
+        var dow = t.getDay();
+        var mon = new Date(t);
+        mon.setDate(t.getDate() - (dow === 0 ? 6 : dow - 1) + offset * 7);
+        var out = [];
+        for (var i = 0; i < 5; i++) {
+            var d = new Date(mon); d.setDate(mon.getDate() + i);
+            out.push(_fmt(d));
+        }
+        return out;
+    }
+
+    function _monthInfo(offset) {
+        var t = _today();
+        var raw = t.getMonth() + offset;
+        var year  = t.getFullYear() + Math.floor(raw / 12);
+        var month = ((raw % 12) + 12) % 12;
+        var first = new Date(year, month, 1);
+        var last  = new Date(year, month + 1, 0);
+        var dow   = first.getDay();
+        var start = new Date(first);
+        start.setDate(first.getDate() - (dow === 0 ? 6 : dow - 1));
+        return { year: year, month: month, first: first, last: last, weekStart: start };
+    }
+
+    /* ============================================================
+       TILE + HALF RENDERING
+    ============================================================ */
+    function _safeAttr(str) {
+        return String(str || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+    }
+
+    function _renderTile(entry, small) {
+        var sym    = entry.symbol || '';
+        var siCls  = entry.is_superinvestor ? ' ecg-tile-si' : '';
+        var smCls  = small ? ' ecg-tile-sm' : '';
+        var aria   = _safeAttr((entry.name || sym) + ', reports ' + (entry.hour_label || ''));
+        var mini   = JSON.stringify({
+            symbol: entry.symbol, name: entry.name, hour_label: entry.hour_label,
+            epsEstimate: entry.epsEstimate, revenueEstimate_fmt: entry.revenueEstimate_fmt,
+            is_superinvestor: entry.is_superinvestor, si_names: entry.si_names
+        });
+        var entryAttr = mini.replace(/"/g, '&quot;');
+        var logoUrl = 'https://assets.parqet.com/logos/symbol/' + encodeURIComponent(sym) + '?format=svg';
+        var initials = (sym.replace(/[^A-Za-z]/g, '').slice(0, 2) || sym.slice(0, 2)).toUpperCase();
+        return (
+            '<div class="ecg-tile' + siCls + smCls + '" data-symbol="' + _safeAttr(sym) + '"' +
+            ' data-entry="' + entryAttr + '" tabindex="0" role="button" aria-label="' + aria + '"' +
+            ' onmouseenter="ecgShowCard(this)" onmouseleave="ecgScheduleHide()"' +
+            ' onfocus="ecgShowCard(this)" onblur="ecgScheduleHide()"' +
+            ' onkeydown="ecgTileKey(event,this)">' +
+            '<div class="ecg-logo-wrap" data-symbol="' + _safeAttr(sym) + '">' +
+            '<img class="ecg-logo-img" src="' + logoUrl + '" onerror="ecgLogoError(this)" alt="" loading="lazy">' +
+            '<div class="ecg-logo-fallback">' + _safeAttr(initials) + '</div>' +
+            '</div>' +
+            '<span class="ecg-tile-ticker">' + _safeAttr(sym) + '</span>' +
+            '</div>'
+        );
+    }
+
+    function _renderHalf(entries, halfCls, label, small, dateStr) {
+        var MAX  = small ? 3 : 5;
+        var shown = entries.slice(0, MAX);
+        var more  = entries.length - MAX;
+        var html = '<div class="ecg-half ' + halfCls + '">';
+        if (!small) html += '<div class="ecg-half-label">' + label + '</div>';
+        html += '<div class="ecg-tiles">';
+        shown.forEach(function (e) { html += _renderTile(e, small); });
+        if (more > 0) {
+            html += '<div class="ecg-more-btn" role="button" tabindex="0"' +
+                ' onclick="ecgOpenModal(\'' + _safeAttr(dateStr) + '\')"' +
+                ' onkeydown="if(event.key===\'Enter\'||event.key===\' \')ecgOpenModal(\'' + _safeAttr(dateStr) + '\')"' +
+                ' title="' + more + ' more companies reporting">+' + more + '</div>';
+        }
+        html += '</div></div>';
+        return html;
+    }
+
+    function _renderDayCell(dateStr, small) {
+        var dm      = _getDateMap();
+        var day     = dm[dateStr] || { bmo: [], amc: [] };
+        var todayS  = _fmt(_today());
+        var isToday = dateStr === todayS;
+        var isPast  = dateStr < todayS;
+        var d       = new Date(dateStr + 'T12:00:00');
+        var dayName = d.toLocaleString('en-US', { weekday: 'short' });
+        var dayNum  = d.getDate();
+        var monName = d.toLocaleString('en-US', { month: 'short' });
+
+        var cls = 'ecg-day-col' + (isToday ? ' ecg-today' : '') + (isPast ? ' ecg-past' : '');
+        var hdrCls = 'ecg-day-header';
+        return (
+            '<div class="' + cls + '" data-date="' + dateStr + '">' +
+            '<div class="' + hdrCls + '">' +
+            '<span class="ecg-day-name">' + dayName + '</span>' +
+            '<span class="ecg-day-num">' + dayNum +
+            (small ? '&thinsp;<span class="ecg-day-mon">' + monName + '</span>' : '') +
+            '</span>' +
+            (isToday ? '<span class="ecg-today-dot"></span>' : '') +
+            '</div>' +
+            _renderHalf(day.bmo, 'ecg-half-bmo', 'Pre-Market',  small, dateStr) +
+            _renderHalf(day.amc, 'ecg-half-amc', 'After Close', small, dateStr) +
+            '</div>'
+        );
+    }
+
+    /* ============================================================
+       RENDER DISPATCHERS
+    ============================================================ */
+    function _renderWeek() {
+        var dates = _weekDates(_s.weekOffset);
+        var mon   = new Date(dates[0] + 'T12:00:00');
+        var fri   = new Date(dates[4] + 'T12:00:00');
+        var opts  = { month: 'short', day: 'numeric' };
+        var label = mon.toLocaleString('en-US', opts) + ' – ' +
+                    fri.toLocaleString('en-US', Object.assign({ year: 'numeric' }, opts));
+        document.getElementById('ecg-nav-label').textContent = label;
+
+        var html = '<div class="ecg-week-grid">';
+        dates.forEach(function (d) { html += _renderDayCell(d, false); });
+        html += '</div>';
+        document.getElementById('ecg-container').innerHTML = html;
+        _attachTileEvents(document.getElementById('ecg-container'));
+    }
+
+    function _renderMonth() {
+        var info  = _monthInfo(_s.monthOffset);
+        var label = info.first.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        document.getElementById('ecg-nav-label').textContent = label;
+
+        var html = '<div class="ecg-month-grid">';
+        html += '<div class="ecg-month-header-row">';
+        ['Mon','Tue','Wed','Thu','Fri'].forEach(function (n) {
+            html += '<div class="ecg-month-header-cell">' + n + '</div>';
+        });
+        html += '</div>';
+
+        var cur = new Date(info.weekStart);
+        for (var w = 0; w < 6; w++) {
+            if (cur > info.last && w > 0) break;
+            html += '<div class="ecg-month-week">';
+            for (var i = 0; i < 5; i++) {
+                var dateStr = _fmt(cur);
+                var outMonth = cur.getMonth() !== info.month;
+                var cell = _renderDayCell(dateStr, true);
+                if (outMonth) cell = cell.replace('class="ecg-day-col', 'class="ecg-day-col ecg-out-of-month');
+                html += cell;
+                cur.setDate(cur.getDate() + 1);
+            }
+            cur.setDate(cur.getDate() + 2); // skip weekend
+            html += '</div>';
+        }
+        html += '</div>';
+        document.getElementById('ecg-container').innerHTML = html;
+        _attachTileEvents(document.getElementById('ecg-container'));
+    }
+
+    function ecgRender() {
+        var container  = document.getElementById('ecg-container');
+        var nav        = document.getElementById('ecg-nav');
+        var listView   = document.getElementById('ec-list-view');
+        var searchWrap = document.querySelector('.ec-search-wrap');
+
+        // Force list view on narrow screens
+        if (window.innerWidth < 768 && _s.view !== 'list') {
+            _s.view = 'list';
+        }
+
+        if (_s.view === 'list') {
+            container.style.display = 'none';
+            nav.style.display       = 'none';
+            if (listView)   listView.style.display   = '';
+            if (searchWrap) searchWrap.style.display = '';
+        } else {
+            container.style.display = '';
+            nav.style.display       = 'flex';
+            if (listView)   listView.style.display   = 'none';
+            if (searchWrap) searchWrap.style.display = 'none';
+            if (_s.view === 'week')  _renderWeek();
+            if (_s.view === 'month') _renderMonth();
+        }
+
+        // Sync view-toggle pill active states
+        document.querySelectorAll('.ecg-view-btn').forEach(function (btn) {
+            btn.classList.toggle('active', btn.dataset.view === _s.view);
+        });
+
+        window.ecSyncControls && window.ecSyncControls();
+    }
+    window.ecgRender = ecgRender;
+
+    /* ============================================================
+       NAVIGATION
+    ============================================================ */
+    window.ecgNavPrev = function () {
+        if (_s.view === 'week') _s.weekOffset--; else _s.monthOffset--;
+        ecgRender();
+    };
+    window.ecgNavNext = function () {
+        if (_s.view === 'week') _s.weekOffset++; else _s.monthOffset++;
+        ecgRender();
+    };
+    window.ecgNavToday = function () {
+        // On weekends jump to next week so users see upcoming events
+        var dow = new Date().getDay();
+        _s.weekOffset = (dow === 0 || dow === 6) ? 1 : 0;
+        _s.monthOffset = 0;
+        ecgRender();
+    };
+
+    /* ============================================================
+       VIEW TOGGLE
+    ============================================================ */
+    window.ecgSetView = function (view) {
+        var prev = _s.view;
+        _s.view  = view;
+        // Switching between list and grid needs an HTMX reload (period changes)
+        if ((prev === 'list') !== (view === 'list')) {
+            window.ecReloadCalendar && window.ecReloadCalendar();
+        } else {
+            ecgRender();
+        }
+    };
+
+    /* ============================================================
+       HOVER CARD
+    ============================================================ */
+    var _card      = document.getElementById('ecg-hover-card');
+    var _hideTimer = null;
+
+    window.ecgShowCard = function (tile) {
+        clearTimeout(_hideTimer);
+        var raw;
+        try { raw = JSON.parse(tile.dataset.entry.replace(/&quot;/g, '"')); }
+        catch (e) { return; }
+
+        var sym = raw.symbol || '';
+        document.getElementById('ecg-hc-name').textContent = raw.name || sym;
+        document.getElementById('ecg-hc-sub').textContent  = sym + (raw.hour_label ? ' · ' + raw.hour_label : '');
+        document.getElementById('ecg-hc-eps').textContent  = raw.epsEstimate != null ? '$' + Number(raw.epsEstimate).toFixed(2) : '—';
+        document.getElementById('ecg-hc-rev').textContent  = raw.revenueEstimate_fmt || '—';
+        var siNames = raw.si_names && raw.si_names.length ? raw.si_names.join(', ') : null;
+        document.getElementById('ecg-hc-si').textContent   = siNames || '—';
+        document.getElementById('ecg-hc-si-row').style.display = siNames ? '' : 'none';
+
+        var logo  = document.getElementById('ecg-hc-logo');
+        var fb    = document.getElementById('ecg-hc-fb');
+        logo.style.display = '';
+        fb.style.display   = 'none';
+        logo.onerror = function () {
+            logo.style.display = 'none';
+            fb.style.display   = 'flex';
+            fb.style.background = _symColor(sym);
+            fb.textContent = (sym.replace(/[^A-Za-z]/g,'').slice(0,2) || sym.slice(0,2)).toUpperCase();
+        };
+        logo.src = 'https://assets.parqet.com/logos/symbol/' + encodeURIComponent(sym) + '?format=svg';
+
+        _card.style.visibility = 'hidden';
+        _card.style.display    = 'block';
+        requestAnimationFrame(function () {
+            var rect = tile.getBoundingClientRect();
+            var cw = _card.offsetWidth, ch = _card.offsetHeight;
+            var vw = window.innerWidth,  vh = window.innerHeight;
+            var left = rect.right + 10;
+            var top  = rect.top;
+            if (left + cw > vw - 12) left = rect.left - cw - 10;
+            if (left < 8) left = 8;
+            if (top + ch > vh - 12) top = vh - ch - 12;
+            if (top < 8) top = 8;
+            _card.style.left       = left + 'px';
+            _card.style.top        = top  + 'px';
+            _card.style.visibility = 'visible';
         });
     };
+
+    window.ecgScheduleHide = function () {
+        _hideTimer = setTimeout(function () { _card.style.display = 'none'; }, 120);
+    };
+
+    /* ============================================================
+       DAY MODAL
+    ============================================================ */
+    window.ecgOpenModal = function (dateStr) {
+        var dm  = _getDateMap();
+        var day = dm[dateStr] || { bmo: [], amc: [] };
+        var d   = new Date(dateStr + 'T12:00:00');
+        document.getElementById('ecg-modal-title').textContent =
+            d.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+        var html = '';
+        if (day.bmo.length) {
+            html += '<div class="ecg-modal-section"><div class="ecg-modal-section-label">Pre-Market</div>' +
+                    '<div class="ecg-tiles ecg-modal-tiles">';
+            day.bmo.forEach(function (e) { html += _renderTile(e, false); });
+            html += '</div></div>';
+        }
+        if (day.amc.length) {
+            html += '<div class="ecg-modal-section"><div class="ecg-modal-section-label">After Close</div>' +
+                    '<div class="ecg-tiles ecg-modal-tiles">';
+            day.amc.forEach(function (e) { html += _renderTile(e, false); });
+            html += '</div></div>';
+        }
+        if (!html) html = '<p style="color:var(--pp-text-muted);font-size:0.88em">No earnings data for this day.</p>';
+
+        document.getElementById('ecg-modal-body').innerHTML = html;
+        document.getElementById('ecg-modal').classList.add('open');
+        _attachTileEvents(document.getElementById('ecg-modal-body'));
+    };
+
+    window.ecgCloseModal = function () {
+        document.getElementById('ecg-modal').classList.remove('open');
+    };
+
+    /* Keyboard: Escape closes modal */
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            ecgCloseModal();
+            _card.style.display = 'none';
+        }
+    });
+
+    /* ============================================================
+       KEYBOARD NAVIGATION ON TILES
+    ============================================================ */
+    function _focusAdjacentTile(tile, dir) {
+        var all = Array.from(document.querySelectorAll('.ecg-tile[tabindex="0"]'));
+        var idx = all.indexOf(tile);
+        if (idx < 0) return;
+        var next = all[idx + dir];
+        if (next) next.focus();
+    }
+
+    window.ecgTileKey = function (e, tile) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ecgShowCard(tile); }
+        if (e.key === 'Escape')      { clearTimeout(_hideTimer); _card.style.display = 'none'; }
+        if (e.key === 'ArrowRight')  { e.preventDefault(); _focusAdjacentTile(tile,  1); }
+        if (e.key === 'ArrowLeft')   { e.preventDefault(); _focusAdjacentTile(tile, -1); }
+    };
+
+    function _attachTileEvents(root) {
+        /* Tiles rendered via innerHTML already have inline handlers.
+           This adds keyboard events that can't be inlined safely. */
+        (root || document).querySelectorAll('.ecg-tile').forEach(function (tile) {
+            tile.addEventListener('keydown', function (e) { window.ecgTileKey(e, tile); });
+        });
+    }
+
+    /* ============================================================
+       CLIENT-SIDE LIST SEARCH (existing behaviour)
+    ============================================================ */
+    window.ecFilterTable = function (query) {
+        query = query.toLowerCase();
+        document.querySelectorAll('[data-ec-row]').forEach(function (row) {
+            row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
+        });
+        document.querySelectorAll('[data-ec-day]').forEach(function (group) {
+            var vis = group.querySelectorAll('[data-ec-row]:not([style*="display: none"])');
+            group.style.display = vis.length > 0 || !query ? '' : 'none';
+        });
+    };
+
+    /* ============================================================
+       INIT — run on every HTMX partial swap
+    ============================================================ */
+    // On weekends, default fresh loads to next week so the grid isn't empty
+    (function () {
+        var dow = new Date().getDay();
+        if ((dow === 0 || dow === 6) && _s.weekOffset === 0 && _s.view === 'week') {
+            _s.weekOffset = 1;
+        }
+    })();
+    ecgRender();
+
 })();
 </script>

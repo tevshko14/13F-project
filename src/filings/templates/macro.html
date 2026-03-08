@@ -241,9 +241,21 @@
     var ecCurrentIndex = 'sp500';
     var ecCurrentPeriod = 'this_week';
 
+    // Grid view state — persisted across HTMX partial swaps
+    window.ecGridState = window.ecGridState || { view: 'week', weekOffset: 0, monthOffset: 0 };
+
+    // Show period pills only in list view (called after each HTMX swap)
+    window.ecSyncControls = function() {
+        var nav = document.getElementById('ec-period-nav');
+        if (nav) nav.style.display = window.ecGridState.view === 'list' ? '' : 'none';
+    };
+
     function ecReload() {
-        htmx.ajax('GET', '/api/macro/calendar?key=' + macroKey + '&index=' + ecCurrentIndex + '&period=' + ecCurrentPeriod, '#ec-content');
+        // Grid modes always load period=all for client-side week/month navigation
+        var period = window.ecGridState.view !== 'list' ? 'all' : ecCurrentPeriod;
+        htmx.ajax('GET', '/api/macro/calendar?key=' + macroKey + '&index=' + ecCurrentIndex + '&period=' + period, '#ec-content');
     }
+    window.ecReloadCalendar = ecReload;  // exported for partial to trigger reload on view switch
 
     window.ecChangeIndex = function(idx) {
         ecCurrentIndex = idx;
@@ -286,6 +298,13 @@
         activatePill('ed-country-nav', c);
         edReload();
     };
+
+    // Sync EC controls (period pill visibility) after each calendar partial swap
+    document.body.addEventListener('htmx:afterSwap', function(e) {
+        if (e.detail.target.id === 'ec-content') {
+            window.ecSyncControls && window.ecSyncControls();
+        }
+    });
 })();
 </script>
 {% endblock %}
