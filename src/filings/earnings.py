@@ -309,14 +309,14 @@ def _infer_fiscal_quarter(report_date_str: str, fy_end_month: int) -> str:
 def _fetch_fmp_revenue(ticker: str) -> dict[str, dict] | None:
     """Fetch historical revenue data for a single ticker.
 
-    Tries **Finnhub** first (free tier, has revenue estimate + actual),
-    then falls back to **FMP** (requires premium plan).
+    Tries **Finnhub bulk calendar** first (free tier — recent ~6 weeks,
+    cached in-memory), then falls back to **FMP** (requires premium plan).
 
     Returns ``{date_str: {"revenue": int, "revenueEstimated": int}}``
     or *None* if all sources are unavailable.
     """
-    # ── Finnhub (primary — free tier, 60 req/min) ────────────
-    result = _fetch_finnhub_revenue(ticker)
+    # ── Finnhub bulk calendar (primary — free tier) ──────────
+    result = _finnhub_revenue_for_ticker(ticker)
     if result is not None:
         return result
 
@@ -324,42 +324,81 @@ def _fetch_fmp_revenue(ticker: str) -> dict[str, dict] | None:
     return _fetch_fmp_revenue_raw(ticker)
 
 
-def _fetch_finnhub_revenue(ticker: str) -> dict[str, dict] | None:
-    """Fetch revenue data from Finnhub ``/calendar/earnings`` endpoint."""
+# ── Finnhub bulk calendar cache ─────────────────────────────────
+# Finnhub free tier: /calendar/earnings works with date ranges (not
+# per-symbol), returning ~1K entries per week.  We cache the full
+# result keyed by (symbol, date) and refresh every 6 hours.
+_finnhub_cal_cache: dict[str, dict[str, dict]] | None = None  # {symbol: {date: {rev…}}}
+_finnhub_cal_ts: float = 0
+_FINNHUB_CAL_TTL = 21_600  # 6 hours
+
+
+def _finnhub_revenue_for_ticker(ticker: str) -> dict[str, dict] | None:
+    """Look up Finnhub bulk calendar revenue for a single ticker (cached)."""
+    global _finnhub_cal_cache, _finnhub_cal_ts
+
+    now = time.time()
+    if _finnhub_cal_cache is None or (now - _finnhub_cal_ts) > _FINNHUB_CAL_TTL:
+        _finnhub_cal_cache = _load_finnhub_bulk_calendar()
+        _finnhub_cal_ts = now
+
+    if _finnhub_cal_cache is None:
+        return None
+
+    lookup = _finnhub_cal_cache.get(ticker)
+    return lookup if lookup else None
+
+
+def _load_finnhub_bulk_calendar() -> dict[str, dict[str, dict]] | None:
+    """Fetch Finnhub ``/calendar/earnings`` for last 7 weeks (bulk, no symbol filter).
+
+    Returns ``{symbol: {date_str: {"revenue": val, "revenueEstimated": val}}}``.
+    """
     key = os.environ.get("FINNHUB_API_KEY", "").strip()
     if not key:
         return None
+
+    end = datetime.now()
+    start = end - timedelta(weeks=7)
 
     try:
         r = httpx.get(
             "https://finnhub.io/api/v1/calendar/earnings",
             params={
-                "symbol": ticker,
-                "from": "2020-01-01",
-                "to": datetime.now().strftime("%Y-%m-%d"),
+                "from": start.strftime("%Y-%m-%d"),
+                "to": end.strftime("%Y-%m-%d"),
                 "token": key,
             },
-            timeout=_FMP_TIMEOUT,
+            timeout=20,
         )
         r.raise_for_status()
         data = r.json()
 
         entries = data.get("earningsCalendar", [])
         if not entries:
+            logger.info("Finnhub bulk calendar returned 0 entries")
             return None
 
-        lookup: dict[str, dict] = {}
+        result: dict[str, dict[str, dict]] = {}
         for item in entries:
+            sym = item.get("symbol", "")
             d = item.get("date")
             rev = item.get("revenueActual")
             rev_est = item.get("revenueEstimate")
-            if d and (rev is not None or rev_est is not None):
-                lookup[d] = {"revenue": rev, "revenueEstimated": rev_est}
+            if sym and d and (rev is not None or rev_est is not None):
+                result.setdefault(sym, {})[d] = {
+                    "revenue": rev,
+                    "revenueEstimated": rev_est,
+                }
 
-        return lookup if lookup else None
+        logger.info(
+            "Finnhub bulk calendar: %d entries, %d symbols with revenue",
+            len(entries), len(result),
+        )
+        return result if result else None
 
     except Exception:
-        logger.debug("Finnhub revenue fetch failed for %s", ticker, exc_info=True)
+        logger.warning("Finnhub bulk calendar fetch failed", exc_info=True)
         return None
 
 
