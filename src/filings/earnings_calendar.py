@@ -6,8 +6,11 @@ providing a week-by-week or month-level view of upcoming earnings reports.
 Data flow:
   1. Check in-memory L1 cache (1h TTL)
   2. Fetch from Finnhub /calendar/earnings (free tier, bulk)
+     — via :func:`earnings.fetch_finnhub_calendar_raw` (shared cache)
   3. Fallback to FMP /earning_calendar (premium)
+     — via :func:`earnings_scorecard._fmp_get` (shared helper)
   4. Enrich with company metadata (name, sector, logo availability)
+     — via :func:`earnings_scorecard._build_company_lookup` (shared)
 
 Feature-flagged: set EARNINGS_CALENDAR_ENABLED=1 to expose the page.
 """
@@ -18,17 +21,12 @@ import logging
 import os
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-
-import httpx
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────
 _TTL = 3600  # 1 hour
-_FINNHUB_TIMEOUT = 20
-_FMP_TIMEOUT = 15
-_FMP_BASE = "https://financialmodelingprep.com/api/v3"
 
 # ── Feature flag ─────────────────────────────────────────────────
 FEATURE_ENABLED = os.environ.get("EARNINGS_CALENDAR_ENABLED", "1") == "1"
@@ -140,111 +138,94 @@ def get_month_view(year: int | None = None, month: int | None = None) -> dict:
 # ── Data fetchers ────────────────────────────────────────────────
 
 def _fetch_finnhub_calendar(start: str, end: str) -> list[dict]:
-    """Fetch from Finnhub /calendar/earnings bulk endpoint."""
-    key = os.environ.get("FINNHUB_API_KEY", "").strip()
-    if not key:
+    """Fetch from Finnhub /calendar/earnings bulk endpoint.
+
+    Uses :func:`earnings.fetch_finnhub_calendar_raw` for the shared,
+    cached HTTP call — avoids duplicate API requests when the earnings
+    history module fetches the same data.
+    """
+    from filings.earnings import fetch_finnhub_calendar_raw
+
+    raw = fetch_finnhub_calendar_raw(start, end)
+    if not raw:
         return []
 
-    try:
-        r = httpx.get(
-            "https://finnhub.io/api/v1/calendar/earnings",
-            params={"from": start, "to": end, "token": key},
-            timeout=_FINNHUB_TIMEOUT,
-        )
-        r.raise_for_status()
-        data = r.json()
-        raw = data.get("earningsCalendar", [])
+    entries = []
+    for item in raw:
+        symbol = item.get("symbol", "")
+        if not symbol or "." in symbol:
+            continue  # skip non-US tickers
 
-        entries = []
-        for item in raw:
-            symbol = item.get("symbol", "")
-            if not symbol or "." in symbol:
-                continue  # skip non-US tickers
+        date = item.get("date", "")
+        if not date:
+            continue
 
-            date = item.get("date", "")
-            if not date:
-                continue
+        hour = item.get("hour", "")
+        timing = _parse_timing(hour)
 
-            hour = item.get("hour", "")
-            timing = _parse_timing(hour)
+        entries.append({
+            "ticker": symbol,
+            "date": date,
+            "timing": timing,
+            "eps_estimate": item.get("epsEstimate"),
+            "eps_actual": item.get("epsActual"),
+            "revenue_estimate": item.get("revenueEstimate"),
+            "revenue_actual": item.get("revenueActual"),
+            "year": item.get("year"),
+            "quarter": item.get("quarter"),
+            "confirmed": hour != "",
+        })
 
-            entries.append({
-                "ticker": symbol,
-                "date": date,
-                "timing": timing,
-                "eps_estimate": item.get("epsEstimate"),
-                "eps_actual": item.get("epsActual"),
-                "revenue_estimate": item.get("revenueEstimate"),
-                "revenue_actual": item.get("revenueActual"),
-                "year": item.get("year"),
-                "quarter": item.get("quarter"),
-                "confirmed": hour != "",
-            })
-
-        logger.info(
-            "Finnhub earnings calendar: %d entries for %s to %s",
-            len(entries), start, end,
-        )
-        return entries
-
-    except Exception:
-        logger.warning("Finnhub earnings calendar fetch failed", exc_info=True)
-        return []
+    logger.info(
+        "Finnhub earnings calendar: %d entries for %s to %s",
+        len(entries), start, end,
+    )
+    return entries
 
 
 def _fetch_fmp_calendar(start: str, end: str) -> list[dict]:
-    """Fallback: FMP /earning_calendar endpoint."""
-    key = os.environ.get("FMP_API_KEY", "").strip()
-    if not key:
+    """Fallback: FMP ``/earning_calendar`` endpoint.
+
+    Uses :func:`earnings_scorecard._fmp_get` for the shared HTTP helper
+    (handles API key, error parsing, logging).
+    """
+    from filings.earnings_scorecard import _fmp_get
+
+    data = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    if data is None or not isinstance(data, list):
         return []
 
-    try:
-        r = httpx.get(
-            f"{_FMP_BASE}/earning_calendar",
-            params={"from": start, "to": end, "apikey": key},
-            timeout=_FMP_TIMEOUT,
-        )
-        r.raise_for_status()
-        data = r.json()
+    entries = []
+    for item in data:
+        symbol = item.get("symbol", "")
+        if not symbol or "." in symbol:
+            continue
 
-        if not isinstance(data, list):
-            return []
+        date = item.get("date", "")
+        if not date:
+            continue
 
-        entries = []
-        for item in data:
-            symbol = item.get("symbol", "")
-            if not symbol or "." in symbol:
-                continue
+        time_str = item.get("time", "")
+        timing = "bmo" if time_str == "bmo" else "amc" if time_str == "amc" else "unknown"
 
-            date = item.get("date", "")
-            if not date:
-                continue
+        entries.append({
+            "ticker": symbol,
+            "date": date,
+            "timing": timing,
+            "eps_estimate": item.get("epsEstimated"),
+            "eps_actual": item.get("eps"),
+            "revenue_estimate": item.get("revenueEstimated"),
+            "revenue_actual": item.get("revenue"),
+            "year": item.get("fiscalDateEnding", "")[:4] if item.get("fiscalDateEnding") else None,
+            "quarter": None,
+            "confirmed": True,
+        })
 
-            time_str = item.get("time", "")
-            timing = "bmo" if time_str == "bmo" else "amc" if time_str == "amc" else "unknown"
-
-            entries.append({
-                "ticker": symbol,
-                "date": date,
-                "timing": timing,
-                "eps_estimate": item.get("epsEstimated"),
-                "eps_actual": item.get("eps"),
-                "revenue_estimate": item.get("revenueEstimated"),
-                "revenue_actual": item.get("revenue"),
-                "year": item.get("fiscalDateEnding", "")[:4] if item.get("fiscalDateEnding") else None,
-                "quarter": None,
-                "confirmed": True,
-            })
-
-        logger.info(
-            "FMP earnings calendar: %d entries for %s to %s",
-            len(entries), start, end,
-        )
-        return entries
-
-    except Exception:
-        logger.warning("FMP earnings calendar fetch failed", exc_info=True)
-        return []
+    logger.info(
+        "FMP earnings calendar: %d entries for %s to %s",
+        len(entries), start, end,
+    )
+    return entries
 
 
 # ── Enrichment ───────────────────────────────────────────────────
@@ -280,16 +261,13 @@ def _enrich_entries(entries: list[dict]) -> list[dict]:
 
 
 def _get_company_lookup() -> dict[str, dict]:
-    """Build {symbol: {name, sector}} from market_data constituents."""
-    try:
-        from filings import market_data
-        rows = market_data.get_sp500_constituents()
-        return {
-            r["ticker"]: {"name": r.get("name", ""), "sector": r.get("sector", "")}
-            for r in rows
-        }
-    except Exception:
-        return {}
+    """Build {symbol: {name, sector}} from market_data constituents.
+
+    Delegates to :func:`earnings_scorecard._build_company_lookup`.
+    """
+    from filings.earnings_scorecard import _build_company_lookup
+
+    return _build_company_lookup("sp500")
 
 
 # ── Response builder ─────────────────────────────────────────────
@@ -413,23 +391,15 @@ def _fmt_eps(val) -> str:
 
 
 def _fmt_revenue(val) -> str:
-    if val is None:
-        return "—"
-    try:
-        v = float(val)
-    except (ValueError, TypeError):
-        return "—"
-    abs_v = abs(v)
-    sign = "-" if v < 0 else ""
-    if abs_v >= 1e12:
-        return f"{sign}${abs_v / 1e12:.1f}T"
-    if abs_v >= 1e9:
-        return f"{sign}${abs_v / 1e9:.2f}B"
-    if abs_v >= 1e6:
-        return f"{sign}${abs_v / 1e6:.1f}M"
-    if abs_v >= 1e3:
-        return f"{sign}${abs_v / 1e3:.0f}K"
-    return f"{sign}${abs_v:.0f}"
+    """Format revenue for display, returning ``—`` for None/invalid.
+
+    Delegates to :func:`earnings._fmt_revenue` (returns ``""`` for None),
+    substituting ``—`` for empty strings.
+    """
+    from filings.earnings import _fmt_revenue as _base_fmt_revenue
+
+    result = _base_fmt_revenue(val)
+    return result if result else "—"
 
 
 # ── Mock data ────────────────────────────────────────────────────
