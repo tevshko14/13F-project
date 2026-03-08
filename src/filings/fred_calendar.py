@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -219,11 +221,42 @@ def _fetch_release_dates(release_id: int, from_date: str, to_date: str) -> list[
 
 # ── Main FRED fetcher ────────────────────────────────────────────
 
+def _fetch_series_events(
+    series_id: str, meta: dict, window_start: str, window_end: str, today_str: str
+) -> list[dict]:
+    """Fetch events for one FRED series (obs + release dates). Called concurrently."""
+    obs = _fetch_series_obs(series_id, meta["units"])
+    latest = obs[0] if obs else None
+    previous = obs[1] if len(obs) > 1 else None
+
+    dates = _fetch_release_dates(meta["release_id"], window_start, window_end)
+    if not dates:
+        return []
+
+    result = []
+    for date_str in dates:
+        is_past = date_str <= today_str
+        result.append({
+            "series_id": series_id,
+            "event":    meta["name"],
+            "date":     date_str,
+            "time":     meta["time"],
+            "country":  "US",
+            "impact":   meta["impact"],
+            "category": meta["category"],
+            "actual":   round(latest["value"], 2) if (is_past and latest) else None,
+            "previous": round(previous["value"], 2) if previous else None,
+            "estimate": None,   # FRED does not publish consensus forecasts
+            "unit":     meta["display_unit"],
+            "source":   "fred",
+        })
+    return result
+
+
 def _fetch_all_events() -> list[dict] | None:
     """
-    Hit FRED API for every tracked series + FOMC dates.
+    Hit FRED API for every tracked series + FOMC dates in parallel.
     Returns a flat list of normalised event dicts, or None on total failure.
-    Called by fetch_with_cache as the api_fetch_fn.
     """
     today = datetime.now()
     window_start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -233,50 +266,48 @@ def _fetch_all_events() -> list[dict] | None:
     events: list[dict] = []
     failed = 0
 
-    # ── Per-series events from FRED ──────────────────────────────
-    for series_id, meta in _SERIES.items():
-        # 1. Fetch recent observations (actual & previous)
-        obs = _fetch_series_obs(series_id, meta["units"])
-        latest = obs[0] if obs else None
-        previous = obs[1] if len(obs) > 1 else None
+    # Determine if we need the FEDFUNDS rate (any past FOMC in window)
+    past_fomc_in_window = any(
+        window_start <= d <= window_end and d <= today_str
+        for d, _ in _FOMC_DATES
+    )
 
-        # 2. Fetch scheduled release dates for this series' release
-        dates = _fetch_release_dates(meta["release_id"], window_start, window_end)
+    # ── Parallelise all series fetches + optional FEDFUNDS ───────
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        series_futures = {
+            pool.submit(_fetch_series_events, sid, meta, window_start, window_end, today_str): sid
+            for sid, meta in _SERIES.items()
+        }
+        fedfunds_future = (
+            pool.submit(_fetch_series_obs, "FEDFUNDS", "lin")
+            if past_fomc_in_window else None
+        )
 
-        if not dates:
-            failed += 1
-            continue
+        for fut, sid in series_futures.items():
+            try:
+                results = fut.result()
+                if results:
+                    events.extend(results)
+                else:
+                    failed += 1
+            except Exception:
+                logger.warning("FRED: series %s fetch failed", sid, exc_info=True)
+                failed += 1
 
-        for date_str in dates:
-            is_past = date_str <= today_str
-            events.append({
-                "series_id": series_id,
-                "event":    meta["name"],
-                "date":     date_str,
-                "time":     meta["time"],
-                "country":  "US",
-                "impact":   meta["impact"],
-                "category": meta["category"],
-                # Actual: only show if the release date has passed and we have data
-                "actual":   round(latest["value"], 2) if (is_past and latest) else None,
-                # Previous: the observation before the latest
-                "previous": round(previous["value"], 2) if previous else None,
-                "estimate": None,   # FRED does not publish consensus forecasts
-                "unit":     meta["display_unit"],
-                "source":   "fred",
-            })
+        fedfunds_rate = None
+        if fedfunds_future:
+            try:
+                obs = fedfunds_future.result()
+                if obs:
+                    fedfunds_rate = round(obs[0]["value"], 2)
+            except Exception:
+                pass
 
     # ── FOMC rate-decision events (hardcoded schedule) ───────────
     for fomc_date, fomc_time in _FOMC_DATES:
         if not (window_start <= fomc_date <= window_end):
             continue
         is_past = fomc_date <= today_str
-        # Fetch the effective fed funds rate for past meetings
-        actual_rate = None
-        if is_past:
-            obs = _fetch_series_obs("FEDFUNDS", "lin")
-            if obs:
-                actual_rate = round(obs[0]["value"], 2)
         events.append({
             "series_id": "FOMC",
             "event":    "FOMC Rate Decision",
@@ -285,7 +316,7 @@ def _fetch_all_events() -> list[dict] | None:
             "country":  "US",
             "impact":   "high",
             "category": "monetary_policy",
-            "actual":   actual_rate,
+            "actual":   fedfunds_rate if is_past else None,
             "previous": None,
             "estimate": None,
             "unit":     "%",
@@ -496,7 +527,6 @@ def fetch_economic_events(
 
     # ── Filter ───────────────────────────────────────────────────
     start_str, end_str = _date_range_for_period(period)
-    today_str = datetime.now().strftime("%Y-%m-%d")
 
     filtered = []
     for ev in raw_events:
@@ -610,29 +640,29 @@ def fetch_economic_events(
 
 def _build_mock_events() -> list[dict]:
     """Deterministic mock US economic events (seed 42) for dev/demo."""
-    import random
     rng = random.Random(42)
     today = datetime.now()
 
     _MOCK = [
-        ("CPI (MoM)",                "08:30", "high",   "%",  0.2,  0.3),
-        ("Core CPI (MoM)",           "08:30", "high",   "%",  0.3,  0.3),
-        ("Core PCE (MoM)",           "08:30", "high",   "%",  0.3,  0.2),
-        ("PPI Final Demand (MoM)",   "08:30", "medium", "%",  0.1,  0.2),
-        ("Nonfarm Payrolls",         "08:30", "high",   "K",  180,  200),
-        ("Unemployment Rate",        "08:30", "high",   "%",  3.8,  3.9),
-        ("Initial Jobless Claims",   "08:30", "medium", "K",  210,  215),
-        ("GDP (QoQ, Annualized)",    "08:30", "high",   "%",  3.2,  2.8),
-        ("Retail Sales (MoM)",       "08:30", "high",   "%",  0.4,  0.3),
-        ("Durable Goods Orders (MoM)","08:30","medium", "%", -0.8,  1.2),
-        ("Housing Starts",           "08:30", "medium", "K", 1480, 1500),
-        ("Michigan Consumer Sentiment","10:00","medium","",   69.7, 67.4),
-        ("FOMC Rate Decision",       "14:00", "high",   "%",  5.25, 5.50),
+        # (series_id,            name,                          time,    impact,   unit, est,   prev)
+        ("CPIAUCSL",        "CPI (MoM)",                "08:30", "high",   "%",  0.2,  0.3),
+        ("CPILFESL",        "Core CPI (MoM)",           "08:30", "high",   "%",  0.3,  0.3),
+        ("PCEPILFE",        "Core PCE (MoM)",           "08:30", "high",   "%",  0.3,  0.2),
+        ("PPIFID",          "PPI Final Demand (MoM)",   "08:30", "medium", "%",  0.1,  0.2),
+        ("PAYEMS",          "Nonfarm Payrolls",         "08:30", "high",   "K",  180,  200),
+        ("UNRATE",          "Unemployment Rate",        "08:30", "high",   "%",  3.8,  3.9),
+        ("ICSA",            "Initial Jobless Claims",   "08:30", "medium", "K",  210,  215),
+        ("A191RL1Q225SBEA", "GDP (QoQ, Annualized)",    "08:30", "high",   "%",  3.2,  2.8),
+        ("RSXFS",           "Retail Sales (MoM)",       "08:30", "high",   "%",  0.4,  0.3),
+        ("DGORDER",         "Durable Goods Orders (MoM)","08:30","medium", "%", -0.8,  1.2),
+        ("HOUST",           "Housing Starts",           "08:30", "medium", "K", 1480, 1500),
+        ("UMCSENT",         "Michigan Consumer Sentiment","10:00","medium","",   69.7, 67.4),
+        ("FOMC",            "FOMC Rate Decision",       "14:00", "high",   "%",  5.25, 5.50),
     ]
 
     events = []
     used_slots: set[tuple[str, str]] = set()
-    for i, (name, t, impact, unit, est, prev) in enumerate(_MOCK):
+    for i, (series_id, name, t, impact, unit, est, prev) in enumerate(_MOCK):
         day_offset = (i * 17 + rng.randint(0, 3)) % 14 - 3
         d = today + timedelta(days=day_offset)
         while d.weekday() >= 5:
@@ -667,6 +697,7 @@ def _build_mock_events() -> list[dict]:
         category = next((v for k, v in cat.items() if k in name), "other")
 
         events.append({
+            "series_id": series_id,
             "event":    name,
             "date":     date_str,
             "time":     t,
