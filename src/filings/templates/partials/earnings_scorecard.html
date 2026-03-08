@@ -20,6 +20,14 @@
         margin-top: 0.3em; text-transform: uppercase;
         letter-spacing: 0.04em;
     }
+    .es-metric-card .metric-detail {
+        font-size: 0.78em; color: var(--pp-text-muted);
+        margin-top: 0.25em;
+    }
+    .es-metric-card .metric-total {
+        font-size: 0.5em; font-weight: 400;
+        color: var(--pp-text-muted);
+    }
     .metric-positive { color: #22c55e !important; }
     .metric-negative { color: #ef4444 !important; }
     .es-charts {
@@ -37,46 +45,27 @@
         font-size: 0.95em; margin: 0 0 0.8em; color: var(--pp-text);
     }
     .es-chart-wrap { position: relative; height: 280px; }
-    .es-table-wrap {
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 12px; padding: 1.2em;
-        box-shadow: var(--pp-card-shadow-sm);
-        overflow-x: auto;
-    }
+
+    /* ── Earnings table overrides on top of pp-table ── */
     .es-table-header {
         display: flex; justify-content: space-between;
-        align-items: center; margin-bottom: 1em; flex-wrap: wrap; gap: 0.8em;
+        align-items: center; padding: 1em 1.2em 0.8em; flex-wrap: wrap; gap: 0.8em;
     }
-    .es-table-header h3 { font-size: 0.95em; margin: 0; }
-    .es-search {
-        padding: 0.4em 0.8em; font-size: 0.85em;
+    .es-table-header h3 { font-size: 0.95em; margin: 0; white-space: nowrap; }
+    .es-table-controls {
+        display: flex; gap: 0.5em; align-items: center;
+        margin-left: auto;
+    }
+    .es-table-controls select,
+    .es-table-controls .es-search {
+        padding: 0.4em 0.7em; font-size: 0.82em;
         border-radius: 8px; border: 1px solid var(--pp-border);
         background: var(--pp-surface); color: var(--pp-text);
-        min-width: 200px;
+        width: auto; height: 34px; box-sizing: border-box;
     }
-    .es-table {
-        width: 100%; border-collapse: collapse; font-size: 0.85em;
-    }
-    .es-table th {
-        text-align: left; padding: 0.6em 0.8em;
-        border-bottom: 2px solid var(--pp-border);
-        color: var(--pp-text-muted); font-weight: 600;
-        font-size: 0.85em; text-transform: uppercase;
-        letter-spacing: 0.03em; cursor: pointer;
-        white-space: nowrap; user-select: none;
-    }
-    .es-table th:hover { color: var(--pp-text); }
-    .es-table th .sort-arrow { opacity: 0.3; margin-left: 0.3em; }
-    .es-table th.sorted .sort-arrow { opacity: 1; }
-    .es-table td {
-        padding: 0.55em 0.8em;
-        border-bottom: 1px solid var(--pp-border-light);
-        white-space: nowrap;
-    }
-    .es-table tr:hover { background: var(--pp-surface-hover, var(--pp-surface-alt)); }
-    .es-beat { color: #22c55e; font-weight: 600; }
-    .es-miss { color: #ef4444; font-weight: 600; }
+    .es-table-controls .es-search { width: 9em; }
+    #es-results-table td.es-beat { color: #22c55e; font-weight: 600; }
+    #es-results-table td.es-miss { color: #ef4444; font-weight: 600; }
     .es-inline { color: var(--pp-text-muted); }
     .es-guide-raised { color: #22c55e; }
     .es-guide-lowered { color: #ef4444; }
@@ -85,20 +74,49 @@
         color: var(--pp-text); font-weight: 600; text-decoration: none;
     }
     .es-ticker-link:hover { color: #ef4444; }
-    .es-name { color: var(--pp-text-muted); font-size: 0.9em; }
+    /* Higher specificity to override .pp-table tbody td { white-space: normal } */
+    #es-results-table td.es-name {
+        color: var(--pp-text-muted); font-size: 0.9em;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        max-width: 160px;
+    }
+    #es-results-table td.es-date { color: var(--pp-text-muted); font-size: 0.88em; white-space: nowrap; }
+    #es-results-table td.es-sector {
+        color: var(--pp-text-muted); font-size: 0.88em;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        max-width: 100px;
+    }
+    .es-row-extra { display: none; }
     .es-mock-banner {
         background: rgba(255, 152, 0, 0.1);
         border: 1px solid rgba(255, 152, 0, 0.3);
         border-radius: 8px; padding: 0.6em 1em;
         margin-bottom: 1.2em; font-size: 0.85em; color: #ffb74d;
     }
+
+    /* Compact cell padding so 8 columns fit without scrolling */
+    #es-results-table thead th { padding: 10px 8px; }
+    #es-results-table tbody td { padding: 10px 8px; }
+    #es-results-table th { cursor: pointer; user-select: none; }
+    #es-results-table th:hover { color: var(--pp-text); }
+    #es-results-table th .sort-arrow { opacity: 0.3; margin-left: 0.2em; }
+    #es-results-table th.sorted .sort-arrow { opacity: 1; }
+
+    @media (max-width: 900px) {
+        .es-col-date, .es-col-sector { display: none; }
+    }
     @media (max-width: 600px) {
         .es-metrics { grid-template-columns: repeat(2, 1fr); }
         .es-charts { grid-template-columns: 1fr; }
+        #es-results-table td.es-name { max-width: 100px; }
     }
 </style>
 
-{% if data.get('is_mock') %}
+{% if data.get('is_unavailable') %}
+<div class="es-mock-banner" style="border-color: rgba(239, 68, 68, 0.3); color: #f87171;">
+    Earnings data is temporarily unavailable — please try again shortly.
+</div>
+{% elif data.get('is_mock') %}
 <div class="es-mock-banner">
     Showing sample data — set <code>FMP_API_KEY</code> environment variable for live earnings data from Financial Modeling Prep.
 </div>
@@ -106,17 +124,22 @@
 
 {# ── KPI Cards ── #}
 {% set m = data.metrics %}
+<p style="font-size: 0.82em; color: var(--pp-text-muted); margin: 0 0 0.8em;">
+    Tracking <strong style="color: var(--pp-text);">{{ m.total }}</strong> companies in {{ data.index }} &middot; {{ data.quarter }}{% if data.sector %} &middot; {{ data.sector }}{% endif %}
+</p>
 <div class="es-metrics">
     <div class="es-metric-card">
         <div class="metric-value">{{ m.eps_beat_rate }}%</div>
         <div class="metric-label">EPS Beat Rate</div>
+        <div class="metric-detail">{{ m.eps_beats }} of {{ m.total }}</div>
     </div>
     <div class="es-metric-card">
         <div class="metric-value">{{ m.rev_beat_rate }}%</div>
         <div class="metric-label">Revenue Beat Rate</div>
+        <div class="metric-detail">{{ m.rev_beats }} of {{ m.total }}</div>
     </div>
     <div class="es-metric-card">
-        <div class="metric-value">{{ m.dual_beats }}</div>
+        <div class="metric-value">{{ m.dual_beats }}<span class="metric-total"> / {{ m.total }}</span></div>
         <div class="metric-label">Dual Beats</div>
     </div>
     <div class="es-metric-card">
@@ -140,57 +163,73 @@
 </div>
 
 {# ── Data Table ── #}
-<div class="es-table-wrap">
+{% set visible_rows = 15 %}
+{% set total_rows = data.results | length %}
+{% set has_overflow = total_rows > visible_rows %}
+<div class="pp-table-wrap">
     <div class="es-table-header">
         <h3>Earnings Results — {{ data.index }} ({{ data.quarter }})</h3>
-        <input type="text" class="es-search" id="es-table-search"
-               placeholder="Search ticker or company…" oninput="esFilterTable(this.value)">
+        <div class="es-table-controls">
+            <select id="es-quarter" onchange="esReload()">
+                {% for q in quarters %}
+                <option value="{{ q }}" {% if q == current_quarter %}selected{% endif %}>{{ q }}</option>
+                {% endfor %}
+            </select>
+            <select id="es-sector" onchange="esReload()">
+                <option value="">All Sectors</option>
+                {% for s in sectors %}
+                <option value="{{ s }}" {% if s == current_sector %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+            <input type="text" class="es-search" id="es-table-search"
+                   placeholder="Search…" oninput="esFilterTable(this.value)">
+        </div>
     </div>
-    <table class="es-table" id="es-results-table">
+    <table class="pp-table" id="es-results-table">
         <thead>
             <tr>
-                <th onclick="esSort('symbol')">Ticker <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('name')">Company <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('sector')">Sector <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('date')">Date <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('actual_eps')">EPS <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('est_eps')">EPS Est. <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('eps_surprise_pct')">EPS Surprise <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('rev_surprise_pct')">Rev Surprise <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('price_change')">Reaction <span class="sort-arrow">▼</span></th>
-                <th onclick="esSort('guide')">Guide <span class="sort-arrow">▼</span></th>
+                <th onclick="esSort('symbol')">Ticker <span class="sort-arrow">&#9660;</span></th>
+                <th onclick="esSort('name')">Company <span class="sort-arrow">&#9660;</span></th>
+                <th onclick="esSort('date')" class="es-col-date">Date <span class="sort-arrow">&#9660;</span></th>
+                <th onclick="esSort('sector')" class="es-col-sector">Sector <span class="sort-arrow">&#9660;</span></th>
+                <th onclick="esSort('eps_surprise_pct')" style="text-align:right;">EPS Surp. <span class="sort-arrow">&#9660;</span></th>
+                <th onclick="esSort('rev_surprise_pct')" style="text-align:right;">Rev Surp. <span class="sort-arrow">&#9660;</span></th>
+                <th onclick="esSort('guide')">Guide <span class="sort-arrow">&#9660;</span></th>
+                <th onclick="esSort('price_change')" style="text-align:right;">Stock Reaction <span class="sort-arrow">&#9660;</span></th>
             </tr>
         </thead>
         <tbody>
             {% for r in data.results %}
-            <tr>
-                <td><a href="/stock/{{ r.symbol }}" class="es-ticker-link">{{ r.symbol }}</a></td>
-                <td class="es-name">{{ r.name }}</td>
-                <td class="es-name">{{ r.sector or '—' }}</td>
-                <td>{{ r.date or '—' }}</td>
-                <td class="{% if r.eps_beat %}es-beat{% elif r.eps_beat == false %}es-miss{% endif %}">
-                    {{ r.actual_eps if r.actual_eps is not none else '—' }}
-                </td>
-                <td>{{ r.est_eps if r.est_eps is not none else '—' }}</td>
-                <td class="{% if r.eps_surprise_pct is not none and r.eps_surprise_pct > 0 %}es-beat{% elif r.eps_surprise_pct is not none and r.eps_surprise_pct < 0 %}es-miss{% endif %}">
+            <tr{% if loop.index > visible_rows %} class="es-row-extra"{% endif %}>
+                <td class="pp-primary"><a href="/stock/{{ r.symbol }}" class="es-ticker-link">{{ r.symbol }}</a></td>
+                <td class="es-name" title="{{ r.name }}">{{ r.name }}</td>
+                <td class="es-col-date es-date">{% if r.date %}{{ r.date | format_short_date }}{% else %}—{% endif %}</td>
+                <td class="es-col-sector es-sector" title="{{ r.sector }}">{{ r.sector | abbreviate_sector }}</td>
+                <td style="text-align:right;" class="{% if r.eps_surprise_pct is not none and r.eps_surprise_pct > 0 %}es-beat{% elif r.eps_surprise_pct is not none and r.eps_surprise_pct < 0 %}es-miss{% endif %}">
                     {% if r.eps_surprise_pct is not none %}{{ "+" if r.eps_surprise_pct > 0 }}{{ r.eps_surprise_pct }}%{% else %}—{% endif %}
                 </td>
-                <td class="{% if r.rev_surprise_pct is not none and r.rev_surprise_pct > 0 %}es-beat{% elif r.rev_surprise_pct is not none and r.rev_surprise_pct < 0 %}es-miss{% endif %}">
+                <td style="text-align:right;" class="{% if r.rev_surprise_pct is not none and r.rev_surprise_pct > 0 %}es-beat{% elif r.rev_surprise_pct is not none and r.rev_surprise_pct < 0 %}es-miss{% endif %}">
                     {% if r.rev_surprise_pct is not none %}{{ "+" if r.rev_surprise_pct > 0 }}{{ r.rev_surprise_pct }}%{% else %}—{% endif %}
-                </td>
-                <td class="{% if r.price_change is not none and r.price_change > 0 %}es-beat{% elif r.price_change is not none and r.price_change < 0 %}es-miss{% endif %}">
-                    {% if r.price_change is not none %}{{ "+" if r.price_change > 0 }}{{ r.price_change }}%{% else %}—{% endif %}
                 </td>
                 <td class="{% if r.guide == 'Raised' %}es-guide-raised{% elif r.guide == 'Lowered' %}es-guide-lowered{% else %}es-guide-maintained{% endif %}">
                     {{ r.guide }}
                 </td>
+                <td style="text-align:right;" class="{% if r.price_change is not none and r.price_change > 0 %}es-beat{% elif r.price_change is not none and r.price_change < 0 %}es-miss{% endif %}">
+                    {% if r.price_change is not none %}{{ "+" if r.price_change > 0 }}{{ r.price_change }}%{% else %}—{% endif %}
+                </td>
             </tr>
             {% endfor %}
             {% if not data.results %}
-            <tr><td colspan="10" style="text-align:center; padding:2em; color:var(--pp-text-muted);">No earnings data available for this period.</td></tr>
+            <tr><td colspan="8" style="text-align:center; padding:2em; color:var(--pp-text-muted);">No earnings data available for this period.</td></tr>
             {% endif %}
         </tbody>
     </table>
+    {% if has_overflow %}
+    <button class="gp-expand-btn" id="es-expand-btn" onclick="esToggleRows(this)">
+        <span>Show All {{ total_rows }} Results</span>
+        <span class="gp-expand-arrow">&#9660;</span>
+    </button>
+    {% endif %}
 </div>
 
 <script>
@@ -231,7 +270,7 @@
                     }
                 ]
             });
-            if (window._ppRegisterResize) window._ppRegisterResize(chart);
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
         });
     }
 
@@ -256,7 +295,7 @@
                     }
                 },
                 legend: { bottom: 0, textStyle: { color: textColor, fontSize: 12 } },
-                grid: { top: 20, right: 60, bottom: 50, left: 50 },
+                grid: { top: 40, right: 60, bottom: 50, left: 50 },
                 xAxis: {
                     type: 'category',
                     data: trend.map(function(d) { return d.quarter; }),
@@ -285,17 +324,25 @@
                         itemStyle: { color: '#3b82f6' }, symbol: 'circle', symbolSize: 6
                     },
                     {
+                        name: 'Rev Beat Rate', type: 'line', smooth: true,
+                        data: trend.map(function(d) { return d.rev_beat_rate; }),
+                        lineStyle: { width: 2.5, color: '#a855f7' },
+                        itemStyle: { color: '#a855f7' }, symbol: 'diamond', symbolSize: 6
+                    },
+                    {
                         name: 'Avg Market Reaction', type: 'bar', yAxisIndex: 1,
                         data: trend.map(function(d) { return d.avg_price_change; }),
                         itemStyle: {
                             color: function(p) { return p.value >= 0 ? '#22c55e' : '#ef4444'; },
                             borderRadius: [3, 3, 0, 0]
                         },
-                        barWidth: '40%'
+                        barWidth: '35%',
+                        legendHoverLink: true,
+                        color: '#f59e0b'
                     }
                 ]
             });
-            if (window._ppRegisterResize) window._ppRegisterResize(chart);
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
         });
     }
 
@@ -313,9 +360,8 @@
         if (sortCol === col) { sortAsc = !sortAsc; } else { sortCol = col; sortAsc = true; }
         var tbody = document.querySelector('#es-results-table tbody');
         var rows = Array.from(tbody.querySelectorAll('tr'));
-        var colMap = { symbol:0, name:1, sector:2, date:3, actual_eps:4,
-                       est_eps:5, eps_surprise_pct:6, rev_surprise_pct:7,
-                       price_change:8, guide:9 };
+        var colMap = { symbol:0, name:1, date:2, sector:3, eps_surprise_pct:4,
+                       rev_surprise_pct:5, guide:6, price_change:7 };
         var idx = colMap[col] || 0;
         rows.sort(function(a, b) {
             var va = a.cells[idx].textContent.trim().replace('%','').replace('+','');
@@ -325,9 +371,21 @@
             return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
         });
         rows.forEach(function(r) { tbody.appendChild(r); });
-        document.querySelectorAll('.es-table th').forEach(function(th, i) {
+        document.querySelectorAll('#es-results-table th').forEach(function(th, i) {
             th.classList.toggle('sorted', i === idx);
         });
+    };
+
+    /* ── Expand / collapse rows ── */
+    window.esToggleRows = function(btn) {
+        var extras = document.querySelectorAll('.es-row-extra');
+        var showing = btn.dataset.expanded === '1';
+        extras.forEach(function(r) { r.style.display = showing ? 'none' : ''; });
+        btn.dataset.expanded = showing ? '0' : '1';
+        btn.querySelector('span:first-child').textContent = showing
+            ? 'Show All {{ total_rows }} Results'
+            : 'Show Less';
+        btn.querySelector('.gp-expand-arrow').classList.toggle('expanded', !showing);
     };
 })();
 </script>

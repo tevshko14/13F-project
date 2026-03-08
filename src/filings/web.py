@@ -430,6 +430,41 @@ templates.env.globals["clerk_domain"] = auth.CLERK_DOMAIN
 templates.env.globals["posthog_key"] = _POSTHOG_KEY
 templates.env.globals["clerk_publishable_key"] = _CLERK_PUBLISHABLE_KEY
 
+
+# ── Template filters ──────────────────────────────────────────────────
+_SECTOR_ABBREV = {
+    "Consumer Cyclical": "Cons. Cyc.",
+    "Consumer Defensive": "Cons. Def.",
+    "Communication Services": "Comm. Svcs.",
+    "Financial Services": "Financial",
+    "Basic Materials": "Materials",
+    "Real Estate": "Real Est.",
+    "Industrials": "Industrial",
+    "Information Technology": "Info Tech",
+}
+
+
+def _format_short_date(value: str) -> str:
+    """'2026-02-15' → 'Feb 15'."""
+    if not value:
+        return "—"
+    try:
+        dt = datetime.strptime(value[:10], "%Y-%m-%d")
+        return dt.strftime("%b %d").lstrip("0")
+    except (ValueError, TypeError):
+        return value
+
+
+def _abbreviate_sector(value: str) -> str:
+    """Shorten long GICS sector names for table display."""
+    if not value:
+        return "—"
+    return _SECTOR_ABBREV.get(value, value)
+
+
+templates.env.filters["format_short_date"] = _format_short_date
+templates.env.filters["abbreviate_sector"] = _abbreviate_sector
+
 # Attach rate limiter
 if _has_limiter:
     app.state.limiter = limiter
@@ -3520,8 +3555,9 @@ async def macro_page(
     quarter: str = "",
     sector: str = "",
 ):
-    """Macro page — aggregated earnings-season dashboard."""
+    """Macro page — aggregated earnings-season dashboard + market breadth."""
     from filings import earnings_scorecard
+    from filings import market_breadth
 
     if index not in earnings_scorecard.INDEX_CHOICES:
         index = "sp500"
@@ -3541,6 +3577,8 @@ async def macro_page(
             "current_quarter": quarter,
             "sectors": earnings_scorecard.SECTORS,
             "current_sector": sector,
+            "breadth_indices": market_breadth.INDEX_CHOICES,
+            "breadth_periods": market_breadth.PERIOD_CHOICES,
         },
     )
 
@@ -3564,9 +3602,54 @@ async def macro_scorecard_api(
     )
     trend = await _to_heavy(earnings_scorecard.fetch_historical_beat_rates, index)
 
+    quarters = earnings_scorecard.get_available_quarters()
+    current_quarter = data.get("quarter", quarter or quarters[0])
+    current_sector = sector if sector in earnings_scorecard.SECTORS else ""
+
     return templates.TemplateResponse(
         "partials/earnings_scorecard.html",
-        {"request": request, "data": data, "trend_data": trend},
+        {
+            "request": request,
+            "data": data,
+            "trend_data": trend,
+            "quarters": quarters,
+            "current_quarter": current_quarter,
+            "sectors": earnings_scorecard.SECTORS,
+            "current_sector": current_sector,
+        },
+    )
+
+
+@app.get("/api/macro/breadth", response_class=HTMLResponse)
+async def macro_breadth_api(
+    request: Request,
+    index: str = "sp500",
+    period: str = "1d",
+):
+    """HTMX endpoint — returns the market breadth partial."""
+    from filings import market_breadth
+
+    if index not in market_breadth.INDEX_CHOICES:
+        index = "sp500"
+    if period not in market_breadth.PERIOD_CHOICES:
+        period = "1d"
+
+    data, ad_line = await asyncio.gather(
+        _to_heavy(market_breadth.fetch_breadth_data, index, period),
+        _to_heavy(market_breadth.fetch_ad_line_history, index),
+    )
+
+    # Detect divergence between A/D momentum and index price
+    divergence = market_breadth.detect_divergence(ad_line)
+
+    return templates.TemplateResponse(
+        "partials/market_breadth.html",
+        {
+            "request": request,
+            "data": data,
+            "ad_line": ad_line,
+            "divergence": divergence,
+        },
     )
 
 
