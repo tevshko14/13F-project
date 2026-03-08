@@ -332,6 +332,51 @@ _finnhub_cal_cache: dict[str, dict[str, dict]] | None = None  # {symbol: {date: 
 _finnhub_cal_ts: float = 0
 _FINNHUB_CAL_TTL = 21_600  # 6 hours
 
+# ── Shared Finnhub raw fetch (used by earnings.py + earnings_calendar.py) ──
+_finnhub_raw_cache: dict[str, tuple[float, list[dict]]] = {}
+_FINNHUB_RAW_TTL = 3600  # 1 hour
+_FINNHUB_RAW_MAX_CACHE = 50
+
+
+def fetch_finnhub_calendar_raw(start: str, end: str) -> list[dict]:
+    """Fetch raw entries from Finnhub ``/calendar/earnings`` (cached 1h).
+
+    Shared by ``earnings.py`` (revenue enrichment) and ``earnings_calendar.py``.
+    Returns list of raw Finnhub JSON dicts, or empty list.
+    """
+    cache_key = f"{start}:{end}"
+    cached = _finnhub_raw_cache.get(cache_key)
+    if cached and (time.time() - cached[0]) < _FINNHUB_RAW_TTL:
+        return cached[1]
+
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return []
+
+    try:
+        r = httpx.get(
+            "https://finnhub.io/api/v1/calendar/earnings",
+            params={"from": start, "to": end, "token": key},
+            timeout=20,
+        )
+        r.raise_for_status()
+        entries = r.json().get("earningsCalendar", [])
+
+        if len(_finnhub_raw_cache) >= _FINNHUB_RAW_MAX_CACHE:
+            oldest = min(_finnhub_raw_cache, key=lambda k: _finnhub_raw_cache[k][0])
+            _finnhub_raw_cache.pop(oldest, None)
+        _finnhub_raw_cache[cache_key] = (time.time(), entries)
+
+        logger.info(
+            "Finnhub calendar raw: %d entries for %s to %s",
+            len(entries), start, end,
+        )
+        return entries
+
+    except Exception:
+        logger.warning("Finnhub calendar raw fetch failed", exc_info=True)
+        return []
+
 
 def _finnhub_revenue_for_ticker(ticker: str) -> dict[str, dict] | None:
     """Look up Finnhub bulk calendar revenue for a single ticker (cached)."""
@@ -353,53 +398,34 @@ def _load_finnhub_bulk_calendar() -> dict[str, dict[str, dict]] | None:
     """Fetch Finnhub ``/calendar/earnings`` for last 7 weeks (bulk, no symbol filter).
 
     Returns ``{symbol: {date_str: {"revenue": val, "revenueEstimated": val}}}``.
+    Uses :func:`fetch_finnhub_calendar_raw` for the actual HTTP call.
     """
-    key = os.environ.get("FINNHUB_API_KEY", "").strip()
-    if not key:
-        return None
-
     end = datetime.now()
     start = end - timedelta(weeks=7)
 
-    try:
-        r = httpx.get(
-            "https://finnhub.io/api/v1/calendar/earnings",
-            params={
-                "from": start.strftime("%Y-%m-%d"),
-                "to": end.strftime("%Y-%m-%d"),
-                "token": key,
-            },
-            timeout=20,
-        )
-        r.raise_for_status()
-        data = r.json()
-
-        entries = data.get("earningsCalendar", [])
-        if not entries:
-            logger.info("Finnhub bulk calendar returned 0 entries")
-            return None
-
-        result: dict[str, dict[str, dict]] = {}
-        for item in entries:
-            sym = item.get("symbol", "")
-            d = item.get("date")
-            rev = item.get("revenueActual")
-            rev_est = item.get("revenueEstimate")
-            if sym and d and (rev is not None or rev_est is not None):
-                result.setdefault(sym, {})[d] = {
-                    "revenue": rev,
-                    "revenueEstimated": rev_est,
-                }
-
-        logger.info(
-            "Finnhub bulk calendar: %d entries, %d symbols with revenue",
-            len(entries), len(result),
-        )
-        return result if result else None
-
-    except Exception:
-        logger.warning("Finnhub bulk calendar fetch failed", exc_info=True)
+    entries = fetch_finnhub_calendar_raw(
+        start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"),
+    )
+    if not entries:
         return None
+
+    result: dict[str, dict[str, dict]] = {}
+    for item in entries:
+        sym = item.get("symbol", "")
+        d = item.get("date")
+        rev = item.get("revenueActual")
+        rev_est = item.get("revenueEstimate")
+        if sym and d and (rev is not None or rev_est is not None):
+            result.setdefault(sym, {})[d] = {
+                "revenue": rev,
+                "revenueEstimated": rev_est,
+            }
+
+    logger.info(
+        "Finnhub bulk calendar: %d entries, %d symbols with revenue",
+        len(entries), len(result),
+    )
+    return result if result else None
 
 
 def _fetch_fmp_revenue_raw(ticker: str) -> dict[str, dict] | None:
