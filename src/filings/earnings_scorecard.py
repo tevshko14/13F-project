@@ -541,11 +541,10 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
 # ── Revenue backfill ─────────────────────────────────────────────
 
 def backfill_revenue(index: str = "sp500") -> dict:
-    """Backfill revenue data for index constituents via FMP per-symbol API.
+    """Backfill revenue data for index constituents.
 
-    Iterates over S&P 500 / NASDAQ 100 tickers, fetches FMP historical
-    revenue data, and updates ``earnings_history`` rows that have NULL
-    revenue columns.
+    Tries **Finnhub** first (free tier), then **FMP** (premium) per ticker.
+    Updates ``earnings_history`` rows that have NULL revenue columns.
 
     Returns ``{updated: int, skipped: int, failed: int, total: int}``.
     """
@@ -584,20 +583,18 @@ def backfill_revenue(index: str = "sp500") -> dict:
                 skipped += 1
                 continue
 
-            # Fetch FMP revenue data for this ticker
-            fmp_data = _fetch_fmp_revenue(ticker)
-            if fmp_data is None:
-                # FMP unavailable (plan issue) — stop trying
-                failed += len(tickers) - i
-                logger.warning("backfill_revenue: FMP unavailable, stopping at ticker %d/%d", i, len(tickers))
-                break
+            # Fetch revenue data (Finnhub primary, FMP fallback)
+            rev_data = _fetch_fmp_revenue(ticker)
+            if rev_data is None:
+                # No revenue data available for this ticker — skip, don't break
+                failed += 1
+                continue
 
             # Build complete rows with revenue merged in
-            now_iso = datetime.utcnow().isoformat()
+            now_iso = datetime.now().isoformat()
             rows_to_update: list[dict] = []
             for row in db_rows:
                 rd = row.get("report_date", "")
-                # Construct a full row for upsert
                 full_row = {
                     "ticker": ticker,
                     "report_date": rd,
@@ -614,8 +611,8 @@ def backfill_revenue(index: str = "sp500") -> dict:
                 }
                 rows_to_update.append(full_row)
 
-            # Enrich with FMP revenue
-            rows_to_update = _enrich_rows_with_revenue(rows_to_update, fmp_data)
+            # Enrich with revenue
+            rows_to_update = _enrich_rows_with_revenue(rows_to_update, rev_data)
 
             # Only upsert rows that actually got revenue data
             enriched = [r for r in rows_to_update if r.get("revenue_actual") is not None]
@@ -625,8 +622,8 @@ def backfill_revenue(index: str = "sp500") -> dict:
             else:
                 skipped += 1
 
-            # Throttle: 200ms between tickers to respect FMP rate limits
-            time.sleep(0.2)
+            # Throttle: 1.1s between tickers (Finnhub free = 60 req/min)
+            time.sleep(1.1)
 
         except Exception:
             logger.exception("backfill_revenue failed for %s", ticker)

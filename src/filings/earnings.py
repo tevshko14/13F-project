@@ -307,14 +307,66 @@ def _infer_fiscal_quarter(report_date_str: str, fy_end_month: int) -> str:
 
 
 def _fetch_fmp_revenue(ticker: str) -> dict[str, dict] | None:
-    """Fetch historical revenue data from FMP for a single ticker.
+    """Fetch historical revenue data for a single ticker.
+
+    Tries **Finnhub** first (free tier, has revenue estimate + actual),
+    then falls back to **FMP** (requires premium plan).
 
     Returns ``{date_str: {"revenue": int, "revenueEstimated": int}}``
-    or *None* if FMP is unavailable / key not set / plan lacks access.
+    or *None* if all sources are unavailable.
     """
+    # ── Finnhub (primary — free tier, 60 req/min) ────────────
+    result = _fetch_finnhub_revenue(ticker)
+    if result is not None:
+        return result
+
+    # ── FMP fallback (premium plan required) ─────────────────
+    return _fetch_fmp_revenue_raw(ticker)
+
+
+def _fetch_finnhub_revenue(ticker: str) -> dict[str, dict] | None:
+    """Fetch revenue data from Finnhub ``/calendar/earnings`` endpoint."""
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return None
+
+    try:
+        r = httpx.get(
+            "https://finnhub.io/api/v1/calendar/earnings",
+            params={
+                "symbol": ticker,
+                "from": "2020-01-01",
+                "to": datetime.now().strftime("%Y-%m-%d"),
+                "token": key,
+            },
+            timeout=_FMP_TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        entries = data.get("earningsCalendar", [])
+        if not entries:
+            return None
+
+        lookup: dict[str, dict] = {}
+        for item in entries:
+            d = item.get("date")
+            rev = item.get("revenueActual")
+            rev_est = item.get("revenueEstimate")
+            if d and (rev is not None or rev_est is not None):
+                lookup[d] = {"revenue": rev, "revenueEstimated": rev_est}
+
+        return lookup if lookup else None
+
+    except Exception:
+        logger.debug("Finnhub revenue fetch failed for %s", ticker, exc_info=True)
+        return None
+
+
+def _fetch_fmp_revenue_raw(ticker: str) -> dict[str, dict] | None:
+    """Fetch revenue data from FMP (fallback — requires premium plan)."""
     global _fmp_revenue_available
 
-    # Skip if we already know the endpoint is inaccessible
     if _fmp_revenue_available is False:
         return None
 
@@ -328,7 +380,6 @@ def _fetch_fmp_revenue(ticker: str) -> dict[str, dict] | None:
         r.raise_for_status()
         data = r.json()
 
-        # FMP returns {"Error Message": "..."} when plan lacks access
         if isinstance(data, dict):
             err = data.get("Error Message") or data.get("message") or data.get("error")
             if err:

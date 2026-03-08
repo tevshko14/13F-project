@@ -1850,9 +1850,9 @@ async def sync_announcements():
 
 @app.post("/api/admin/backfill-revenue")
 async def admin_backfill_revenue(request: Request, index: str = "sp500"):
-    """Backfill revenue data from FMP for all index constituents.
+    """Backfill revenue data for all index constituents.
 
-    Iterates over tickers, calling FMP ``/historical/earning_calendar``
+    Iterates over tickers, calling Finnhub (primary) / FMP (fallback)
     per-symbol, and updates ``earnings_history`` rows that have NULL
     revenue columns.  Runs in the heavy thread pool.
     """
