@@ -8,7 +8,7 @@ Data flow:
   2. Fetch from Finnhub /calendar/earnings (free tier, bulk)
      — via :func:`earnings.fetch_finnhub_calendar_raw` (shared cache)
   3. Fallback to FMP /earning_calendar (premium)
-     — via :func:`earnings_scorecard._fmp_get` (shared helper)
+     — via :func:`earnings_scorecard.fmp_get` (shared helper)
   4. Enrich with company metadata (name, sector, logo availability)
      — via :func:`earnings_scorecard._build_company_lookup` (shared)
 
@@ -186,12 +186,12 @@ def _fetch_finnhub_calendar(start: str, end: str) -> list[dict]:
 def _fetch_fmp_calendar(start: str, end: str) -> list[dict]:
     """Fallback: FMP ``/earning_calendar`` endpoint.
 
-    Uses :func:`earnings_scorecard._fmp_get` for the shared HTTP helper
+    Uses :func:`earnings_scorecard.fmp_get` for the shared HTTP helper
     (handles API key, error parsing, logging).
     """
-    from filings.earnings_scorecard import _fmp_get
+    from filings.earnings_scorecard import fmp_get
 
-    data = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    data = fmp_get("/earning_calendar", {"from": start, "to": end})
     if data is None or not isinstance(data, list):
         return []
 

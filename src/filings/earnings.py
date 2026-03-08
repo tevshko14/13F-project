@@ -327,12 +327,17 @@ def _fetch_fmp_revenue(ticker: str) -> dict[str, dict] | None:
 # ── Finnhub bulk calendar cache ─────────────────────────────────
 # Finnhub free tier: /calendar/earnings works with date ranges (not
 # per-symbol), returning ~1K entries per week.  We cache the full
-# result keyed by (symbol, date) and refresh every 6 hours.
-_finnhub_cal_cache: dict[str, dict[str, dict]] | None = None  # {symbol: {date: {rev…}}}
+# Two-tier Finnhub cache:
+#   _finnhub_raw_cache  — raw API JSON keyed by date-range (1h TTL, shared
+#                         with earnings_calendar.py via fetch_finnhub_calendar_raw)
+#   _finnhub_cal_cache  — parsed {symbol: {date: {revenue}}} for per-ticker
+#                         revenue enrichment (6h TTL, private to this module).
+# The parsed cache intentionally outlives the raw cache because revenue data
+# changes infrequently; when it expires it re-fetches through the raw layer.
+_finnhub_cal_cache: dict[str, dict[str, dict]] | None = None
 _finnhub_cal_ts: float = 0
 _FINNHUB_CAL_TTL = 21_600  # 6 hours
 
-# ── Shared Finnhub raw fetch (used by earnings.py + earnings_calendar.py) ──
 _finnhub_raw_cache: dict[str, tuple[float, list[dict]]] = {}
 _FINNHUB_RAW_TTL = 3600  # 1 hour
 _FINNHUB_RAW_MAX_CACHE = 50

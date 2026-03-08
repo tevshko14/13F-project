@@ -70,7 +70,7 @@ def _api_key() -> str:
     return os.environ.get("FMP_API_KEY", "")
 
 
-def _fmp_get(path: str, params: dict | None = None) -> list | dict | None:
+def fmp_get(path: str, params: dict | None = None) -> list | dict | None:
     key = _api_key()
     if not key:
         return None
@@ -294,7 +294,7 @@ def _fetch_from_fmp(
     sector: str | None,
 ) -> list[dict] | None:
     """Fallback: FMP ``/earning_calendar`` bulk endpoint (premium)."""
-    calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    calendar = fmp_get("/earning_calendar", {"from": start, "to": end})
     if calendar is None or not isinstance(calendar, list):
         return None
 
@@ -438,7 +438,7 @@ def _trend_from_db(
 
 def _trend_from_fmp(start: str, end: str) -> list[dict] | None:
     """Build per-quarter metric rows from FMP earning_calendar (fallback)."""
-    calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    calendar = fmp_get("/earning_calendar", {"from": start, "to": end})
     if calendar is None or not isinstance(calendar, list):
         return None
 
