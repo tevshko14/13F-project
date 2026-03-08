@@ -1,0 +1,152 @@
+<style>
+    .ec-day-detail-wrap {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 12px;
+        margin-top: 1.5em;
+        overflow: hidden;
+    }
+    .ec-day-detail-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 1em 1.2em;
+        border-bottom: 1px solid var(--pp-border);
+        background: var(--pp-surface-alt);
+    }
+    .ec-day-detail-title {
+        font-weight: 700; font-size: 1em; color: var(--pp-text);
+    }
+    .ec-day-detail-count {
+        font-size: 0.82em; color: var(--pp-text-muted);
+    }
+    .ec-day-detail-close {
+        background: none; border: none; cursor: pointer;
+        color: var(--pp-text-muted); padding: 0.3em;
+        border-radius: 6px;
+    }
+    .ec-day-detail-close:hover { background: var(--pp-surface-hover); color: var(--pp-text); }
+
+    .ec-detail-table {
+        width: 100%; border-collapse: collapse;
+    }
+    .ec-detail-table th {
+        text-align: left; font-size: 0.72em; font-weight: 600;
+        color: var(--pp-text-muted); padding: 0.6em 1em;
+        text-transform: uppercase; letter-spacing: 0.04em;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .ec-detail-table td {
+        padding: 0.7em 1em; font-size: 0.85em;
+        border-bottom: 1px solid var(--pp-border-light);
+        color: var(--pp-text);
+    }
+    .ec-detail-table tr:last-child td { border-bottom: none; }
+    .ec-detail-table tr:hover td { background: var(--pp-surface-hover); }
+
+    .ec-detail-company {
+        display: flex; align-items: center; gap: 0.5em;
+    }
+    .ec-detail-logo {
+        width: 24px; height: 24px; border-radius: 4px;
+        object-fit: contain;
+    }
+    .ec-detail-ticker {
+        font-weight: 700; color: var(--pp-text);
+    }
+    .ec-detail-name {
+        font-size: 0.82em; color: var(--pp-text-muted);
+    }
+    .ec-detail-timing-badge {
+        display: inline-flex; align-items: center; gap: 0.25em;
+        font-size: 0.72em; font-weight: 600; padding: 0.2em 0.5em;
+        border-radius: 4px;
+    }
+    .ec-detail-bmo { background: rgba(251, 191, 36, 0.12); color: #d97706; }
+    .ec-detail-amc { background: rgba(99, 102, 241, 0.12); color: #6366f1; }
+    .ec-detail-tbd { background: var(--pp-overlay-5); color: var(--pp-text-muted); }
+
+    .ec-detail-beat { color: #22c55e; font-weight: 600; }
+    .ec-detail-miss { color: #ef4444; font-weight: 600; }
+</style>
+
+<div class="ec-day-detail-wrap">
+    <div class="ec-day-detail-header">
+        <div>
+            <span class="ec-day-detail-title">{{ date_label }}</span>
+            <span class="ec-day-detail-count">— {{ entries|length }} report{{ 's' if entries|length != 1 else '' }}</span>
+        </div>
+        <button class="ec-day-detail-close" onclick="document.getElementById('ec-day-detail').style.display='none';" title="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    </div>
+
+    {% if entries %}
+    <div style="overflow-x: auto;">
+        <table class="ec-detail-table">
+            <thead>
+                <tr>
+                    <th>Company</th>
+                    <th>Ticker</th>
+                    <th>Time</th>
+                    <th>Est. Revenue</th>
+                    <th>Est. EPS</th>
+                    {% if has_actuals %}
+                    <th>Actual EPS</th>
+                    <th>Result</th>
+                    {% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in entries %}
+                <tr>
+                    <td>
+                        <div class="ec-detail-company">
+                            {% if logo_tickers is defined and e.ticker in logo_tickers %}
+                            <img src="/api/logo/{{ e.ticker }}.png" alt="" class="ec-detail-logo" loading="lazy" decoding="async"
+                                 onerror="this.style.display='none';">
+                            {% endif %}
+                            <span class="ec-detail-name">{{ e.name or e.ticker }}</span>
+                        </div>
+                    </td>
+                    <td>
+                        <a href="/stock/{{ e.ticker }}" class="ec-detail-ticker" style="text-decoration: none;">{{ e.ticker }}</a>
+                    </td>
+                    <td>
+                        {% if e.timing == 'bmo' %}
+                        <span class="ec-detail-timing-badge ec-detail-bmo">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/></svg>
+                            BMO
+                        </span>
+                        {% elif e.timing == 'amc' %}
+                        <span class="ec-detail-timing-badge ec-detail-amc">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+                            AMC
+                        </span>
+                        {% else %}
+                        <span class="ec-detail-timing-badge ec-detail-tbd">TBD</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ e.revenue_estimate_fmt }}</td>
+                    <td>{{ e.eps_estimate_fmt }}</td>
+                    {% if has_actuals %}
+                    <td>{{ e.eps_actual_fmt }}</td>
+                    <td>
+                        {% if e.beat_eps == true %}
+                        <span class="ec-detail-beat">Beat</span>
+                        {% elif e.beat_eps == false %}
+                        <span class="ec-detail-miss">Miss</span>
+                        {% else %}
+                        <span style="color: var(--pp-text-muted);">—</span>
+                        {% endif %}
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="padding: 2em; text-align: center; color: var(--pp-text-muted);">
+        No earnings reports scheduled for this date.
+    </div>
+    {% endif %}
+</div>
