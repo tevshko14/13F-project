@@ -136,6 +136,7 @@ class GrandPortfolioEntry:
     combined_value: int
     pct_of_aggregate: float
     holders: list[str]  # Display names of holders
+    avg_weight: float = 0.0  # Average portfolio weight across holders
 
 
 @dataclass

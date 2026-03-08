@@ -15,7 +15,7 @@ import os
 import random
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -49,6 +49,15 @@ SECTORS = [
     "Technology",
     "Utilities",
 ]
+
+CALENDAR_PERIODS = {
+    "this_week": "This Week",
+    "next_week": "Next Week",
+    "next_2w": "Next 2 Weeks",
+    "all": "All Upcoming",
+}
+
+_HOUR_LABELS = {"bmo": "Before Open", "amc": "After Close", "dmh": "During Market"}
 
 
 # ── Helpers ──────────────────────────────────────────────────────
@@ -772,4 +781,376 @@ def _mock_quarter_trend(quarter: str) -> dict:
         "eps_beat_rate": 68 + (h % 20),
         "rev_beat_rate": 58 + (h % 22),
         "avg_price_change": round(-2 + (h % 800) / 100, 2),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Earnings Calendar — upcoming/recent earnings dates
+# ═══════════════════════════════════════════════════════════════════
+
+_ecal_cache: dict | None = None  # {"entries": [...], "fetched_at": float}
+_ecal_lock = threading.Lock()
+_ECAL_TTL = 3600  # 1 hour — Finnhub data changes infrequently
+
+# Outer cache for processed results (keyed by index:period)
+_ecal_result_cache: dict[str, tuple[float, dict]] = {}
+_ECAL_RESULT_TTL = 1800  # 30 minutes
+
+
+def _fmt_rev(val: float | None) -> str:
+    """Format revenue for display: $94.2B, $12.3M, etc."""
+    if val is None:
+        return ""
+    abs_val = abs(val)
+    sign = "-" if val < 0 else ""
+    if abs_val >= 1e12:
+        return f"{sign}${abs_val / 1e12:.1f}T"
+    if abs_val >= 1e9:
+        return f"{sign}${abs_val / 1e9:.1f}B"
+    if abs_val >= 1e6:
+        return f"{sign}${abs_val / 1e6:.1f}M"
+    if abs_val >= 1e3:
+        return f"{sign}${abs_val / 1e3:.0f}K"
+    return f"{sign}${abs_val:.0f}"
+
+
+def _load_finnhub_earnings_calendar() -> list[dict] | None:
+    """Fetch Finnhub /calendar/earnings for past 1 week + next 4 weeks.
+
+    Returns flat list of dicts preserving ALL Finnhub fields, or None.
+    Cached in-memory for ``_ECAL_TTL`` seconds.
+    """
+    global _ecal_cache
+
+    now = time.time()
+    with _ecal_lock:
+        if _ecal_cache is not None and (now - _ecal_cache["fetched_at"]) < _ECAL_TTL:
+            return _ecal_cache["entries"]
+
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return None
+
+    end = datetime.now() + timedelta(weeks=4)
+    start = datetime.now() - timedelta(weeks=1)
+
+    try:
+        r = httpx.get(
+            "https://finnhub.io/api/v1/calendar/earnings",
+            params={
+                "from": start.strftime("%Y-%m-%d"),
+                "to": end.strftime("%Y-%m-%d"),
+                "token": key,
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        entries = data.get("earningsCalendar", [])
+        if not entries:
+            logger.info("Finnhub earnings calendar returned 0 entries")
+            return None
+
+        result = []
+        for item in entries:
+            sym = item.get("symbol", "")
+            d = item.get("date")
+            if not sym or not d:
+                continue
+            result.append({
+                "symbol": sym,
+                "date": d,
+                "epsActual": item.get("epsActual"),
+                "epsEstimate": item.get("epsEstimate"),
+                "revenueActual": item.get("revenueActual"),
+                "revenueEstimate": item.get("revenueEstimate"),
+                "hour": item.get("hour", ""),
+                "quarter": item.get("quarter"),
+                "year": item.get("year"),
+            })
+
+        with _ecal_lock:
+            _ecal_cache = {"entries": result, "fetched_at": time.time()}
+
+        logger.info(
+            "Finnhub earnings calendar: %d entries, %s to %s",
+            len(result), start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"),
+        )
+        return result
+
+    except Exception:
+        logger.warning("Finnhub earnings calendar fetch failed", exc_info=True)
+        # Return stale cache if available
+        with _ecal_lock:
+            if _ecal_cache is not None:
+                return _ecal_cache["entries"]
+        return None
+
+
+def _calendar_date_range(period: str) -> tuple[str, str]:
+    """Compute (start_date, end_date) for the given calendar period."""
+    today = datetime.now()
+    weekday = today.weekday()  # 0=Mon, 6=Sun
+
+    # Find current week's Monday
+    monday = today - timedelta(days=weekday)
+    if weekday >= 5:  # Weekend — shift to next Monday
+        monday = today + timedelta(days=(7 - weekday))
+
+    if period == "this_week":
+        start = monday
+        end = monday + timedelta(days=4)  # Friday
+    elif period == "next_week":
+        start = monday + timedelta(weeks=1)
+        end = start + timedelta(days=4)
+    elif period == "next_2w":
+        start = monday
+        end = monday + timedelta(weeks=2, days=4)
+    else:  # "all"
+        start = today
+        end = today + timedelta(weeks=4)
+
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def fetch_earnings_calendar(
+    index: str = "sp500",
+    period: str = "this_week",
+    si_tickers: set[str] | None = None,
+) -> dict:
+    """Fetch upcoming/recent earnings calendar, grouped by date.
+
+    Args:
+        index: ``"sp500"`` or ``"nasdaq"``
+        period: ``"this_week"``, ``"next_week"``, ``"next_2w"``, or ``"all"``
+        si_tickers: Set of tickers held by superinvestors (for badges)
+
+    Returns dict with keys: upcoming, just_reported, metrics, index,
+    index_key, period, period_label, is_mock.
+    """
+    if si_tickers is None:
+        si_tickers = set()
+
+    # ── L1 result cache ──────────────────────────────────────────
+    cache_key = f"ecal:{index}:{period}"
+    now = time.time()
+    with _lock:
+        cached = _ecal_result_cache.get(cache_key)
+        if cached and (now - cached[0]) < _ECAL_RESULT_TTL:
+            return cached[1]
+
+    # ── Raw data ─────────────────────────────────────────────────
+    raw = _load_finnhub_earnings_calendar()
+    if raw is None:
+        key = os.environ.get("FINNHUB_API_KEY", "").strip()
+        if not key:
+            result = _build_mock_calendar(index, period, si_tickers)
+            with _lock:
+                _ecal_result_cache[cache_key] = (now, result)
+            return result
+        return _build_empty_calendar(index, period)
+
+    # ── Filter by index constituents ─────────────────────────────
+    company_info = _build_company_lookup(index)
+    if not company_info:
+        return _build_empty_calendar(index, period)
+
+    # Normalize: Finnhub uses "." (e.g. BRK.B), our lookup uses "-"
+    norm_lookup: dict[str, str] = {}  # finnhub_sym -> our_sym
+    for sym in company_info:
+        norm_lookup[sym] = sym
+        dot_ver = sym.replace("-", ".")
+        if dot_ver != sym:
+            norm_lookup[dot_ver] = sym
+
+    # ── Date boundaries ──────────────────────────────────────────
+    start_str, end_str = _calendar_date_range(period)
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # ── Split into upcoming vs just_reported ─────────────────────
+    upcoming_by_date: dict[str, list[dict]] = {}
+    just_reported: list[dict] = []
+
+    for item in raw:
+        finnhub_sym = item["symbol"]
+        our_sym = norm_lookup.get(finnhub_sym)
+        if our_sym is None:
+            continue
+
+        d = item["date"]
+        info = company_info.get(our_sym, {})
+        is_si = our_sym in si_tickers
+
+        entry = {
+            "symbol": our_sym,
+            "name": info.get("name", our_sym),
+            "sector": info.get("sector", ""),
+            "date": d,
+            "hour": item.get("hour", ""),
+            "hour_label": _HOUR_LABELS.get(item.get("hour", ""), "TBD"),
+            "epsActual": item.get("epsActual"),
+            "epsEstimate": item.get("epsEstimate"),
+            "revenueActual": item.get("revenueActual"),
+            "revenueEstimate": item.get("revenueEstimate"),
+            "revenueEstimate_fmt": _fmt_rev(item.get("revenueEstimate")),
+            "revenueActual_fmt": _fmt_rev(item.get("revenueActual")),
+            "quarter": item.get("quarter"),
+            "year": item.get("year"),
+            "is_superinvestor": is_si,
+            "si_names": [],  # filled in by web.py from ownership_map
+            "has_page": True,
+        }
+
+        # Upcoming: within requested period and not yet reported
+        if start_str <= d <= end_str and item.get("epsActual") is None:
+            upcoming_by_date.setdefault(d, []).append(entry)
+        # Just reported: past week, has actual data
+        elif d < today_str and item.get("epsActual") is not None:
+            entry["eps_beat"] = (
+                entry["epsActual"] >= entry["epsEstimate"]
+                if entry["epsActual"] is not None and entry["epsEstimate"] is not None
+                else None
+            )
+            entry["rev_beat"] = (
+                entry["revenueActual"] >= entry["revenueEstimate"]
+                if entry["revenueActual"] is not None
+                and entry["revenueEstimate"] is not None
+                else None
+            )
+            just_reported.append(entry)
+
+    # ── Group upcoming by date (sorted chronologically) ──────────
+    upcoming: list[dict] = []
+    for d in sorted(upcoming_by_date.keys()):
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            label = dt.strftime("%A, %B %d")  # "Monday, March 10"
+        except ValueError:
+            label = d
+        # Sort entries within a day: BMO first, then DMH, then AMC
+        order = {"bmo": 0, "dmh": 1, "amc": 2}
+        entries = sorted(
+            upcoming_by_date[d],
+            key=lambda e: (order.get(e["hour"], 3), e["symbol"]),
+        )
+        upcoming.append({"date": d, "date_label": label, "entries": entries})
+
+    # Sort just_reported by date descending (most recent first)
+    just_reported.sort(key=lambda e: e["date"], reverse=True)
+
+    # ── Summary metrics ──────────────────────────────────────────
+    all_upcoming = [e for day in upcoming for e in day["entries"]]
+    metrics = {
+        "reporting_count": len(all_upcoming),
+        "bmo_count": sum(1 for e in all_upcoming if e["hour"] == "bmo"),
+        "amc_count": sum(1 for e in all_upcoming if e["hour"] == "amc"),
+        "dmh_count": sum(
+            1 for e in all_upcoming if e["hour"] not in ("bmo", "amc")
+        ),
+        "si_reporting_count": sum(
+            1 for e in all_upcoming if e["is_superinvestor"]
+        ),
+    }
+
+    result = {
+        "upcoming": upcoming,
+        "just_reported": just_reported[:25],  # Cap to last 25
+        "metrics": metrics,
+        "index": INDEX_CHOICES.get(index, index),
+        "index_key": index,
+        "period": period,
+        "period_label": CALENDAR_PERIODS.get(period, period),
+        "is_mock": False,
+    }
+
+    with _lock:
+        _ecal_result_cache[cache_key] = (now, result)
+
+    return result
+
+
+def _build_empty_calendar(index: str, period: str) -> dict:
+    """Empty calendar result when API is unavailable."""
+    return {
+        "upcoming": [],
+        "just_reported": [],
+        "metrics": {
+            "reporting_count": 0, "bmo_count": 0,
+            "amc_count": 0, "dmh_count": 0, "si_reporting_count": 0,
+        },
+        "index": INDEX_CHOICES.get(index, index),
+        "index_key": index,
+        "period": period,
+        "period_label": CALENDAR_PERIODS.get(period, period),
+        "is_mock": False,
+        "is_unavailable": True,
+    }
+
+
+def _build_mock_calendar(
+    index: str, period: str, si_tickers: set[str],
+) -> dict:
+    """Deterministic mock calendar for dev (no FINNHUB_API_KEY)."""
+    rng = random.Random(42)
+    company_info = _build_company_lookup(index)
+    symbols = sorted(company_info.keys())[:30]
+
+    today = datetime.now()
+    monday = today - timedelta(days=today.weekday())
+
+    upcoming: list[dict] = []
+    for day_offset in range(5):  # Mon-Fri
+        d = monday + timedelta(days=day_offset)
+        d_str = d.strftime("%Y-%m-%d")
+        d_label = d.strftime("%A, %B %d")
+        count = rng.randint(2, 6)
+        chosen = rng.sample(symbols, min(count, len(symbols)))
+        entries = []
+        for sym in chosen:
+            info = company_info.get(sym, {})
+            hour = rng.choice(["bmo", "amc", "dmh"])
+            entries.append({
+                "symbol": sym,
+                "name": info.get("name", sym),
+                "sector": info.get("sector", ""),
+                "date": d_str,
+                "hour": hour,
+                "hour_label": _HOUR_LABELS.get(hour, "TBD"),
+                "epsEstimate": round(rng.uniform(0.5, 5.0), 2),
+                "epsActual": None,
+                "revenueEstimate": round(rng.uniform(1, 50), 1) * 1e9,
+                "revenueEstimate_fmt": _fmt_rev(
+                    round(rng.uniform(1, 50), 1) * 1e9
+                ),
+                "revenueActual": None,
+                "revenueActual_fmt": "",
+                "quarter": rng.randint(1, 4),
+                "year": today.year,
+                "is_superinvestor": sym in si_tickers,
+                "si_names": [],
+                "has_page": True,
+            })
+        upcoming.append({"date": d_str, "date_label": d_label, "entries": entries})
+
+    all_entries = [e for day in upcoming for e in day["entries"]]
+    return {
+        "upcoming": upcoming,
+        "just_reported": [],
+        "metrics": {
+            "reporting_count": len(all_entries),
+            "bmo_count": sum(1 for e in all_entries if e["hour"] == "bmo"),
+            "amc_count": sum(1 for e in all_entries if e["hour"] == "amc"),
+            "dmh_count": sum(
+                1 for e in all_entries if e["hour"] not in ("bmo", "amc")
+            ),
+            "si_reporting_count": sum(
+                1 for e in all_entries if e["is_superinvestor"]
+            ),
+        },
+        "index": INDEX_CHOICES.get(index, index),
+        "index_key": index,
+        "period": period,
+        "period_label": CALENDAR_PERIODS.get(period, period),
+        "is_mock": True,
     }

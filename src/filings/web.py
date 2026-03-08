@@ -564,6 +564,40 @@ def _valid_cik(cik: str) -> bool:
     return bool(_CIK_RE.match(cik))
 
 
+async def _get_fund_data(cik: str) -> dict | None:
+    """L1/L2 fund data lookup with Supabase fallback and background refresh.
+
+    Checks the in-memory fund cache (L1), falls back to Supabase (L2),
+    promotes hits to L1, and triggers a background refresh if stale.
+    """
+    cik_normalized = cik.lstrip("0") or cik
+    cache_data = _fund_cache()
+    cached = (
+        cache_data.get(cik_normalized)
+        or cache_data.get(cik)
+        or getattr(app.state, "fund_cache", {}).get(cik_normalized)
+        or getattr(app.state, "fund_cache", {}).get(cik)
+    )
+
+    # L1 miss → try Supabase L2
+    if not cached:
+        data, _is_fresh = await asyncio.to_thread(
+            supabase_cache.get_cached_with_stale, f"13f:{cik_normalized}"
+        )
+        if isinstance(data, dict):
+            cached = data
+            cache_data[cik_normalized] = cached
+            if hasattr(app.state, "fund_cache"):
+                app.state.fund_cache[cik_normalized] = cached
+
+    # Trigger background refresh if stale
+    if cached and _ENABLE_BACKGROUND_REFRESH:
+        if cache.is_fund_stale(cached) and cik_normalized not in _refresh_in_progress:
+            asyncio.create_task(_trigger_single_refresh(app, cik_normalized))
+
+    return cached
+
+
 def _valid_member_id(member_id: str) -> bool:
     """Return True if *member_id* looks like a valid congress member ID."""
     return bool(_MEMBER_ID_RE.match(member_id))
@@ -1865,12 +1899,13 @@ async def admin_backfill_revenue(request: Request, index: str = "sp500"):
 # --- Homepage: dashboard with market data & widgets ---
 
 
-@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
-async def homepage(request: Request):
+async def _get_panda_fund_stats() -> dict:
+    """Return Panda Fund donation stats for the current month.
+
+    Shared by the homepage and /support page to avoid duplicate logic.
+    """
     monthly_goal = _PANDA_FUND_MONTHLY_GOAL
     current_month = datetime.now().strftime("%Y-%m")
-
-    # Primary: live total from Supabase supporters table (same as /support)
     raised_cents = await asyncio.to_thread(
         supabase_cache.get_monthly_raised_cents, current_month
     )
@@ -1878,18 +1913,21 @@ async def homepage(request: Request):
         raw_raised = raised_cents // 100
     else:
         raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
+    raised = min(raw_raised, monthly_goal)
+    pct = min(100, round(raised / monthly_goal * 100)) if monthly_goal else 0
+    return {"raised": raised, "goal": monthly_goal, "pct": pct}
 
-    raised_this_month = min(raw_raised, monthly_goal)
-    progress_pct = (
-        min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
-    )
+
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def homepage(request: Request):
+    pf = await _get_panda_fund_stats()
     return templates.TemplateResponse(
         "home.html",
         {
             "request": request,
-            "panda_raised": raised_this_month,
-            "panda_goal": monthly_goal,
-            "panda_pct": progress_pct,
+            "panda_raised": pf["raised"],
+            "panda_goal": pf["goal"],
+            "panda_pct": pf["pct"],
             "stripe_publishable_key": _STRIPE_PUBLISHABLE_KEY,
             "stripe_configured": bool(_STRIPE_SECRET_KEY and _STRIPE_PUBLISHABLE_KEY),
             "price_onetime": _STRIPE_PRICE_ONETIME,
@@ -1928,28 +1966,9 @@ async def fund_row(request: Request, cik: str):
     cik_normalized = cik.lstrip("0") or cik
     si = SUPERINVESTORS_BY_CIK.get(cik_normalized) or SUPERINVESTORS_BY_CIK.get(cik)
 
-    # ── Serve from L1 in-memory cache (fast path) ──
-    cached = app.state.fund_cache.get(cik_normalized) or app.state.fund_cache.get(cik)
-
-    # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
-    if not cached:
-        data, _is_fresh = await asyncio.to_thread(
-            supabase_cache.get_cached_with_stale, f"13f:{cik_normalized}"
-        )
-        if isinstance(data, dict):
-            cached = data
-            # Promote to L1 so subsequent requests are fast
-            app.state.fund_cache[cik_normalized] = cached
+    cached = await _get_fund_data(cik)
 
     if cached:
-        # Trigger background refresh if this fund is stale
-        if (
-            _ENABLE_BACKGROUND_REFRESH
-            and cache.is_fund_stale(cached)
-            and cik_normalized not in _refresh_in_progress
-        ):
-            asyncio.create_task(_trigger_single_refresh(app, cik_normalized))
-
         top_tickers = [
             h.get("ticker") or h.get("issuer", "?")[:8]
             for h in cached.get("top_holdings", [])[:5]
@@ -1983,28 +2002,9 @@ async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=2
     if not _valid_cik(cik):
         return PlainTextResponse("Invalid CIK", status_code=400)
     si = SUPERINVESTORS_BY_CIK.get(cik)
-    cache_data = _fund_cache()
-    cached = cache_data.get(cik)
-
-    # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
-    if not cached:
-        data, _is_fresh = await asyncio.to_thread(
-            supabase_cache.get_cached_with_stale, f"13f:{cik}"
-        )
-        if isinstance(data, dict):
-            cached = data
-            # Promote to L1 so subsequent requests are fast
-            cache_data[cik] = cached
+    cached = await _get_fund_data(cik)
 
     if cached:
-        # Trigger background refresh if this fund is stale
-        if (
-            _ENABLE_BACKGROUND_REFRESH
-            and cache.is_fund_stale(cached)
-            and cik not in _refresh_in_progress
-        ):
-            asyncio.create_task(_trigger_single_refresh(app, cik))
-
         # ── Cache hit: build from stored data (zero SEC calls) ──
         fund, holdings_list = client.get_enriched_holdings_from_cache(
             cached, cik, top_n
@@ -2124,17 +2124,7 @@ async def compare(request: Request, cik: str):
 async def compare_api(request: Request, cik: str, top_n: int = Query(25, ge=1, le=200)):
     if not _valid_cik(cik):
         return PlainTextResponse("Invalid CIK", status_code=400)
-    cache_data = _fund_cache()
-    cached = cache_data.get(cik)
-
-    # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
-    if not cached:
-        data, _is_fresh = await asyncio.to_thread(
-            supabase_cache.get_cached_with_stale, f"13f:{cik}"
-        )
-        if isinstance(data, dict):
-            cached = data
-            cache_data[cik] = cached
+    cached = await _get_fund_data(cik)
 
     if cached:
         # ── Cache hit: reconstruct comparison from stored data ──
@@ -2179,17 +2169,7 @@ async def portfolio_chart_data(request: Request, cik: str):
     """
     if not _valid_cik(cik):
         return JSONResponse({"error": "Invalid CIK"}, status_code=400)
-    cache_data = _fund_cache()
-    cached = cache_data.get(cik)
-
-    # ── L1 miss → try Supabase L2 (stale OK) as fallback ──
-    if not cached:
-        data, _is_fresh = await asyncio.to_thread(
-            supabase_cache.get_cached_with_stale, f"13f:{cik}"
-        )
-        if isinstance(data, dict):
-            cached = data
-            cache_data[cik] = cached
+    cached = await _get_fund_data(cik)
 
     if not cached:
         return JSONResponse(content=[])
@@ -2314,42 +2294,27 @@ async def funds_page(request: Request, view: str = "funds"):
             },
         )
 
-    entries = client.build_grand_portfolio(cache_data, SUPERINVESTORS_BY_CIK)
+    # Run both CPU-bound computations concurrently in threads
+    entries, most_added = await asyncio.gather(
+        asyncio.to_thread(client.build_grand_portfolio, cache_data, SUPERINVESTORS_BY_CIK),
+        asyncio.to_thread(market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK),
+    )
 
     # ── Build Consensus Leaders data (top 10 by holder count) ──
-    # Compute avg portfolio weight per ticker across holders
-    ticker_weights: dict[str, list[float]] = {}
-    for cik, fund_data in cache_data.items():
-        if cik not in SUPERINVESTORS_BY_CIK:
-            continue
-        for h in fund_data.get("all_holdings", []):
-            t = h.get("ticker")
-            if t:
-                t_upper = t.upper()
-                ticker_weights.setdefault(t_upper, []).append(h.get("pct", 0))
-
     consensus_data = []
     for e in entries[:10]:
-        ticker_key = e.ticker.upper() if e.ticker else None
-        weights = ticker_weights.get(ticker_key, []) if ticker_key else []
-        avg_weight = round(sum(weights) / len(weights), 2) if weights else 0
         top_holders = e.holders[:3]
         consensus_data.append(
             {
                 "ticker": e.ticker or e.cusip[:6],
                 "issuer": e.issuer_name,
                 "holders": e.num_holders,
-                "avg_weight": avg_weight,
+                "avg_weight": round(e.avg_weight, 2) if hasattr(e, "avg_weight") else 0,
                 "top_holders": top_holders,
                 "combined_value": e.combined_value,
                 "link": f"/stock/{e.ticker}" if e.ticker else None,
             }
         )
-
-    # ── Build Recent Momentum data (most added this quarter) ──
-    most_added = await asyncio.to_thread(
-        market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK
-    )
 
     # Cross-reference: tickers in both consensus and momentum
     consensus_tickers = {d["ticker"].upper() for d in consensus_data if d["ticker"]}
@@ -2788,32 +2753,11 @@ _PANDA_FUND_LINE_ITEMS = [
 ]
 
 async def _support_page_context(request: Request, extra: dict | None = None) -> dict:
-    """Build the shared template context for /support and /support/thank-you.
-
-    Reads the current month's raised total from Supabase (via supporters table)
-    and falls back to the PANDA_FUND_RAISED env var when Supabase is unavailable.
-    """
+    """Build the shared template context for /support and /support/thank-you."""
     from calendar import month_name as _month_names
 
-    monthly_goal = _PANDA_FUND_MONTHLY_GOAL
-    current_month = datetime.now().strftime("%Y-%m")
+    pf = await _get_panda_fund_stats()
     current_month_name = _month_names[datetime.now().month]
-
-    # Primary: live total from Supabase supporters table
-    raised_cents = await asyncio.to_thread(
-        supabase_cache.get_monthly_raised_cents, current_month
-    )
-    if raised_cents > 0:
-        raw_raised = raised_cents // 100
-    else:
-        # Fallback: manually maintained env var (used before webhook was built,
-        # or when Supabase is unavailable)
-        raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
-
-    raised_this_month = min(raw_raised, monthly_goal)
-    progress_pct = (
-        min(100, round(raised_this_month / monthly_goal * 100)) if monthly_goal else 0
-    )
 
     # Funding history from Supabase (Feb 2025 launch → current month)
     history = await asyncio.to_thread(supabase_cache.get_funding_history)
@@ -2827,14 +2771,14 @@ async def _support_page_context(request: Request, extra: dict | None = None) -> 
         "price_panda": _STRIPE_PRICE_PANDA,
         "price_giant_panda": _STRIPE_PRICE_GIANT_PANDA,
         "feedback_link": _FEEDBACK_LINK,
-        "monthly_goal": monthly_goal,
-        "raised_this_month": raised_this_month,
-        "progress_pct": progress_pct,
-        "goal_reached": raw_raised >= monthly_goal,
+        "monthly_goal": pf["goal"],
+        "raised_this_month": pf["raised"],
+        "progress_pct": pf["pct"],
+        "goal_reached": pf["raised"] >= pf["goal"],
         "current_month_name": current_month_name,
         "line_items": _PANDA_FUND_LINE_ITEMS,
         "funding_history_months": [h["month"] for h in history],
-        "funding_history_raised": [min(h["raised"], monthly_goal) for h in history],
+        "funding_history_raised": [min(h["raised"], pf["goal"]) for h in history],
     }
     if extra:
         ctx.update(extra)
@@ -3608,6 +3552,7 @@ async def macro_page(
             "current_sector": sector,
             "breadth_indices": market_breadth.INDEX_CHOICES,
             "breadth_periods": market_breadth.PERIOD_CHOICES,
+            "calendar_periods": earnings_scorecard.CALENDAR_PERIODS,
         },
     )
 
@@ -3684,6 +3629,55 @@ async def macro_breadth_api(
             "data": data,
             "ad_line": ad_line,
             "divergence": divergence,
+        },
+    )
+
+
+@app.get("/api/macro/calendar", response_class=HTMLResponse)
+async def macro_calendar_api(
+    request: Request,
+    index: str = "sp500",
+    period: str = "this_week",
+):
+    """HTMX endpoint — returns the earnings calendar partial."""
+    if not _check_macro_key(request):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    from filings import earnings_scorecard
+
+    if index not in earnings_scorecard.INDEX_CHOICES:
+        index = "sp500"
+    if period not in earnings_scorecard.CALENDAR_PERIODS:
+        period = "this_week"
+
+    # Build superinvestor ticker set from fund cache
+    ownership_map = _get_ownership_map()
+    si_tickers = set(ownership_map.keys()) if ownership_map else set()
+
+    data = await _to_heavy(
+        earnings_scorecard.fetch_earnings_calendar,
+        index, period, si_tickers,
+    )
+
+    # Attach ownership details (which SI names own each ticker)
+    if ownership_map:
+        for date_group in data.get("upcoming", []):
+            for entry in date_group.get("entries", []):
+                sym = entry.get("symbol", "")
+                if sym in ownership_map:
+                    entry["si_names"] = ownership_map[sym]
+        for entry in data.get("just_reported", []):
+            sym = entry.get("symbol", "")
+            if sym in ownership_map:
+                entry["si_names"] = ownership_map[sym]
+
+    return templates.TemplateResponse(
+        "partials/earnings_calendar_macro.html",
+        {
+            "request": request,
+            "data": data,
+            "periods": earnings_scorecard.CALENDAR_PERIODS,
+            "current_period": period,
         },
     )
 
@@ -4154,8 +4148,9 @@ async def congress_activity_api(
     page_data = await _get_congress_page_data()
     recent_trades = page_data.get("_recent_trades", [])
 
-    # Build filtered activity dashboard
-    activity_data = congress_trading.prepare_congress_activity(
+    # Build filtered activity dashboard (CPU-bound — run in thread)
+    activity_data = await asyncio.to_thread(
+        congress_trading.prepare_congress_activity,
         recent_trades,
         timeframe=timeframe,
         chamber=chamber,

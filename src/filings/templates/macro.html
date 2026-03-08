@@ -53,6 +53,7 @@
 <div class="macro-tabs" role="tablist">
     <button class="macro-tab active" id="tab-earnings" data-macro-tab="earnings" role="tab" aria-selected="true" aria-controls="macro-panel-earnings">Earnings Scorecard</button>
     <button class="macro-tab" id="tab-breadth" data-macro-tab="breadth" role="tab" aria-selected="false" aria-controls="macro-panel-breadth">Market Performance</button>
+    <button class="macro-tab" id="tab-calendar" data-macro-tab="calendar" role="tab" aria-selected="false" aria-controls="macro-panel-calendar">Earnings Calendar</button>
 </div>
 
 {# ═══ Panel: Earnings Scorecard ═══ #}
@@ -100,10 +101,35 @@
     </div>
 </div>
 
+{# ═══ Panel: Earnings Calendar ═══ #}
+<div class="macro-panel" id="macro-panel-calendar" role="tabpanel" aria-labelledby="tab-calendar">
+    <div class="macro-controls">
+        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Earnings Calendar</h2>
+        <div class="pp-pill-nav" id="ec-index-nav" style="margin-bottom: 0;">
+            {% for key, label in indices.items() %}
+            <button class="pp-pill-btn {% if key == 'sp500' %}active{% endif %}"
+                    data-key="{{ key }}" onclick="ecChangeIndex('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+        <div class="pp-pill-nav" id="ec-period-nav" style="margin-bottom: 0;">
+            {% for key, label in calendar_periods.items() %}
+            <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
+                    data-key="{{ key }}" onclick="ecChangePeriod('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    <div id="ec-content">
+        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+            <span aria-busy="true">Loading earnings calendar…</span>
+        </div>
+    </div>
+</div>
+
 <script>
 (function() {
     /* ── Top-level tab switching ── */
     var mbLoaded = false;
+    var ecLoaded = false;
     document.querySelectorAll('.macro-tab').forEach(function(tab) {
         tab.addEventListener('click', function() {
             document.querySelectorAll('.macro-tab').forEach(function(t) {
@@ -120,6 +146,11 @@
             if (tab.dataset.macroTab === 'breadth' && !mbLoaded) {
                 mbLoaded = true;
                 mbReload();
+            }
+            /* Lazy-load Earnings Calendar on first tab click */
+            if (tab.dataset.macroTab === 'calendar' && !ecLoaded) {
+                ecLoaded = true;
+                ecReload();
             }
         });
     });
@@ -167,6 +198,26 @@
         mbCurrentPeriod = p;
         activatePill('mb-period-nav', p);
         mbReload();
+    };
+
+    /* ── Earnings Calendar controls ── */
+    var ecCurrentIndex = 'sp500';
+    var ecCurrentPeriod = 'this_week';
+
+    function ecReload() {
+        htmx.ajax('GET', '/api/macro/calendar?key=' + macroKey + '&index=' + ecCurrentIndex + '&period=' + ecCurrentPeriod, '#ec-content');
+    }
+
+    window.ecChangeIndex = function(idx) {
+        ecCurrentIndex = idx;
+        activatePill('ec-index-nav', idx);
+        ecReload();
+    };
+
+    window.ecChangePeriod = function(p) {
+        ecCurrentPeriod = p;
+        activatePill('ec-period-nav', p);
+        ecReload();
     };
 })();
 </script>
