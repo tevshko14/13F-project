@@ -124,29 +124,50 @@
     }
     .mb-divergence-icon { font-size: 1.2em; }
 
-    /* ── Sector Performance ── */
+    /* ── Sector Performance (diverging bar) ── */
     .mb-sector-list { list-style: none; padding: 0; margin: 0; }
     .mb-sector-row {
-        display: flex; align-items: center; gap: 0.6em;
-        padding: 0.45em 0;
-        border-bottom: 1px solid var(--pp-border);
+        display: flex; align-items: center; gap: 0;
+        padding: 0.35em 0;
+        border-bottom: 1px solid var(--pp-overlay-5, var(--pp-border));
     }
     .mb-sector-row:last-child { border-bottom: none; }
     .mb-sector-name {
-        width: 150px; flex-shrink: 0;
-        font-size: 0.82em; color: var(--pp-text);
+        width: 140px; flex-shrink: 0;
+        font-size: 0.8em; color: var(--pp-text);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        padding-right: 0.6em;
     }
-    .mb-sector-bar {
-        flex: 1; display: flex; height: 18px; border-radius: 4px;
-        overflow: hidden; background: var(--pp-border);
+    .mb-diverging-wrap {
+        flex: 1; display: flex; align-items: center;
+        height: 20px; position: relative;
     }
-    .mb-sector-up { background: #22c55e; transition: width 0.3s ease; }
-    .mb-sector-down { background: #ef4444; transition: width 0.3s ease; }
-    .mb-sector-flat { background: #71717a; }
+    .mb-div-left {
+        flex: 1; display: flex; justify-content: flex-end;
+        height: 100%;
+    }
+    .mb-div-right {
+        flex: 1; display: flex; justify-content: flex-start;
+        height: 100%;
+    }
+    .mb-div-bar-red {
+        background: #ef4444; border-radius: 4px 0 0 4px;
+        height: 100%; transition: width 0.35s ease;
+    }
+    .mb-div-bar-green {
+        background: #22c55e; border-radius: 0 4px 4px 0;
+        height: 100%; transition: width 0.35s ease;
+    }
+    .mb-div-center {
+        width: 2px; flex-shrink: 0;
+        background: var(--pp-text-muted);
+        height: 100%; opacity: 0.4;
+    }
     .mb-sector-stat {
-        width: 55px; text-align: right; flex-shrink: 0;
-        font-size: 0.8em; font-weight: 600;
+        width: 72px; text-align: right; flex-shrink: 0;
+        font-size: 0.78em; font-weight: 700;
+        padding-left: 0.6em;
+        font-variant-numeric: tabular-nums;
     }
 
     /* ── Top Movers ── */
@@ -190,7 +211,8 @@
         .mb-breadth-bar { height: 36px; }
         .mb-bar-adv, .mb-bar-dec { font-size: 0.85em; }
         .mb-movers-grid { grid-template-columns: 1fr; gap: 0.8em; }
-        .mb-sector-name { width: 110px; }
+        .mb-sector-name { width: 100px; font-size: 0.75em; }
+        .mb-sector-stat { width: 62px; font-size: 0.72em; }
         .mb-ma-card { flex-direction: column; text-align: center; }
     }
 </style>
@@ -267,25 +289,26 @@
 </div>
 {% endif %}
 
-{# ── Sector Performance Breakdown ── #}
+{# ── Sector Performance Breakdown (Diverging Bar Chart) ── #}
 {% if data.sector_breadth %}
 <div class="mb-chart-card">
     <h3>Sector Performance — {{ data.index_name }}</h3>
     <p class="mb-chart-subtitle">Percentage of stocks higher vs lower per sector over {{ data.period_label | default('1 Day') }}</p>
     <ul class="mb-sector-list">
-        {% for s in data.sector_breadth %}
-        {% set down_pct = (s.down / s.total * 100) if s.total > 0 else 0 %}
-        {% set flat_pct = 100 - s.up_pct - down_pct %}
+        {% for s in data.sector_breadth|sort(attribute='up_pct', reverse=true) %}
+        {% set lower_pct = 100 - s.up_pct %}
         <li class="mb-sector-row">
             <span class="mb-sector-name" title="{{ s.sector }}">{{ s.sector }}</span>
-            <div class="mb-sector-bar">
-                <div class="mb-sector-up" style="width: {{ s.up_pct }}%"></div>
-                {% if flat_pct > 0 %}
-                <div class="mb-sector-flat" style="width: {{ flat_pct }}%"></div>
-                {% endif %}
-                <div class="mb-sector-down" style="width: {{ down_pct }}%"></div>
+            <div class="mb-diverging-wrap">
+                <div class="mb-div-left">
+                    <div class="mb-div-bar-red" style="width: {{ lower_pct }}%"></div>
+                </div>
+                <div class="mb-div-center"></div>
+                <div class="mb-div-right">
+                    <div class="mb-div-bar-green" style="width: {{ s.up_pct }}%"></div>
+                </div>
             </div>
-            <span class="mb-sector-stat" style="color: {% if s.up_pct >= 50 %}#22c55e{% else %}#ef4444{% endif %}">{{ s.up_pct }}% higher</span>
+            <span class="mb-sector-stat" style="color: {% if s.up_pct >= 50 %}#22c55e{% else %}#ef4444{% endif %}">{{ s.up_pct }}%</span>
         </li>
         {% endfor %}
     </ul>
