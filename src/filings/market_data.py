@@ -201,7 +201,10 @@ def get_sp500_constituents() -> list[dict]:
 
         tables = pd.read_html(
             "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-            storage_options={"timeout": 10},
+            storage_options={
+                "timeout": 10,
+                "User-Agent": "PaperPanda/1.0 (market data; contact@paperpanda.io)",
+            },
         )
         df = tables[0]
 
@@ -1117,7 +1120,7 @@ def get_current_prices_batch(tickers: list[str]) -> dict[str, float]:
 # ── Heatmap Builder ───────────────────────────────────────────────────
 
 
-def _pct_to_color(pct: float) -> str:
+def pct_to_color(pct: float) -> str:
     """Map % change to hex color. -5%=deep red, 0=gray, +5%=deep green."""
     pct = max(-5.0, min(5.0, pct))
     if pct >= 0:
@@ -1173,7 +1176,7 @@ def build_heatmap_data(
             "superinvestor_count": count,
             "link": f"/stock/{ticker}",
             "itemStyle": {
-                "color": _pct_to_color(pct),
+                "color": pct_to_color(pct),
                 "borderColor": "rgba(0,0,0,0.15)",
                 "borderWidth": 1,
             },

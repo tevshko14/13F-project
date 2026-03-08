@@ -1,0 +1,551 @@
+<style>
+    /* ── Sentiment headline ── */
+    .mb-sentiment {
+        display: flex; align-items: baseline; gap: 0.4em;
+        margin-bottom: 0.3em;
+    }
+    .mb-sentiment-icon { font-size: 1.5em; font-weight: 700; line-height: 1; }
+    .mb-sentiment-label { font-size: 1.4em; font-weight: 700; }
+    .mb-bullish .mb-sentiment-icon,
+    .mb-bullish .mb-sentiment-label { color: #22c55e; }
+    .mb-bearish .mb-sentiment-icon,
+    .mb-bearish .mb-sentiment-label { color: #ef4444; }
+    .mb-sentiment-detail {
+        font-size: 0.95em; color: var(--pp-text-muted);
+    }
+    .mb-context-line {
+        font-size: 0.82em; color: var(--pp-text-muted);
+        margin: 0 0 0.8em;
+    }
+    .mb-context-line strong { color: var(--pp-text); }
+
+    /* ── Breadth bar ── */
+    .mb-breadth-bar-wrap { margin-bottom: 1.8em; }
+    .mb-breadth-bar {
+        display: flex; height: 42px; border-radius: 10px;
+        overflow: hidden; background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        box-shadow: var(--pp-card-shadow-sm);
+    }
+    .mb-bar-adv, .mb-bar-dec {
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-weight: 700; font-size: 0.95em;
+        transition: width 0.4s ease;
+    }
+    .mb-bar-adv { background: #22c55e; }
+    .mb-bar-unch {
+        background: #71717a; display: flex; align-items: center;
+        justify-content: center; color: #fff; font-size: 0.8em;
+    }
+    .mb-bar-dec { background: #ef4444; }
+    .mb-bar-legend {
+        display: flex; justify-content: space-between;
+        align-items: center; font-size: 0.82em;
+        color: var(--pp-text-muted); margin-top: 0.5em;
+        padding: 0 0.1em;
+    }
+    .mb-legend-adv { color: #22c55e; }
+    .mb-legend-dec { color: #ef4444; }
+    .mb-legend-ratio {
+        font-weight: 600; color: var(--pp-text);
+        background: var(--pp-surface); border: 1px solid var(--pp-border);
+        border-radius: 6px; padding: 0.15em 0.6em;
+        font-size: 0.95em;
+    }
+
+    /* ── Charts ── */
+    .mb-chart-card {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 12px; padding: 1.2em;
+        box-shadow: var(--pp-card-shadow-sm);
+        margin-bottom: 1.5em;
+    }
+    .mb-chart-card h3 {
+        font-size: 0.95em; margin: 0 0 0.2em; color: var(--pp-text);
+    }
+    .mb-chart-subtitle {
+        font-size: 0.8em; color: var(--pp-text-muted);
+        margin: 0 0 0.8em; font-style: italic;
+    }
+    .mb-chart-wrap { position: relative; height: 320px; }
+    .mb-treemap-wrap { position: relative; height: 500px; }
+    .mb-mock-banner {
+        background: rgba(255, 152, 0, 0.1);
+        border: 1px solid rgba(255, 152, 0, 0.3);
+        border-radius: 8px; padding: 0.6em 1em;
+        margin-bottom: 1.2em; font-size: 0.85em; color: #ffb74d;
+    }
+
+    /* ── % Above 50d MA card ── */
+    .mb-ma-card {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 12px; padding: 1em 1.2em;
+        box-shadow: var(--pp-card-shadow-sm);
+        margin-bottom: 1.5em;
+        display: flex; align-items: center; gap: 1.2em;
+    }
+    .mb-ma-gauge {
+        position: relative; width: 76px; height: 76px; flex-shrink: 0;
+    }
+    .mb-ma-gauge svg { transform: rotate(-90deg); display: block; }
+    .mb-ma-gauge-bg { fill: none; stroke: var(--pp-border); stroke-width: 3.5; }
+    .mb-ma-gauge-fill { fill: none; stroke-width: 3.5; stroke-linecap: round;
+        transition: stroke-dashoffset 0.6s ease; }
+    .mb-ma-gauge-text {
+        position: absolute; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.82em; font-weight: 700;
+    }
+    .mb-ma-info { flex: 1; }
+    .mb-ma-label {
+        font-size: 0.85em; color: var(--pp-text-muted); margin: 0;
+    }
+    .mb-ma-detail {
+        font-size: 0.78em; color: var(--pp-text-muted); margin: 0.2em 0 0;
+    }
+
+    /* ── Divergence callout ── */
+    .mb-divergence {
+        border-radius: 10px; padding: 0.7em 1em;
+        margin-bottom: 1.5em; font-size: 0.88em;
+        display: flex; align-items: center; gap: 0.5em;
+    }
+    .mb-divergence-bearish {
+        background: rgba(245, 158, 11, 0.1);
+        border: 1px solid rgba(245, 158, 11, 0.35);
+        color: #f59e0b;
+    }
+    .mb-divergence-bullish {
+        background: rgba(59, 130, 246, 0.1);
+        border: 1px solid rgba(59, 130, 246, 0.35);
+        color: #3b82f6;
+    }
+    .mb-divergence-icon { font-size: 1.2em; }
+
+    /* ── Sector Performance ── */
+    .mb-sector-list { list-style: none; padding: 0; margin: 0; }
+    .mb-sector-row {
+        display: flex; align-items: center; gap: 0.6em;
+        padding: 0.45em 0;
+        border-bottom: 1px solid var(--pp-border);
+    }
+    .mb-sector-row:last-child { border-bottom: none; }
+    .mb-sector-name {
+        width: 150px; flex-shrink: 0;
+        font-size: 0.82em; color: var(--pp-text);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mb-sector-bar {
+        flex: 1; display: flex; height: 18px; border-radius: 4px;
+        overflow: hidden; background: var(--pp-border);
+    }
+    .mb-sector-up { background: #22c55e; transition: width 0.3s ease; }
+    .mb-sector-down { background: #ef4444; transition: width 0.3s ease; }
+    .mb-sector-flat { background: #71717a; }
+    .mb-sector-stat {
+        width: 55px; text-align: right; flex-shrink: 0;
+        font-size: 0.8em; font-weight: 600;
+    }
+
+    /* ── Top Movers ── */
+    .mb-movers-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 1.5em;
+    }
+    .mb-movers-col {
+        min-width: 0; /* prevent grid blowout */
+    }
+    .mb-movers-col h4 {
+        font-size: 0.85em; margin: 0 0 0.5em;
+        color: var(--pp-text-muted); font-weight: 600;
+    }
+    .mb-mover-row {
+        display: flex; align-items: center; gap: 0.5em;
+        padding: 0.4em 0.5em; border-radius: 6px;
+        text-decoration: none; color: inherit;
+        transition: background 0.15s;
+        min-width: 0;
+    }
+    .mb-mover-row:hover { background: var(--pp-border); }
+    .mb-mover-rank {
+        width: 20px; font-size: 0.75em; color: var(--pp-text-muted);
+        text-align: center; flex-shrink: 0;
+    }
+    .mb-mover-ticker {
+        font-weight: 700; font-size: 0.88em; width: 55px; flex-shrink: 0;
+    }
+    .mb-mover-name {
+        flex: 1; font-size: 0.8em; color: var(--pp-text-muted);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .mb-mover-pct {
+        font-weight: 700; font-size: 0.88em; flex-shrink: 0;
+        min-width: 60px; text-align: right;
+    }
+
+    @media (max-width: 600px) {
+        .mb-sentiment { flex-wrap: wrap; }
+        .mb-treemap-wrap { height: 350px; }
+        .mb-breadth-bar { height: 36px; }
+        .mb-bar-adv, .mb-bar-dec { font-size: 0.85em; }
+        .mb-movers-grid { grid-template-columns: 1fr; gap: 0.8em; }
+        .mb-sector-name { width: 110px; }
+        .mb-ma-card { flex-direction: column; text-align: center; }
+    }
+</style>
+
+{% if data.get('is_mock') %}
+<div class="mb-mock-banner">
+    Showing sample data — yfinance may be rate-limited or unavailable.
+</div>
+{% endif %}
+
+{# ── Sentiment Headline ── #}
+{% set m = data.metrics %}
+{% set is_bullish = m.breadth_ratio >= 1 %}
+<div class="mb-sentiment {% if is_bullish %}mb-bullish{% else %}mb-bearish{% endif %}">
+    <span class="mb-sentiment-icon">{% if is_bullish %}&#9650;{% else %}&#9660;{% endif %}</span>
+    <span class="mb-sentiment-label">{% if is_bullish %}Bullish{% else %}Bearish{% endif %}</span>
+    <span class="mb-sentiment-detail">
+        — {% if is_bullish %}{{ m.advance_pct }}% of {{ data.index_name }} up{% else %}{{ m.decline_pct }}% of {{ data.index_name }} down{% endif %}
+    </span>
+</div>
+<p class="mb-context-line">
+    Tracking <strong>{{ m.total }}</strong> stocks over {{ data.period_label | default('1 Day') }} &middot; {{ m.advances }} up · {{ m.declines }} down{% if m.unchanged > 0 %} · {{ m.unchanged }} flat{% endif %}
+</p>
+
+{# ── Breadth Bar ── #}
+{% set adv_w = m.advance_pct %}
+{% set dec_w = m.decline_pct %}
+{% set unch_w = (100 - adv_w - dec_w) %}
+<div class="mb-breadth-bar-wrap">
+    <div class="mb-breadth-bar">
+        <div class="mb-bar-adv" style="width: {{ adv_w }}%"
+            >{% if adv_w > 8 %}{{ m.advances }}{% endif %}</div>
+        {% if m.unchanged > 0 %}
+        <div class="mb-bar-unch" style="width: {{ unch_w }}%"
+            >{% if unch_w > 8 %}{{ m.unchanged }}{% endif %}</div>
+        {% endif %}
+        <div class="mb-bar-dec" style="width: {{ dec_w }}%"
+            >{% if dec_w > 8 %}{{ m.declines }}{% endif %}</div>
+    </div>
+    <div class="mb-bar-legend">
+        <span class="mb-legend-adv">&#9679; Up ({{ m.advance_pct }}%)</span>
+        <span class="mb-legend-ratio">Up/Down Ratio: {{ m.breadth_ratio }}</span>
+        <span class="mb-legend-dec">&#9679; Down ({{ m.decline_pct }}%)</span>
+    </div>
+</div>
+
+{# ── % Above 50-Day MA KPI ── #}
+{% if data.above_50d %}
+{% set ma = data.above_50d %}
+{% set ma_color = '#22c55e' if ma.pct >= 50 else '#ef4444' %}
+<div class="mb-ma-card">
+    <div class="mb-ma-gauge">
+        <svg viewBox="0 0 36 36" width="76" height="76">
+            <circle class="mb-ma-gauge-bg" cx="18" cy="18" r="15.9155" />
+            <circle class="mb-ma-gauge-fill" cx="18" cy="18" r="15.9155"
+                stroke="{{ ma_color }}"
+                stroke-dasharray="{{ ma.pct }}, 100"
+            />
+        </svg>
+        <span class="mb-ma-gauge-text" style="color: {{ ma_color }}">{{ ma.pct }}%</span>
+    </div>
+    <div class="mb-ma-info">
+        <p class="mb-ma-label">of stocks trading above their 50-day moving average</p>
+        <p class="mb-ma-detail">{{ ma.above }} of {{ ma.total }} stocks · {% if ma.pct >= 70 %}Strong uptrend{% elif ma.pct >= 50 %}Moderately bullish{% elif ma.pct >= 30 %}Moderately bearish{% else %}Weak breadth{% endif %}</p>
+    </div>
+</div>
+{% endif %}
+
+{# ── Divergence Callout ── #}
+{% if divergence %}
+<div class="mb-divergence mb-divergence-{{ divergence.type }}">
+    <span class="mb-divergence-icon">{% if divergence.type == 'bearish' %}⚠️{% else %}💡{% endif %}</span>
+    <span>{{ divergence.message }}</span>
+</div>
+{% endif %}
+
+{# ── Sector Performance Breakdown ── #}
+{% if data.sector_breadth %}
+<div class="mb-chart-card">
+    <h3>Sector Performance — {{ data.index_name }}</h3>
+    <p class="mb-chart-subtitle">Percentage of stocks higher vs lower per sector over {{ data.period_label | default('1 Day') }}</p>
+    <ul class="mb-sector-list">
+        {% for s in data.sector_breadth %}
+        {% set down_pct = (s.down / s.total * 100) if s.total > 0 else 0 %}
+        {% set flat_pct = 100 - s.up_pct - down_pct %}
+        <li class="mb-sector-row">
+            <span class="mb-sector-name" title="{{ s.sector }}">{{ s.sector }}</span>
+            <div class="mb-sector-bar">
+                <div class="mb-sector-up" style="width: {{ s.up_pct }}%"></div>
+                {% if flat_pct > 0 %}
+                <div class="mb-sector-flat" style="width: {{ flat_pct }}%"></div>
+                {% endif %}
+                <div class="mb-sector-down" style="width: {{ down_pct }}%"></div>
+            </div>
+            <span class="mb-sector-stat" style="color: {% if s.up_pct >= 50 %}#22c55e{% else %}#ef4444{% endif %}">{{ s.up_pct }}% higher</span>
+        </li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+{# ── Top Movers: Gainers | Losers ── #}
+{% if data.top_movers and (data.top_movers.gainers or data.top_movers.losers) %}
+<div class="mb-chart-card">
+    <h3>Top Movers — {{ data.period_label | default('1 Day') }}</h3>
+    <p class="mb-chart-subtitle">Biggest gainers &amp; losers in the {{ data.index_name }}</p>
+    <div class="mb-movers-grid">
+        <div class="mb-movers-col">
+            <h4>&#9650; Top Gainers</h4>
+            {% for s in data.top_movers.gainers %}
+            <a href="/stock/{{ s.ticker }}" class="mb-mover-row">
+                <span class="mb-mover-rank">{{ loop.index }}</span>
+                <span class="mb-mover-ticker">{{ s.ticker }}</span>
+                <span class="mb-mover-name">{{ s.name }}</span>
+                <span class="mb-mover-pct" style="color: #22c55e">+{{ "%.2f"|format(s.pct) }}%</span>
+            </a>
+            {% endfor %}
+        </div>
+        <div class="mb-movers-col">
+            <h4>&#9660; Top Losers</h4>
+            {% for s in data.top_movers.losers %}
+            <a href="/stock/{{ s.ticker }}" class="mb-mover-row">
+                <span class="mb-mover-rank">{{ loop.index }}</span>
+                <span class="mb-mover-ticker">{{ s.ticker }}</span>
+                <span class="mb-mover-name">{{ s.name }}</span>
+                <span class="mb-mover-pct" style="color: #ef4444">{{ "%.2f"|format(s.pct) }}%</span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
+{# ── A/D Line Chart (full width) ── #}
+<div class="mb-chart-card">
+    <h3>Market Momentum — {{ data.index_name }} (3 months)</h3>
+    <p class="mb-chart-subtitle">Running total of daily stocks up minus down · Divergence from price can signal turning points</p>
+    <div class="mb-chart-wrap" id="mb-ad-line-chart"></div>
+</div>
+
+{# ── Sector Heatmap (Treemap) ── #}
+<div class="mb-chart-card" style="margin-bottom: 2em;">
+    <h3>Sector Heatmap — {{ data.index_name }}</h3>
+    <p class="mb-chart-subtitle">Box size reflects trading volume weight &middot; Click any stock to view details</p>
+    <div class="mb-treemap-wrap" id="mb-treemap-chart"></div>
+</div>
+
+<script>
+(function() {
+    /* ── Normalize array to 0–100 range for visual comparison ── */
+    function normRange(arr) {
+        var vals = [];
+        for (var i = 0; i < arr.length; i++) {
+            if (arr[i] !== null && arr[i] !== undefined) vals.push(arr[i]);
+        }
+        if (!vals.length) return arr;
+        var min = Math.min.apply(null, vals);
+        var max = Math.max.apply(null, vals);
+        var range = max - min;
+        if (range === 0) return arr.map(function() { return 50; });
+        return arr.map(function(v) {
+            if (v === null || v === undefined) return null;
+            return Math.round((v - min) / range * 1000) / 10;
+        });
+    }
+
+    /* ── A/D Line Chart (normalized, single axis) ── */
+    var adEl = document.getElementById('mb-ad-line-chart');
+    if (adEl) {
+        window.requireECharts(function() {
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            var textColor = isDark ? '#ccc' : '#333';
+            var gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+            var adData = {{ ad_line | tojson }};
+
+            /* Keep raw data for tooltips */
+            var rawAD = adData.cumulative_ad;
+            var rawPrices = adData.index_prices;
+
+            /* Normalize both to 0–100 */
+            var adNorm = normRange(rawAD);
+            var hasIndex = rawPrices && rawPrices.some(function(v) { return v !== null; });
+            var priceNorm = hasIndex ? normRange(rawPrices) : [];
+
+            var existing = echarts.getInstanceByDom(adEl);
+            if (existing) existing.dispose();
+            var chart = echarts.init(adEl);
+
+            var series = [
+                {
+                    name: 'Market Momentum', type: 'line', smooth: true,
+                    data: adNorm,
+                    lineStyle: { width: 2.5, color: '#3b82f6' },
+                    itemStyle: { color: '#3b82f6' },
+                    symbol: 'none',
+                    areaStyle: {
+                        color: {
+                            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                            colorStops: [
+                                { offset: 0, color: 'rgba(59,130,246,0.18)' },
+                                { offset: 1, color: 'rgba(59,130,246,0.02)' }
+                            ]
+                        }
+                    }
+                }
+            ];
+
+            if (hasIndex) {
+                series.push({
+                    name: adData.index_name + ' Price', type: 'line',
+                    data: priceNorm,
+                    lineStyle: { width: 2, color: '#f59e0b' },
+                    itemStyle: { color: '#f59e0b' },
+                    symbol: 'none'
+                });
+            }
+
+            chart.setOption({
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        var d = params[0].axisValue;
+                        var parts = d.split('-');
+                        var s = parts[1] + '/' + parts[2] + '/' + parts[0] + '<br/>';
+                        params.forEach(function(p) {
+                            if (p.value === null || p.value === undefined) return;
+                            var orig;
+                            if (p.seriesIndex === 0) {
+                                orig = rawAD[p.dataIndex];
+                                s += p.marker + ' Momentum Score: <strong>' + orig + '</strong><br/>';
+                            } else {
+                                orig = rawPrices[p.dataIndex];
+                                if (orig !== null && orig !== undefined) {
+                                    s += p.marker + ' ' + adData.index_name
+                                        + ': <strong>$' + orig.toLocaleString() + '</strong><br/>';
+                                }
+                            }
+                        });
+                        return s;
+                    }
+                },
+                legend: {
+                    bottom: 0,
+                    textStyle: { color: textColor, fontSize: 12 }
+                },
+                grid: { top: 30, right: 50, bottom: 50, left: 50 },
+                xAxis: {
+                    type: 'category',
+                    data: adData.dates,
+                    axisLabel: {
+                        color: textColor, fontSize: 10,
+                        formatter: function(v) {
+                            var parts = v.split('-');
+                            return parts[1] + '/' + parts[2];
+                        }
+                    },
+                    axisLine: { lineStyle: { color: gridColor } }
+                },
+                yAxis: {
+                    type: 'value',
+                    name: 'Relative Strength',
+                    nameTextStyle: { color: textColor, fontSize: 11 },
+                    axisLabel: { show: false },
+                    splitLine: { lineStyle: { color: gridColor } },
+                    min: 0, max: 100
+                },
+                series: series
+            });
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
+        });
+    }
+
+    /* ── Sector Treemap ── */
+    var treemapEl = document.getElementById('mb-treemap-chart');
+    if (treemapEl) {
+        window.requireECharts(function() {
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            var borderColor = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.4)';
+            var labelBg = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.25)';
+            var treemapData = {{ data.treemap | tojson }};
+
+            var existing = echarts.getInstanceByDom(treemapEl);
+            if (existing) existing.dispose();
+            var chart = echarts.init(treemapEl);
+            chart.setOption({
+                animation: false,
+                tooltip: {
+                    appendToBody: true,
+                    confine: true,
+                    formatter: function(info) {
+                        var d = info.data;
+                        if (!d || d.pct_change === undefined) return info.name;
+                        var sign = d.pct_change >= 0 ? '+' : '';
+                        var color = d.pct_change >= 0 ? '#2e7d32' : '#c62828';
+                        return '<strong>' + d.name + '</strong>'
+                            + '<br/>' + (d.full_name || '')
+                            + '<br/><span style="color:' + color + '; font-size: 1.1em; font-weight: bold;">'
+                            + sign + d.pct_change.toFixed(2) + '%</span>';
+                    }
+                },
+                series: [{
+                    type: 'treemap',
+                    data: treemapData,
+                    width: '100%',
+                    height: '100%',
+                    roam: false,
+                    nodeClick: false,
+                    breadcrumb: { show: false },
+                    levels: [
+                        {
+                            itemStyle: {
+                                borderColor: borderColor,
+                                borderWidth: 2,
+                                gapWidth: 2
+                            },
+                            upperLabel: {
+                                show: true,
+                                height: 22,
+                                fontSize: 11,
+                                fontWeight: 'bold',
+                                color: '#fff',
+                                backgroundColor: labelBg,
+                                padding: [2, 6]
+                            }
+                        },
+                        {
+                            label: {
+                                show: true,
+                                formatter: function(params) {
+                                    var d = params.data;
+                                    if (!d || d.pct_change === undefined) return params.name;
+                                    var sign = d.pct_change >= 0 ? '+' : '';
+                                    return d.name + '\n' + sign + d.pct_change.toFixed(1) + '%';
+                                },
+                                fontSize: 10,
+                                color: '#fff',
+                                textShadowColor: 'rgba(0,0,0,0.5)',
+                                textShadowBlur: 2
+                            },
+                            itemStyle: {
+                                gapWidth: 1
+                            }
+                        }
+                    ]
+                }]
+            });
+
+            chart.on('click', function(params) {
+                if (params.data && params.data.link) {
+                    window.location.href = params.data.link;
+                }
+            });
+
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
+        });
+    }
+})();
+</script>

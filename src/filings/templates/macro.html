@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Macro — Earnings Scorecard | PaperPanda{% endblock %}
-{% block meta_description %}Track earnings season performance — beat rates, revenue surprises, market reactions, and detailed company results across the S&P 500 and NASDAQ.{% endblock %}
-{% block og_title %}Earnings Scorecard | PaperPanda{% endblock %}
-{% block og_description %}Aggregated earnings season metrics — EPS beat rates, revenue surprises, market reaction deltas, and detailed company results.{% endblock %}
-{% block twitter_title %}Earnings Scorecard | PaperPanda{% endblock %}
-{% block twitter_description %}Earnings season scorecard — beat rates, revenue surprises, and market reactions.{% endblock %}
+{% block title %}Macro — Market Indicators | PaperPanda{% endblock %}
+{% block meta_description %}Track earnings season performance, market performance, and macro indicators across the S&P 500, NASDAQ 100, and Dow 30.{% endblock %}
+{% block og_title %}Macro Indicators | PaperPanda{% endblock %}
+{% block og_description %}Earnings scorecard, market performance, and macro-level market indicators.{% endblock %}
+{% block twitter_title %}Macro Indicators | PaperPanda{% endblock %}
+{% block twitter_description %}Earnings scorecard, market performance, and macro-level market indicators.{% endblock %}
 {% block json_ld_extra %}
 <script type="application/ld+json">
 {
@@ -19,88 +19,153 @@
 {% endblock %}
 {% block content %}
 <hgroup>
-    <h1>Macro — Earnings Scorecard</h1>
-    <p>High-level view of market performance during earnings season</p>
+    <h1>Macro</h1>
+    <p>High-level market indicators and earnings season performance</p>
 </hgroup>
 
 <style>
-    .es-index-toggle {
-        display: flex; gap: 0; margin-bottom: 1.2em;
-        border-bottom: 2px solid var(--pp-overlay-8);
+    .macro-tabs {
+        display: flex; gap: 0;
+        border-bottom: 2px solid var(--pp-overlay-8, var(--pp-border));
+        margin-bottom: 1.5em; overflow-x: auto;
     }
-    .es-index-btn {
-        padding: 0.6em 1.4em; font-size: 0.9em; font-weight: 600;
-        color: var(--pp-sub-text); cursor: pointer;
-        border: none; background: none;
+    .macro-tab {
+        padding: 0.7em 1.3em; font-size: 0.9em; font-weight: 600;
+        color: var(--pp-sub-text, var(--pp-text-muted)); cursor: pointer;
         border-bottom: 2px solid transparent; margin-bottom: -2px;
-        transition: color 0.2s, border-color 0.2s;
+        white-space: nowrap; transition: color 0.15s, border-color 0.15s;
+        background: none; border-top: none; border-left: none; border-right: none;
     }
-    .es-index-btn:hover { color: var(--pp-text); }
-    .es-index-btn.active { color: #ef4444; border-bottom-color: #ef4444; }
-    .es-filters {
-        display: flex; flex-wrap: wrap; gap: 0.8em;
-        margin-bottom: 1.5em; align-items: center;
+    .macro-tab:hover { color: var(--pp-text); }
+    .macro-tab.active {
+        color: var(--pp-accent, #ef4444);
+        border-bottom-color: var(--pp-accent, #ef4444);
     }
-    .es-filters select {
-        padding: 0.45em 0.9em; font-size: 0.85em;
-        border-radius: 8px; border: 1px solid var(--pp-border);
-        background: var(--pp-surface); color: var(--pp-text);
-        min-width: 140px;
+    .macro-panel { display: none; }
+    .macro-panel.active { display: block; }
+    .macro-controls {
+        display: flex; align-items: center; flex-wrap: wrap;
+        gap: 1em; margin-bottom: 1.5em;
     }
 </style>
 
-{# ── Index Toggle ── #}
-<div class="es-index-toggle">
-    {% for key, label in indices.items() %}
-    <button class="es-index-btn {% if key == current_index %}active{% endif %}"
-            onclick="esChangeIndex('{{ key }}')">{{ label }}</button>
-    {% endfor %}
+{# ── Top-level tabs ── #}
+<div class="macro-tabs" role="tablist">
+    <button class="macro-tab active" id="tab-earnings" data-macro-tab="earnings" role="tab" aria-selected="true" aria-controls="macro-panel-earnings">Earnings Scorecard</button>
+    <button class="macro-tab" id="tab-breadth" data-macro-tab="breadth" role="tab" aria-selected="false" aria-controls="macro-panel-breadth">Market Performance</button>
 </div>
 
-{# ── Filters ── #}
-<div class="es-filters">
-    <select id="es-quarter" onchange="esReload()">
-        {% for q in quarters %}
-        <option value="{{ q }}" {% if q == current_quarter %}selected{% endif %}>{{ q }}</option>
-        {% endfor %}
-    </select>
-    <select id="es-sector" onchange="esReload()">
-        <option value="">All Sectors</option>
-        {% for s in sectors %}
-        <option value="{{ s }}" {% if s == current_sector %}selected{% endif %}>{{ s }}</option>
-        {% endfor %}
-    </select>
+{# ═══ Panel: Earnings Scorecard ═══ #}
+<div class="macro-panel active" id="macro-panel-earnings" role="tabpanel" aria-labelledby="tab-earnings">
+    <div class="macro-controls">
+        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Earnings Scorecard</h2>
+        <div class="pp-pill-nav" id="es-index-nav" style="margin-bottom: 0;">
+            {% for key, label in indices.items() %}
+            <button class="pp-pill-btn {% if key == current_index %}active{% endif %}"
+                    data-key="{{ key }}" onclick="esChangeIndex('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    <div id="es-content"
+         hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+            <span aria-busy="true">Loading earnings scorecard…</span>
+        </div>
+    </div>
 </div>
 
-{# ── HTMX target ── #}
-<div id="es-content"
-     hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
-     hx-trigger="load"
-     hx-swap="innerHTML">
-    <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-        <span aria-busy="true">Loading earnings scorecard…</span>
+{# ═══ Panel: Market Performance ═══ #}
+<div class="macro-panel" id="macro-panel-breadth" role="tabpanel" aria-labelledby="tab-breadth">
+    <div class="macro-controls">
+        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Market Performance</h2>
+        <div class="pp-pill-nav" id="mb-index-nav" style="margin-bottom: 0;">
+            {% for key, label in breadth_indices.items() %}
+            <button class="pp-pill-btn {% if key == 'sp500' %}active{% endif %}"
+                    data-key="{{ key }}" onclick="mbChangeIndex('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+        <div class="pp-pill-nav" id="mb-period-nav" style="margin-bottom: 0;">
+            {% for key, label in breadth_periods.items() %}
+            <button class="pp-pill-btn {% if key == '1d' %}active{% endif %}"
+                    data-key="{{ key }}" onclick="mbChangePeriod('{{ key }}')">{{ label }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    <div id="mb-content">
+        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+            <span aria-busy="true">Loading market performance…</span>
+        </div>
     </div>
 </div>
 
 <script>
 (function() {
-    var currentIndex = '{{ current_index }}';
-    var indexLabels = { sp500: 'S&P 500', nasdaq: 'NASDAQ 100' };
+    /* ── Top-level tab switching ── */
+    var mbLoaded = false;
+    document.querySelectorAll('.macro-tab').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+            document.querySelectorAll('.macro-tab').forEach(function(t) {
+                t.classList.remove('active');
+                t.setAttribute('aria-selected', 'false');
+            });
+            document.querySelectorAll('.macro-panel').forEach(function(p) { p.classList.remove('active'); });
+            tab.classList.add('active');
+            tab.setAttribute('aria-selected', 'true');
+            var panel = document.getElementById('macro-panel-' + tab.dataset.macroTab);
+            if (panel) panel.classList.add('active');
+
+            /* Lazy-load Market Performance on first tab click */
+            if (tab.dataset.macroTab === 'breadth' && !mbLoaded) {
+                mbLoaded = true;
+                mbReload();
+            }
+        });
+    });
+
+    /* ── Shared pill-nav toggle (uses data-key, no text matching) ── */
+    function activatePill(navId, key) {
+        document.querySelectorAll('#' + navId + ' .pp-pill-btn').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.key === key);
+        });
+    }
+
+    /* ── Earnings Scorecard controls ── */
+    var esCurrentIndex = '{{ current_index }}';
 
     window.esChangeIndex = function(idx) {
-        currentIndex = idx;
-        document.querySelectorAll('.es-index-btn').forEach(function(btn) {
-            btn.classList.toggle('active', btn.textContent.trim() === (indexLabels[idx] || idx));
-        });
+        esCurrentIndex = idx;
+        activatePill('es-index-nav', idx);
         esReload();
     };
 
     window.esReload = function() {
         var quarter = document.getElementById('es-quarter').value;
         var sector = document.getElementById('es-sector').value;
-        var url = '/api/macro/scorecard?index=' + currentIndex + '&quarter=' + encodeURIComponent(quarter);
+        var url = '/api/macro/scorecard?index=' + esCurrentIndex + '&quarter=' + encodeURIComponent(quarter);
         if (sector) url += '&sector=' + encodeURIComponent(sector);
         htmx.ajax('GET', url, '#es-content');
+    };
+
+    /* ── Market Performance controls ── */
+    var mbCurrentIndex = 'sp500';
+    var mbCurrentPeriod = '1d';
+
+    function mbReload() {
+        htmx.ajax('GET', '/api/macro/breadth?index=' + mbCurrentIndex + '&period=' + mbCurrentPeriod, '#mb-content');
+    }
+
+    window.mbChangeIndex = function(idx) {
+        mbCurrentIndex = idx;
+        activatePill('mb-index-nav', idx);
+        mbReload();
+    };
+
+    window.mbChangePeriod = function(p) {
+        mbCurrentPeriod = p;
+        activatePill('mb-period-nav', p);
+        mbReload();
     };
 })();
 </script>

@@ -388,6 +388,20 @@ CREATE TABLE IF NOT EXISTS analyst_estimates (
 );
 CREATE INDEX IF NOT EXISTS idx_analyst_estimates_ticker
     ON analyst_estimates (ticker);
+
+-- Earnings scorecard aggregate cache (L2 for earnings_scorecard.py)
+CREATE TABLE IF NOT EXISTS earnings_scorecard_cache (
+    id          BIGSERIAL PRIMARY KEY,
+    cache_key   TEXT NOT NULL UNIQUE,
+    index_key   TEXT NOT NULL,
+    quarter     TEXT NOT NULL,
+    sector      TEXT,
+    payload     JSONB NOT NULL,
+    fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_esc_key
+    ON earnings_scorecard_cache (cache_key);
 """
 
 
@@ -3240,3 +3254,76 @@ def get_analyst_estimates(ticker: str) -> list[dict]:
     except Exception as exc:
         logger.warning("get_analyst_estimates(%s) failed: %s", ticker, exc)
         return []
+
+
+# ── Earnings Scorecard aggregate cache ────────────────────────────
+
+
+def get_scorecard_cache(
+    cache_key: str,
+    max_age_seconds: int = 604_800,
+) -> dict | list | None:
+    """Return cached scorecard payload if fresh, else *None*.
+
+    *max_age_seconds* defaults to 7 days — earnings data is quarterly so
+    results rarely change.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+
+    try:
+        resp = (
+            client.table("earnings_scorecard_cache")
+            .select("payload,fetched_at")
+            .eq("cache_key", cache_key)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data
+        if not rows:
+            return None
+
+        row = rows[0]
+
+        # Check freshness
+        fetched = datetime.fromisoformat(row["fetched_at"].replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - fetched).total_seconds()
+        if age > max_age_seconds:
+            return None  # stale — let caller re-fetch from API
+
+        return row["payload"]
+    except Exception as exc:
+        logger.warning("get_scorecard_cache(%s) failed: %s", cache_key, exc)
+        return None
+
+
+def upsert_scorecard_cache(
+    cache_key: str,
+    index_key: str,
+    quarter: str,
+    sector: str | None,
+    payload: dict | list,
+) -> bool:
+    """Upsert a scorecard cache row.  Returns *True* on success."""
+    client = _get_client()
+    if client is None:
+        return False
+
+    row = {
+        "cache_key": cache_key,
+        "index_key": index_key,
+        "quarter": quarter,
+        "sector": sector,
+        "payload": payload,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        client.table("earnings_scorecard_cache").upsert(
+            row, on_conflict="cache_key"
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.warning("upsert_scorecard_cache(%s) failed: %s", cache_key, exc)
+        return False

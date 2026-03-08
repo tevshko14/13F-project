@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 # ── Cache ────────────────────────────────────────────────────────
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, object]] = {}
-_TTL = 3600  # 1 hour
+_TTL = 3600  # 1 hour (L1 in-memory)
+_DB_TTL = 604_800  # 7 days (L2 Supabase)
 
 _FMP_BASE = "https://financialmodelingprep.com/api/v3"
 _TIMEOUT = 15
@@ -106,15 +107,35 @@ def fetch_earnings_data(
     quarter: str | None = None,
     sector: str | None = None,
 ) -> dict:
-    """Fetch and aggregate earnings-season data (cached 1 h)."""
+    """Fetch and aggregate earnings-season data.
+
+    3-tier cache: L1 in-memory (1 h) → L2 Supabase (7 d) → L3 FMP API.
+    """
     cache_key = f"{index}:{quarter or 'latest'}:{sector or 'all'}"
 
+    # L1: in-memory
     with _lock:
         cached = _cache.get(cache_key)
         if cached and time.time() - cached[0] < _TTL:
             return cached[1]
 
+    # L2: Supabase DB
+    from filings import supabase_cache
+
+    db_hit = supabase_cache.get_scorecard_cache(cache_key, max_age_seconds=_DB_TTL)
+    if db_hit is not None:
+        with _lock:
+            _cache[cache_key] = (time.time(), db_hit)
+        return db_hit
+
+    # L3: FMP API
     data = _fetch_from_fmp(index, quarter, sector)
+
+    # Write back to L2 (skip mock data)
+    if not data.get("is_mock"):
+        supabase_cache.upsert_scorecard_cache(
+            cache_key, index, data.get("quarter", ""), sector, data,
+        )
 
     with _lock:
         _cache[cache_key] = (time.time(), data)
@@ -141,7 +162,11 @@ def _fetch_from_fmp(
 
     surprises = _fmp_get("/earnings-surprises", {"from": start, "to": end})
     if not surprises or not isinstance(surprises, list):
-        return _build_mock_data(quarter, index, sector)
+        # Only show mock data in dev (no API key). In production (key set
+        # but API down), return an empty result so users never see fake data.
+        if not _api_key():
+            return _build_mock_data(quarter, index, sector)
+        return _build_empty_data(quarter, index, sector)
 
     constituents = _get_index_constituents(index)
 
@@ -260,16 +285,31 @@ def _compute_metrics(results: list[dict]) -> dict:
 # ── Historical trend data ────────────────────────────────────────
 
 def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
-    """Beat rates for the last 8 quarters (for the trend chart)."""
+    """Beat rates for the last 8 quarters (for the trend chart).
+
+    3-tier cache: L1 in-memory (1 h) → L2 Supabase (7 d) → L3 FMP API.
+    """
     cache_key = f"history:{index}"
 
+    # L1: in-memory
     with _lock:
         cached = _cache.get(cache_key)
         if cached and time.time() - cached[0] < _TTL:
             return cached[1]
 
+    # L2: Supabase DB
+    from filings import supabase_cache
+
+    db_hit = supabase_cache.get_scorecard_cache(cache_key, max_age_seconds=_DB_TTL)
+    if db_hit is not None:
+        with _lock:
+            _cache[cache_key] = (time.time(), db_hit)
+        return db_hit
+
+    # L3: FMP API
     quarters = get_available_quarters()
     trend: list[dict] = []
+    has_real_data = False
 
     for q_label in reversed(quarters):  # oldest first
         parsed = _parse_quarter(q_label)
@@ -280,6 +320,7 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
 
         surprises = _fmp_get("/earnings-surprises", {"from": start, "to": end})
         if surprises and isinstance(surprises, list):
+            has_real_data = True
             rows = [
                 {
                     "eps_beat": (
@@ -307,10 +348,18 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
                 "avg_price_change": m["avg_price_change"],
             })
         else:
-            trend.append(_mock_quarter_trend(q_label))
+            # Only use mock quarter data in dev (no API key)
+            if not _api_key():
+                trend.append(_mock_quarter_trend(q_label))
 
-    if not trend:
+    if not trend and not _api_key():
         trend = [_mock_quarter_trend(q) for q in reversed(quarters)]
+
+    # Write back to L2 (skip if all mock data)
+    if has_real_data:
+        supabase_cache.upsert_scorecard_cache(
+            cache_key, index, "multi", None, trend,
+        )
 
     with _lock:
         _cache[cache_key] = (time.time(), trend)
@@ -319,7 +368,7 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
 
 # ── Mock data fallback ───────────────────────────────────────────
 
-_MOCK_COMPANIES = [
+_MOCK_COMPANIES_SP500 = [
     ("AAPL", "Apple Inc.", "Technology"),
     ("MSFT", "Microsoft Corp.", "Technology"),
     ("GOOGL", "Alphabet Inc.", "Communication Services"),
@@ -352,14 +401,65 @@ _MOCK_COMPANIES = [
     ("TMO", "Thermo Fisher Scientific", "Healthcare"),
 ]
 
+_MOCK_COMPANIES_NASDAQ = [
+    ("AAPL", "Apple Inc.", "Technology"),
+    ("MSFT", "Microsoft Corp.", "Technology"),
+    ("GOOGL", "Alphabet Inc.", "Communication Services"),
+    ("AMZN", "Amazon.com Inc.", "Consumer Cyclical"),
+    ("NVDA", "NVIDIA Corp.", "Technology"),
+    ("META", "Meta Platforms Inc.", "Communication Services"),
+    ("TSLA", "Tesla Inc.", "Consumer Cyclical"),
+    ("AVGO", "Broadcom Inc.", "Technology"),
+    ("NFLX", "Netflix Inc.", "Communication Services"),
+    ("CRM", "Salesforce Inc.", "Technology"),
+    ("COST", "Costco Wholesale", "Consumer Defensive"),
+    ("AMD", "Advanced Micro Devices", "Technology"),
+    ("INTC", "Intel Corp.", "Technology"),
+    ("ADBE", "Adobe Inc.", "Technology"),
+    ("QCOM", "Qualcomm Inc.", "Technology"),
+    ("INTU", "Intuit Inc.", "Technology"),
+    ("ISRG", "Intuitive Surgical", "Healthcare"),
+    ("REGN", "Regeneron Pharmaceuticals", "Healthcare"),
+    ("BKNG", "Booking Holdings", "Consumer Cyclical"),
+    ("PANW", "Palo Alto Networks", "Technology"),
+    ("SNPS", "Synopsys Inc.", "Technology"),
+    ("CDNS", "Cadence Design Systems", "Technology"),
+    ("MELI", "MercadoLibre Inc.", "Consumer Cyclical"),
+    ("LRCX", "Lam Research", "Technology"),
+    ("KLAC", "KLA Corp.", "Technology"),
+]
+
+_MOCK_COMPANIES: dict[str, list[tuple[str, str, str]]] = {
+    "sp500": _MOCK_COMPANIES_SP500,
+    "nasdaq": _MOCK_COMPANIES_NASDAQ,
+}
+
+
+def _build_empty_data(quarter: str, index: str, sector: str | None) -> dict:
+    """Return a valid but empty result for when the API is unavailable.
+
+    Used in production (API key set) when FMP is temporarily down, so
+    users never see fabricated numbers.
+    """
+    return {
+        "metrics": _compute_metrics([]),
+        "results": [],
+        "quarter": quarter,
+        "index": INDEX_CHOICES.get(index, index),
+        "index_key": index,
+        "sector": sector,
+        "is_unavailable": True,
+    }
+
 
 def _build_mock_data(quarter: str, index: str, sector: str | None) -> dict:
-    rng = random.Random(42)  # deterministic, no global state mutation
+    rng = random.Random(hash((42, index)))  # deterministic, varies by index
 
+    all_companies = _MOCK_COMPANIES.get(index, _MOCK_COMPANIES_SP500)
     symbols = (
-        [(s, n, sec) for s, n, sec in _MOCK_COMPANIES if sec == sector]
+        [(s, n, sec) for s, n, sec in all_companies if sec == sector]
         if sector
-        else list(_MOCK_COMPANIES)
+        else list(all_companies)
     )
 
     results: list[dict] = []
