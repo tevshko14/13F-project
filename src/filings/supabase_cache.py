@@ -402,6 +402,32 @@ CREATE TABLE IF NOT EXISTS earnings_scorecard_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_esc_key
     ON earnings_scorecard_cache (cache_key);
+
+-- ── Economic calendar events (FRED data) ──────────────────────────────────
+-- One row per series × release_date.  Upcoming events (actual IS NULL) are
+-- refreshed every 6 hours; released events (actual IS NOT NULL) are immutable.
+CREATE TABLE IF NOT EXISTS economic_events (
+    id            BIGSERIAL PRIMARY KEY,
+    series_id     TEXT NOT NULL,           -- FRED series ID or 'FOMC'
+    event_name    TEXT NOT NULL DEFAULT '',
+    release_date  DATE NOT NULL,
+    release_time  TEXT NOT NULL DEFAULT '08:30',
+    country       TEXT NOT NULL DEFAULT 'US',
+    category      TEXT NOT NULL DEFAULT 'other',
+    impact        TEXT NOT NULL DEFAULT 'medium',
+    actual        NUMERIC(12, 4),          -- NULL until data is released
+    previous      NUMERIC(12, 4),
+    unit          TEXT NOT NULL DEFAULT '',
+    source        TEXT NOT NULL DEFAULT 'fred',
+    fetched_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(series_id, release_date)
+);
+CREATE INDEX IF NOT EXISTS idx_economic_events_date
+    ON economic_events (release_date DESC);
+CREATE INDEX IF NOT EXISTS idx_economic_events_impact
+    ON economic_events (impact, release_date DESC);
+CREATE INDEX IF NOT EXISTS idx_economic_events_series
+    ON economic_events (series_id, release_date DESC);
 """
 
 
@@ -3361,3 +3387,77 @@ def query_earnings_history(
     except Exception as exc:
         logger.warning("query_earnings_history(%s–%s) failed: %s", start_date, end_date, exc)
         return None
+
+
+# ── Economic calendar events ──────────────────────────────────────────────────
+
+def upsert_economic_events(rows: list[dict]) -> int:
+    """Batch upsert rows into ``economic_events``.
+
+    Each row must have ``series_id`` and ``release_date`` (ISO date string).
+    On conflict the row is updated in place — only upcoming events
+    (``actual IS NULL``) change in practice; released rows are immutable.
+
+    Returns the number of rows upserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None or not rows:
+        return 0
+
+    upserted = 0
+    CHUNK = 100
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("economic_events").upsert(
+                chunk, on_conflict="series_id,release_date"
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_economic_events chunk %d failed: %s", i, exc)
+
+    return upserted
+
+
+def get_economic_events(
+    from_date: str,
+    to_date: str,
+    min_fetched_at: str | None = None,
+) -> list[dict]:
+    """Fetch economic events in the given date range.
+
+    Args:
+        from_date:      ISO date string, inclusive lower bound.
+        to_date:        ISO date string, inclusive upper bound.
+        min_fetched_at: ISO datetime string.  When provided, only rows
+                        whose ``fetched_at >= min_fetched_at`` are
+                        returned.  Pass this to enforce the 6-hour TTL
+                        for upcoming events; omit it to get stale data
+                        for fallback purposes.
+
+    Returns a list of row dicts (all columns), sorted by release_date ASC.
+    Returns an empty list on error or when Supabase is unavailable.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+
+    try:
+        q = (
+            client.table("economic_events")
+            .select(
+                "series_id,event_name,release_date,release_time,"
+                "country,category,impact,actual,previous,unit,source,fetched_at"
+            )
+            .gte("release_date", from_date)
+            .lte("release_date", to_date)
+        )
+        if min_fetched_at:
+            q = q.gte("fetched_at", min_fetched_at)
+        resp = q.order("release_date").execute()
+        return resp.data or []
+    except Exception as exc:
+        logger.warning(
+            "get_economic_events(%s–%s) failed: %s", from_date, to_date, exc
+        )
+        return []

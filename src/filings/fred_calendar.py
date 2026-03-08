@@ -4,17 +4,20 @@ Uses the Federal Reserve Bank of St. Louis (FRED) API as the primary
 data source.  FRED is free, official, and covers all major US macro
 releases (CPI, NFP, FOMC, GDP, PCE, PPI, Retail Sales, etc.).
 
-Caching strategy mirrors the 13F filings pattern:
-  L1 — in-memory dict (TTL 1 hr): avoids repeated Supabase reads within
+Caching strategy — 3-tier with dedicated Supabase table:
+  L1 — in-memory dict (TTL 1 hr): avoids repeated DB reads within
         the same process lifetime.
-  L2 — Supabase cache (TTL 6 hr): survives deploys, shared across
-        workers, and serves stale data if FRED is temporarily down.
-  L3 — FRED REST API: fetched only when both caches are cold/expired.
+  L2 — ``economic_events`` Supabase table (TTL 6 hr): survives
+        deploys, shared across workers, queryable for historical data.
+        Upcoming events are refreshed every 6 hours; released events
+        (actual IS NOT NULL) are immutable and never re-fetched.
+  L3 — FRED REST API: only called when L2 is cold/expired.
+        Results are upserted into ``economic_events`` so every request
+        benefits all future users.
 
 Fallback: deterministic mock data when no FRED_API_KEY is configured.
 
-Public surface (same interface as economic_calendar.py so web.py needs
-zero changes):
+Public surface (same interface as economic_calendar.py):
   PERIOD_CHOICES, IMPACT_CHOICES, COUNTRY_CHOICES
   fetch_economic_events(period, country, impact_filter) -> dict
 """
@@ -25,7 +28,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -142,14 +145,12 @@ _FOMC_DATES: list[tuple[str, str]] = [
 # ── Caching ──────────────────────────────────────────────────────
 _lock = threading.Lock()
 
-# L1 in-memory cache: {"events": [...], "fetched_at": float}
+# L1 in-memory cache: {"events": [...], "fetched_at": float, "is_mock": bool}
 _l1_cache: dict | None = None
 _L1_TTL = 3600          # 1 hour
 
-# Supabase L2
-_SUPABASE_KEY = "fred:events"
-_SUPABASE_CAT = "fred_events"
-_SUPABASE_TTL = 6 * 3600   # 6 hours
+# L2 DB freshness window — upcoming events are re-fetched after this
+_DB_TTL = 6 * 3600      # 6 hours
 
 # L1 result cache (filtered views, keyed by period/country/impact)
 _result_cache: dict[str, tuple[float, dict]] = {}
@@ -249,6 +250,7 @@ def _fetch_all_events() -> list[dict] | None:
         for date_str in dates:
             is_past = date_str <= today_str
             events.append({
+                "series_id": series_id,
                 "event":    meta["name"],
                 "date":     date_str,
                 "time":     meta["time"],
@@ -276,6 +278,7 @@ def _fetch_all_events() -> list[dict] | None:
             if obs:
                 actual_rate = round(obs[0]["value"], 2)
         events.append({
+            "series_id": "FOMC",
             "event":    "FOMC Rate Decision",
             "date":     fomc_date,
             "time":     fomc_time,
@@ -299,12 +302,51 @@ def _fetch_all_events() -> list[dict] | None:
 
 # ── Cache orchestration ──────────────────────────────────────────
 
+def _event_to_row(ev: dict) -> dict:
+    """Convert an internal event dict to an ``economic_events`` table row."""
+    return {
+        "series_id":    ev["series_id"],
+        "event_name":   ev["event"],
+        "release_date": ev["date"],
+        "release_time": ev.get("time") or "08:30",
+        "country":      ev.get("country", "US"),
+        "category":     ev.get("category", "other"),
+        "impact":       ev.get("impact", "medium"),
+        "actual":       ev.get("actual"),
+        "previous":     ev.get("previous"),
+        "unit":         ev.get("unit", ""),
+        "source":       ev.get("source", "fred"),
+    }
+
+
+def _row_to_event(row: dict) -> dict:
+    """Convert an ``economic_events`` DB row back to an internal event dict."""
+    return {
+        "series_id": row["series_id"],
+        "event":     row["event_name"],
+        "date":      row["release_date"],
+        "time":      row.get("release_time") or "08:30",
+        "country":   row.get("country", "US"),
+        "category":  row.get("category", "other"),
+        "impact":    row.get("impact", "medium"),
+        "actual":    float(row["actual"]) if row.get("actual") is not None else None,
+        "previous":  float(row["previous"]) if row.get("previous") is not None else None,
+        "estimate":  None,  # FRED has no consensus forecasts
+        "unit":      row.get("unit", ""),
+        "source":    row.get("source", "fred"),
+    }
+
+
 def _load_raw_events() -> tuple[list[dict], bool]:
     """
     Returns (events, is_mock).
 
     Cache hierarchy:
-      L1 in-memory (1 hr) → L2 Supabase (6 hr) → L3 FRED API → mock
+      L1 in-memory (1 hr)
+      → L2 economic_events table, fresh rows only (TTL 6 hr)
+      → L3 FRED API → upsert into economic_events
+      → L2 stale fallback (any rows in window, regardless of age)
+      → mock data
     """
     global _l1_cache
 
@@ -322,27 +364,49 @@ def _load_raw_events() -> tuple[list[dict], bool]:
             _l1_cache = {"events": mock, "fetched_at": now, "is_mock": True}
         return mock, True
 
-    # ── L2 + L3: Supabase cache with FRED as api_fetch_fn ────────
-    # fetch_with_cache handles: Supabase read → FRED API → stale fallback
-    result = supabase_cache.fetch_with_cache(
-        cache_key=_SUPABASE_KEY,
-        category=_SUPABASE_CAT,
-        ttl_days=_SUPABASE_TTL / 86400,
-        api_fetch_fn=_fetch_all_events,
+    # Wide window covering all period options (-7d to +28d)
+    today = datetime.now()
+    window_start = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+    window_end   = (today + timedelta(days=28)).strftime("%Y-%m-%d")
+
+    # ── L2: economic_events table (fresh rows only) ───────────────
+    min_fetched = datetime.fromtimestamp(
+        now - _DB_TTL, tz=timezone.utc
+    ).isoformat()
+    fresh_rows = supabase_cache.get_economic_events(
+        window_start, window_end, min_fetched_at=min_fetched
     )
+    if fresh_rows:
+        events = [_row_to_event(r) for r in fresh_rows]
+        with _lock:
+            _l1_cache = {"events": events, "fetched_at": now, "is_mock": False}
+        return events, False
 
-    is_mock = False
-    if not result:
-        # Both Supabase and FRED failed — fall back to mock
-        result = _build_mock_events()
-        is_mock = True
-        logger.warning("FRED calendar unavailable; using mock data")
+    # ── L3: FRED API ─────────────────────────────────────────────
+    api_result = _fetch_all_events()
+    if api_result:
+        rows = [_event_to_row(e) for e in api_result]
+        upserted = supabase_cache.upsert_economic_events(rows)
+        logger.info("FRED: upserted %d rows into economic_events", upserted)
+        with _lock:
+            _l1_cache = {"events": api_result, "fetched_at": now, "is_mock": False}
+        return api_result, False
 
-    # Populate L1
+    # ── Stale DB fallback ─────────────────────────────────────────
+    stale_rows = supabase_cache.get_economic_events(window_start, window_end)
+    if stale_rows:
+        events = [_row_to_event(r) for r in stale_rows]
+        with _lock:
+            _l1_cache = {"events": events, "fetched_at": now, "is_mock": False}
+        logger.warning("FRED API failed; serving stale economic_events data")
+        return events, False
+
+    # ── Last resort: mock data ────────────────────────────────────
+    mock = _build_mock_events()
     with _lock:
-        _l1_cache = {"events": result, "fetched_at": now, "is_mock": is_mock}
-
-    return result, is_mock
+        _l1_cache = {"events": mock, "fetched_at": now, "is_mock": True}
+    logger.warning("FRED calendar unavailable; using mock data")
+    return mock, True
 
 
 # ── Value formatting ─────────────────────────────────────────────
