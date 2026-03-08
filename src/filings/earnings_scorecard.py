@@ -84,8 +84,15 @@ def _fmp_get(path: str, params: dict | None = None) -> list | dict | None:
         data = r.json()
         if isinstance(data, list):
             logger.info("FMP %s returned %d items", path, len(data))
+        elif isinstance(data, dict):
+            # FMP returns {"Error Message": "..."} when plan lacks access
+            err_msg = data.get("Error Message") or data.get("message") or data.get("error")
+            if err_msg:
+                logger.error("FMP %s plan/access error: %s", path, err_msg)
+            else:
+                logger.warning("FMP %s returned dict (expected list): %s", path, str(data)[:200])
         else:
-            logger.warning("FMP %s returned non-list: %s", path, str(data)[:200])
+            logger.warning("FMP %s returned unexpected type: %s", path, str(data)[:200])
         return data
     except Exception:
         logger.exception("FMP API error: %s", path)
@@ -116,7 +123,12 @@ def fetch_earnings_data(
 ) -> dict:
     """Fetch and aggregate earnings-season data.
 
-    3-tier cache: L1 in-memory (1 h) → L2 Supabase (7 d) → L3 FMP API.
+    Cache tiers:
+      L1  in-memory (1 h)
+      L2  scorecard_cache table (7 d)
+      L3  earnings_history table (primary source — populated by per-ticker sync)
+      L4  FMP earning_calendar API (fallback)
+      L5  deterministic mock data (dev-only, when no API key)
     """
     cache_key = f"{index}:{quarter or 'latest'}:{sector or 'all'}"
 
@@ -126,7 +138,7 @@ def fetch_earnings_data(
         if cached and time.time() - cached[0] < _TTL:
             return cached[1]
 
-    # L2: Supabase DB
+    # L2: Supabase scorecard_cache
     from filings import supabase_cache
 
     db_hit = supabase_cache.get_scorecard_cache(cache_key, max_age_seconds=_DB_TTL)
@@ -135,11 +147,11 @@ def fetch_earnings_data(
             _cache[cache_key] = (time.time(), db_hit)
         return db_hit
 
-    # L3: FMP API
-    data = _fetch_from_fmp(index, quarter, sector)
+    # L3 / L4: earnings_history table → FMP fallback
+    data = _fetch_scorecard(index, quarter, sector)
 
-    # Write back to L2 (skip mock data)
-    if not data.get("is_mock"):
+    # Write back to L2 (skip mock / unavailable data)
+    if not data.get("is_mock") and not data.get("is_unavailable"):
         supabase_cache.upsert_scorecard_cache(
             cache_key, index, data.get("quarter", ""), sector, data,
         )
@@ -166,53 +178,144 @@ def _build_company_lookup(index: str) -> dict[str, dict]:
         return {}
 
 
-def _fetch_from_fmp(
-    index: str, quarter: str | None, sector: str | None,
-) -> dict:
-    # Resolve quarter → date range
+def _resolve_quarter(quarter: str | None) -> tuple[str, str, str]:
+    """Return ``(quarter_label, start_date, end_date)``."""
     if quarter:
         parsed = _parse_quarter(quarter)
         if parsed:
             y, q = parsed
             start, end = _quarter_dates(y, q)
-        else:
-            quarter = None
+            return quarter, start, end
 
-    if not quarter:
-        now = datetime.now()
-        q = (now.month - 1) // 3 + 1
-        start, end = _quarter_dates(now.year, q)
-        quarter = f"Q{q} {now.year}"
+    now = datetime.now()
+    q = (now.month - 1) // 3 + 1
+    start, end = _quarter_dates(now.year, q)
+    return f"Q{q} {now.year}", start, end
 
-    # FMP bulk endpoint: /earning_calendar (not /earnings-surprises which is per-symbol)
-    calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
-    if not calendar or not isinstance(calendar, list):
+
+def _fetch_scorecard(
+    index: str, quarter: str | None, sector: str | None,
+) -> dict:
+    """Primary scorecard fetch — tries earnings_history DB, then FMP."""
+    quarter, start, end = _resolve_quarter(quarter)
+    company_info = _build_company_lookup(index)
+
+    # ── L3: earnings_history table (primary source) ──────────
+    results = _fetch_from_earnings_history(start, end, company_info, sector)
+
+    # ── L4: FMP earning_calendar (fallback) ──────────────────
+    if results is None:
+        results = _fetch_from_fmp(start, end, company_info, sector)
+
+    # ── L5: mock data (dev only) ─────────────────────────────
+    if results is None:
         if not _api_key():
             return _build_mock_data(quarter, index, sector)
         return _build_empty_data(quarter, index, sector)
 
-    constituents = _get_index_constituents(index)
-    company_info = _build_company_lookup(index)
+    results.sort(key=lambda r: r["date"] or "", reverse=True)
+    metrics = _compute_metrics(results)
 
+    return {
+        "metrics": metrics,
+        "results": results,
+        "quarter": quarter,
+        "index": INDEX_CHOICES.get(index, index),
+        "index_key": index,
+        "sector": sector,
+    }
+
+
+def _fetch_from_earnings_history(
+    start: str, end: str,
+    company_info: dict[str, dict],
+    sector: str | None,
+) -> list[dict] | None:
+    """Query the ``earnings_history`` Supabase table (populated by per-ticker sync)."""
+    try:
+        from filings import supabase_cache
+
+        rows = supabase_cache.query_earnings_history(start, end)
+        if rows is None:
+            return None  # Supabase not configured or query failed
+
+        tickers = set(company_info.keys()) if company_info else None
+        results: list[dict] = []
+
+        for row in rows:
+            ticker = row.get("ticker", "")
+            if tickers and ticker not in tickers:
+                continue
+
+            info = company_info.get(ticker, {})
+            item_sector = info.get("sector", "")
+            if sector and item_sector and item_sector != sector:
+                continue
+
+            actual_eps = _safe_float(row.get("eps_actual"))
+            est_eps = _safe_float(row.get("eps_estimate"))
+            actual_rev = _safe_float(row.get("revenue_actual"))
+            est_rev = _safe_float(row.get("revenue_estimate"))
+
+            # Skip rows without any actuals
+            if actual_eps is None:
+                continue
+
+            eps_beat = row.get("beat_eps")
+            rev_beat = row.get("beat_revenue")
+            eps_surprise_pct = _safe_float(row.get("eps_surprise_pct"))
+            rev_surprise_pct = _safe_float(row.get("revenue_surprise_pct"))
+
+            results.append({
+                "symbol": ticker,
+                "name": info.get("name") or ticker,
+                "date": str(row.get("report_date", "")),
+                "sector": item_sector,
+                "actual_eps": actual_eps,
+                "est_eps": est_eps,
+                "eps_beat": eps_beat,
+                "eps_surprise_pct": round(eps_surprise_pct, 2) if eps_surprise_pct is not None else None,
+                "rev_beat": rev_beat,
+                "rev_surprise_pct": round(rev_surprise_pct, 2) if rev_surprise_pct is not None else None,
+                "price_change": None,
+                "guide": "—",
+            })
+
+        logger.info("earnings_history returned %d rows for %s–%s", len(results), start, end)
+        return results
+    except Exception:
+        logger.exception("_fetch_from_earnings_history failed")
+        return None
+
+
+def _fetch_from_fmp(
+    start: str, end: str,
+    company_info: dict[str, dict],
+    sector: str | None,
+) -> list[dict] | None:
+    """Fallback: FMP ``/earning_calendar`` bulk endpoint (premium)."""
+    calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    if calendar is None or not isinstance(calendar, list):
+        return None
+
+    tickers = set(company_info.keys()) if company_info else None
     results: list[dict] = []
+
     for item in calendar:
         symbol = item.get("symbol", "")
-        if constituents and symbol not in constituents:
+        if tickers and symbol not in tickers:
             continue
 
-        # Company name + sector from Wikipedia constituents lookup
         info = company_info.get(symbol, {})
         item_sector = info.get("sector", "")
         if sector and item_sector and item_sector != sector:
             continue
 
-        # earning_calendar fields: eps, epsEstimated, revenue, revenueEstimated
         actual_eps = item.get("eps")
         est_eps = item.get("epsEstimated")
         actual_rev = item.get("revenue")
         est_rev = item.get("revenueEstimated")
 
-        # Skip rows where actuals haven't been reported yet
         if actual_eps is None and actual_rev is None:
             continue
 
@@ -248,33 +351,22 @@ def _fetch_from_fmp(
             "eps_surprise_pct": eps_surprise_pct,
             "rev_beat": rev_beat,
             "rev_surprise_pct": rev_surprise_pct,
-            "price_change": None,  # not available from earning_calendar
-            "guide": "—",  # not available from earning_calendar
+            "price_change": None,
+            "guide": "—",
         })
 
-    results.sort(key=lambda r: r["date"] or "", reverse=True)
-    metrics = _compute_metrics(results)
-
-    return {
-        "metrics": metrics,
-        "results": results,
-        "quarter": quarter,
-        "index": INDEX_CHOICES.get(index, index),
-        "index_key": index,
-        "sector": sector,
-    }
+    logger.info("FMP earning_calendar returned %d rows for %s–%s", len(results), start, end)
+    return results
 
 
-def _get_index_constituents(index: str) -> set[str] | None:
-    if index == "sp500":
-        data = _fmp_get("/sp500_constituent")
-    elif index == "nasdaq":
-        data = _fmp_get("/nasdaq_constituent")
-    else:
+def _safe_float(val) -> float | None:
+    """Convert a value to float, returning None for anything invalid."""
+    if val is None:
         return None
-    if data and isinstance(data, list):
-        return {item.get("symbol", "") for item in data}
-    return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
 
 
 def _compute_metrics(results: list[dict]) -> dict:
@@ -314,12 +406,72 @@ def _compute_metrics(results: list[dict]) -> dict:
     }
 
 
+# ── Historical trend helpers ─────────────────────────────────────
+
+def _trend_from_db(
+    start: str, end: str, tickers: set[str] | None, supabase_cache,
+) -> list[dict] | None:
+    """Build per-quarter metric rows from earnings_history."""
+    try:
+        rows = supabase_cache.query_earnings_history(start, end)
+        if rows is None:
+            return None
+
+        result = []
+        for r in rows:
+            ticker = r.get("ticker", "")
+            if tickers and ticker not in tickers:
+                continue
+            if r.get("eps_actual") is None:
+                continue
+            result.append({
+                "eps_beat": r.get("beat_eps"),
+                "rev_beat": r.get("beat_revenue"),
+                "eps_surprise_pct": _safe_float(r.get("eps_surprise_pct")),
+                "price_change": None,
+            })
+        return result if result else None
+    except Exception:
+        logger.exception("_trend_from_db failed")
+        return None
+
+
+def _trend_from_fmp(start: str, end: str) -> list[dict] | None:
+    """Build per-quarter metric rows from FMP earning_calendar (fallback)."""
+    calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    if calendar is None or not isinstance(calendar, list):
+        return None
+
+    rows = [
+        {
+            "eps_beat": (
+                s.get("eps", 0) > s.get("epsEstimated", 0)
+                if s.get("eps") is not None
+                and s.get("epsEstimated") is not None
+                else None
+            ),
+            "rev_beat": (
+                s.get("revenue", 0) > s.get("revenueEstimated", 0)
+                if s.get("revenue") is not None
+                and s.get("revenueEstimated") is not None
+                else None
+            ),
+            "eps_surprise_pct": None,
+            "price_change": None,
+        }
+        for s in calendar
+        if s.get("eps") is not None
+    ]
+    return rows if rows else None
+
+
 # ── Historical trend data ────────────────────────────────────────
 
 def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
     """Beat rates for the last 8 quarters (for the trend chart).
 
-    3-tier cache: L1 in-memory (1 h) → L2 Supabase (7 d) → L3 FMP API.
+    Cache tiers mirror ``fetch_earnings_data``:
+      L1 in-memory → L2 scorecard_cache → L3 earnings_history → L4 FMP.
     """
     cache_key = f"history:{index}"
 
@@ -329,7 +481,7 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
         if cached and time.time() - cached[0] < _TTL:
             return cached[1]
 
-    # L2: Supabase DB
+    # L2: Supabase scorecard_cache
     from filings import supabase_cache
 
     db_hit = supabase_cache.get_scorecard_cache(cache_key, max_age_seconds=_DB_TTL)
@@ -338,8 +490,11 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
             _cache[cache_key] = (time.time(), db_hit)
         return db_hit
 
-    # L3: FMP API
+    # L3/L4: build trend from earnings_history (or FMP fallback)
     quarters = get_available_quarters()
+    company_info = _build_company_lookup(index)
+    tickers = set(company_info.keys()) if company_info else None
+
     trend: list[dict] = []
     has_real_data = False
 
@@ -350,40 +505,24 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
         y, q = parsed
         start, end = _quarter_dates(y, q)
 
-        calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
-        if calendar and isinstance(calendar, list):
+        # Try earnings_history first
+        q_rows = _trend_from_db(start, end, tickers, supabase_cache)
+
+        # Fallback to FMP
+        if q_rows is None:
+            q_rows = _trend_from_fmp(start, end)
+
+        if q_rows is not None:
             has_real_data = True
-            rows = [
-                {
-                    "eps_beat": (
-                        s.get("eps", 0) > s.get("epsEstimated", 0)
-                        if s.get("eps") is not None
-                        and s.get("epsEstimated") is not None
-                        else None
-                    ),
-                    "rev_beat": (
-                        s.get("revenue", 0) > s.get("revenueEstimated", 0)
-                        if s.get("revenue") is not None
-                        and s.get("revenueEstimated") is not None
-                        else None
-                    ),
-                    "eps_surprise_pct": None,
-                    "price_change": None,
-                }
-                for s in calendar
-                if s.get("eps") is not None  # skip unannounced
-            ]
-            m = _compute_metrics(rows)
+            m = _compute_metrics(q_rows)
             trend.append({
                 "quarter": q_label,
                 "eps_beat_rate": m["eps_beat_rate"],
                 "rev_beat_rate": m["rev_beat_rate"],
                 "avg_price_change": m["avg_price_change"],
             })
-        else:
-            # Only use mock quarter data in dev (no API key)
-            if not _api_key():
-                trend.append(_mock_quarter_trend(q_label))
+        elif not _api_key():
+            trend.append(_mock_quarter_trend(q_label))
 
     if not trend and not _api_key():
         trend = [_mock_quarter_trend(q) for q in reversed(quarters)]

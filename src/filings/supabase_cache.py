@@ -3327,3 +3327,37 @@ def upsert_scorecard_cache(
     except Exception as exc:
         logger.warning("upsert_scorecard_cache(%s) failed: %s", cache_key, exc)
         return False
+
+
+def query_earnings_history(
+    start_date: str,
+    end_date: str,
+) -> list[dict] | None:
+    """Query ``earnings_history`` rows for a calendar-date range.
+
+    Returns a list of dicts with ticker, report_date, eps/revenue fields,
+    or *None* on failure.  Used by the scorecard module to avoid FMP
+    dependency.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+
+    try:
+        resp = (
+            client.table("earnings_history")
+            .select(
+                "ticker,report_date,fiscal_quarter,"
+                "eps_estimate,eps_actual,eps_surprise_pct,"
+                "revenue_estimate,revenue_actual,revenue_surprise_pct,"
+                "beat_eps,beat_revenue"
+            )
+            .gte("report_date", start_date)
+            .lte("report_date", end_date)
+            .order("report_date", desc=True)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("query_earnings_history(%s–%s) failed: %s", start_date, end_date, exc)
+        return None
