@@ -1,0 +1,789 @@
+{% extends "base.html" %}
+{% block title %}PaperPanda — Track Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
+{% block meta_description %}PaperPanda tracks superinvestor 13F filings, insider trading, analyst ratings, and market news — all in one place. See what Buffett, Ackman, Burry, and 80+ top investors are buying and selling.{% endblock %}
+{% block og_title %}PaperPanda — Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
+{% block og_description %}Free superinvestor 13F portfolio tracker. See what Buffett, Ackman, Burry, and 80+ top investors are buying and selling.{% endblock %}
+{% block twitter_title %}PaperPanda — Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
+{% block twitter_description %}Free superinvestor 13F portfolio tracker. See what Buffett, Ackman, Burry & 80+ top investors are buying.{% endblock %}
+{% block canonical_url %}https://paperpanda.io/{% endblock %}
+{% block og_url %}https://paperpanda.io/{% endblock %}
+{% block extra_head_scripts %}
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
+{% endblock %}
+{% block content %}
+
+{# Override Pico CSS narrow container for the bento grid dashboard #}
+<style>
+    main.container {
+        max-width: 1280px !important;
+        width: 100% !important;
+        padding-left: 2em !important;
+        padding-right: 2em !important;
+    }
+</style>
+
+{# Mesh gradient background is now in base.html #}
+
+{# ── Hero Section ── #}
+<div style="text-align: center; margin-bottom: 0.5em;">
+    <h1 class="hero-title" style="margin-bottom: 0.2em;">Welcome to PaperPanda</h1>
+<style>
+    .hero-title {
+        color: #fff;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+        -webkit-text-stroke: 0.5px rgba(0, 0, 0, 0.4);
+        paint-order: stroke fill;
+        text-shadow: 0 0 20px rgba(25, 118, 210, 0.2), 0 0 40px rgba(25, 118, 210, 0.08);
+    }
+    [data-theme="light"] .hero-title {
+        color: var(--pp-text);
+        text-shadow: 0 0 30px rgba(25, 118, 210, 0.2), 0 0 60px rgba(25, 118, 210, 0.08);
+    }
+</style>
+    <p class="text-muted" style="font-size: 1.1em; max-width: 600px; margin: 0 auto;">
+        Track superinvestor portfolios, insider trades, analyst ratings, and market news — all in one place.
+    </p>
+</div>
+
+{# ── Hero Search Bar (Brave-style pill) ── #}
+<div class="hero-search-wrapper">
+    <div id="ticker-search" class="hero-search-bar">
+        <svg class="hero-search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="search"
+               id="ticker-search-input"
+               placeholder="Search for a stock, fund, insider, or politician"
+               autocomplete="off"
+               oninput="tickerSearchFilter(this.value)"
+               onfocus="tickerSearchFilter(this.value)"
+               onkeydown="tickerSearchKeydown(event)">
+        <button class="hero-search-btn" onclick="var inp=document.getElementById('ticker-search-input'); if(inp.value.trim()) tickerSearchFilter(inp.value);" aria-label="Search">
+            Search
+        </button>
+        <div id="ticker-search-results"
+             style="display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+                    background: var(--pp-surface); border: 1px solid var(--pp-border);
+                    border-radius: 16px; max-height: 400px; overflow-y: auto; z-index: 1001;
+                    box-shadow: var(--pp-dropdown-shadow);">
+        </div>
+    </div>
+</div>
+
+{# ── Quick Navigation Cards ── #}
+<div class="home-cards">
+    <a href="/retail" class="home-card">
+        <div class="home-card-icon">&#128200;</div>
+        <strong>Retail</strong>
+        <span class="text-muted text-small">Reddit sentiment, trending tickers, and market mood</span>
+    </a>
+    <a href="/funds" class="home-card">
+        <div class="home-card-icon">&#128188;</div>
+        <strong>Funds</strong>
+        <span class="text-muted text-small">13F portfolio holdings from Buffett, Ackman, and more</span>
+    </a>
+    <a href="/insider-trading" class="home-card">
+        <div class="home-card-icon">&#128269;</div>
+        <strong>Insiders</strong>
+        <span class="text-muted text-small">Latest SEC Form 4 insider buys and sells</span>
+    </a>
+    <a href="/congress" class="home-card">
+        <div class="home-card-icon">&#127963;</div>
+        <strong>Congress</strong>
+        <span class="text-muted text-small">STOCK Act disclosures from House &amp; Senate members</span>
+    </a>
+</div>
+
+{# ── Scrolling Ticker Tape (lazy-loaded) ── #}
+<div id="ticker-tape-wrap" style="margin: 1.5em 0 2em 0;"
+     hx-get="/api/ticker-tape" hx-trigger="load" hx-swap="innerHTML">
+    <p class="text-muted" style="text-align:center;font-size:0.85em;" aria-busy="true">
+        Loading market data...
+    </p>
+</div>
+
+{# ══════════════════════════════════════════════════════════════ #}
+{# ── BENTO GRID ── #}
+{# ══════════════════════════════════════════════════════════════ #}
+<div class="bento-grid">
+
+    {# ── Card 1: Market Overview (5 cols) ── #}
+    <div class="glass-card bento-overview">
+        <div class="bento-card-header">
+            <h3 class="bento-card-title">Market Overview</h3>
+        </div>
+        <div class="bento-card-body" hx-get="/api/market-overview" hx-trigger="load" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
+        </div>
+    </div>
+
+    {# ── Card 2: Market News (7 cols) ── #}
+    <div class="glass-card bento-news">
+        <div class="bento-card-header">
+            <h3 class="bento-card-title">Market News</h3>
+        </div>
+        <div class="bento-card-body bento-card-body-flex" hx-get="/api/market-news" hx-trigger="load delay:0.5s" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
+        </div>
+    </div>
+
+    {# ── Card 3: S&P 500 Heatmap (8 cols) ── #}
+    <div class="glass-card bento-heatmap">
+        <div class="bento-card-header">
+            <h3 class="bento-card-title">S&amp;P 500 Heatmap</h3>
+            <div class="heatmap-toggle" id="heatmap-toggle">
+                <button class="heatmap-pill active" data-period="1D"
+                        onclick="switchHeatmapPeriod('1D', this)">1D</button>
+                <button class="heatmap-pill" data-period="1W"
+                        onclick="switchHeatmapPeriod('1W', this)">1W</button>
+                <button class="heatmap-pill" data-period="1M"
+                        onclick="switchHeatmapPeriod('1M', this)">1M</button>
+            </div>
+        </div>
+        <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
+        </div>
+    </div>
+
+    {# ── Card 4: Retail Sentiment (4 cols) ── #}
+    <div class="glass-card bento-sentiment">
+        <div class="bento-card-header">
+            <h3 class="bento-card-title">Retail Sentiment</h3>
+        </div>
+        <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
+        </div>
+    </div>
+
+    {# ── Card 5: Trending with Smart Money (12 cols) ── #}
+    <div class="glass-card bento-trending">
+        <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
+            <div class="bento-loading"><span class="spinner"></span></div>
+        </div>
+    </div>
+
+    {# ── Card 6: Support the Panda (12 cols) ── #}
+    <div class="glass-card bento-support">
+        <div class="pw-body">
+            <div class="pw-top">
+                <div class="pw-header">
+                    <span class="pw-icon">&#x1F43C;</span>
+                    <strong class="pw-title">Support the Panda</strong>
+                </div>
+                <p class="pw-copy">
+                    PaperPanda is open and ad-free. I pay for these expensive data APIs out of pocket.
+                    Help keep the project alive.
+                </p>
+                <div class="pw-progress-track">
+                    <div class="pw-progress-fill" style="width: {{ panda_pct }}%;"></div>
+                </div>
+                <div class="pw-progress-label">
+                    ${{ panda_raised }} / ${{ panda_goal }} this month
+                </div>
+            </div>
+            {% if stripe_configured %}
+            <div class="pw-tier-pills">
+                <button class="pw-tier-pill" onclick="openHomeCheckout('{{ price_bamboo }}', 'subscription')">
+                    &#x1F38B; Bamboo <strong>$5/mo</strong>
+                </button>
+                <button class="pw-tier-pill pw-tier-popular" onclick="openHomeCheckout('{{ price_panda }}', 'subscription')">
+                    &#x1F43C; Panda <strong>$15/mo</strong>
+                </button>
+                <button class="pw-tier-pill" onclick="openHomeCheckout('{{ price_giant_panda }}', 'subscription')">
+                    &#x1F451; Giant Panda <strong>$30/mo</strong>
+                </button>
+                <button class="pw-tier-pill pw-tier-onetime" onclick="openHomeCheckout('{{ price_onetime }}', 'payment')">
+                    &#x2764;&#xFE0F; One-time donation
+                </button>
+            </div>
+            {% else %}
+            <div class="pw-tier-pills">
+                <a href="/support" class="pw-tier-pill">&#x1F43C; Support &rarr;</a>
+            </div>
+            {% endif %}
+            <a href="/support" class="pw-learn-more">Learn more about the Panda Fund &rarr;</a>
+        </div>
+    </div>
+
+</div>{# end .bento-grid #}
+
+{# ── Heatmap period switch via JSON (avoids full HTML re-render) ── #}
+<script>
+function switchHeatmapPeriod(period, btn) {
+    /* Update active pill */
+    document.querySelectorAll('.heatmap-pill').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    /* Show loading state */
+    var body = document.getElementById('heatmap-body');
+    if (body) body.style.opacity = '0.4';
+    /* Fetch JSON and update existing chart (no full re-render) */
+    fetch('/api/heatmap-data?period=' + period)
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (body) body.style.opacity = '';
+            if (d.data && window._ppUpdateHeatmap) {
+                window._ppUpdateHeatmap(d.data, d.period_label || period);
+            } else if (d.error) {
+                /* Fallback: full HTMX reload if chart not ready */
+                if (body) body.innerHTML = '<div class="bento-loading"><span class="spinner"></span></div>';
+                htmx.ajax('GET', '/api/heatmap?period=' + period, {target: '#heatmap-body', swap: 'innerHTML'});
+            }
+        })
+        .catch(function() {
+            if (body) body.style.opacity = '';
+        });
+}
+</script>
+
+{% if stripe_configured %}
+{# ── Homepage Checkout Overlay (embedded Stripe) ── #}
+<script async src="https://js.stripe.com/v3/"></script>
+<div class="checkout-overlay" id="home-checkout-overlay" onclick="closeHomeCheckout(event)">
+    <div class="checkout-overlay-inner" onclick="event.stopPropagation()">
+        <button class="checkout-close" onclick="closeHomeCheckout()" aria-label="Close">&times;</button>
+        <div class="checkout-loading" id="home-checkout-loading">Loading checkout&hellip;</div>
+        <div id="home-checkout-mount"></div>
+    </div>
+</div>
+<script>
+var _homeStripe = null;
+var _homeCheckout = null;
+
+function openHomeCheckout(priceId, mode) {
+    if (!priceId) return;
+    var overlay = document.getElementById('home-checkout-overlay');
+    var mountEl = document.getElementById('home-checkout-mount');
+    var loadingEl = document.getElementById('home-checkout-loading');
+
+    mountEl.innerHTML = '';
+    loadingEl.style.display = '';
+    overlay.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    if (_homeCheckout) {
+        _homeCheckout.destroy();
+        _homeCheckout = null;
+    }
+    if (!_homeStripe) {
+        _homeStripe = Stripe('{{ stripe_publishable_key }}');
+    }
+
+    fetch('/api/create-checkout-session', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({price_id: priceId, mode: mode})
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.error) { loadingEl.textContent = 'Error: ' + data.error; return; }
+        return _homeStripe.initEmbeddedCheckout({clientSecret: data.clientSecret});
+    })
+    .then(function(checkout) {
+        if (!checkout) return;
+        _homeCheckout = checkout;
+        loadingEl.style.display = 'none';
+        checkout.mount('#home-checkout-mount');
+    })
+    .catch(function() { loadingEl.textContent = 'Something went wrong. Please try again.'; });
+}
+
+function closeHomeCheckout(e) {
+    if (e && e.target !== e.currentTarget) return;
+    document.getElementById('home-checkout-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+    if (_homeCheckout) { _homeCheckout.destroy(); _homeCheckout = null; }
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeHomeCheckout();
+});
+</script>
+{% endif %}
+
+<style>
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Checkout overlay (homepage)                              ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    .checkout-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        justify-content: center;
+        align-items: center;
+        padding: 1em;
+    }
+    .checkout-overlay.open { display: flex; }
+    .checkout-overlay-inner {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        border-radius: 16px;
+        width: 100%;
+        max-width: 600px;
+        max-height: 92vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        position: relative;
+        animation: homeCheckoutIn 0.25s ease;
+    }
+    @keyframes homeCheckoutIn {
+        from { opacity: 0; transform: translateY(16px) scale(0.97); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .checkout-close {
+        position: absolute; top: 12px; right: 14px;
+        background: none; border: none; font-size: 1.5em;
+        cursor: pointer; color: var(--pp-text-muted); z-index: 1;
+        line-height: 1; border-radius: 6px; padding: 0.1em 0.3em;
+        transition: background 0.15s, color 0.15s;
+    }
+    .checkout-close:hover { background: var(--pp-surface-hover); color: var(--pp-text); }
+    .checkout-loading {
+        display: flex; align-items: center; justify-content: center;
+        min-height: 200px; color: var(--pp-text-muted); font-size: 0.9em;
+    }
+    #home-checkout-mount { min-height: 300px; }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Hero Search Bar (Brave-style pill)                      ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    .hero-search-wrapper {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 40px;
+        padding: 0 1em;
+    }
+    .hero-search-bar {
+        position: relative;
+        display: flex;
+        align-items: center;
+        width: 90%;
+        max-width: 720px;
+        height: 56px;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-glass-border);
+        border-radius: 28px;
+        padding: 0 6px 0 20px;
+        box-shadow: 0 0 20px rgba(25, 118, 210, 0.12), 0 0 0 1px rgba(25, 118, 210, 0.08);
+        animation: searchGlow 3s ease-in-out infinite;
+        transition: border-color 0.3s, box-shadow 0.3s;
+    }
+    @keyframes searchGlow {
+        0%, 100% { box-shadow: 0 0 20px rgba(25, 118, 210, 0.12), 0 0 0 1px rgba(25, 118, 210, 0.08); }
+        50%      { box-shadow: 0 0 24px rgba(25, 118, 210, 0.2), 0 0 0 1px rgba(25, 118, 210, 0.12); }
+    }
+    .hero-search-bar:hover {
+        animation: none;
+        border-color: rgba(25, 118, 210, 0.3);
+        box-shadow: 0 0 24px rgba(25, 118, 210, 0.18), 0 0 0 1px rgba(25, 118, 210, 0.12);
+    }
+    .hero-search-bar:focus-within {
+        animation: none;
+        border-color: rgba(25, 118, 210, 0.5);
+        box-shadow: 0 0 28px rgba(25, 118, 210, 0.25), 0 0 0 2px rgba(25, 118, 210, 0.18), 0 4px 16px rgba(0,0,0,0.06);
+    }
+    .hero-search-icon {
+        width: 20px;
+        height: 20px;
+        color: var(--pp-overlay-35);
+        flex-shrink: 0;
+        margin-right: 12px;
+    }
+    .hero-search-bar input[type="search"] {
+        flex: 1;
+        border: none;
+        outline: none;
+        background: transparent;
+        font-size: 18px;
+        height: 100%;
+        padding: 0;
+        margin: 0;
+        margin-bottom: 0;
+        color: var(--pico-color, #333);
+        -webkit-appearance: none;
+    }
+    .hero-search-bar input[type="search"]::placeholder {
+        color: var(--pp-overlay-35);
+        font-size: 16px;
+    }
+    .hero-search-bar input[type="search"]:focus {
+        border: none;
+        outline: none;
+        box-shadow: none;
+        --pico-border-color: transparent;
+    }
+    .hero-search-btn {
+        flex-shrink: 0;
+        height: 44px;
+        padding: 0 24px;
+        border: none;
+        border-radius: 22px;
+        background: #1976d2;
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s;
+        margin: 0;
+    }
+    .hero-search-btn:hover {
+        background: #1565c0;
+    }
+    .hero-search-bar #ticker-search-results {
+        border-radius: 16px;
+        padding: 0.4em 0;
+    }
+    .hero-search-bar #ticker-search-results .ts-item {
+        padding: 0.6em 1.2em !important;
+        font-size: 0.95em !important;
+    }
+
+    @media (max-width: 600px) {
+        .hero-search-bar {
+            height: 50px;
+            padding: 0 5px 0 16px;
+        }
+        .hero-search-bar input[type="search"] {
+            font-size: 16px;
+        }
+        .hero-search-bar input[type="search"]::placeholder {
+            font-size: 14px;
+        }
+        .hero-search-btn {
+            height: 40px;
+            padding: 0 16px;
+            font-size: 14px;
+        }
+        .hero-search-icon {
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+        }
+    }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Feature Cards: 4-column row on desktop, centered        ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    .home-cards {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        margin-bottom: 1.5em;
+        max-width: 680px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    .home-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        padding: 0.9em 0.7em;
+        background: var(--pp-glass-bg);
+        backdrop-filter: blur(var(--pp-glass-blur));
+        -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+        border: 1px solid var(--pp-glass-border);
+        border-radius: 12px;
+        text-decoration: none;
+        color: inherit;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+        min-width: 0;
+    }
+    .home-card:hover {
+        border-color: #1976d2;
+        box-shadow: 0 4px 12px rgba(25, 118, 210, 0.12);
+        transform: translateY(-2px);
+    }
+    .home-card-icon {
+        font-size: 1.8em;
+        margin-bottom: 0.25em;
+    }
+    .home-card strong {
+        display: block;
+        margin-bottom: 0.15em;
+        font-size: 0.92em;
+    }
+    .home-card .text-small {
+        font-size: 0.78em;
+        line-height: 1.3;
+    }
+    @media (max-width: 640px) {
+        .home-cards {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+    }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Bento Grid Layout                                       ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    .bento-grid {
+        display: grid;
+        grid-template-columns: repeat(12, 1fr);
+        gap: 1.25em;
+    }
+
+    /* ── Glass Card ── */
+    .glass-card {
+        background: var(--pp-glass-bg);
+        backdrop-filter: blur(var(--pp-glass-blur));
+        -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+        border: 1px solid var(--pp-glass-border);
+        border-radius: 16px;
+        box-shadow: var(--pp-glass-shadow);
+        overflow: hidden;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .glass-card:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--pp-glass-shadow), 0 8px 32px rgba(0, 0, 0, 0.06);
+    }
+
+    /* ── Card Header ── */
+    .bento-card-header {
+        padding: 0.75em 1em 0.4em;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5em;
+    }
+    .bento-card-title {
+        margin: 0;
+        font-size: 0.95em;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: var(--pp-text);
+    }
+
+    /* ── Card Body ── */
+    .bento-card-body {
+        /* partials render directly inside here */
+        transition: opacity 0.2s ease;
+    }
+    .bento-card-body.htmx-request {
+        opacity: 0.4;
+        pointer-events: none;
+    }
+    .bento-card-body-flex {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+    }
+
+    /* ── Loading State ── */
+    .bento-loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 200px;
+        color: var(--pp-text-muted);
+    }
+
+    /* ── Grid Placement (Desktop ≥1024px) ── */
+    .bento-overview   { grid-column: span 5; }
+    .bento-news       { grid-column: span 7; display: flex; flex-direction: column; }
+    .bento-heatmap    { grid-column: span 8; }
+    .bento-sentiment  { grid-column: span 4; }
+    .bento-trending   { grid-column: span 12; }
+    .bento-support    { grid-column: span 12; }
+
+    /* ── Tablet (768-1023px) ── */
+    @media (max-width: 1023px) {
+        .bento-overview   { grid-column: span 6; }
+        .bento-news       { grid-column: span 6; }
+        .bento-heatmap    { grid-column: span 12; }
+        .bento-sentiment  { grid-column: span 12; }
+        .bento-trending   { grid-column: span 12; }
+        .bento-support    { grid-column: span 12; }
+    }
+
+    /* ── Mobile (<768px) ── */
+    @media (max-width: 767px) {
+        .bento-grid {
+            grid-template-columns: 1fr;
+            gap: 1em;
+        }
+        .bento-overview,
+        .bento-news,
+        .bento-heatmap,
+        .bento-sentiment,
+        .bento-trending,
+        .bento-support {
+            grid-column: span 1;
+        }
+    }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Heatmap Toggle (inside card header)                     ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    .heatmap-toggle {
+        display: flex;
+        gap: 0;
+        background: var(--pp-overlay-5);
+        border-radius: 8px;
+        padding: 3px;
+        flex-shrink: 0;
+    }
+    .heatmap-pill {
+        background: transparent;
+        border: none;
+        padding: 0.3em 0.7em;
+        font-size: 0.78em;
+        font-weight: 600;
+        color: var(--pp-overlay-50);
+        cursor: pointer;
+        border-radius: 6px;
+        transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+        margin: 0;
+        line-height: 1.4;
+    }
+    .heatmap-pill:hover {
+        color: var(--pp-text-secondary);
+    }
+    .heatmap-pill.active {
+        background: var(--pp-surface);
+        color: #1976d2;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Fade-in transition when heatmap data updates */
+    #heatmap-body {
+        transition: opacity 0.3s ease;
+    }
+    #heatmap-body.htmx-request {
+        opacity: 0.4;
+    }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Support the Panda widget (inside glass card)            ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    .bento-support .pw-body {
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 1.4em 1.8em;
+    }
+    .pw-top {
+        max-width: 520px;
+        margin: 0 auto 0.8em;
+        text-align: center;
+    }
+    .pw-header {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5em;
+        margin-bottom: 0.35em;
+    }
+    .pw-icon {
+        font-size: 1.2em;
+    }
+    .pw-title {
+        font-size: 1.05em;
+        color: var(--pp-text);
+    }
+    .pw-copy {
+        font-size: 0.82em;
+        color: var(--pp-text-secondary);
+        line-height: 1.5;
+        margin: 0 0 0.7em;
+    }
+    .pw-progress-track {
+        background: var(--pp-surface-hover);
+        border-radius: 999px;
+        height: 5px;
+        overflow: hidden;
+    }
+    .pw-progress-fill {
+        background: #22c55e;
+        height: 100%;
+        border-radius: 999px;
+        transition: width 0.6s ease;
+        animation: pw-pulse 2s ease-in-out infinite;
+    }
+    @keyframes pw-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+    .pw-progress-label {
+        font-size: 0.72em;
+        color: var(--pp-text-faint);
+        margin-top: 0.3em;
+        margin-bottom: 0;
+    }
+    .pw-tier-pills {
+        display: flex;
+        justify-content: center;
+        gap: 0.6em;
+        margin-bottom: 0.8em;
+        flex-wrap: wrap;
+    }
+    .pw-tier-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4em;
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border);
+        padding: 0.5em 1.2em;
+        border-radius: 999px;
+        font-size: 0.82em;
+        color: var(--pp-text);
+        text-decoration: none;
+        cursor: pointer;
+        transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .pw-tier-pill:hover {
+        border-color: #22c55e;
+        box-shadow: 0 2px 8px rgba(34, 197, 94, 0.12);
+    }
+    .pw-tier-pill strong {
+        font-weight: 700;
+    }
+    .pw-tier-popular {
+        border-color: #22c55e;
+        background: rgba(34, 197, 94, 0.06);
+    }
+    .pw-tier-onetime {
+        border-style: dashed;
+    }
+    .pw-tier-onetime:hover {
+        border-style: solid;
+    }
+    .pw-learn-more {
+        display: block;
+        text-align: center;
+        font-size: 0.75em;
+        color: var(--pp-text-muted);
+        text-decoration: none;
+        transition: color 0.15s;
+    }
+    .pw-learn-more:hover {
+        color: var(--pp-text);
+    }
+    @media (max-width: 640px) {
+        .bento-support .pw-body { padding: 1.2em 1em; }
+    }
+
+    /* ══════════════════════════════════════════════════════════════ */
+    /* ── Fade-in animation for bento cards                       ── */
+    /* ══════════════════════════════════════════════════════════════ */
+    @keyframes bentoFadeIn {
+        from { opacity: 0; transform: translateY(12px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    .glass-card {
+        animation: bentoFadeIn 0.4s ease both;
+    }
+    .glass-card:nth-child(1) { animation-delay: 0s; }
+    .glass-card:nth-child(2) { animation-delay: 0.05s; }
+    .glass-card:nth-child(3) { animation-delay: 0.1s; }
+    .glass-card:nth-child(4) { animation-delay: 0.15s; }
+    .glass-card:nth-child(5) { animation-delay: 0.2s; }
+    .glass-card:nth-child(6) { animation-delay: 0.25s; }
+</style>
+{% endblock %}

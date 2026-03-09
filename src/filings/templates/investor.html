@@ -17,87 +17,498 @@
     ]
 }
 </script>
-<script type="application/ld+json">
-{
-    "@context": "https://schema.org",
-    "@type": "Dataset",
-    "name": "{{ investor_name or fund.name }} — 13F Portfolio Holdings",
-    "description": "SEC 13F filing data for {{ fund.name }}, showing current portfolio positions, quarterly changes, and historical activity.",
-    "url": "https://paperpanda.io/holdings/{{ fund.cik }}",
-    "keywords": ["13F filings", "{{ investor_name or fund.name }}", "{{ fund.name }}", "portfolio holdings", "hedge fund"],
-    "creator": {
-        "@type": "Organization",
-        "name": "PaperPanda",
-        "url": "https://paperpanda.io"
-    },
-    "variableMeasured": [
-        {"@type": "PropertyValue", "name": "Total Portfolio Value (USD)", "value": "{{ fund.total_value }}"},
-        {"@type": "PropertyValue", "name": "Number of Holdings", "value": "{{ fund.total_holdings }}"}
-    ]
-}
-</script>
+{% endblock %}
+{% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
 {% endblock %}
 {% block content %}
 {% from "partials/ticker_link.html" import ticker_link %}
-<hgroup>
+<section class="fund-detail-shell">
+<div class="fund-detail-aurora fund-detail-aurora-one" aria-hidden="true"></div>
+<div class="fund-detail-aurora fund-detail-aurora-two" aria-hidden="true"></div>
+
+{# ── Hero ── #}
+<hgroup class="fund-detail-hero">
+    <p class="fund-detail-kicker">PaperPanda Fund Terminal</p>
     <h1>{% if investor_name %}{{ investor_name }}{% else %}{{ fund.name }}{% endif %}</h1>
     <p>{{ fund.name }} &middot; CIK: {{ fund.cik }} &middot;
        Report Period: {{ fund.report_period }} &middot; Filed: {{ fund.filing_date }}</p>
 </hgroup>
 
-{# ── SEO: Server-Rendered Portfolio Summary (visible to Googlebot) ── #}
-{% if seo_summary and seo_summary.top_holdings %}
-<style>
-    .inv-seo-summary {
-        margin-bottom: 1.5em;
-        padding-bottom: 1em;
-        border-bottom: 1px solid var(--pp-border-light);
-    }
-    .inv-seo-summary h2 {
-        font-size: 1.05em;
-        margin: 0 0 0.5em;
-    }
-    .inv-seo-summary p {
-        font-size: 0.88em;
-        line-height: 1.6;
-        color: var(--pp-text-secondary);
-        margin: 0.4em 0;
-    }
-    .inv-seo-summary a {
-        color: var(--pp-link);
-        text-decoration: none;
-        font-weight: 600;
-    }
-    .inv-seo-summary a:hover { text-decoration: underline; }
-</style>
-<section class="inv-seo-summary">
-    <h2>{{ investor_name or fund.name }} — 13F Portfolio Summary</h2>
-    <p>
-        {{ investor_name or fund.name }} manages a
-        <strong>
-            {% if seo_summary.portfolio_value >= 1e9 %}${{ "%.1f"|format(seo_summary.portfolio_value / 1e9) }} billion
-            {% elif seo_summary.portfolio_value >= 1e6 %}${{ "%.0f"|format(seo_summary.portfolio_value / 1e6) }} million
-            {% else %}${{ "{:,.0f}".format(seo_summary.portfolio_value) }}{% endif %}
-        </strong>
-        portfolio across <strong>{{ seo_summary.num_holdings }}</strong> positions
-        as of {{ seo_summary.report_period }}.
-        Top holdings include
-        {% for h in seo_summary.top_holdings %}
-            {% if h.ticker %}<a href="/stock/{{ h.ticker }}">{{ h.ticker }}</a>{% else %}{{ h.issuer }}{% endif %}
-            ({{ "%.1f"|format(h.pct) }}%){% if not loop.last %}, {% else %}.{% endif %}
-        {% endfor %}
-    </p>
-    {% if seo_summary.new_buys or seo_summary.sold or seo_summary.adds or seo_summary.reduces %}
-    <p>
-        In the latest quarter,
-        {% if seo_summary.new_buys %}{{ investor_name or fund.name }} initiated <strong>{{ seo_summary.new_buys }}</strong> new position{{ "s" if seo_summary.new_buys != 1 }}{% endif %}{% if seo_summary.new_buys and (seo_summary.adds or seo_summary.sold or seo_summary.reduces) %}, {% endif %}{% if seo_summary.adds %}added to <strong>{{ seo_summary.adds }}</strong> existing position{{ "s" if seo_summary.adds != 1 }}{% endif %}{% if seo_summary.adds and (seo_summary.sold or seo_summary.reduces) %}, {% endif %}{% if seo_summary.reduces %}reduced <strong>{{ seo_summary.reduces }}</strong> position{{ "s" if seo_summary.reduces != 1 }}{% endif %}{% if seo_summary.reduces and seo_summary.sold %}, and {% endif %}{% if seo_summary.sold %}exited <strong>{{ seo_summary.sold }}</strong> position{{ "s" if seo_summary.sold != 1 }} entirely{% endif %}.
-    </p>
-    {% endif %}
-</section>
+{# ── Tab Navigation ── #}
+<div class="fund-nav-shell">
+    <nav>
+        <ul class="fund-nav-list">
+            <li>
+                <button id="fund-tab-portfolio-btn"
+                        class="fund-tab active"
+                        onclick="switchFundTab('portfolio')">
+                    Portfolio
+                </button>
+            </li>
+            <li>
+                <button id="fund-tab-changes-btn"
+                        class="fund-tab"
+                        onclick="switchFundTab('changes')">
+                    Position Changes
+                </button>
+            </li>
+            <li>
+                <button id="fund-tab-deployment-btn"
+                        class="fund-tab"
+                        onclick="switchFundTab('deployment')">
+                    Capital Deployed
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Tab: Portfolio ── #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="fund-tab-portfolio" class="fund-tab-content active">
+
+    {# ── Portfolio Donut Chart ── #}
+    <div class="fund-glass-card" id="portfolio-chart-card">
+        <div class="fund-card-header">Portfolio Concentration</div>
+        <div class="fund-card-sub">Top 10 holdings by weight &mdash; hover for cross-investor insights</div>
+        <div class="chart-wrapper">
+            <div class="chart-container" id="portfolio-donut"></div>
+            <div class="chart-legend" id="portfolio-legend">
+                <div class="chart-empty" id="portfolio-chart-loading">
+                    <span aria-busy="true">Loading chart data...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Holdings Table ── #}
+    <div class="fund-glass-card fund-card-flush">
+        <header class="fund-card-head">
+            <div>
+                <strong class="fund-card-header">Holdings</strong>
+                <span class="fund-card-sub" style="display:inline; margin-left: 0.5rem;">
+                    Total: ${{ "{:,.0f}".format(fund.total_value) }} &middot; {{ fund.total_holdings }} positions
+                </span>
+            </div>
+        </header>
+
+        <div class="holdings-fade{% if holdings | length <= 10 %} expanded{% endif %}" id="holdings-table-wrap">
+        <div class="pp-table-wrap">
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th data-sort="text">Ticker</th>
+                    <th data-sort="text">Issuer</th>
+                    <th data-sort="text">Class</th>
+                    <th class="text-right" data-sort="number">% of Portfolio</th>
+                    <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
+                    <th class="text-right" data-sort="number">Shares</th>
+                    <th data-sort="activity">Activity</th>
+                    <th class="text-right" data-sort="number">Share Change</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for h in holdings %}
+                <tr{% if loop.index > 10 %} class="holding-overflow"{% endif %}>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ ticker_link(h.ticker, h.cusip) }}</td>
+                    <td><strong>{{ h.issuer_name }}</strong></td>
+                    <td class="text-small">{{ h.title_of_class }}</td>
+                    <td class="text-right">{{ "%.1f"|format(h.pct_of_portfolio) }}%</td>
+                    <td class="text-right">${{ "{:,.0f}".format(h.value) }}</td>
+                    <td class="text-right">{{ "{:,}".format(h.shares) }}</td>
+                    <td>
+                        {% if h.activity == "NEW BUY" %}
+                            <span class="badge badge-new">NEW BUY</span>
+                        {% elif h.activity == "ADD" %}
+                            <span class="badge badge-add">ADD</span>
+                        {% elif h.activity == "REDUCE" %}
+                            <span class="badge badge-reduce">REDUCE</span>
+                        {% elif h.activity == "SOLD" %}
+                            <span class="badge badge-sold">SOLD</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if h.share_change != 0 %}
+                            <span class="{% if h.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                {{ "{:+,}".format(h.share_change) }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        </div>
+
+        {% if holdings | length > 10 %}
+        <button class="holdings-expand-btn" id="holdings-expand" onclick="toggleHoldings(this)">
+            <span>View All {{ holdings | length }} Holdings</span>
+            <span class="holdings-expand-arrow">&#9660;</span>
+        </button>
+        {% endif %}
+    </div>
+
+</div>{# end fund-tab-portfolio #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Tab: Position Changes ── #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="fund-tab-changes" class="fund-tab-content">
+
+{% if quarterly_changes %}
+<div class="fund-glass-card fund-card-flush">
+    <header class="fund-card-head">
+        <div>
+            <strong class="fund-card-header">Position Changes</strong>
+            <span class="fund-card-sub" style="display:inline; margin-left: 0.5rem;">
+                {{ quarterly_changes | length }} quarter{{ "s" if quarterly_changes | length != 1 else "" }} available
+            </span>
+        </div>
+    </header>
+
+    {# ── Quarter Tabs ── #}
+    <div style="padding: 0 1rem;">
+        <nav>
+            <ul class="fund-quarter-nav">
+                {% for q in quarterly_changes %}
+                <li>
+                    <button class="quarter-tab{% if loop.first %} active{% endif %}"
+                            onclick="switchChangeQuarter({{ loop.index0 }})"
+                            data-quarter-idx="{{ loop.index0 }}">
+                        {{ q.period }}
+                        <span class="text-muted text-small" style="font-weight: normal; display: block; font-size: 0.75em;">
+                            {{ q.changes | length }} trade{{ "s" if q.changes | length != 1 else "" }}
+                        </span>
+                    </button>
+                </li>
+                {% endfor %}
+            </ul>
+        </nav>
+    </div>
+
+    {# ── Quarter Panels ── #}
+    {% for q in quarterly_changes %}
+    <div class="quarter-panel{% if loop.first %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
+        {% if q.changes | length == 0 %}
+            <p class="text-muted" style="text-align: center; padding: 2em 0; font-size: 0.95em;">
+                No trades reported for this period.
+            </p>
+        {% else %}
+        <div class="pp-table-wrap">
+        <table class="inv-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th data-sort="text">Ticker</th>
+                    <th data-sort="text">Issuer</th>
+                    <th data-sort="activity">Action</th>
+                    <th class="text-right" data-sort="number">Share Change</th>
+                    <th class="text-right" data-sort="number">% Change</th>
+                    <th class="text-right" data-sort="number">Shares Held</th>
+                    <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in q.changes %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>
+                        {% if c.ticker %}
+                            <a href="/stock/{{ c.ticker }}"><strong>{{ c.ticker }}</strong></a>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td><strong>{{ c.issuer }}</strong></td>
+                    <td>
+                        {% if c.status == "NEW" %}
+                            <span class="badge badge-new">NEW BUY</span>
+                        {% elif c.status == "INCREASED" %}
+                            <span class="badge badge-add">ADD</span>
+                        {% elif c.status == "DECREASED" %}
+                            <span class="badge badge-reduce">REDUCE</span>
+                        {% elif c.status == "CLOSED" %}
+                            <span class="badge badge-sold">SOLD</span>
+                        {% else %}
+                            <span class="text-muted">{{ c.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if c.share_change != 0 %}
+                            <span class="{% if c.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                {{ "{:+,}".format(c.share_change) }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if c.status == "NEW" %}
+                            <span class="activity-add">New</span>
+                        {% elif c.status == "CLOSED" %}
+                            <span class="activity-reduce">Exit</span>
+                        {% elif c.previous_shares and c.previous_shares > 0 %}
+                            {% set pct_chg = ((c.current_shares - c.previous_shares) / c.previous_shares * 100) %}
+                            <span class="{% if pct_chg > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                {{ "%+.1f"|format(pct_chg) }}%
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if c.current_shares %}
+                            {{ "{:,}".format(c.current_shares) }}
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if c.current_value %}
+                            ${{ "{:,.0f}".format(c.current_value) }}
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+</div>{# end fund-glass-card #}
+{% else %}
+<div class="fund-glass-card" style="padding: 2rem; text-align: center;">
+    <p class="text-muted">No quarterly position change data available for this fund.</p>
+</div>
 {% endif %}
 
+</div>{# end fund-tab-changes #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Tab: Capital Deployed ── #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="fund-tab-deployment" class="fund-tab-content">
+    <div id="deployment-card-slot"
+         hx-get="/api/deployment/{{ fund.cik }}"
+         hx-trigger="revealed"
+         hx-swap="innerHTML">
+        <div class="fund-glass-card" style="padding: 2rem; text-align: center;">
+            <p aria-busy="true"><span class="spinner"></span> Loading deployment data...</p>
+        </div>
+    </div>
+</div>{# end fund-tab-deployment #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Styles ── #}
+{# ══════════════════════════════════════════════════════════════════ #}
 <style>
-    /* ── Table styling: Paper Panda design ── */
+    main.container {
+        max-width: 1240px !important;
+        width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+
+    /* ── Shell & Aurora ── */
+    .fund-detail-shell {
+        --fund-detail-ink: #0f172a;
+        --fund-detail-accent: #0d9488;
+        position: relative;
+        isolation: isolate;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        padding-bottom: 2rem;
+    }
+    .fund-detail-aurora {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(56px);
+        opacity: 0.56;
+        pointer-events: none;
+        z-index: -1;
+    }
+    .fund-detail-aurora-one {
+        width: min(36vw, 460px);
+        height: min(32vw, 400px);
+        top: -80px;
+        left: -90px;
+        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.36), rgba(13, 148, 136, 0.08) 72%);
+    }
+    .fund-detail-aurora-two {
+        width: min(32vw, 420px);
+        height: min(28vw, 360px);
+        top: 40px;
+        right: -70px;
+        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.22), rgba(194, 65, 12, 0.08) 72%);
+    }
+
+    /* ── Hero ── */
+    .fund-detail-hero {
+        text-align: left;
+        margin: 0 auto 1rem;
+        max-width: 1140px;
+        border-radius: 24px;
+        padding: 1.2rem 1.4rem 1.1rem;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background:
+            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+    .fund-detail-kicker {
+        margin: 0 0 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.62);
+    }
+    .fund-detail-hero h1 {
+        margin: 0;
+        font-size: clamp(1.7rem, 3.8vw, 2.8rem);
+        letter-spacing: -0.03em;
+        line-height: 1.05;
+        color: var(--fund-detail-ink);
+        font-family: "Fraunces", Georgia, serif;
+        font-weight: 700;
+    }
+    .fund-detail-hero p {
+        margin-top: 0.55rem;
+        color: rgba(15, 23, 42, 0.72);
+        font-size: 0.93rem;
+    }
+
+    /* ── Tab nav shell ── */
+    .fund-nav-shell {
+        max-width: 1140px;
+        margin: 0 auto 1.2rem;
+        padding: 0.5rem;
+        border-radius: 16px;
+        border: 1px solid rgba(13, 148, 136, 0.2);
+        background: rgba(255, 255, 255, 0.62);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+    .fund-nav-list {
+        list-style: none;
+        display: flex;
+        gap: 0.42rem;
+        padding: 0 0 0 0.5rem;
+        margin: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    button.fund-tab {
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 0.5rem 1rem;
+        margin: 0;
+        background: transparent;
+        cursor: pointer;
+        font-size: 0.87rem;
+        font-weight: 700;
+        white-space: nowrap;
+        color: rgba(15, 23, 42, 0.62);
+        transition: all 0.16s ease;
+    }
+    button.fund-tab:hover {
+        color: var(--fund-detail-ink);
+        border-color: rgba(13, 148, 136, 0.24);
+        background: rgba(13, 148, 136, 0.08);
+    }
+    button.fund-tab.active {
+        color: #fff;
+        border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
+    }
+    .fund-tab-content { display: none; max-width: 1140px; margin: 0 auto; }
+    .fund-tab-content.active { display: block; }
+
+    /* ── Glass card surface ── */
+    .fund-glass-card {
+        border-radius: 18px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+        overflow: hidden;
+        margin-bottom: 1.2rem;
+        padding: 1.35rem;
+    }
+    .fund-glass-card.fund-card-flush {
+        padding: 0;
+    }
+    .fund-card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.8rem;
+        padding: 1rem 1.25rem 0.85rem;
+    }
+    .fund-card-header {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--fund-detail-ink);
+    }
+    .fund-card-sub {
+        font-size: 0.83rem;
+        color: rgba(15, 23, 42, 0.62);
+        margin-top: 0.25rem;
+        display: block;
+    }
+
+    /* ── Quarter nav (underline style, scrollable) ── */
+    .fund-quarter-nav {
+        list-style: none;
+        display: flex;
+        gap: 0;
+        padding: 0;
+        margin: 0 0 0 0;
+        border-bottom: 2px solid rgba(15, 23, 42, 0.08);
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .quarter-tab {
+        background: transparent;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.45em 1.1em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.85em;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.55);
+        transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+        text-align: center;
+    }
+    .quarter-tab:hover { color: var(--fund-detail-ink); }
+    .quarter-tab.active {
+        color: #0d9488;
+        border-bottom-color: #0d9488;
+    }
+    .quarter-panel { display: none; }
+    .quarter-panel.active { display: block; }
+
+    /* ── Table styling ── */
     .inv-table {
         width: 100%;
         table-layout: auto;
@@ -111,7 +522,7 @@
         text-transform: uppercase;
         letter-spacing: 0.06em;
         color: var(--pp-text-muted);
-        background: var(--pp-surface-alt);
+        background: rgba(15, 23, 42, 0.03);
         border-bottom: 1px solid var(--pp-border);
         white-space: nowrap;
         vertical-align: middle;
@@ -128,7 +539,7 @@
         transition: background-color 0.15s ease;
     }
     .inv-table tbody tr:hover {
-        background-color: var(--pp-surface-alt);
+        background-color: rgba(15, 23, 42, 0.04);
     }
     .inv-table tbody tr:last-child td {
         border-bottom: none;
@@ -136,9 +547,7 @@
 
     /* ── Holdings overflow rows + fade ── */
     .holding-overflow { display: none; }
-    .holdings-fade {
-        position: relative;
-    }
+    .holdings-fade { position: relative; }
     .holdings-fade::after {
         content: '';
         position: absolute;
@@ -155,120 +564,39 @@
         height: 0;
     }
 
-    /* ── Holdings expand button (matches stock page) ── */
+    /* ── Expand button ── */
     .holdings-expand-btn {
-        background: none;
-        border: 1px solid var(--pp-overlay-10);
-        border-radius: 6px;
-        padding: 0.4em 1.2em;
-        cursor: pointer;
-        font-size: 0.85em;
-        color: var(--pp-text-muted);
         display: flex;
         align-items: center;
-        gap: 0.4em;
-        margin: 0.5em auto 0;
-        transition: background 0.15s, color 0.15s;
+        justify-content: center;
+        gap: 0.45em;
+        width: 100%;
+        padding: 0.72rem 1rem;
+        border: none;
+        border-top: 1px solid var(--pp-border-light);
+        background: rgba(13, 148, 136, 0.06);
+        color: var(--fund-detail-ink);
+        font-size: 0.85rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.16s ease, color 0.16s ease;
+        margin: 0;
+        border-radius: 0 0 18px 18px;
+        font-family: inherit;
     }
     .holdings-expand-btn:hover {
-        background: var(--pp-overlay-5);
-        color: var(--pp-text-secondary);
+        background: rgba(13, 148, 136, 0.13);
+        color: #0d9488;
     }
     .holdings-expand-arrow {
         display: inline-block;
-        transition: transform 0.2s;
-        font-size: 0.75em;
+        font-size: 0.72em;
+        transition: transform 0.22s ease;
+        opacity: 0.7;
     }
-    .holdings-expand-arrow.expanded {
-        transform: rotate(180deg);
-    }
+    .holdings-expand-arrow.expanded { transform: rotate(180deg); }
 
-    /* ── Quarter tabs (matches stock page) ── */
-    .quarter-tab {
-        background: none;
-        border: none;
-        border-bottom: 3px solid transparent;
-        padding: 0.4em 1em;
-        margin: 0;
-        margin-bottom: -2px;
-        cursor: pointer;
-        font-size: 0.85em;
-        font-weight: 600;
-        color: var(--pp-overlay-50);
-        transition: color 0.15s, border-color 0.15s;
-        white-space: nowrap;
-        text-align: center;
-    }
-    .quarter-tab:hover { color: var(--pp-text-secondary); }
-    .quarter-tab.active {
-        color: #ef4444;
-        border-bottom-color: #ef4444;
-    }
-    .quarter-panel { display: none; }
-    .quarter-panel.active { display: block; }
-
-    /* ── Skeleton loader for quarter content ── */
-    .skeleton-row {
-        height: 20px;
-        background: linear-gradient(90deg, var(--pp-overlay-5) 25%, var(--pp-overlay-10) 50%, var(--pp-overlay-5) 75%);
-        background-size: 200% 100%;
-        animation: skeletonShimmer 1.5s infinite ease-in-out;
-        border-radius: 4px;
-        margin-bottom: 0.75em;
-    }
-    .skeleton-row:nth-child(odd) { width: 90%; }
-    .skeleton-row:nth-child(even) { width: 70%; }
-    @keyframes skeletonShimmer {
-        0% { background-position: 200% 0; }
-        100% { background-position: -200% 0; }
-    }
-
-    /* ── Position Changes section ── */
-    .position-changes-section {
-        margin-top: 2.5em;
-    }
-    .position-changes-header {
-        font-size: 1.1em;
-        font-weight: 700;
-        margin-bottom: 0.2em;
-    }
-    .position-changes-sub {
-        font-size: 0.82em;
-        color: var(--pp-overlay-50);
-        margin-bottom: 1em;
-    }
-
-    /* ── Responsive ── */
-    @media (max-width: 768px) {
-        .inv-table thead th,
-        .inv-table tbody td {
-            padding: 10px 12px; font-size: 13px;
-        }
-    }
-</style>
-
-{# ── Portfolio Donut Chart (lazy-loaded) ── #}
-<style>
-    .chart-card {
-        border: 1px solid var(--pp-overlay-8);
-        border-radius: 12px;
-        padding: 1.5em;
-        margin-bottom: 1.5em;
-        background: var(--pp-surface);
-        box-shadow: var(--pp-card-shadow-sm);
-        overflow: visible;
-    }
-    .chart-card-header {
-        font-size: 1.05em;
-        font-weight: 700;
-        margin-bottom: 0.2em;
-        color: var(--pp-text);
-    }
-    .chart-card-sub {
-        font-size: 0.82em;
-        color: var(--pp-overlay-50);
-        margin-bottom: 1em;
-    }
+    /* ── Chart card specifics ── */
     .chart-wrapper {
         display: flex;
         align-items: center;
@@ -296,9 +624,7 @@
         border-radius: 6px;
         transition: background 0.15s ease;
     }
-    .chart-legend-item:hover {
-        background: var(--pp-overlay-5);
-    }
+    .chart-legend-item:hover { background: rgba(15, 23, 42, 0.04); }
     .chart-legend-dot {
         width: 10px;
         height: 10px;
@@ -311,31 +637,128 @@
         min-width: 50px;
     }
     .chart-legend-pct {
-        color: var(--pp-overlay-50);
+        color: rgba(15, 23, 42, 0.5);
         margin-left: auto;
         font-size: 0.9em;
     }
     .chart-empty {
         text-align: center;
         padding: 3em 1em;
-        color: var(--pp-overlay-40);
+        color: rgba(15, 23, 42, 0.4);
         font-size: 0.95em;
+    }
+
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .fund-detail-shell {
+        --fund-detail-ink: #e2e8f0;
+    }
+    :root[data-theme="dark"] .fund-detail-hero {
+        border-color: rgba(148, 163, 184, 0.22);
+        background:
+            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
+    }
+    :root[data-theme="dark"] .fund-detail-kicker,
+    :root[data-theme="dark"] .fund-detail-hero p {
+        color: rgba(226, 232, 240, 0.72);
+    }
+    :root[data-theme="dark"] .fund-nav-shell {
+        border-color: rgba(45, 212, 191, 0.2);
+        background: rgba(15, 23, 42, 0.72);
+    }
+    :root[data-theme="dark"] button.fund-tab {
+        color: rgba(226, 232, 240, 0.72);
+    }
+    :root[data-theme="dark"] button.fund-tab:hover {
+        color: #e2e8f0;
+        background: rgba(45, 212, 191, 0.12);
+        border-color: rgba(45, 212, 191, 0.26);
+    }
+    :root[data-theme="dark"] .fund-glass-card {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+    :root[data-theme="dark"] .fund-card-sub {
+        color: rgba(148, 163, 184, 0.84);
+    }
+    :root[data-theme="dark"] .inv-table thead th {
+        background: rgba(148, 163, 184, 0.08);
+        color: rgba(148, 163, 184, 0.84);
+    }
+    :root[data-theme="dark"] .inv-table tbody tr:hover {
+        background-color: rgba(148, 163, 184, 0.08);
+    }
+    :root[data-theme="dark"] .quarter-tab {
+        color: rgba(226, 232, 240, 0.55);
+    }
+    :root[data-theme="dark"] .quarter-tab:hover {
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .quarter-tab.active {
+        color: #2dd4bf;
+        border-bottom-color: #2dd4bf;
+    }
+    :root[data-theme="dark"] .fund-quarter-nav {
+        border-bottom-color: rgba(148, 163, 184, 0.18);
+    }
+    :root[data-theme="dark"] .holdings-expand-btn {
+        background: rgba(45, 212, 191, 0.08);
+        color: var(--fund-detail-ink);
+    }
+    :root[data-theme="dark"] .holdings-expand-btn:hover {
+        background: rgba(45, 212, 191, 0.15);
+        color: #2dd4bf;
+    }
+    :root[data-theme="dark"] .chart-legend-item:hover {
+        background: rgba(148, 163, 184, 0.1);
+    }
+    :root[data-theme="dark"] .chart-legend-pct {
+        color: rgba(226, 232, 240, 0.5);
+    }
+    :root[data-theme="dark"] .chart-empty {
+        color: rgba(226, 232, 240, 0.4);
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+        main.container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        .fund-detail-hero {
+            border-radius: 20px;
+            padding: 1rem 1rem 0.9rem;
+        }
+        .inv-table thead th,
+        .inv-table tbody td {
+            padding: 10px 12px;
+            font-size: 13px;
+        }
+        .chart-container {
+            width: 100%;
+            max-width: 380px;
+            height: 360px;
+        }
+    }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+        .fund-detail-hero,
+        .fund-tab,
+        .fund-glass-card,
+        .quarter-tab,
+        .holdings-expand-btn,
+        .holdings-expand-arrow,
+        .holdings-fade::after {
+            animation: none !important;
+            transition: none !important;
+        }
     }
 </style>
 
-<div class="chart-card" id="portfolio-chart-card">
-    <div class="chart-card-header">Portfolio Concentration</div>
-    <div class="chart-card-sub">Top 10 holdings by weight - hover for cross-investor insights</div>
-    <div class="chart-wrapper">
-        <div class="chart-container" id="portfolio-donut"></div>
-        <div class="chart-legend" id="portfolio-legend">
-            <div class="chart-empty" id="portfolio-chart-loading">
-                <span aria-busy="true">Loading chart data...</span>
-            </div>
-        </div>
-    </div>
-</div>
-
+{# ── Chart script (unchanged from original) ── #}
 <script>
 (function() {
     var chartEl = document.getElementById('portfolio-donut');
@@ -356,12 +779,10 @@
                 return;
             }
 
-            // Calculate "Other" slice
             var top10Pct = 0;
             for (var i = 0; i < data.length; i++) top10Pct += data[i].pct;
             var otherPct = Math.max(0, 100 - top10Pct);
 
-            // Build ECharts data
             var chartData = data.map(function(d, idx) {
                 return {
                     name: d.ticker,
@@ -396,25 +817,18 @@
                     formatter: function(params) {
                         var d = params.data._raw;
                         if (!d) return '<strong>' + params.name + '</strong><br/>Weight: ' + params.value.toFixed(1) + '%';
-
                         var html = '<strong style="font-size: 1.15em;">' + d.ticker + '</strong>'
                             + '<span style="opacity: 0.6; margin-left: 6px;">' + d.pct.toFixed(1) + '%</span>'
                             + '<br/><span style="opacity: 0.7;">' + d.issuer + '</span>';
-
-                        // Value
                         var valStr = d.value >= 1e9
                             ? '$' + (d.value / 1e9).toFixed(1) + 'B'
                             : '$' + (d.value / 1e6).toFixed(0) + 'M';
                         html += '<br/><br/><span style="opacity: 0.5;">Value:</span> ' + valStr;
-
-                        // Activity + Quarter
                         var actColor = '#fff';
                         if (d.activity === 'NEW BUY' || d.activity === 'ADD') actColor = '#66bb6a';
                         else if (d.activity === 'REDUCE' || d.activity === 'SOLD') actColor = '#ef5350';
                         html += '<br/><span style="opacity: 0.5;">Activity:</span> <span style="color:' + actColor + ';">' + d.activity + '</span>';
                         if (d.quarter) html += ' <span style="opacity: 0.4;">(' + d.quarter + ')</span>';
-
-                        // Cross-investor
                         if (d.also_held_by > 0) {
                             html += '<br/><br/><span style="opacity: 0.5;">Also held by</span> <strong>' + d.also_held_by + '</strong> <span style="opacity: 0.5;">other superinvestor' + (d.also_held_by > 1 ? 's' : '') + '</span>';
                             var names = d.owner_names || [];
@@ -434,26 +848,16 @@
                     center: ['50%', '50%'],
                     avoidLabelOverlap: true,
                     padAngle: 2,
-                    itemStyle: {
-                        borderRadius: 6,
-                        borderColor: 'transparent',
-                        borderWidth: 2
-                    },
+                    itemStyle: { borderRadius: 6, borderColor: 'transparent', borderWidth: 2 },
                     label: { show: false },
                     emphasis: {
                         scaleSize: 8,
-                        label: {
-                            show: true,
-                            fontSize: 14,
-                            fontWeight: 'bold',
-                            formatter: '{b}\n{d}%'
-                        }
+                        label: { show: true, fontSize: 14, fontWeight: 'bold', formatter: '{b}\n{d}%' }
                     },
                     data: chartData
                 }]
             });
 
-            // Build custom legend
             var legendHtml = '';
             for (var j = 0; j < data.length; j++) {
                 var d = data[j];
@@ -472,13 +876,10 @@
             }
             legendEl.innerHTML = legendHtml;
 
-            // Legend hover highlights chart slice
             legendEl.querySelectorAll('.chart-legend-item').forEach(function(item) {
                 item.addEventListener('mouseenter', function() {
                     var idx = parseInt(item.dataset.idx);
-                    if (!isNaN(idx)) {
-                        chart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: idx });
-                    }
+                    if (!isNaN(idx)) chart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: idx });
                 });
                 item.addEventListener('mouseleave', function() {
                     chart.dispatchAction({ type: 'downplay', seriesIndex: 0 });
@@ -491,15 +892,13 @@
                 });
             });
 
-            // Click chart slice -> stock page
             chart.on('click', function(params) {
                 var d = params.data._raw;
                 if (d && d.ticker) window.location.href = '/stock/' + d.ticker;
             });
 
-            // Responsive
             if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
-            }); // end requireECharts
+            });
         })
         .catch(function() {
             legendEl.innerHTML = '<div class="chart-empty">Failed to load chart data</div>';
@@ -507,218 +906,35 @@
 })();
 </script>
 
-{# ── Fund Deployment Card (lazy-loaded via HTMX) ── #}
-<div id="deployment-card-slot"
-     hx-get="/api/deployment/{{ fund.cik }}"
-     hx-trigger="load"
-     hx-swap="innerHTML">
-</div>
-
-{# ══════════════════════════════════════════════════════════════════ #}
-{# ── Holdings Table: Top 10 Preview with Expand                     #}
-{# ══════════════════════════════════════════════════════════════════ #}
-<article>
-    <header>
-        <strong>Total Value:</strong> ${{ "{:,.0f}".format(fund.total_value) }}
-        &nbsp;&middot;&nbsp;
-        <strong>Total Holdings:</strong> {{ fund.total_holdings }}
-    </header>
-
-    <div class="holdings-fade{% if holdings | length <= 10 %} expanded{% endif %}" id="holdings-table-wrap">
-    <div class="pp-table-wrap">
-    <table class="inv-table">
-        <thead>
-            <tr>
-                <th>#</th>
-                <th data-sort="text">Ticker</th>
-                <th data-sort="text">Issuer</th>
-                <th data-sort="text">Class</th>
-                <th class="text-right" data-sort="number">% of Portfolio</th>
-                <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
-                <th class="text-right" data-sort="number">Shares</th>
-                <th data-sort="activity">Activity</th>
-                <th class="text-right" data-sort="number">Share Change</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for h in holdings %}
-            <tr{% if loop.index > 10 %} class="holding-overflow"{% endif %}>
-                <td>{{ loop.index }}</td>
-                <td>{{ ticker_link(h.ticker, h.cusip) }}</td>
-                <td><strong>{{ h.issuer_name }}</strong></td>
-                <td class="text-small">{{ h.title_of_class }}</td>
-                <td class="text-right">{{ "%.1f"|format(h.pct_of_portfolio) }}%</td>
-                <td class="text-right">${{ "{:,.0f}".format(h.value) }}</td>
-                <td class="text-right">{{ "{:,}".format(h.shares) }}</td>
-                <td>
-                    {% if h.activity == "NEW BUY" %}
-                        <span class="badge badge-new">NEW BUY</span>
-                    {% elif h.activity == "ADD" %}
-                        <span class="badge badge-add">ADD</span>
-                    {% elif h.activity == "REDUCE" %}
-                        <span class="badge badge-reduce">REDUCE</span>
-                    {% elif h.activity == "SOLD" %}
-                        <span class="badge badge-sold">SOLD</span>
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                <td class="text-right">
-                    {% if h.share_change != 0 %}
-                        <span class="{% if h.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
-                            {{ "{:+,}".format(h.share_change) }}
-                        </span>
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    </div>{# end pp-table-wrap #}
-    </div>
-
-    {% if holdings | length > 10 %}
-    <button class="holdings-expand-btn" id="holdings-expand" onclick="toggleHoldings(this)">
-        <span>View All {{ holdings | length }} Holdings</span>
-        <span class="holdings-expand-arrow">&#9660;</span>
-    </button>
-    {% endif %}
-</article>
-
-{# ══════════════════════════════════════════════════════════════════ #}
-{# ── Position Changes: Quarterly Subtabs                            #}
-{# ══════════════════════════════════════════════════════════════════ #}
-{% if quarterly_changes %}
-<div class="position-changes-section">
-    <article>
-        <header>
-            <div>
-                <div class="position-changes-header">Position Changes</div>
-                <div class="position-changes-sub">
-                    Buys and sells by quarter &middot; {{ quarterly_changes | length }} quarter{{ "s" if quarterly_changes | length != 1 else "" }} available
-                </div>
-            </div>
-        </header>
-
-        {# ── Quarter Tabs (left=newest, right=oldest) ── #}
-        <nav>
-            <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid var(--pp-overlay-10); overflow-x: auto;">
-                {% for q in quarterly_changes %}
-                <li>
-                    <button class="quarter-tab{% if loop.first %} active{% endif %}"
-                            onclick="switchChangeQuarter({{ loop.index0 }})"
-                            data-quarter-idx="{{ loop.index0 }}">
-                        {{ q.period }}
-                        <span class="text-muted text-small" style="font-weight: normal; display: block; font-size: 0.75em;">
-                            {{ q.changes | length }} trade{{ "s" if q.changes | length != 1 else "" }}
-                        </span>
-                    </button>
-                </li>
-                {% endfor %}
-            </ul>
-        </nav>
-
-        {# ── Quarter Panels ── #}
-        {% for q in quarterly_changes %}
-        <div class="quarter-panel{% if loop.first %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
-            {% if q.changes | length == 0 %}
-                <p class="text-muted" style="text-align: center; padding: 2em 0; font-size: 0.95em;">
-                    No trades reported for this period.
-                </p>
-            {% else %}
-            <div class="pp-table-wrap">
-            <table class="inv-table">
-                <thead>
-                    <tr>
-                        <th>#</th>
-                        <th data-sort="text">Ticker</th>
-                        <th data-sort="text">Issuer</th>
-                        <th data-sort="activity">Action</th>
-                        <th class="text-right" data-sort="number">Share Change</th>
-                        <th class="text-right" data-sort="number">% Change</th>
-                        <th class="text-right" data-sort="number">Shares Held</th>
-                        <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for c in q.changes %}
-                    <tr>
-                        <td>{{ loop.index }}</td>
-                        <td>
-                            {% if c.ticker %}
-                                <a href="/stock/{{ c.ticker }}"><strong>{{ c.ticker }}</strong></a>
-                            {% else %}
-                                <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                        <td><strong>{{ c.issuer }}</strong></td>
-                        <td>
-                            {% if c.status == "NEW" %}
-                                <span class="badge badge-new">NEW BUY</span>
-                            {% elif c.status == "INCREASED" %}
-                                <span class="badge badge-add">ADD</span>
-                            {% elif c.status == "DECREASED" %}
-                                <span class="badge badge-reduce">REDUCE</span>
-                            {% elif c.status == "CLOSED" %}
-                                <span class="badge badge-sold">SOLD</span>
-                            {% else %}
-                                <span class="text-muted">{{ c.status }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-right">
-                            {% if c.share_change != 0 %}
-                                <span class="{% if c.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
-                                    {{ "{:+,}".format(c.share_change) }}
-                                </span>
-                            {% else %}
-                                <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-right">
-                            {% if c.status == "NEW" %}
-                                <span class="activity-add">New</span>
-                            {% elif c.status == "CLOSED" %}
-                                <span class="activity-reduce">Exit</span>
-                            {% elif c.previous_shares and c.previous_shares > 0 %}
-                                {% set pct_chg = ((c.current_shares - c.previous_shares) / c.previous_shares * 100) %}
-                                <span class="{% if pct_chg > 0 %}activity-add{% else %}activity-reduce{% endif %}">
-                                    {{ "%+.1f"|format(pct_chg) }}%
-                                </span>
-                            {% else %}
-                                <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-right">
-                            {% if c.current_shares %}
-                                {{ "{:,}".format(c.current_shares) }}
-                            {% else %}
-                                <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                        <td class="text-right">
-                            {% if c.current_value %}
-                                ${{ "{:,.0f}".format(c.current_value) }}
-                            {% else %}
-                                <span class="text-muted">-</span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            </div>{# end pp-table-wrap #}
-            {% endif %}
-        </div>
-        {% endfor %}
-    </article>
-</div>
-{% endif %}
-
 {# ── Interaction Scripts ── #}
 <script>
 (function() {
+    // ── Tab switching ──
+    window.switchFundTab = function(tab) {
+        document.querySelectorAll('.fund-tab').forEach(function(btn) {
+            btn.classList.toggle('active', btn.id === 'fund-tab-' + tab + '-btn');
+        });
+        document.querySelectorAll('.fund-tab-content').forEach(function(panel) {
+            panel.classList.toggle('active', panel.id === 'fund-tab-' + tab);
+        });
+        if (window.initSortableTables) window.initSortableTables();
+        // Trigger HTMX reveal for lazy-loaded panels
+        var active = document.getElementById('fund-tab-' + tab);
+        if (active && window.htmx) htmx.trigger(active.querySelector('[hx-trigger*="revealed"]') || active, 'revealed');
+        var url = new URL(window.location);
+        url.searchParams.set('ftab', tab);
+        history.replaceState(null, '', url.toString());
+    };
+
+    // ── Restore tab from URL ──
+    (function() {
+        var params = new URLSearchParams(window.location.search);
+        var ftab = params.get('ftab');
+        if (ftab && document.getElementById('fund-tab-' + ftab)) {
+            switchFundTab(ftab);
+        }
+    })();
+
     // ── Holdings expand/collapse ──
     window.toggleHoldings = function(btn) {
         var rows = document.querySelectorAll('.holding-overflow');
@@ -759,4 +975,5 @@
     };
 })();
 </script>
+</section>
 {% endblock %}

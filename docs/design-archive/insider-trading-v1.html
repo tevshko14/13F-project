@@ -18,102 +18,131 @@
 </script>
 {% endblock %}
 {% block extra_head_scripts %}
-<link rel="preload" href="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" as="script">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
 {% endblock %}
 {% block content %}
-<section class="insider-shell">
-    <div class="insider-aurora insider-aurora-one" aria-hidden="true"></div>
-    <div class="insider-aurora insider-aurora-two" aria-hidden="true"></div>
+<hgroup>
+    <h1>Insider Trading Screener</h1>
+    <p>Real-time SEC Form 4 filings — insider buys and sells across all public companies.</p>
+</hgroup>
 
-    <header class="insider-hero">
-        <p class="insider-kicker">PaperPanda Signal Desk</p>
-        <h1>Insider Trading Screener</h1>
-        <p>Real-time SEC Form 4 flow across public companies, with quick separation of latest activity, net purchases, and net sales.</p>
-    </header>
+{# -- Sub-tabs: Latest / Purchases / Sales -- #}
+<div style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
+            <li>
+                <button id="insider-tab-all-btn"
+                        class="insider-tab active"
+                        onclick="switchInsiderTab('all')">
+                    Latest
+                </button>
+            </li>
+            <li>
+                <button id="insider-tab-buys-btn"
+                        class="insider-tab"
+                        onclick="switchInsiderTab('buys')">
+                    Purchases
+                </button>
+            </li>
+            <li>
+                <button id="insider-tab-sells-btn"
+                        class="insider-tab"
+                        onclick="switchInsiderTab('sells')">
+                    Sales
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
 
-    <div class="insider-nav-shell">
-        <nav>
-            <ul class="insider-nav-list">
-                <li>
-                    <button id="insider-tab-all-btn"
-                            class="insider-tab active"
-                            onclick="switchInsiderTab('all')">
-                        Latest
-                    </button>
-                </li>
-                <li>
-                    <button id="insider-tab-buys-btn"
-                            class="insider-tab"
-                            onclick="switchInsiderTab('buys')">
-                        Purchases
-                    </button>
-                </li>
-                <li>
-                    <button id="insider-tab-sells-btn"
-                            class="insider-tab"
-                            onclick="switchInsiderTab('sells')">
-                        Sales
-                    </button>
-                </li>
-            </ul>
-        </nav>
-    </div>
+<style>
+    button.insider-tab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: var(--pp-overlay-50);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    button.insider-tab:hover { color: var(--pp-text-secondary); }
+    button.insider-tab.active {
+        color: #ef4444;
+        border-bottom-color: #ef4444;
+    }
 
-    <div class="insider-period-bar">
-        <button class="insider-period active" data-period="" onclick="switchInsiderPeriod('')">This Quarter</button>
-        <button class="insider-period" data-period="today" onclick="switchInsiderPeriod('today')">Today</button>
-        <button class="insider-period" data-period="week" onclick="switchInsiderPeriod('week')">Last 7 Days</button>
-        <button class="insider-period" data-period="month" onclick="switchInsiderPeriod('month')">Last 30 Days</button>
-    </div>
+    /* Date period pills */
+    .insider-period-bar { display: flex; gap: 0.5em; margin-bottom: 1.5em; flex-wrap: wrap; }
+    .insider-period {
+        background: var(--pp-surface-alt); border: 1px solid var(--pp-border);
+        border-radius: 20px; padding: 0.3em 1em; cursor: pointer;
+        font-size: 0.82em; font-weight: 500; color: var(--pp-text-muted);
+        transition: all 0.15s ease;
+    }
+    .insider-period:hover { border-color: var(--pp-text-faint); color: var(--pp-text-secondary); }
+    .insider-period.active { background: #ef4444; color: #fff; border-color: #ef4444; }
+</style>
 
-    <article id="insider-chart-section" class="insider-chart-card" style="display: none;">
-        <header class="insider-chart-head">
-            <div>
-                <strong>Insider Momentum</strong>
-                <span class="text-muted">Top-5 Buys and Top-5 Sells by net dollar flow</span>
-            </div>
-            <button id="insider-chart-toggle-btn"
-                    class="secondary outline"
-                    style="font-size: 0.8em; padding: 0.25em 0.75em; margin: 0;"
-                    onclick="toggleInsiderChartView()">
-                Show Detailed View
-            </button>
-        </header>
-        <div class="insider-chart-wrap">
-            <canvas id="insiderMomentumChart"></canvas>
+{# -- Date period filter pills -- #}
+<div class="insider-period-bar">
+    <button class="insider-period active" data-period="" onclick="switchInsiderPeriod('')">This Quarter</button>
+    <button class="insider-period" data-period="today" onclick="switchInsiderPeriod('today')">Today</button>
+    <button class="insider-period" data-period="week" onclick="switchInsiderPeriod('week')">Last 7 Days</button>
+    <button class="insider-period" data-period="month" onclick="switchInsiderPeriod('month')">Last 30 Days</button>
+</div>
+
+{# -- Insider Momentum Chart -- #}
+<article id="insider-chart-section" style="display: none;">
+    <header style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <strong>Insider Momentum</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Top-5-Buys and Top-5-Sells by Net Dollar Flow
+            </span>
         </div>
-        <footer class="text-muted text-small insider-chart-foot">
-            Green = Purchases &middot; Red = Sales
-        </footer>
-    </article>
-
-    <div id="insider-trades-content" class="insider-results-card">
-        {% if trades %}
-        {% include "partials/insider_trades.html" %}
-        {% else %}
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading insider trades...
-        </p>
-        {% endif %}
+        <button id="insider-chart-toggle-btn"
+                class="secondary outline"
+                style="font-size: 0.8em; padding: 0.25em 0.75em; margin: 0;"
+                onclick="toggleInsiderChartView()">
+            Show Detailed View
+        </button>
+    </header>
+    <div style="position: relative; width: 100%; height: 350px;">
+        <canvas id="insiderMomentumChart"></canvas>
     </div>
-</section>
+    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.5em;">
+        Green = Purchases &middot; Red = Sales
+    </footer>
+</article>
+
+{# -- Trade table (server-rendered for SEO, JS refreshes on tab switch) -- #}
+<div id="insider-trades-content">
+    {% if trades %}
+    {% include "partials/insider_trades.html" %}
+    {% else %}
+    <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+        Loading insider trades...
+    </p>
+    {% endif %}
+</div>
 
 <script>
 (function() {
     var currentFilter = 'all';
     var currentPeriod = '';
-    var activeCacheKey = 'all:';
+    var activeCacheKey = 'all:';   /* composite key the tooltip reads from */
     var cache = {};
     var chartDataCache = {};
     var insiderChart = null;
     var chartView = 'simple';
-    var lastViewType = null;
-    var retried = {};
+    var lastViewType = null;   /* track simple/detailed for smooth updates */
+    var retried = {};           /* per-filter retry flag */
 
+    /* ── Number formatting ── */
     function fmtDollar(num) {
         if (num === 0) return '$0';
         var a = Math.abs(num);
@@ -124,6 +153,7 @@
         return sign + '$' + a.toLocaleString();
     }
 
+    /* ── Color palette (from stock.html) ── */
     function palette(darkHex, lightHex, count) {
         if (count === 0) return [];
         if (count === 1) return [darkHex];
@@ -140,6 +170,7 @@
     }
     function mix(a, b, t) { return Math.round(a + (b - a) * t); }
 
+    /* ── Canvas gradient helper for Chart.js ── */
     function makeVerticalGradient(ctx, colorTop, colorBottom) {
         var canvas = ctx.canvas || ctx;
         var gradient = canvas.getContext('2d').createLinearGradient(0, 0, 0, canvas.height);
@@ -148,6 +179,7 @@
         return gradient;
     }
 
+    /* ── Simple view: one green bar + one red bar per ticker ── */
     function buildSimpleData(chartData) {
         var canvas = document.getElementById('insiderMomentumChart');
         var buyGradient = canvas ? makeVerticalGradient(canvas, '#34d399', '#047857') : '#047857';
@@ -175,6 +207,7 @@
         };
     }
 
+    /* ── Detailed view: per-insider segments ── */
     function buildDetailedData(chartData) {
         var labels = chartData.map(function(d) { return d.ticker; });
         var datasets = [];
@@ -230,6 +263,7 @@
         return { labels: labels, datasets: datasets };
     }
 
+    /* ── Chart.js shared options ── */
     function getChartOptions() {
         var cs = getComputedStyle(document.documentElement);
         var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
@@ -251,7 +285,7 @@
                     grid: { display: false },
                     border: { display: false },
                     ticks: {
-                        font: { family: "'Space Grotesk', 'system-ui', sans-serif", weight: '600', size: 12 },
+                        font: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 12 },
                         color: axisColor,
                     },
                 },
@@ -261,12 +295,12 @@
                     title: {
                         display: true,
                         text: 'Total Dollar Value ($)',
-                        font: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 12, weight: '500' },
+                        font: { family: "'Inter', 'system-ui', sans-serif", size: 12, weight: '500' },
                         color: axisMuted,
                     },
                     ticks: {
                         callback: function(v) { return fmtDollar(v); },
-                        font: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 11 },
+                        font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
                         color: axisSecondary,
                     },
                     grid: {
@@ -284,14 +318,14 @@
                     display: chartView === 'detailed',
                     position: 'bottom',
                     labels: {
-                        font: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 11 },
+                        font: { family: "'Inter', 'system-ui', sans-serif", size: 11 },
                         color: legendColor,
                         boxWidth: 12, padding: 8,
                     },
                 },
                 tooltip: {
-                    titleFont: { family: "'Space Grotesk', 'system-ui', sans-serif", weight: '600', size: 13 },
-                    bodyFont: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 12 },
+                    titleFont: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 13 },
+                    bodyFont: { family: "'Inter', 'system-ui', sans-serif", size: 12 },
                     padding: 12,
                     callbacks: {
                         title: function(items) {
@@ -309,12 +343,16 @@
                             var insiders = d.insider_details || [];
                             var lines = [];
 
+                            /* Net Amount with consensus label */
                             var consensus = d.net_flow >= 0 ? 'Bullish Consensus' : 'Bearish Consensus';
                             var sign = d.net_flow >= 0 ? '+' : '';
                             lines.push('Net Amount: ' + sign + fmtDollar(d.net_flow) + ' (' + consensus + ')');
 
+                            /* Insider counts summary */
                             var sellers = insiders.filter(function(i) { return i.sell_value > 0; });
                             var buyers = insiders.filter(function(i) { return i.buy_value > 0; });
+                            var sellCount = sellers.reduce(function(s, i) { return s + i.count; }, 0);
+                            var buyCount = buyers.reduce(function(s, i) { return s + i.count; }, 0);
                             var parts = [];
                             if (sellers.length > 0) {
                                 parts.push(sellers.length + ' Insider' + (sellers.length !== 1 ? 's' : '') + ' Sold ' + fmtDollar(d.sell_value));
@@ -324,6 +362,7 @@
                             }
                             if (parts.length > 0) lines.push(parts.join(' | '));
 
+                            /* Top 3 contributors by total value */
                             lines.push('');
                             var sorted = insiders.slice().sort(function(a, b) {
                                 return (b.buy_value + b.sell_value) - (a.buy_value + a.sell_value);
@@ -340,6 +379,7 @@
                                 lines.push('  +' + (insiders.length - 3) + ' more');
                             }
 
+                            /* Date range */
                             if (d.date_range) {
                                 lines.push('');
                                 lines.push('Date Range: ' + d.date_range);
@@ -353,16 +393,13 @@
         };
     }
 
-    var _chartRetries = 0;
+    /* ── Render chart (guarded: Chart.js may still be loading) ── */
     function renderChart(chartData) {
         if (typeof Chart === 'undefined') {
-            if (_chartRetries < 10) {
-                _chartRetries++;
-                setTimeout(function() { renderChart(chartData); }, 300);
-            }
+            /* Lazy-load Chart.js on demand (works with hx-boost navigation) */
+            window.requireChartJS(function() { renderChart(chartData); });
             return;
         }
-        _chartRetries = 0;
 
         var section = document.getElementById('insider-chart-section');
         if (!chartData || chartData.length === 0) {
@@ -378,6 +415,7 @@
         var ctx = document.getElementById('insiderMomentumChart');
         if (!ctx) return;
 
+        /* Smooth update when view type hasn't changed and chart exists */
         if (insiderChart && lastViewType === chartView) {
             insiderChart.data.labels = viewData.labels;
             insiderChart.data.datasets = viewData.datasets;
@@ -385,6 +423,7 @@
             return;
         }
 
+        /* Full recreate on first render or view type change */
         if (insiderChart) { insiderChart.destroy(); insiderChart = null; }
 
         lastViewType = chartView;
@@ -395,6 +434,7 @@
         });
     }
 
+    /* ── Toggle simple / detailed ── */
     window.toggleInsiderChartView = function() {
         var btn = document.getElementById('insider-chart-toggle-btn');
         if (chartView === 'simple') {
@@ -404,12 +444,14 @@
             chartView = 'simple';
             btn.textContent = 'Show Detailed View';
         }
+        /* Force full recreate by clearing lastViewType */
         lastViewType = null;
         if (chartDataCache[activeCacheKey]) {
             renderChart(chartDataCache[activeCacheKey]);
         }
     };
 
+    /* ── Tab switching ── */
     function loadTrades(filter) {
         currentFilter = filter;
         var cacheKey = filter + ':' + currentPeriod;
@@ -420,6 +462,7 @@
         });
         document.getElementById('insider-tab-' + filter + '-btn').classList.add('active');
 
+        /* Check cache */
         if (cache[cacheKey]) {
             document.getElementById('insider-trades-content').innerHTML = cache[cacheKey];
             renderChart(chartDataCache[cacheKey] || []);
@@ -427,6 +470,7 @@
             return;
         }
 
+        /* Show loading */
         document.getElementById('insider-trades-content').innerHTML =
             '<p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading insider trades...</p>';
 
@@ -441,6 +485,7 @@
                 cache[cacheKey] = html;
                 document.getElementById('insider-trades-content').innerHTML = html;
 
+                /* Extract chart data from embedded script tag */
                 var match = html.match(/var\s+__chartData\s*=\s*(\[[\s\S]*?\]);/);
                 if (match) {
                     try { chartDataCache[cacheKey] = JSON.parse(match[1]); } catch(e) {}
@@ -449,6 +494,7 @@
                 if (window.initSortableTables) window.initSortableTables();
             })
             .catch(function() {
+                /* Retry once after a short delay before showing the error */
                 if (!retried[cacheKey]) {
                     retried[cacheKey] = true;
                     setTimeout(function() { loadTrades(filter); }, 1500);
@@ -462,6 +508,7 @@
 
     window.switchInsiderTab = loadTrades;
 
+    /* ── Date period switching ── */
     window.switchInsiderPeriod = function(period) {
         currentPeriod = period;
         document.querySelectorAll('.insider-period').forEach(function(btn) {
@@ -470,16 +517,18 @@
         loadTrades(currentFilter);
     };
 
+    /* Re-render chart when theme changes so axis/grid colors update */
     document.addEventListener('pp-theme-changed', function() {
         if (insiderChart) {
-            lastViewType = null;
+            lastViewType = null;  /* force full recreate */
             if (chartDataCache[activeCacheKey]) {
                 renderChart(chartDataCache[activeCacheKey]);
             }
         }
     });
 
-    document.addEventListener('DOMContentLoaded', function() {
+    /* ── Initialize: run immediately if DOM ready (hx-boost), else on DOMContentLoaded ── */
+    function _initInsiderCharts() {
         var initCacheKey = currentFilter + ':' + currentPeriod;
         if (typeof __chartData !== 'undefined' && __chartData.length > 0) {
             cache[initCacheKey] = document.getElementById('insider-trades-content').innerHTML;
@@ -490,292 +539,12 @@
         } else {
             loadTrades('all');
         }
-    });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _initInsiderCharts);
+    } else {
+        _initInsiderCharts();
+    }
 })();
 </script>
-
-<style>
-    main.container {
-        max-width: 1280px !important;
-        width: 100% !important;
-        padding-left: 1.5rem !important;
-        padding-right: 1.5rem !important;
-    }
-
-    .insider-shell {
-        --insider-ink: #0f172a;
-        --insider-accent: #0d9488;
-        --insider-accent-soft: rgba(13, 148, 136, 0.12);
-        position: relative;
-        isolation: isolate;
-        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
-        padding-bottom: 2rem;
-    }
-
-    .insider-aurora {
-        position: absolute;
-        border-radius: 999px;
-        filter: blur(56px);
-        opacity: 0.56;
-        pointer-events: none;
-        z-index: -1;
-    }
-
-    .insider-aurora-one {
-        width: min(40vw, 520px);
-        height: min(34vw, 440px);
-        top: -90px;
-        left: -100px;
-        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.36), rgba(13, 148, 136, 0.08) 72%);
-    }
-
-    .insider-aurora-two {
-        width: min(34vw, 430px);
-        height: min(30vw, 390px);
-        top: 50px;
-        right: -80px;
-        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.22), rgba(194, 65, 12, 0.08) 72%);
-    }
-
-    .insider-hero {
-        text-align: center;
-        margin: 0 auto 1rem;
-        max-width: 1040px;
-        border-radius: 24px;
-        padding: 1.5rem 1.1rem 1.15rem;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        background:
-            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
-            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
-            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
-    }
-
-    .insider-kicker {
-        margin: 0 0 0.45rem;
-        text-transform: uppercase;
-        letter-spacing: 0.16em;
-        font-size: 0.72rem;
-        font-weight: 700;
-        color: rgba(15, 23, 42, 0.62);
-    }
-
-    .insider-hero h1 {
-        margin: 0;
-        font-size: clamp(1.8rem, 4.2vw, 3.15rem);
-        letter-spacing: -0.03em;
-        line-height: 1.05;
-        color: var(--insider-ink);
-        font-family: "Fraunces", Georgia, serif;
-    }
-
-    .insider-hero p {
-        margin: 0.85rem auto 0;
-        max-width: 740px;
-        font-size: 1rem;
-        color: rgba(15, 23, 42, 0.72);
-    }
-
-    .insider-nav-shell {
-        max-width: 1160px;
-        margin: 0 auto 0.8rem;
-        padding: 0.5rem;
-        border-radius: 16px;
-        border: 1px solid rgba(13, 148, 136, 0.2);
-        background: rgba(255, 255, 255, 0.62);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-    }
-
-    .insider-nav-list {
-        list-style: none;
-        display: flex;
-        gap: 0.42rem;
-        padding: 0 0 0 0.5rem;
-        margin: 0;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    button.insider-tab {
-        margin: 0;
-        border: 1px solid transparent;
-        border-radius: 999px;
-        padding: 0.5rem 1rem;
-        cursor: pointer;
-        font-size: 0.87rem;
-        font-weight: 700;
-        color: rgba(15, 23, 42, 0.62);
-        background: transparent;
-        white-space: nowrap;
-        transition: all 0.16s ease;
-    }
-
-    button.insider-tab:hover {
-        color: var(--insider-ink);
-        border-color: rgba(13, 148, 136, 0.24);
-        background: rgba(13, 148, 136, 0.08);
-    }
-
-    button.insider-tab.active {
-        color: #fff;
-        border-color: #0f766e;
-        background: linear-gradient(120deg, #0f766e, #0d9488);
-        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
-    }
-
-    .insider-period-bar {
-        display: flex;
-        gap: 0.5em;
-        margin: 0 auto 1rem;
-        max-width: 1160px;
-        flex-wrap: wrap;
-    }
-
-    .insider-period {
-        background: rgba(255, 255, 255, 0.75);
-        border: 1px solid rgba(15, 23, 42, 0.14);
-        border-radius: 999px;
-        padding: 0.35em 1em;
-        cursor: pointer;
-        font-size: 0.82em;
-        font-weight: 600;
-        color: rgba(15, 23, 42, 0.7);
-        transition: all 0.15s ease;
-    }
-
-    .insider-period:hover {
-        border-color: rgba(13, 148, 136, 0.38);
-        color: var(--insider-ink);
-    }
-
-    .insider-period.active {
-        background: linear-gradient(120deg, #0f766e, #0d9488);
-        color: #fff;
-        border-color: #0f766e;
-    }
-
-    .insider-chart-card,
-    .insider-results-card {
-        max-width: 1160px;
-        margin: 0 auto 1rem;
-        border-radius: 18px;
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
-        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
-        overflow: hidden;
-    }
-
-    .insider-chart-card {
-        padding: 1rem;
-    }
-
-    .insider-chart-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-    }
-
-    .insider-chart-wrap {
-        position: relative;
-        width: 100%;
-        height: 350px;
-        margin-top: 0.7rem;
-    }
-
-    .insider-chart-foot {
-        text-align: center;
-        padding-top: 0.45rem;
-    }
-
-    .insider-results-card {
-        padding: 1rem;
-    }
-
-    :root[data-theme="dark"] .insider-shell {
-        --insider-ink: #e2e8f0;
-    }
-
-    :root[data-theme="dark"] .insider-hero {
-        border-color: rgba(148, 163, 184, 0.22);
-        background:
-            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
-            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
-            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
-    }
-
-    :root[data-theme="dark"] .insider-kicker,
-    :root[data-theme="dark"] .insider-hero p {
-        color: rgba(226, 232, 240, 0.72);
-    }
-
-    :root[data-theme="dark"] .insider-nav-shell {
-        border-color: rgba(45, 212, 191, 0.2);
-        background: rgba(15, 23, 42, 0.72);
-    }
-
-    :root[data-theme="dark"] button.insider-tab {
-        color: rgba(226, 232, 240, 0.72);
-    }
-
-    :root[data-theme="dark"] button.insider-tab:hover {
-        color: #e2e8f0;
-        background: rgba(45, 212, 191, 0.12);
-        border-color: rgba(45, 212, 191, 0.26);
-    }
-
-    :root[data-theme="dark"] .insider-period {
-        background: rgba(15, 23, 42, 0.75);
-        border-color: rgba(148, 163, 184, 0.3);
-        color: rgba(226, 232, 240, 0.78);
-    }
-
-    :root[data-theme="dark"] .insider-chart-card,
-    :root[data-theme="dark"] .insider-results-card {
-        border-color: rgba(148, 163, 184, 0.2);
-        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
-        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
-    }
-
-    @media (max-width: 767px) {
-        main.container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-        }
-
-        .insider-hero {
-            border-radius: 20px;
-            padding: 1.2rem 0.85rem 1rem;
-        }
-
-        .insider-chart-head {
-            flex-direction: column;
-            align-items: flex-start;
-        }
-
-        .insider-chart-card,
-        .insider-results-card {
-            padding: 0.9rem;
-        }
-
-        .insider-chart-wrap {
-            height: 300px;
-        }
-    }
-
-    /* ── Accessibility: reduced motion ── */
-    @media (prefers-reduced-motion: reduce) {
-        .insider-chart-card,
-        .insider-results-card,
-        .insider-tab,
-        .insider-period,
-        .insider-hero {
-            animation: none !important;
-            transition: none !important;
-        }
-    }
-</style>
 {% endblock %}

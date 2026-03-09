@@ -17,78 +17,32 @@
     ]
 }
 </script>
-{% endblock %}
-{% block extra_head_scripts %}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Person",
+    "name": "{{ member.full_name }}",
+    "jobTitle": "{{ member.chamber }} Member",
+    {% if member.party %}"affiliation": {"@type": "Organization", "name": "{{ member.party }} Party"},{% endif %}
+    {% if member.state %}"workLocation": {"@type": "Place", "name": "{{ member.state }}"},{% endif %}
+    "url": "https://paperpanda.io/politician/{{ member.member_id }}"
+}
+</script>
 {% endblock %}
 {% block content %}
-<section class="pol-shell">
-<div class="pol-aurora pol-aurora-one" aria-hidden="true"></div>
-<div class="pol-aurora pol-aurora-two" aria-hidden="true"></div>
 
 <style>
-    main.container {
-        max-width: 1200px !important;
-        width: 100% !important;
-        padding-left: 1.5rem !important;
-        padding-right: 1.5rem !important;
-    }
-    .pol-shell {
-        --pol-ink: #0f172a;
-        position: relative;
-        isolation: isolate;
-        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
-        padding-bottom: 2rem;
-    }
-    .pol-aurora {
-        position: absolute;
-        border-radius: 999px;
-        filter: blur(56px);
-        opacity: 0.56;
-        pointer-events: none;
-        z-index: -1;
-    }
-    .pol-aurora-one {
-        width: min(36vw, 460px);
-        height: min(32vw, 400px);
-        top: -80px;
-        left: -90px;
-        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.34), rgba(13, 148, 136, 0.08) 72%);
-    }
-    .pol-aurora-two {
-        width: min(32vw, 420px);
-        height: min(28vw, 360px);
-        top: 40px;
-        right: -70px;
-        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.2), rgba(194, 65, 12, 0.08) 72%);
-    }
-
     /* ── Header ── */
     .pol-header {
-        margin: 0 auto 1.2rem;
-        max-width: 1080px;
-        border-radius: 24px;
-        padding: 1.1rem 1.1rem 1rem;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        background:
-            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
-            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
-            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+        margin-bottom: 2em;
     }
     .pol-header h1 {
         margin: 0 0 0.2em;
-        font-size: clamp(1.55rem, 3.4vw, 2.4rem);
+        font-size: 1.8em;
         display: flex;
         align-items: center;
         gap: 0.5em;
         flex-wrap: wrap;
-        color: var(--pol-ink);
-        font-family: "Fraunces", Georgia, serif;
     }
     .pol-header-meta {
         font-size: 0.9em;
@@ -138,11 +92,10 @@
         margin-bottom: 2em;
     }
     .pol-stat-card {
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        border-radius: 14px;
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 10px;
         padding: 1em;
-        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
-        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+        background: var(--pp-surface);
         text-align: center;
     }
     .pol-stat-value {
@@ -172,7 +125,7 @@
         text-transform: uppercase;
         letter-spacing: 0.06em;
         color: var(--pp-text-muted);
-        background: rgba(15, 23, 42, 0.03);
+        background: var(--pp-surface-alt);
         border-bottom: 1px solid var(--pp-border);
         white-space: nowrap;
         vertical-align: middle;
@@ -188,7 +141,7 @@
         transition: background-color 0.15s ease;
     }
     .pol-table tbody tr:hover {
-        background-color: rgba(15, 23, 42, 0.04);
+        background-color: var(--pp-surface-alt);
     }
     .pol-table tbody tr:last-child td {
         border-bottom: none;
@@ -240,11 +193,11 @@
 
     /* ── Portfolio Donut Chart ── */
     .pol-chart-card {
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        border-radius: 18px;
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 12px;
         padding: 1.5em;
-        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
-        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+        background: var(--pp-surface);
+        box-shadow: var(--pp-card-shadow-sm);
         margin-bottom: 2em;
     }
     .pol-chart-header {
@@ -310,33 +263,7 @@
         text-overflow: ellipsis;
     }
 
-    :root[data-theme="dark"] .pol-shell { --pol-ink: #e2e8f0; }
-    :root[data-theme="dark"] .pol-header {
-        border-color: rgba(148, 163, 184, 0.22);
-        background:
-            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
-            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
-            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
-    }
-    :root[data-theme="dark"] .pol-header-meta { color: rgba(226, 232, 240, 0.72); }
-    :root[data-theme="dark"] .pol-stat-card,
-    :root[data-theme="dark"] .pol-chart-card {
-        border-color: rgba(148, 163, 184, 0.2);
-        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
-        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
-    }
-    :root[data-theme="dark"] .pol-table thead th { background: rgba(148, 163, 184, 0.08); }
-    :root[data-theme="dark"] .pol-table tbody tr:hover { background-color: rgba(148, 163, 184, 0.08); }
-
     @media (max-width: 768px) {
-        main.container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-        }
-        .pol-header {
-            border-radius: 20px;
-            padding: 0.95rem 0.85rem 0.9rem;
-        }
         .pol-chart-wrapper { flex-direction: column; }
         .pol-chart-container { width: 100%; max-width: 480px; }
     }
@@ -345,18 +272,6 @@
     @media (max-width: 768px) {
         .pol-table thead th, .pol-table tbody td { padding: 10px 10px; font-size: 13px; }
         .pol-stats { grid-template-columns: repeat(2, 1fr); }
-    }
-
-    /* ── Accessibility: reduced motion ── */
-    @media (prefers-reduced-motion: reduce) {
-        .pol-header,
-        .pol-stat-card,
-        .pol-chart-card,
-        .insider-filter,
-        .pol-expand-btn {
-            animation: none !important;
-            transition: none !important;
-        }
     }
 </style>
 
@@ -692,7 +607,7 @@
         transition: all 0.15s;
     }
     .insider-filter:hover { border-color: var(--pp-text-secondary); color: var(--pp-text-secondary); }
-    .insider-filter.active { background: linear-gradient(120deg, #0f766e, #0d9488); border-color: #0f766e; color: #fff; }
+    .insider-filter.active { background: #ef4444; border-color: #ef4444; color: #fff; }
 </style>
 
 <div style="overflow-x: auto;">
@@ -774,5 +689,4 @@ window.filterPolTrades = function(type, btn) {
 if (window.initSortableTables) window.initSortableTables();
 </script>
 
-    </section>
 {% endblock %}

@@ -586,10 +586,6 @@
         .cluster-table tr:last-child td { border-bottom: none; }
         .cluster-table tr:hover { background: var(--pp-surface-alt); }
 
-        /* Analyst ratings table */
-        .analyst-table thead th { position: sticky; top: 0; background: var(--pp-surface); z-index: 1; }
-        .analyst-table tbody tr { transition: background 0.1s; }
-
         /* Fund AUM sub-label */
         .fund-aum { display: block; color: var(--pp-text-faint); font-size: 0.72em; margin-top: 2px; }
 
@@ -811,18 +807,6 @@
             background: rgba(239, 68, 68, 1);
             box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
         }
-        /* Auth buttons (Sign In / Profile / Sign Out) have a neutral bg — override white !important */
-        [data-theme="light"] .pp-auth-signin,
-        [data-theme="light"] .pp-auth-signout {
-            color: #18181b !important;
-            background: rgba(0, 0, 0, 0.06);
-            border-color: rgba(0, 0, 0, 0.12);
-        }
-        [data-theme="light"] .pp-auth-signin:hover,
-        [data-theme="light"] .pp-auth-signout:hover {
-            background: rgba(0, 0, 0, 0.1);
-            box-shadow: none;
-        }
 
         /* Expand/collapse toggle button — vertical pill on sidebar edge */
         .pp-sidebar-toggle {
@@ -857,10 +841,6 @@
             margin: var(--pp-bento-inset) var(--pp-bento-inset) var(--pp-bento-inset) calc(var(--pp-sidebar-collapsed) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
             min-height: calc(100vh - var(--pp-bento-inset) * 2);
             padding-top: 1em;
-            /* Dynamic horizontal padding: centres a ~1200px content column when space allows,
-               but always keeps at least 1.5rem from the card edge (avoids content flush) */
-            padding-left:  max(1.5rem, calc((100vw - var(--pp-sidebar-collapsed) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
-            padding-right: max(1.5rem, calc((100vw - var(--pp-sidebar-collapsed) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
             background: var(--pp-bento-card-bg);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
@@ -869,22 +849,16 @@
             box-shadow: var(--pp-bento-card-shadow);
             overflow: hidden;
             position: relative;
-            transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                        padding-left 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-                        padding-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .pp-sidebar.expanded ~ .pp-notif-dropdown--sidebar ~ .pp-content-wrapper,
         .pp-sidebar.expanded ~ .pp-content-wrapper {
             margin-left: calc(var(--pp-sidebar-width) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
-            padding-left:  max(1.5rem, calc((100vw - var(--pp-sidebar-width) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
-            padding-right: max(1.5rem, calc((100vw - var(--pp-sidebar-width) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
         }
         /* FOUC prevention: use html class set before body renders (desktop only) */
         @media (min-width: 1024px) {
             html.pp-sidebar-is-expanded .pp-content-wrapper {
                 margin-left: calc(var(--pp-sidebar-width) + var(--pp-bento-inset) * 2 + var(--pp-bento-gap));
-                padding-left:  max(1.5rem, calc((100vw - var(--pp-sidebar-width) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
-                padding-right: max(1.5rem, calc((100vw - var(--pp-sidebar-width) - var(--pp-bento-inset) * 3 - var(--pp-bento-gap) - 1200px) / 2));
             }
         }
 
@@ -945,8 +919,6 @@
                 border: none !important;
                 box-shadow: none !important;
                 min-height: 100vh !important;
-                padding-left: 0 !important;
-                padding-right: 0 !important;
             }
             .pp-sidebar-toggle { display: none; }
             .pp-mobile-header {
@@ -1010,7 +982,7 @@
             transition: color 0.2s;
         }
         .pp-bell-btn:hover {
-            color: var(--pico-primary, #1a73e8);
+            color: #0d9488;
         }
         .pp-bell-svg {
             display: block;
@@ -1034,60 +1006,74 @@
             width: 360px;
             max-height: 440px;
             overflow-y: auto;
-            background: var(--pp-dropdown-glass-bg);
-            border: 1px solid var(--pp-toast-border);
-            border-radius: 16px;
-            box-shadow: var(--pp-toast-shadow);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
+            background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            border-radius: 18px;
+            box-shadow: 0 22px 42px rgba(15, 23, 42, 0.16);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
             z-index: 1000;
-            color: var(--pp-toast-text);
+            color: var(--pp-text);
+        }
+        :root[data-theme="dark"] .pp-notif-dropdown {
+            background: linear-gradient(165deg, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.82));
+            border-color: rgba(148, 163, 184, 0.22);
+            box-shadow: 0 24px 48px rgba(2, 6, 23, 0.58);
+            color: #e2e8f0;
         }
         .pp-notif-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0.8em 1.1em;
-            border-bottom: 1px solid var(--pp-toast-border);
-            font-size: 0.85em;
+            padding: 0.88em 1.1em;
+            border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+            font-size: 0.82em;
             font-weight: 600;
-            letter-spacing: -0.01em;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--pp-text-muted);
         }
         .pp-notif-header a {
             font-weight: 500;
             font-size: 0.9em;
-            color: var(--pico-primary);
+            text-transform: none;
+            letter-spacing: 0;
+            color: #0d9488;
         }
         .pp-notif-item {
             display: flex;
             align-items: flex-start;
             gap: 0.6em;
-            padding: 0.7em 1.1em;
+            padding: 0.78em 1.1em;
             margin: 0;
-            border-bottom: 1px solid var(--pp-toast-border);
+            border-bottom: 1px solid rgba(15, 23, 42, 0.08);
             text-decoration: none;
             color: inherit;
-            font-size: 0.82em;
+            font-size: 0.83em;
             transition: background 0.15s;
         }
         .pp-notif-item:hover {
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(13, 148, 136, 0.08);
         }
         :root:not([data-theme="dark"]) .pp-notif-item:hover {
-            background: rgba(0, 0, 0, 0.04);
+            background: rgba(13, 148, 136, 0.08);
+        }
+        :root[data-theme="dark"] .pp-notif-header,
+        :root[data-theme="dark"] .pp-notif-item {
+            border-color: rgba(148, 163, 184, 0.2);
         }
         .pp-notif-item:last-child {
             border-bottom: none;
         }
         .pp-notif-new {
-            background: rgba(59, 130, 246, 0.08);
+            background: rgba(13, 148, 136, 0.1);
         }
         .pp-notif-item--feature {
-            border-left: 3px solid #0ea5e9;
-            background: rgba(14, 165, 233, 0.06);
+            border-left: 3px solid #0d9488;
+            background: rgba(13, 148, 136, 0.06);
         }
         .pp-notif-item--feature:hover {
-            background: rgba(14, 165, 233, 0.12);
+            background: rgba(13, 148, 136, 0.12);
         }
         .pp-notif-item--support {
             border-left: 3px solid #f59e0b;
@@ -1109,7 +1095,7 @@
         }
         .pp-notif-title {
             font-weight: 600;
-            font-size: 0.92em;
+            font-size: 0.93em;
             margin-bottom: 0.15em;
             white-space: nowrap;
             overflow: hidden;
@@ -1117,16 +1103,40 @@
             letter-spacing: -0.01em;
         }
         .pp-notif-msg {
-            opacity: 0.6;
+            opacity: 0.74;
             font-size: 0.85em;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
         .pp-notif-time {
-            opacity: 0.4;
+            opacity: 0.58;
             font-size: 0.75em;
             margin-top: 0.15em;
+        }
+        .pp-notif-meta {
+            display: flex;
+            align-items: center;
+            gap: 0.45em;
+            margin-top: 0.15em;
+        }
+        .pp-notif-kind {
+            display: inline-flex;
+            align-items: center;
+            font-size: 0.68em;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            font-weight: 700;
+            padding: 0.16em 0.5em;
+            border-radius: 999px;
+            border: 1px solid rgba(13, 148, 136, 0.28);
+            color: #0f766e;
+            background: rgba(13, 148, 136, 0.1);
+        }
+        :root[data-theme="dark"] .pp-notif-kind {
+            color: #2dd4bf;
+            border-color: rgba(45, 212, 191, 0.32);
+            background: rgba(13, 148, 136, 0.18);
         }
         .pp-notif-empty {
             text-align: center;
@@ -1141,16 +1151,31 @@
             margin: 0;
             font-size: 0.8em;
             font-weight: 600;
-            color: var(--pico-primary);
+            color: #0d9488;
             text-decoration: none;
-            border-top: 1px solid var(--pp-toast-border);
+            border-top: 1px solid rgba(15, 23, 42, 0.08);
             transition: background 0.15s;
         }
         .pp-notif-footer:hover {
-            background: rgba(255, 255, 255, 0.04);
+            background: rgba(13, 148, 136, 0.08);
         }
         :root:not([data-theme="dark"]) .pp-notif-footer:hover {
-            background: rgba(0, 0, 0, 0.04);
+            background: rgba(13, 148, 136, 0.08);
+        }
+        :root[data-theme="dark"] .pp-notif-footer {
+            border-color: rgba(148, 163, 184, 0.2);
+            color: #2dd4bf;
+        }
+        @media (max-width: 640px) {
+            .pp-notif-dropdown {
+                width: calc(100vw - 16px);
+                max-height: min(72vh, 560px);
+                border-radius: 16px;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .pp-notif-item, .pp-notif-footer, .pp-notif-item--feature,
+            .pp-notif-item--support { transition: none !important; }
         }
 
         /* Sortable table headers */
@@ -1227,14 +1252,6 @@
             position: relative;
             z-index: 1;
         }
-        /* Let the dynamic padding on .pp-content-wrapper control the column width */
-        @media (min-width: 1024px) {
-            .pp-content-wrapper > main.container {
-                max-width: 100%;
-                padding-left: 0;
-                padding-right: 0;
-            }
-        }
         .mesh-blob {
             position: absolute;
             border-radius: 50%;
@@ -1244,21 +1261,21 @@
         .mesh-blob-1 {
             width: 600px; height: 600px;
             background: radial-gradient(circle, #0d47a1, #0d47a1 40%, transparent 70%);
-            top: -10vh; left: -5%;
+            top: -10%; left: -5%;
             opacity: 0.22;
             animation: meshDrift1 24s ease-in-out infinite;
         }
         .mesh-blob-2 {
             width: 500px; height: 500px;
             background: radial-gradient(circle, #4a148c, #4a148c 40%, transparent 70%);
-            top: 40vh; right: -8%;
+            top: 40%; right: -8%;
             opacity: 0.20;
             animation: meshDrift2 28s ease-in-out infinite;
         }
         .mesh-blob-3 {
             width: 450px; height: 450px;
             background: radial-gradient(circle, #004d40, #004d40 40%, transparent 70%);
-            top: 90vh; left: 30%;
+            bottom: -5%; left: 30%;
             opacity: 0.21;
             animation: meshDrift3 26s ease-in-out infinite;
         }
@@ -1336,36 +1353,6 @@
             box-shadow: var(--pp-glass-shadow) !important;
             overflow: hidden;
         }
-
-        /* ── Pill switcher (segmented control) — shared across pages ── */
-        .pp-pill-nav {
-            display: inline-flex;
-            gap: 0.25em;
-            background: var(--pp-overlay-5);
-            border-radius: 10px;
-            padding: 0.25em;
-            margin-bottom: 1.5em;
-        }
-        .pp-pill-btn {
-            padding: 0.45em 1.15em;
-            border-radius: 7px;
-            font-size: 0.86em;
-            font-weight: 600;
-            cursor: pointer;
-            border: none;
-            background: transparent;
-            color: var(--pp-sub-text);
-            transition: background 0.15s, color 0.15s;
-            white-space: nowrap;
-        }
-        .pp-pill-btn.active {
-            background: var(--pp-surface);
-            color: var(--pp-text);
-            box-shadow: 0 1px 4px rgba(0,0,0,0.10);
-        }
-        .pp-pill-btn:hover:not(.active) { color: var(--pp-text); }
-        .pp-pill-panel { display: none; }
-        .pp-pill-panel.active { display: block; }
     </style>
     {# ── ClerkJS SDK (popup/modal auth, no redirect) ── #}
     {% if clerk_publishable_key %}
@@ -1528,12 +1515,6 @@
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                     <span>Alt Signals</span>
                 </a>
-                {% if request.url.path.startswith('/macro') %}
-                <a href="/macro?key={{ request.query_params.get('key', '') }}" class="pp-nav-link active">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
-                    <span>Macro</span>
-                </a>
-                {% endif %}
             </div>
         </nav>
 
@@ -1553,15 +1534,15 @@
                     </span>
                 </button>
             </div>
-            <button onclick="ppOpenSignIn()" class="pp-sidebar-support-btn pp-auth-signin" style="background: var(--pp-overlay-5); border-color: var(--pp-border); color: var(--pp-text);{% if request.state.user %} display:none;{% endif %}">
+            <button onclick="ppOpenSignIn()" class="pp-sidebar-support-btn pp-auth-signin" style="background: var(--pp-overlay-5); border-color: var(--pp-border);{% if request.state.user %} display:none;{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
                 <span>Sign In</span>
             </button>
-            <a href="/profile" class="pp-sidebar-support-btn pp-auth-signout" style="background: var(--pp-overlay-5); border-color: var(--pp-border); color: var(--pp-text);{% if not request.state.user %} display:none;{% endif %}">
+            <a href="/profile" class="pp-sidebar-support-btn pp-auth-signout" style="background: var(--pp-overlay-5); border-color: var(--pp-border);{% if not request.state.user %} display:none;{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 <span>Profile</span>
             </a>
-            <button onclick="ppSignOut()" class="pp-sidebar-support-btn pp-auth-signout" style="background: var(--pp-overlay-5); border-color: var(--pp-border); color: var(--pp-text);{% if not request.state.user %} display:none;{% endif %}">
+            <button onclick="ppSignOut()" class="pp-sidebar-support-btn pp-auth-signout" style="background: var(--pp-overlay-5); border-color: var(--pp-border);{% if not request.state.user %} display:none;{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                 <span>Sign Out</span>
             </button>
@@ -2105,18 +2086,18 @@
 
     {# ── Global Toast Notification System ── #}
     <div id="pp-toast-container" style="
-        position: fixed; bottom: 20px; right: 20px; z-index: 9999;
+        position: fixed; bottom: 16px; right: 16px; z-index: 9999;
         display: flex; flex-direction: column; gap: 0.5em;
         max-width: 380px; pointer-events: none;
     "></div>
     <style>
         .pp-toast {
-            background: var(--pp-toast-bg);
-            color: var(--pp-toast-text);
-            padding: 0.9em 1.2em;
-            border-radius: 14px;
-            box-shadow: var(--pp-toast-shadow);
-            border: 1px solid var(--pp-toast-border);
+            background: linear-gradient(165deg, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.82));
+            color: var(--pp-text);
+            padding: 0.84em 1em;
+            border-radius: 16px;
+            box-shadow: 0 20px 36px rgba(15, 23, 42, 0.18);
+            border: 1px solid rgba(15, 23, 42, 0.08);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             font-size: 0.88em;
@@ -2130,6 +2111,12 @@
             transition: transform 0.2s, opacity 0.2s;
             overflow: hidden;
             position: relative;
+        }
+        :root[data-theme="dark"] .pp-toast {
+            background: linear-gradient(165deg, rgba(15, 23, 42, 0.94), rgba(15, 23, 42, 0.8));
+            color: #e2e8f0;
+            border-color: rgba(148, 163, 184, 0.24);
+            box-shadow: 0 24px 42px rgba(2, 6, 23, 0.62);
         }
         .pp-toast::before {
             content: '';
@@ -2158,6 +2145,23 @@
             from { transform: translateY(0) scale(1); opacity: 1; }
             to { transform: translateY(16px) scale(0.96); opacity: 0; }
         }
+        @media (max-width: 640px) {
+            #pp-toast-container {
+                left: 8px;
+                right: 8px !important;
+                bottom: 10px !important;
+                max-width: none !important;
+            }
+            .pp-toast {
+                width: 100%;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .pp-toast {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
     </style>
     <script>
     window.ppToast = function(opts) {
@@ -2168,6 +2172,12 @@
         if (opts.type === 'bullish') accentColor = '#34d399';
         else if (opts.type === 'bearish') accentColor = '#f87171';
         else if (opts.type === 'alert') accentColor = '#fbbf24';
+        else if (opts.type === '13f_change') accentColor = '#2563eb';
+        else if (opts.type === 'youtube') accentColor = '#dc2626';
+        else if (opts.type === 'reddit_velocity') accentColor = '#f97316';
+        else if (opts.type === 'congress_trade') accentColor = '#059669';
+        else if (opts.type === 'insider_trade') accentColor = '#7c3aed';
+        else if (opts.type === 'feature_release') accentColor = '#0d9488';
 
         var toast = document.createElement('div');
         toast.className = 'pp-toast';
@@ -2200,7 +2210,7 @@
             toast.style.cursor = 'pointer';
             toast.addEventListener('click', function(e) {
                 if (!e.target.classList.contains('pp-toast-close')) {
-                    window.location.href = '/notifications';
+                    window.location.href = opts.link;
                 }
             });
         }

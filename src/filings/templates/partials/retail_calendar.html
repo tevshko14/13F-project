@@ -1,4 +1,19 @@
 {# ── YouTube Event Calendar (lazy-loaded partial) ── #}
+<style>
+    .retail-cal-wrap article {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 16px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
+        padding: 1rem;
+    }
+    :root[data-theme="dark"] .retail-cal-wrap article {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+</style>
+<div class="retail-cal-wrap">
 
 {# ── Stats summary row ── #}
 {% if stats %}
@@ -442,9 +457,9 @@
         color: var(--pp-tag-text);
     }
     .calendar-filter-pill.active {
-        background: var(--pp-text);
-        color: var(--pp-surface);
-        border-color: var(--pp-text);
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        color: #fff;
+        border-color: #0f766e;
     }
 
     @media (max-width: 768px) {
@@ -500,3 +515,4 @@ window.filterCalendar = function(sentiment) {
     });
 })();
 </script>
+</div>

@@ -39,8 +39,19 @@
 </script>
 {% endif %}
 {% endblock %}
+{% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
+{% endblock %}
 {% block content %}
-<hgroup>
+<section class="stock-shell">
+<div class="stock-aurora stock-aurora-one" aria-hidden="true"></div>
+<div class="stock-aurora stock-aurora-two" aria-hidden="true"></div>
+
+<hgroup class="stock-hero">
+    <p class="stock-kicker">PaperPanda Equity Terminal</p>
     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75em;">
         <h1 style="display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; margin-bottom: 0; min-width: 0;">
             {% if logo_tickers is defined and stock_info.ticker in logo_tickers %}
@@ -69,240 +80,10 @@
     </p>
 </hgroup>
 
-{# ── SEO: Server-Rendered Company Overview (visible to Googlebot) ── #}
-<style>
-    .seo-overview {
-        margin-bottom: 1.5em;
-        padding-bottom: 1em;
-        border-bottom: 1px solid var(--pp-border-light);
-    }
-    .seo-metrics-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-        gap: 0.6em;
-        margin-bottom: 1.2em;
-    }
-    .seo-metric {
-        display: flex;
-        flex-direction: column;
-        gap: 0.15em;
-        padding: 0.55em 0.75em;
-        border-radius: 8px;
-        background: var(--pp-surface-alt);
-        border: 1px solid var(--pp-border-light);
-    }
-    .seo-metric-label {
-        font-size: 0.68em;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--pp-sub-text-light);
-    }
-    .seo-metric-value {
-        font-size: 1.05em;
-        font-weight: 700;
-        color: var(--pp-text);
-    }
-    .seo-description {
-        margin-bottom: 1.2em;
-    }
-    .seo-description summary {
-        cursor: pointer;
-        list-style: none;
-        margin-bottom: 0.5em;
-    }
-    .seo-description summary::-webkit-details-marker { display: none; }
-    .seo-description p {
-        font-size: 0.88em;
-        line-height: 1.6;
-        color: var(--pp-text-secondary);
-        margin: 0.4em 0;
-    }
-    .seo-classification {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.5em 1.2em;
-        font-size: 0.82em !important;
-        color: var(--pp-sub-text) !important;
-    }
-    .seo-holder-summary {
-        margin-bottom: 1.2em;
-    }
-    .seo-holder-summary p {
-        font-size: 0.88em;
-        line-height: 1.6;
-        color: var(--pp-text-secondary);
-        margin: 0.4em 0;
-    }
-    .seo-holder-summary a {
-        color: var(--pp-link);
-        text-decoration: none;
-        font-weight: 600;
-    }
-    .seo-holder-summary a:hover { text-decoration: underline; }
-    .seo-related {
-        margin-top: 0.8em;
-    }
-    .seo-related-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-        gap: 0.5em;
-    }
-    .seo-related-link {
-        display: flex;
-        flex-direction: column;
-        padding: 0.5em 0.7em;
-        border-radius: 6px;
-        border: 1px solid var(--pp-border-light);
-        background: var(--pp-surface);
-        text-decoration: none;
-        transition: background 0.15s, border-color 0.15s;
-    }
-    .seo-related-link:hover {
-        background: var(--pp-surface-alt);
-        border-color: var(--pp-overlay-20);
-    }
-    .seo-related-link strong {
-        font-size: 0.92em;
-        color: var(--pp-text);
-    }
-    .seo-related-link span {
-        font-size: 0.72em;
-        color: var(--pp-sub-text);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    @media (max-width: 600px) {
-        .seo-metrics-grid {
-            grid-template-columns: repeat(2, 1fr);
-        }
-        .seo-related-grid {
-            grid-template-columns: repeat(2, 1fr);
-        }
-    }
-</style>
-{% if stock_info.long_business_summary or stock_info.sector or (stock and stock.holders) %}
-<section class="seo-overview">
-    {# ── Key Metrics Grid ── #}
-    {% if stock_info.market_cap or stock_info.current_price %}
-    <div class="seo-metrics-grid">
-        {% if stock_info.current_price %}
-        <div class="seo-metric">
-            <span class="seo-metric-label">Price</span>
-            <span class="seo-metric-value">${{ "%.2f"|format(stock_info.current_price) }}</span>
-        </div>
-        {% endif %}
-        {% if stock_info.market_cap %}
-        <div class="seo-metric">
-            <span class="seo-metric-label">Market Cap</span>
-            <span class="seo-metric-value">
-                {% if stock_info.market_cap >= 1e12 %}${{ "%.2f"|format(stock_info.market_cap / 1e12) }}T
-                {% elif stock_info.market_cap >= 1e9 %}${{ "%.1f"|format(stock_info.market_cap / 1e9) }}B
-                {% else %}${{ "%.0f"|format(stock_info.market_cap / 1e6) }}M{% endif %}
-            </span>
-        </div>
-        {% endif %}
-        {% if stock_info.trailing_pe %}
-        <div class="seo-metric">
-            <span class="seo-metric-label">P/E Ratio</span>
-            <span class="seo-metric-value">{{ "%.1f"|format(stock_info.trailing_pe) }}</span>
-        </div>
-        {% endif %}
-        {% if stock_info.dividend_yield %}
-        <div class="seo-metric">
-            <span class="seo-metric-label">Div. Yield</span>
-            <span class="seo-metric-value">{{ "%.2f"|format(stock_info.dividend_yield * 100) }}%</span>
-        </div>
-        {% endif %}
-        {% if stock_info.fifty_two_week_low and stock_info.fifty_two_week_high %}
-        <div class="seo-metric">
-            <span class="seo-metric-label">52-Week Range</span>
-            <span class="seo-metric-value">${{ "%.2f"|format(stock_info.fifty_two_week_low) }} – ${{ "%.2f"|format(stock_info.fifty_two_week_high) }}</span>
-        </div>
-        {% endif %}
-        {% if stock_info.beta %}
-        <div class="seo-metric">
-            <span class="seo-metric-label">Beta</span>
-            <span class="seo-metric-value">{{ "%.2f"|format(stock_info.beta) }}</span>
-        </div>
-        {% endif %}
-    </div>
-    {% endif %}
-
-    {# ── Company Description ── #}
-    {% if stock_info.long_business_summary %}
-    <details class="seo-description" open>
-        <summary>
-            <h2 style="display: inline; font-size: 1.05em; margin: 0;">About {{ stock_info.issuer_name or stock_info.ticker }}</h2>
-        </summary>
-        <p>{{ stock_info.long_business_summary }}</p>
-        {% if stock_info.sector or stock_info.industry %}
-        <p class="seo-classification">
-            {% if stock_info.sector %}<span>Sector: <strong>{{ stock_info.sector }}</strong></span>{% endif %}
-            {% if stock_info.industry %}<span>Industry: <strong>{{ stock_info.industry }}</strong></span>{% endif %}
-            {% if stock_info.exchange %}<span>Exchange: <strong>{{ stock_info.exchange }}</strong></span>{% endif %}
-        </p>
-        {% endif %}
-    </details>
-    {% endif %}
-
-    {# ── Superinvestor Ownership Summary (natural language for Googlebot) ── #}
-    {% if stock and stock.holders %}
-    <div class="seo-holder-summary">
-        <h2 style="font-size: 1.05em;">Who Owns {{ stock_info.ticker or "This Stock" }}? Superinvestor Holdings</h2>
-        <p>
-            {{ stock_info.issuer_name or stock_info.ticker }} is held by
-            <strong>{{ stock.num_holders }}</strong> tracked superinvestor{{ "s" if stock.num_holders != 1 else "" }},
-            with a combined position value of
-            <strong>
-                {% if stock.combined_value >= 1e9 %}${{ "%.1f"|format(stock.combined_value / 1e9) }} billion
-                {% elif stock.combined_value >= 1e6 %}${{ "%.0f"|format(stock.combined_value / 1e6) }} million
-                {% else %}${{ "{:,.0f}".format(stock.combined_value) }}{% endif %}
-            </strong>.
-            {% set top_holders = stock.holders[:3] %}
-            The largest positions are held by
-            {% for h in top_holders %}
-                <a href="/holdings/{{ h.fund_cik }}">{{ h.fund_display_name }}</a>
-                ({{ "%.1f"|format(h.pct_of_portfolio) }}% of portfolio){% if not loop.last %}, {% else %}.{% endif %}
-            {% endfor %}
-        </p>
-        {% set buyers = [] %}
-        {% set sellers = [] %}
-        {% for h in stock.holders %}
-            {% if h.activity in ["NEW BUY", "ADD"] %}{% if buyers.append(h) %}{% endif %}{% endif %}
-            {% if h.activity in ["REDUCE", "SOLD"] %}{% if sellers.append(h) %}{% endif %}{% endif %}
-        {% endfor %}
-        {% if buyers or sellers %}
-        <p>
-            In the most recent quarter{% if buyers %},
-            <strong>{{ buyers|length }}</strong> superinvestor{{ "s" if buyers|length != 1 else "" }} added or initiated positions{% endif %}{% if buyers and sellers %} while {% endif %}{% if sellers %}<strong>{{ sellers|length }}</strong> reduced or exited{% endif %}.
-        </p>
-        {% endif %}
-    </div>
-    {% endif %}
-
-    {# ── Related Stocks (internal linking) ── #}
-    {% if related_stocks %}
-    <div class="seo-related">
-        <h3 style="font-size: 0.92em; margin-bottom: 0.6em;">Also Held by These Superinvestors</h3>
-        <div class="seo-related-grid">
-            {% for rs in related_stocks %}
-            <a href="/stock/{{ rs.ticker }}" class="seo-related-link">
-                <strong>{{ rs.ticker }}</strong>
-                <span>{{ rs.issuer }}</span>
-            </a>
-            {% endfor %}
-        </div>
-    </div>
-    {% endif %}
-</section>
-{% endif %}
-
 {# ── Tab Navigation ── #}
-<div class="stock-tabs" style="margin-bottom: 1.5em;">
+<div class="stock-tabs stock-nav-shell">
     <nav>
-        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
+        <ul class="stock-nav-list">
             <li>
                 <button id="tab-overview-btn"
                         class="stock-tab active"
@@ -343,30 +124,156 @@
 </div>
 
 <style>
-    button.stock-tab {
-        background: none;
-        border: none;
-        border-bottom: 3px solid transparent;
-        padding: 0.5em 1.2em;
+    main.container {
+        max-width: 1280px !important;
+        width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+
+    /* ── Shell & Aurora ── */
+    .stock-shell {
+        --stock-ink: #0f172a;
+        position: relative;
+        isolation: isolate;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        padding-bottom: 2rem;
+    }
+    .stock-aurora {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(56px);
+        opacity: 0.56;
+        pointer-events: none;
+        z-index: -1;
+    }
+    .stock-aurora-one {
+        width: min(40vw, 520px);
+        height: min(34vw, 440px);
+        top: -90px;
+        left: -90px;
+        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.36), rgba(13, 148, 136, 0.08) 72%);
+    }
+    .stock-aurora-two {
+        width: min(34vw, 430px);
+        height: min(30vw, 390px);
+        top: 40px;
+        right: -80px;
+        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.22), rgba(194, 65, 12, 0.08) 72%);
+    }
+
+    /* ── Hero card ── */
+    .stock-hero {
+        text-align: left;
+        margin: 0 auto 1rem;
+        max-width: 1180px;
+        border-radius: 24px;
+        padding: 1.2rem 1.1rem 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background:
+            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+    .stock-kicker {
+        margin: 0 0 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.62);
+    }
+    .stock-hero h1 {
+        font-family: "Fraunces", Georgia, serif;
+        letter-spacing: -0.02em;
+    }
+
+    /* ── Glass tab nav ── */
+    .stock-nav-shell {
+        max-width: 1180px;
+        margin: 0 auto 1rem;
+        padding: 0.5rem;
+        border-radius: 16px;
+        border: 1px solid rgba(13, 148, 136, 0.2);
+        background: rgba(255, 255, 255, 0.62);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+    .stock-nav-list {
+        list-style: none;
+        display: flex;
+        gap: 0.42rem;
+        padding: 0 0 0 0.5rem;
         margin: 0;
-        margin-bottom: -2px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    button.stock-tab {
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 0.5rem 0.92rem;
+        margin: 0;
+        background: transparent;
         cursor: pointer;
-        font-size: 0.95em;
-        font-weight: 600;
-        color: var(--pp-overlay-50);
-        transition: color 0.15s, border-color 0.15s;
+        font-size: 0.84rem;
+        font-weight: 700;
+        white-space: nowrap;
+        color: rgba(15, 23, 42, 0.62);
+        transition: all 0.16s ease;
     }
     button.stock-tab:hover {
-        color: var(--pp-text-secondary);
+        color: var(--stock-ink);
+        border-color: rgba(13, 148, 136, 0.24);
+        background: rgba(13, 148, 136, 0.08);
     }
     button.stock-tab.active {
-        color: #ef4444;
-        border-bottom-color: #ef4444;
+        color: #fff;
+        border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
     }
     .tab-content { display: none; }
     .tab-content.active { display: block; }
 
-    /* Quarter history tabs */
+    /* ── Pill sub-navigation ── */
+    .pp-pill-nav {
+        display: flex;
+        gap: 0.38rem;
+        flex-wrap: wrap;
+        padding: 0.75rem 0 0.5rem 0.5rem;
+        margin-bottom: 0.75rem;
+    }
+    .pp-pill-btn {
+        border: 1.5px solid rgba(13, 148, 136, 0.22);
+        border-radius: 999px;
+        padding: 0.36rem 0.9rem;
+        font-size: 0.81rem;
+        font-weight: 600;
+        background: transparent;
+        color: rgba(15, 23, 42, 0.62);
+        cursor: pointer;
+        transition: all 0.16s ease;
+        white-space: nowrap;
+        margin: 0;
+    }
+    .pp-pill-btn:hover {
+        border-color: rgba(13, 148, 136, 0.5);
+        color: #0d9488;
+        background: rgba(13, 148, 136, 0.07);
+    }
+    .pp-pill-btn.active {
+        border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        color: #fff;
+        box-shadow: 0 4px 10px rgba(13, 148, 136, 0.22);
+    }
+    .pp-pill-panel { display: none; }
+    .pp-pill-panel.active { display: block; }
+
+    /* ── Quarter history tabs ── */
     .quarter-tab {
         background: none;
         border: none;
@@ -384,13 +291,13 @@
     }
     .quarter-tab:hover { color: var(--pp-text-secondary); }
     .quarter-tab.active {
-        color: #ef4444;
-        border-bottom-color: #ef4444;
+        color: #0d9488;
+        border-bottom-color: #0d9488;
     }
     .quarter-panel { display: none; }
     .quarter-panel.active { display: block; }
 
-    /* Holders expand/collapse */
+    /* ── Holders expand/collapse ── */
     .holders-expand-btn {
         background: none;
         border: 1px solid var(--pp-overlay-10);
@@ -444,14 +351,113 @@
         cursor: pointer;
         transition: all 0.15s;
     }
-    .pp-period-btn:hover { border-color: #ef4444; color: #ef4444; }
+    .pp-period-btn:hover { border-color: #0d9488; color: #0d9488; }
     .pp-period-btn.active {
-        border-color: #ef4444;
-        background: #ef4444;
+        border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
         color: #fff;
     }
 
-    /* ── Table spacing: proper padding, line-height, min font ── */
+    /* ── SEO overview section ── */
+    .seo-overview {
+        max-width: 1180px;
+        margin: 0 auto 1.25rem;
+        padding: 1rem 1.1rem 1rem;
+        border-radius: 16px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07);
+    }
+    .seo-metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.6em;
+        margin-bottom: 1.2em;
+    }
+    .seo-metric {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15em;
+        padding: 0.55em 0.75em;
+        border-radius: 8px;
+        background: var(--pp-surface-alt);
+        border: 1px solid var(--pp-border-light);
+    }
+    .seo-metric-label {
+        font-size: 0.68em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--pp-sub-text-light);
+    }
+    .seo-metric-value {
+        font-size: 1.05em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .seo-description { margin-bottom: 1.2em; }
+    .seo-description summary {
+        cursor: pointer;
+        list-style: none;
+        margin-bottom: 0.5em;
+    }
+    .seo-description summary::-webkit-details-marker { display: none; }
+    .seo-description p {
+        font-size: 0.88em;
+        line-height: 1.6;
+        color: var(--pp-text-secondary);
+        margin: 0.4em 0;
+    }
+    .seo-classification {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5em 1.2em;
+        font-size: 0.82em !important;
+        color: var(--pp-sub-text) !important;
+    }
+    .seo-holder-summary { margin-bottom: 1.2em; }
+    .seo-holder-summary p {
+        font-size: 0.88em;
+        line-height: 1.6;
+        color: var(--pp-text-secondary);
+        margin: 0.4em 0;
+    }
+    .seo-holder-summary a {
+        color: var(--pp-link);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .seo-holder-summary a:hover { text-decoration: underline; }
+    .seo-related { margin-top: 0.8em; }
+    .seo-related-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 0.5em;
+    }
+    .seo-related-link {
+        display: flex;
+        flex-direction: column;
+        padding: 0.5em 0.7em;
+        border-radius: 6px;
+        border: 1px solid var(--pp-border-light);
+        background: var(--pp-surface);
+        text-decoration: none;
+        transition: background 0.15s, border-color 0.15s;
+    }
+    .seo-related-link:hover {
+        background: var(--pp-surface-alt);
+        border-color: var(--pp-overlay-20);
+    }
+    .seo-related-link strong { font-size: 0.92em; color: var(--pp-text); }
+    .seo-related-link span {
+        font-size: 0.72em;
+        color: var(--pp-sub-text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* ── Table spacing ── */
     #tab-overview table,
     #tab-ownership table {
         width: 100%;
@@ -482,26 +488,17 @@
         white-space: normal;
     }
     #tab-overview table tbody tr,
-    #tab-ownership table tbody tr {
-        transition: background-color 0.15s ease;
-    }
+    #tab-ownership table tbody tr { transition: background-color 0.15s ease; }
     #tab-overview table tbody tr:hover,
-    #tab-ownership table tbody tr:hover {
-        background-color: var(--pp-surface-alt);
-    }
+    #tab-ownership table tbody tr:hover { background-color: var(--pp-surface-alt); }
     #tab-overview table tbody tr:last-child td,
-    #tab-ownership table tbody tr:last-child td {
-        border-bottom: none;
-    }
+    #tab-ownership table tbody tr:last-child td { border-bottom: none; }
 
-    /* ── Force full-width on overview panels (break out of PicoCSS container) ── */
+    /* ── Force full-width on overview panels ── */
     #tab-overview .financials-container,
-    #tab-overview .chart-container {
-        max-width: none;
-        box-sizing: border-box;
-    }
+    #tab-overview .chart-container { max-width: none; box-sizing: border-box; }
 
-    /* ── Ticker news cards (matches homepage mn-card style) ── */
+    /* ── Ticker news cards ── */
     .tn-card {
         display: flex;
         gap: 0.7em;
@@ -513,11 +510,7 @@
     }
     .tn-card:last-child { border-bottom: none; }
     .tn-card:hover { background: var(--pp-surface-hover, rgba(255,255,255,0.04)); }
-    .tn-card-icon {
-        width: 20px; height: 20px;
-        border-radius: 3px; flex-shrink: 0;
-        margin-top: 0.15em;
-    }
+    .tn-card-icon { width: 20px; height: 20px; border-radius: 3px; flex-shrink: 0; margin-top: 0.15em; }
     .tn-card-body { flex: 1; min-width: 0; }
     .tn-headline {
         font-weight: 600; font-size: 0.88em; line-height: 1.35;
@@ -525,10 +518,7 @@
         -webkit-box-orient: vertical; overflow: hidden;
         color: var(--pp-text-secondary, inherit);
     }
-    .tn-meta {
-        font-size: 0.74em; color: var(--pp-text-muted, var(--pp-overlay-50));
-        margin-top: 0.2em;
-    }
+    .tn-meta { font-size: 0.74em; color: var(--pp-text-muted, var(--pp-overlay-50)); margin-top: 0.2em; }
     .tn-meta .tn-source { font-weight: 600; }
     .tn-meta .tn-dot { margin: 0 0.25em; }
 
@@ -551,61 +541,140 @@
         cursor: pointer; margin: 0; line-height: 1.2;
         transition: color 0.15s, border-color 0.15s;
     }
-    .news-pagination button:hover:not(:disabled) {
-        color: var(--pp-text);
-        border-color: var(--pp-text-muted);
-    }
+    .news-pagination button:hover:not(:disabled) { color: var(--pp-text); border-color: var(--pp-text-muted); }
     .news-pagination button:disabled { opacity: 0.3; cursor: default; }
-    .news-pagination .page-info {
-        font-size: 0.75em;
-        color: var(--pp-text-muted);
-        font-weight: 500;
+    .news-pagination .page-info { font-size: 0.75em; color: var(--pp-text-muted); font-weight: 500; }
+
+    /* ── Glass surface on tab content areas ── */
+    .tab-content.active > article,
+    .tab-content.active > .pp-table-wrap,
+    #tab-overview .chart-container,
+    #tab-overview #ticker-news-container { border-radius: 16px; }
+
+    #tab-overview .chart-container,
+    #tab-overview #ticker-news-container,
+    #own-panel-funds > article,
+    #own-panel-congress > div,
+    #own-panel-filings > div,
+    #own-panel-insider > div,
+    #forecast-analysts-panel > div,
+    #forecast-earnings-panel > div,
+    #forecast-estimates-panel > div,
+    #signal-panel-sentiment > div,
+    #signal-panel-short-interest > div,
+    #tab-vitals > div {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
     }
 
-    /* ── Responsive: stack on mobile, full-width on desktop ── */
+    #tab-overview .chart-container,
+    #tab-overview #ticker-news-container,
+    #own-panel-funds > article { padding: 1rem; }
+
+    #own-panel-congress > div,
+    #own-panel-filings > div,
+    #own-panel-insider > div { padding: 1rem 1.1rem; }
+
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .stock-shell { --stock-ink: #e2e8f0; }
+    :root[data-theme="dark"] .stock-hero {
+        border-color: rgba(148, 163, 184, 0.22);
+        background:
+            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
+    }
+    :root[data-theme="dark"] .stock-kicker,
+    :root[data-theme="dark"] .stock-hero p { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] .stock-nav-shell {
+        border-color: rgba(45, 212, 191, 0.2);
+        background: rgba(15, 23, 42, 0.72);
+    }
+    :root[data-theme="dark"] button.stock-tab { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] button.stock-tab:hover {
+        color: #e2e8f0;
+        background: rgba(45, 212, 191, 0.12);
+        border-color: rgba(45, 212, 191, 0.26);
+    }
+    :root[data-theme="dark"] .pp-pill-btn {
+        color: rgba(226, 232, 240, 0.62);
+        border-color: rgba(45, 212, 191, 0.2);
+    }
+    :root[data-theme="dark"] .pp-pill-btn:hover {
+        color: #2dd4bf;
+        background: rgba(45, 212, 191, 0.1);
+        border-color: rgba(45, 212, 191, 0.4);
+    }
+    :root[data-theme="dark"] .seo-overview {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 10px 28px rgba(2, 6, 23, 0.4);
+    }
+    :root[data-theme="dark"] #tab-overview .chart-container,
+    :root[data-theme="dark"] #tab-overview #ticker-news-container,
+    :root[data-theme="dark"] #own-panel-funds > article,
+    :root[data-theme="dark"] #own-panel-congress > div,
+    :root[data-theme="dark"] #own-panel-filings > div,
+    :root[data-theme="dark"] #own-panel-insider > div,
+    :root[data-theme="dark"] #forecast-analysts-panel > div,
+    :root[data-theme="dark"] #forecast-earnings-panel > div,
+    :root[data-theme="dark"] #forecast-estimates-panel > div,
+    :root[data-theme="dark"] #signal-panel-sentiment > div,
+    :root[data-theme="dark"] #signal-panel-short-interest > div,
+    :root[data-theme="dark"] #tab-vitals > div {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+
+    /* ── Responsive ── */
     @media (max-width: 768px) {
-        .chart-container {
-            aspect-ratio: 16 / 9;
-            min-height: 350px;
+        main.container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
         }
-        .financials-container {
-            height: 600px;
-        }
-        .financials-container iframe {
-            min-height: 580px;
-        }
+        .stock-hero { border-radius: 20px; padding: 1rem 0.85rem 0.9rem; }
+        .chart-container { aspect-ratio: 16 / 9; min-height: 350px; }
+        .financials-container { height: 600px; }
+        .financials-container iframe { min-height: 580px; }
         #tab-overview,
-        #tab-ownership {
-            display: flex;
-            flex-direction: column;
-            width: 100%;
-        }
-        #tab-overview.active {
-            display: flex;
-        }
+        #tab-ownership { display: flex; flex-direction: column; width: 100%; }
+        #tab-overview.active { display: flex; }
         #tab-overview table th,
         #tab-overview table td,
         #tab-ownership table th,
-        #tab-ownership table td {
-            font-size: 14px;    /* enforce 14px minimum on mobile */
-        }
+        #tab-ownership table td { font-size: 14px; }
+        .seo-metrics-grid { grid-template-columns: repeat(2, 1fr); }
+        .seo-related-grid { grid-template-columns: repeat(2, 1fr); }
     }
     @media (min-width: 769px) {
         #tab-overview,
-        #tab-ownership {
-            width: 100%;
-            max-width: 100%;
+        #tab-ownership { width: 100%; max-width: 100%; }
+    }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+        .stock-hero,
+        .stock-tab,
+        .pp-period-btn,
+        .pp-pill-btn,
+        .quarter-tab,
+        .holders-expand-btn,
+        .holders-expand-arrow {
+            animation: none !important;
+            transition: none !important;
         }
     }
 </style>
 
+
 {# ══════════════════════════════════════════════════════════════════ #}
-{# ── NEW Overview Tab: Price Chart, Financials, News ──            #}
+{# ── Overview Tab: Price Chart + News ──                           #}
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="tab-overview" class="tab-content active">
 
 {% if stock_info.ticker %}
-    {# ── Self-hosted OHLCV Candlestick Chart (ECharts) ── #}
     <div class="chart-container">
         <div class="pp-period-row">
             <button class="pp-period-btn" data-period="1M" onclick="ppChartPeriod('1M')">1M</button>
@@ -617,15 +686,11 @@
         <div id="pp-ohlcv-chart" style="width: 100%; height: calc(100% - 2em);"></div>
     </div>
 
-    {# ── News section ── #}
     <h4 style="margin-top: 0.5em;">Latest News</h4>
     <div id="ticker-news-container">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading news...
-        </p>
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading news...</p>
     </div>
 
-    {# ── ECharts OHLCV candlestick chart ── #}
     <script>
     (function() {
         var TICKER = "{{ stock_info.ticker }}";
@@ -645,10 +710,8 @@
                     axis: cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a',
                     grid: cs.getPropertyValue('--pp-chart-grid').trim() || (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'),
                     bg: 'transparent',
-                    upColor: '#1976d2',
-                    upBorder: '#1565c0',
-                    downColor: '#dc2626',
-                    downBorder: '#b91c1c',
+                    upColor: '#1976d2', upBorder: '#1565c0',
+                    downColor: '#dc2626', downBorder: '#b91c1c',
                     tooltip: isDark ? 'rgba(30,30,40,0.95)' : 'rgba(255,255,255,0.97)',
                     tooltipText: isDark ? '#e4e4e7' : '#27272a',
                 };
@@ -678,59 +741,34 @@
                 var dates = [], candleData = [], volumes = [], rawDates = [];
                 var n = data.ohlcv.length;
                 var prevMonth = -1;
-
                 for (var i = 0; i < n; i++) {
                     var d = data.ohlcv[i];
-                    // d = [epoch_ms, O, H, L, C, V]
                     var dt = new Date(d[0]);
                     rawDates.push(dt);
                     var m = dt.getMonth();
                     if (n <= 35) {
-                        // 1M: show day number, add month name at month boundary
-                        if (m !== prevMonth) {
-                            dates.push(dt.toLocaleDateString('en-US', {month:'short'}) + ' ' + dt.getDate());
-                        } else {
-                            dates.push(String(dt.getDate()));
-                        }
+                        dates.push(m !== prevMonth ? dt.toLocaleDateString('en-US', {month:'short'}) + ' ' + dt.getDate() : String(dt.getDate()));
                     } else if (n <= 70) {
-                        // 3M: "Feb 3" format
                         dates.push(dt.toLocaleDateString('en-US', {month:'short', day:'numeric'}));
                     } else {
-                        // 6M/1Y/5Y: "Mar '25" format
                         dates.push(dt.toLocaleDateString('en-US', {month:'short', year:'2-digit'}));
                     }
                     prevMonth = m;
-                    // ECharts candlestick: [open, close, low, high]
                     candleData.push([d[1], d[4], d[3], d[2]]);
-                    var isUp = d[4] >= d[1];
-                    volumes.push({
-                        value: d[5],
-                        itemStyle: { color: isUp ? 'rgba(25,118,210,0.35)' : 'rgba(220,38,38,0.35)' }
-                    });
+                    volumes.push({ value: d[5], itemStyle: { color: d[4] >= d[1] ? 'rgba(25,118,210,0.35)' : 'rgba(220,38,38,0.35)' } });
                 }
-
                 chart.setOption({
-                    animation: false,
-                    backgroundColor: tc.bg,
+                    animation: false, backgroundColor: tc.bg,
                     tooltip: {
-                        trigger: 'axis',
-                        axisPointer: { type: 'cross', crossStyle: { color: tc.axis } },
-                        backgroundColor: tc.tooltip,
-                        borderColor: tc.grid,
+                        trigger: 'axis', axisPointer: { type: 'cross', crossStyle: { color: tc.axis } },
+                        backgroundColor: tc.tooltip, borderColor: tc.grid,
                         textStyle: { color: tc.tooltipText, fontSize: 12 },
                         formatter: function(params) {
                             if (!params || !params.length) return '';
-                            var c = params[0];
-                            if (!c || c.data == null) return '';
-                            var idx = c.dataIndex;
-                            var ds = rawDates[idx] ? rawDates[idx].toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : c.name;
-                            // data = [open, close, low, high]
+                            var c = params[0]; if (!c || c.data == null) return '';
+                            var ds = rawDates[c.dataIndex] ? rawDates[c.dataIndex].toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : c.name;
                             var vals = Array.isArray(c.data) ? c.data : c.value;
-                            var html = '<b>' + ds + '</b><br/>';
-                            html += 'O: <b>' + vals[0].toFixed(2) + '</b> ';
-                            html += 'H: <b>' + vals[3].toFixed(2) + '</b><br/>';
-                            html += 'L: <b>' + vals[2].toFixed(2) + '</b> ';
-                            html += 'C: <b>' + vals[1].toFixed(2) + '</b>';
+                            var html = '<b>' + ds + '</b><br/>O: <b>' + vals[0].toFixed(2) + '</b> H: <b>' + vals[3].toFixed(2) + '</b><br/>L: <b>' + vals[2].toFixed(2) + '</b> C: <b>' + vals[1].toFixed(2) + '</b>';
                             if (params[1] && params[1].data != null) {
                                 var vol = typeof params[1].data === 'object' ? params[1].data.value : params[1].data;
                                 if (vol) html += '<br/>Vol: <b>' + (vol >= 1e6 ? (vol/1e6).toFixed(1)+'M' : vol >= 1e3 ? (vol/1e3).toFixed(0)+'K' : vol) + '</b>';
@@ -738,36 +776,10 @@
                             return html;
                         }
                     },
-                    grid: [
-                        { left: 60, right: 15, top: 15, bottom: '28%' },
-                        { left: 60, right: 15, height: '15%', bottom: 30 }
-                    ],
+                    grid: [{ left: 60, right: 15, top: 15, bottom: '28%' }, { left: 60, right: 15, height: '15%', bottom: 30 }],
                     xAxis: [
-                        {
-                            type: 'category', gridIndex: 0, data: dates, boundaryGap: true,
-                            axisLine: { lineStyle: { color: tc.grid } },
-                            axisTick: { show: false },
-                            axisLabel: { show: false },
-                            axisPointer: { label: { show: false } },
-                            splitLine: { show: false }
-                        },
-                        {
-                            type: 'category', gridIndex: 1, data: dates, boundaryGap: true,
-                            axisLine: { lineStyle: { color: tc.grid } },
-                            axisTick: { show: false },
-                            axisLabel: {
-                                color: tc.axis, fontSize: 11,
-                                interval: function(idx) {
-                                    var n = dates.length;
-                                    if (n <= 25) return true;
-                                    if (n <= 70) return idx % 5 === 0;
-                                    if (n <= 150) return idx % 10 === 0;
-                                    return idx % 20 === 0;
-                                }
-                            },
-                            axisPointer: { label: { show: false } },
-                            splitLine: { show: false }
-                        }
+                        { type: 'category', gridIndex: 0, data: dates, boundaryGap: true, axisLine: { lineStyle: { color: tc.grid } }, axisTick: { show: false }, axisLabel: { show: false }, axisPointer: { label: { show: false } }, splitLine: { show: false } },
+                        { type: 'category', gridIndex: 1, data: dates, boundaryGap: true, axisLine: { lineStyle: { color: tc.grid } }, axisTick: { show: false }, axisLabel: { color: tc.axis, fontSize: 11, interval: function(idx) { var n = dates.length; if (n <= 25) return true; if (n <= 70) return idx % 5 === 0; if (n <= 150) return idx % 10 === 0; return idx % 20 === 0; } }, axisPointer: { label: { show: false } }, splitLine: { show: false } }
                     ],
                     yAxis: [
                         { type: 'value', gridIndex: 0, scale: true, splitLine: { lineStyle: { color: tc.grid } }, axisLabel: { color: tc.axis, fontSize: 11 }, axisLine: { show: false }, axisTick: { show: false }, axisPointer: { label: { show: false } } },
@@ -775,25 +787,8 @@
                     ],
                     dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }],
                     series: [
-                        {
-                            type: 'candlestick',
-                            data: candleData,
-                            itemStyle: {
-                                color: tc.upColor,
-                                color0: tc.downColor,
-                                borderColor: tc.upBorder,
-                                borderColor0: tc.downBorder,
-                            },
-                            xAxisIndex: 0,
-                            yAxisIndex: 0,
-                        },
-                        {
-                            type: 'bar',
-                            data: volumes,
-                            xAxisIndex: 1,
-                            yAxisIndex: 1,
-                            barMaxWidth: 6,
-                        }
+                        { type: 'candlestick', data: candleData, itemStyle: { color: tc.upColor, color0: tc.downColor, borderColor: tc.upBorder, borderColor0: tc.downBorder }, xAxisIndex: 0, yAxisIndex: 0 },
+                        { type: 'bar', data: volumes, xAxisIndex: 1, yAxisIndex: 1, barMaxWidth: 6 }
                     ],
                 }, true);
             }
@@ -817,13 +812,8 @@
                 fetchOHLCV(period);
             };
 
-            // Initial load
             fetchOHLCV('1Y');
-
-            // Theme change
             document.addEventListener('pp-theme-changed', function() { if (_lastData) renderChart(_lastData); });
-
-            // Responsive resize
             if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
         });
     })();
@@ -831,99 +821,51 @@
 
     <script>
     (function() {
-        var allStories = [];
-        var currentPage = 0;
-        var perPage = 10;
-
-        // Auto-load news
+        var allStories = [], currentPage = 0, perPage = 10;
         loadTickerNews('{{ stock_info.ticker }}');
 
         function loadTickerNews(ticker) {
             var container = document.getElementById('ticker-news-container');
-            var url = 'https://api.tickertick.com/feed?q=tt:' + ticker.toLowerCase() + '&n=50';
-
-            fetch(url)
+            fetch('https://api.tickertick.com/feed?q=tt:' + ticker.toLowerCase() + '&n=50')
                 .then(function(resp) { return resp.json(); })
                 .then(function(data) {
                     if (!data.stories || data.stories.length === 0) {
-                        container.innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'No recent news found for ' + ticker + '.</p>';
+                        container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">No recent news found for ' + ticker + '.</p>';
                         return;
                     }
-                    allStories = data.stories;
-                    currentPage = 0;
+                    allStories = data.stories; currentPage = 0;
                     renderNewsPage(container);
                 })
                 .catch(function() {
-                    container.innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Failed to load news. Please try again later.</p>';
+                    container.innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Failed to load news. Please try again later.</p>';
                 });
         }
 
         function renderNewsPage(container) {
             var totalPages = Math.ceil(allStories.length / perPage);
-            var start = currentPage * perPage;
-            var end = Math.min(start + perPage, allStories.length);
-            var pageStories = allStories.slice(start, end);
-
+            var pageStories = allStories.slice(currentPage * perPage, Math.min((currentPage + 1) * perPage, allStories.length));
             var html = '';
             for (var i = 0; i < pageStories.length; i++) {
                 var story = pageStories[i];
-                var date = new Date(story.time);
-                var timeAgo = getTimeAgo(date);
+                var timeAgo = getTimeAgo(new Date(story.time));
                 html += '<a class="tn-card" href="' + escapeHtml(story.url) + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">';
-                if (story.favicon_url) {
-                    html += '<img class="tn-card-icon" src="' + escapeHtml(story.favicon_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
-                }
-                html += '<div class="tn-card-body">';
-                html += '<div class="tn-headline">' + escapeHtml(story.title) + '</div>';
-                html += '<div class="tn-meta">';
-                html += '<span class="tn-source">' + escapeHtml(story.site || '') + '</span>';
-                html += '<span class="tn-dot">&middot;</span>';
-                html += '<span>' + timeAgo + '</span>';
-                html += '</div></div></a>';
+                if (story.favicon_url) html += '<img class="tn-card-icon" src="' + escapeHtml(story.favicon_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+                html += '<div class="tn-card-body"><div class="tn-headline">' + escapeHtml(story.title) + '</div>';
+                html += '<div class="tn-meta"><span class="tn-source">' + escapeHtml(story.site || '') + '</span><span class="tn-dot">&middot;</span><span>' + timeAgo + '</span></div></div></a>';
             }
-
-            // Pagination
-            html += '<div class="news-pagination">' +
-                '<button onclick="event.preventDefault();window._newsPrev()" ' +
-                (currentPage === 0 ? 'disabled' : '') + '>&lsaquo;</button>' +
-                '<span class="page-info">' + (currentPage + 1) + ' / ' + totalPages + '</span>' +
-                '<button onclick="event.preventDefault();window._newsNext()" ' +
-                (currentPage >= totalPages - 1 ? 'disabled' : '') + '>&rsaquo;</button>' +
-                '</div>';
-
+            html += '<div class="news-pagination"><button onclick="event.preventDefault();window._newsPrev()" ' + (currentPage === 0 ? 'disabled' : '') + '>&lsaquo;</button><span class="page-info">' + (currentPage + 1) + ' / ' + totalPages + '</span><button onclick="event.preventDefault();window._newsNext()" ' + (currentPage >= totalPages - 1 ? 'disabled' : '') + '>&rsaquo;</button></div>';
             container.innerHTML = html;
         }
 
-        window._newsPrev = function() {
-            if (currentPage > 0) {
-                currentPage--;
-                renderNewsPage(document.getElementById('ticker-news-container'));
-                document.getElementById('ticker-news-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        };
-
-        window._newsNext = function() {
-            var totalPages = Math.ceil(allStories.length / perPage);
-            if (currentPage < totalPages - 1) {
-                currentPage++;
-                renderNewsPage(document.getElementById('ticker-news-container'));
-                document.getElementById('ticker-news-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-        };
+        window._newsPrev = function() { if (currentPage > 0) { currentPage--; renderNewsPage(document.getElementById('ticker-news-container')); document.getElementById('ticker-news-container').scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
+        window._newsNext = function() { var t = Math.ceil(allStories.length / perPage); if (currentPage < t - 1) { currentPage++; renderNewsPage(document.getElementById('ticker-news-container')); document.getElementById('ticker-news-container').scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
 
         function getTimeAgo(date) {
-            var now = new Date();
-            var diffMs = now - date;
-            var diffMin = Math.floor(diffMs / 60000);
-            var diffHr = Math.floor(diffMs / 3600000);
-            var diffDay = Math.floor(diffMs / 86400000);
-            if (diffMin < 60) return diffMin + 'm ago';
-            if (diffHr < 24) return diffHr + 'h ago';
-            if (diffDay < 7) return diffDay + 'd ago';
+            var diff = Date.now() - date;
+            var m = Math.floor(diff / 60000), h = Math.floor(diff / 3600000), d = Math.floor(diff / 86400000);
+            if (m < 60) return m + 'm ago';
+            if (h < 24) return h + 'h ago';
+            if (d < 7) return d + 'd ago';
             return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
         }
 
@@ -946,11 +888,10 @@
 </div>{# end tab-overview #}
 
 {# ══════════════════════════════════════════════════════════════════ #}
-{# ── Ownership Tab (renamed from Overview) ──                      #}
+{# ── Ownership Tab (Funds / Congress / Insiders / SEC Filings) ──  #}
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="tab-ownership" class="tab-content">
 
-{# ── Ownership pill nav: Funds / Congress ── #}
 <div class="pp-pill-nav" id="ownership-pill-nav">
     <button class="pp-pill-btn active" data-own-tab="funds">Funds</button>
     <button class="pp-pill-btn" data-own-tab="congress">Congress</button>
@@ -958,9 +899,7 @@
     <button class="pp-pill-btn" data-own-tab="filings">SEC Filings</button>
 </div>
 
-{# ── Sub-panel: Funds (superinvestor holdings — pre-rendered) ── #}
 <div class="pp-pill-panel active" id="own-panel-funds">
-
 {% if stock and stock.holders %}
 
 {% if history %}
@@ -968,12 +907,9 @@
     <header style="display: flex; justify-content: space-between; align-items: center;">
         <div>
             <strong>Quarterly Activity Chart</strong>
-            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-                Adds vs. Reduces by Quarter
-            </span>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">Adds vs. Reduces by Quarter</span>
         </div>
-        <button id="chart-toggle-btn"
-                class="secondary outline"
+        <button id="chart-toggle-btn" class="secondary outline"
                 style="font-size: 0.8em; padding: 0.25em 0.75em; margin: 0;"
                 onclick="toggleChartView()">
             Show Detailed View
@@ -989,9 +925,7 @@
 {% endif %}
 
 <article>
-    <header>
-        <strong>Superinvestor Holders</strong>
-    </header>
+    <header><strong>Superinvestor Holders</strong></header>
     <div class="pp-table-wrap">
     <table class="pp-table">
         <thead>
@@ -1009,41 +943,27 @@
             {% for h in stock.holders %}
             <tr{% if loop.index > 10 %} class="holder-overflow" style="display: none;"{% endif %}>
                 <td>{{ loop.index }}</td>
-                <td>
-                    <a href="/holdings/{{ h.fund_cik }}">
-                        <strong>{{ h.fund_display_name }}</strong>
-                    </a>
-                </td>
+                <td><a href="/holdings/{{ h.fund_cik }}"><strong>{{ h.fund_display_name }}</strong></a></td>
                 <td class="text-right">{{ "%.1f"|format(h.pct_of_portfolio) }}%</td>
                 <td class="text-right">${{ "{:,.0f}".format(h.value) }}</td>
                 <td class="text-right">{{ "{:,}".format(h.shares) }}</td>
                 <td>
-                    {% if h.activity == "NEW BUY" %}
-                        <span class="badge badge-new">NEW BUY</span>
-                    {% elif h.activity == "ADD" %}
-                        <span class="badge badge-add">ADD</span>
-                    {% elif h.activity == "REDUCE" %}
-                        <span class="badge badge-reduce">REDUCE</span>
-                    {% elif h.activity == "SOLD" %}
-                        <span class="badge badge-sold">SOLD</span>
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
+                    {% if h.activity == "NEW BUY" %}<span class="badge badge-new">NEW BUY</span>
+                    {% elif h.activity == "ADD" %}<span class="badge badge-add">ADD</span>
+                    {% elif h.activity == "REDUCE" %}<span class="badge badge-reduce">REDUCE</span>
+                    {% elif h.activity == "SOLD" %}<span class="badge badge-sold">SOLD</span>
+                    {% else %}<span class="text-muted">-</span>{% endif %}
                 </td>
                 <td class="text-right">
                     {% if h.share_change != 0 %}
-                        <span class="{% if h.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
-                            {{ "{:+,}".format(h.share_change) }}
-                        </span>
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
+                        <span class="{% if h.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">{{ "{:+,}".format(h.share_change) }}</span>
+                    {% else %}<span class="text-muted">-</span>{% endif %}
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
-    </div>{# end pp-table-wrap #}
+    </div>
     {% if stock.holders | length > 10 %}
     <button class="holders-expand-btn" onclick="toggleHolders(this)">
         <span>Show all {{ stock.holders | length }} holders</span>
@@ -1056,12 +976,8 @@
 <article>
     <header>
         <strong>Quarterly Activity History</strong>
-        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            ({{ history | length }} quarter{{ "s" if history | length != 1 else "" }})
-        </span>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">({{ history | length }} quarter{{ "s" if history | length != 1 else "" }})</span>
     </header>
-
-    {# ── Quarter Tabs (left=newest, right=oldest, default=newest) ── #}
     <nav>
         <ul class="quarter-tabs" style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid var(--pp-overlay-10); overflow-x: auto;">
             {% for quarter in history %}
@@ -1078,8 +994,6 @@
             {% endfor %}
         </ul>
     </nav>
-
-    {# ── Quarter Tab Panels ── #}
     {% for quarter in history %}
     <div class="quarter-panel{% if loop.first %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
         <div class="pp-table-wrap">
@@ -1095,102 +1009,66 @@
             <tbody>
                 {% for entry in quarter.entries %}
                 <tr>
+                    <td><a href="/holdings/{{ entry.fund_cik }}"><strong>{{ entry.fund_display_name }}</strong></a></td>
                     <td>
-                        <a href="/holdings/{{ entry.fund_cik }}">
-                            <strong>{{ entry.fund_display_name }}</strong>
-                        </a>
-                    </td>
-                    <td>
-                        {% if entry.activity == "NEW BUY" %}
-                            <span class="badge badge-new">NEW BUY</span>
-                        {% elif entry.activity == "ADD" %}
-                            <span class="badge badge-add">ADD</span>
-                        {% elif entry.activity == "REDUCE" %}
-                            <span class="badge badge-reduce">REDUCE</span>
-                        {% elif entry.activity == "SOLD" %}
-                            <span class="badge badge-sold">SOLD</span>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
+                        {% if entry.activity == "NEW BUY" %}<span class="badge badge-new">NEW BUY</span>
+                        {% elif entry.activity == "ADD" %}<span class="badge badge-add">ADD</span>
+                        {% elif entry.activity == "REDUCE" %}<span class="badge badge-reduce">REDUCE</span>
+                        {% elif entry.activity == "SOLD" %}<span class="badge badge-sold">SOLD</span>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
                     </td>
                     <td class="text-right">
                         {% if entry.share_change != 0 %}
-                            <span class="{% if entry.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
-                                {{ "{:+,}".format(entry.share_change) }}
-                            </span>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
+                            <span class="{% if entry.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">{{ "{:+,}".format(entry.share_change) }}</span>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
                     </td>
                     <td class="text-right">
-                        {% if entry.activity == "NEW BUY" %}
-                            <span class="activity-new-buy">New</span>
-                        {% elif entry.activity == "SOLD" %}
-                            <span class="activity-sold">Exit</span>
+                        {% if entry.activity == "NEW BUY" %}<span class="activity-new-buy">New</span>
+                        {% elif entry.activity == "SOLD" %}<span class="activity-sold">Exit</span>
                         {% elif entry.pct_change != 0 %}
-                            <span class="{% if entry.pct_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
-                                {{ "%+.1f"|format(entry.pct_change) }}%
-                            </span>
-                        {% else %}
-                            <span class="text-muted">-</span>
-                        {% endif %}
+                            <span class="{% if entry.pct_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">{{ "%+.1f"|format(entry.pct_change) }}%</span>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
                     </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
-        </div>{# end pp-table-wrap #}
+        </div>
     </div>
     {% endfor %}
 </article>
 {% endif %}
 
 {% else %}
-    {# ── Empty state: no superinvestor holds this stock ── #}
-    <article style="text-align: center; padding: 3em 1em;">
-        <p class="text-muted" style="font-size: 1.1em;">
-            Not held by any tracked superinvestor.
-        </p>
-        <p class="text-muted">
-            This stock does not appear in any of the 13F filings we track.
-            <a href="/funds">View all tracked funds</a>.
-        </p>
-    </article>
+<article style="text-align: center; padding: 3em 1em;">
+    <p class="text-muted" style="font-size: 1.1em;">Not held by any tracked superinvestor.</p>
+    <p class="text-muted">This stock does not appear in any of the 13F filings we track. <a href="/funds">View all tracked funds</a>.</p>
+</article>
 {% endif %}
-
 </div>{# end own-panel-funds #}
 
-{# ── Sub-panel: Congress (lazy-loaded on first pill click) ── #}
 <div class="pp-pill-panel" id="own-panel-congress">
     <div id="congress-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading congressional trading data...
-        </p>
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading congressional trading data...</p>
     </div>
 </div>
 
-{# ── Sub-panel: SEC Filings (lazy-loaded on first pill click) ── #}
 <div class="pp-pill-panel" id="own-panel-filings">
     <div id="filings-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading SEC filings...
-        </p>
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading SEC filings...</p>
     </div>
 </div>
 
-{# ── Sub-panel: Insider Trading (lazy-loaded on first pill click) ── #}
 <div class="pp-pill-panel" id="own-panel-insider">
     <div id="insider-insights-container"></div>
     <div id="insider-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading insider trading data...
-        </p>
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading insider trading data...</p>
     </div>
 </div>
 
 </div>{# end tab-ownership #}
 
-{# ── Forecasts Tab (Analysts + Earnings pills) ── #}
+{# ── Forecasts Tab (Analysts / Earnings / Estimates pills) ── #}
 <div id="tab-forecasts" class="tab-content">
     <div class="pp-pill-nav" id="forecasts-pill-nav">
         <button id="pill-analysts-btn" class="pp-pill-btn active" data-forecast-tab="analysts">Analysts</button>
@@ -1214,7 +1092,7 @@
     </div>
 </div>
 
-{# ── Signals Tab (pills: Sentiment | Short Interest) ── #}
+{# ── Signals Tab (Sentiment / Short Interest pills) ── #}
 <div id="tab-signals" class="tab-content">
     <div class="pp-pill-nav" id="signals-pill-nav">
         <button class="pp-pill-btn active" data-signal-tab="sentiment">Sentiment</button>
@@ -1235,9 +1113,7 @@
 {# ── Vitals Tab ── #}
 <div id="tab-vitals" class="tab-content">
     <div id="vitals-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading vitals data...
-        </p>
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading vitals data...</p>
     </div>
 </div>
 
@@ -1259,10 +1135,7 @@ window.toggleHolders = function(btn) {
     var arrow = btn.querySelector('.holders-expand-arrow');
     var label = btn.querySelector('span:first-child');
     var expanded = rows.length > 0 && rows[0].style.display !== 'none';
-
-    rows.forEach(function(row) {
-        row.style.display = expanded ? 'none' : '';
-    });
+    rows.forEach(function(row) { row.style.display = expanded ? 'none' : ''; });
     arrow.classList.toggle('expanded', !expanded);
     label.textContent = expanded
         ? 'Show all ' + (document.querySelectorAll('.holder-overflow').length + 10) + ' holders'
@@ -1270,10 +1143,9 @@ window.toggleHolders = function(btn) {
 };
 </script>
 
-{# ── Tab Switching Logic ── #}
+{# ── Tab & Pill Switching Logic ── #}
 <script>
 (function() {
-    // Helper: innerHTML doesn't execute <script> tags — re-insert them as live elements
     function activateScripts(container) {
         container.querySelectorAll('script').forEach(function(old) {
             var s = document.createElement('script');
@@ -1282,211 +1154,112 @@ window.toggleHolders = function(btn) {
         });
     }
 
-    var analystLoaded = false;
-    var signalsLoaded = false;
-    var shortInterestLoaded = false;
-    var vitalsLoaded = false;
-    var earningsLoaded = false;
-    var estimatesLoaded = false;
-    var filingsLoaded = false;
-    var insiderLoaded = false;
+    var analystLoaded = false, signalsLoaded = false, shortInterestLoaded = false;
+    var vitalsLoaded = false, earningsLoaded = false, estimatesLoaded = false;
+    var filingsLoaded = false, insiderLoaded = false, congressLoaded = false;
     var activeForecastPill = 'analysts';
     var activeSignalPill = 'sentiment';
 
+    // ── Forecasts pill switcher ──
     function switchForecastPill(pill) {
         activeForecastPill = pill;
-        document.getElementById('forecasts-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
-            btn.classList.remove('active');
-        });
+        document.getElementById('forecasts-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) { btn.classList.remove('active'); });
         document.getElementById('pill-' + pill + '-btn').classList.add('active');
-        document.getElementById('tab-forecasts').querySelectorAll('.pp-pill-panel').forEach(function(panel) {
-            panel.classList.remove('active');
-        });
+        document.getElementById('tab-forecasts').querySelectorAll('.pp-pill-panel').forEach(function(panel) { panel.classList.remove('active'); });
         document.getElementById('forecast-' + pill + '-panel').classList.add('active');
 
         if (pill === 'analysts' && !analystLoaded) {
             analystLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/analysts/{{ stock_info.ticker }}')
-                .then(function(r) { return r.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('analyst-ratings-content');
-                    el.innerHTML = html; activateScripts(el);
-                })
-                .catch(function() {
-                    document.getElementById('analyst-ratings-content').innerHTML =
-                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load analyst ratings.</p>';
-                });
+            fetch('/api/analysts/{{ stock_info.ticker }}').then(function(r) { return r.text(); })
+                .then(function(html) { var el = document.getElementById('analyst-ratings-content'); el.innerHTML = html; activateScripts(el); })
+                .catch(function() { document.getElementById('analyst-ratings-content').innerHTML = '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load analyst ratings.</p>'; });
             {% else %}
-            document.getElementById('analyst-ratings-content').innerHTML =
-                '<p class="text-muted" style="text-align:center;padding:2em 0;">Analyst ratings require a ticker symbol.</p>';
+            document.getElementById('analyst-ratings-content').innerHTML = '<p class="text-muted" style="text-align:center;padding:2em 0;">Analyst ratings require a ticker symbol.</p>';
             {% endif %}
         }
-
         if (pill === 'earnings' && !earningsLoaded) {
             earningsLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/earnings/{{ stock_info.ticker }}')
-                .then(function(r) { return r.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('earnings-content');
-                    el.innerHTML = html; activateScripts(el);
-                })
-                .catch(function() {
-                    document.getElementById('earnings-content').innerHTML =
-                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load earnings data.</p>';
-                });
+            fetch('/api/earnings/{{ stock_info.ticker }}').then(function(r) { return r.text(); })
+                .then(function(html) { var el = document.getElementById('earnings-content'); el.innerHTML = html; activateScripts(el); })
+                .catch(function() { document.getElementById('earnings-content').innerHTML = '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load earnings data.</p>'; });
             {% else %}
-            document.getElementById('earnings-content').innerHTML =
-                '<p class="text-muted" style="text-align:center;padding:2em 0;">Earnings data requires a ticker symbol.</p>';
+            document.getElementById('earnings-content').innerHTML = '<p class="text-muted" style="text-align:center;padding:2em 0;">Earnings data requires a ticker symbol.</p>';
             {% endif %}
         }
-
         if (pill === 'estimates' && !estimatesLoaded) {
             estimatesLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/estimates/{{ stock_info.ticker }}')
-                .then(function(r) { return r.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('estimates-content');
-                    el.innerHTML = html; activateScripts(el);
-                })
-                .catch(function() {
-                    document.getElementById('estimates-content').innerHTML =
-                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load estimates data.</p>';
-                });
+            fetch('/api/estimates/{{ stock_info.ticker }}').then(function(r) { return r.text(); })
+                .then(function(html) { var el = document.getElementById('estimates-content'); el.innerHTML = html; activateScripts(el); })
+                .catch(function() { document.getElementById('estimates-content').innerHTML = '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load estimates data.</p>'; });
             {% else %}
-            document.getElementById('estimates-content').innerHTML =
-                '<p class="text-muted" style="text-align:center;padding:2em 0;">Estimates data requires a ticker symbol.</p>';
+            document.getElementById('estimates-content').innerHTML = '<p class="text-muted" style="text-align:center;padding:2em 0;">Estimates data requires a ticker symbol.</p>';
             {% endif %}
         }
     }
     window.switchForecastPill = switchForecastPill;
 
-    // ── Signals pill switcher (Sentiment / Short Interest) ──
+    // ── Signals pill switcher ──
     function switchSignalPill(pill) {
         activeSignalPill = pill;
         document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
-            btn.classList.remove('active');
+            btn.classList.toggle('active', btn.dataset.signalTab === pill);
         });
-        // Activate the clicked pill button by matching data-signal-tab
-        document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
-            if (btn.dataset.signalTab === pill) btn.classList.add('active');
-        });
-        document.getElementById('tab-signals').querySelectorAll('.pp-pill-panel').forEach(function(panel) {
-            panel.classList.remove('active');
-        });
+        document.getElementById('tab-signals').querySelectorAll('.pp-pill-panel').forEach(function(panel) { panel.classList.remove('active'); });
         document.getElementById('signal-panel-' + pill).classList.add('active');
 
         if (pill === 'sentiment' && !signalsLoaded) {
             signalsLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/signals/{{ stock_info.ticker }}')
-                .then(function(resp) { return resp.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('signals-content');
-                    el.innerHTML = html;
-                    activateScripts(el);
-                    if (window.initSortableTables) window.initSortableTables();
-                })
-                .catch(function() {
-                    document.getElementById('signals-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Failed to load signals data. Please try again later.</p>';
-                });
+            fetch('/api/signals/{{ stock_info.ticker }}').then(function(resp) { return resp.text(); })
+                .then(function(html) { var el = document.getElementById('signals-content'); el.innerHTML = html; activateScripts(el); if (window.initSortableTables) window.initSortableTables(); })
+                .catch(function() { document.getElementById('signals-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Failed to load signals data. Please try again later.</p>'; });
             {% else %}
-            document.getElementById('signals-content').innerHTML =
-                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                'Signals data requires a ticker symbol.</p>';
+            document.getElementById('signals-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Signals data requires a ticker symbol.</p>';
             {% endif %}
         }
-
         if (pill === 'short-interest' && !shortInterestLoaded) {
             shortInterestLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/signals/{{ stock_info.ticker }}/short-interest')
-                .then(function(resp) { return resp.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('short-interest-content');
-                    el.innerHTML = html;
-                    activateScripts(el);
-                })
-                .catch(function() {
-                    document.getElementById('short-interest-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Failed to load short interest data. Please try again later.</p>';
-                });
+            fetch('/api/signals/{{ stock_info.ticker }}/short-interest').then(function(resp) { return resp.text(); })
+                .then(function(html) { var el = document.getElementById('short-interest-content'); el.innerHTML = html; activateScripts(el); })
+                .catch(function() { document.getElementById('short-interest-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Failed to load short interest data. Please try again later.</p>'; });
             {% else %}
-            document.getElementById('short-interest-content').innerHTML =
-                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                'Short interest data requires a ticker symbol.</p>';
+            document.getElementById('short-interest-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Short interest data requires a ticker symbol.</p>';
             {% endif %}
         }
     }
     window.switchSignalPill = switchSignalPill;
 
+    // ── Top-level tab switcher ──
     var _tabBtns = document.querySelectorAll('.stock-tab');
     var _tabPanels = document.querySelectorAll('.tab-content');
 
     window.switchTab = function(tab) {
-        // Toggle tab buttons
-        _tabBtns.forEach(function(btn) {
-            btn.classList.remove('active');
-        });
+        _tabBtns.forEach(function(btn) { btn.classList.remove('active'); });
         document.getElementById('tab-' + tab + '-btn').classList.add('active');
-
-        // Toggle tab content
-        _tabPanels.forEach(function(el) {
-            el.classList.remove('active');
-        });
+        _tabPanels.forEach(function(el) { el.classList.remove('active'); });
         document.getElementById('tab-' + tab).classList.add('active');
 
-        // Re-init sortable tables when switching to ownership tab
-        if (tab === 'ownership') {
-            if (window.initSortableTables) window.initSortableTables();
-        }
+        if (tab === 'ownership' && window.initSortableTables) window.initSortableTables();
+        if (tab === 'forecasts') switchForecastPill(activeForecastPill);
+        if (tab === 'signals') switchSignalPill(activeSignalPill);
 
-        // Lazy-load forecasts tab (triggers active pill load)
-        if (tab === 'forecasts') {
-            switchForecastPill(activeForecastPill);
-        }
-
-        // Lazy-load signals tab (triggers active pill load)
-        if (tab === 'signals') {
-            switchSignalPill(activeSignalPill);
-        }
-
-        // Lazy-load vitals data on first click
         if (tab === 'vitals' && !vitalsLoaded) {
             vitalsLoaded = true;
             {% if stock_info.ticker %}
-            var vitalsUrl = '/api/vitals/{{ stock_info.ticker }}';
+            fetch('/api/vitals/{{ stock_info.ticker }}').then(function(resp) { return resp.text(); })
+                .then(function(html) { document.getElementById('vitals-content').innerHTML = html; })
+                .catch(function() { document.getElementById('vitals-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Failed to load vitals data. Please try again later.</p>'; });
             {% else %}
-            var vitalsUrl = null;
+            document.getElementById('vitals-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Vitals data requires a ticker symbol.</p>';
             {% endif %}
-
-            if (vitalsUrl) {
-                fetch(vitalsUrl)
-                    .then(function(resp) { return resp.text(); })
-                    .then(function(html) {
-                        document.getElementById('vitals-content').innerHTML = html;
-                    })
-                    .catch(function() {
-                        document.getElementById('vitals-content').innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'Failed to load vitals data. Please try again later.</p>';
-                    });
-            } else {
-                document.getElementById('vitals-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Vitals data requires a ticker symbol.</p>';
-            }
         }
-
     };
 
-    // ── Ownership inner pill switcher (Funds / Congress / SEC Filings / Insider) ──
-    var congressLoaded = false;
+    // ── Ownership inner pill switcher ──
     document.getElementById('ownership-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
         pill.addEventListener('click', function() {
             document.getElementById('ownership-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(p) { p.classList.remove('active'); });
@@ -1494,135 +1267,61 @@ window.toggleHolders = function(btn) {
             pill.classList.add('active');
             document.getElementById('own-panel-' + pill.dataset.ownTab).classList.add('active');
 
-            // Lazy-load congress on first pill click
             if (pill.dataset.ownTab === 'congress' && !congressLoaded) {
                 congressLoaded = true;
-                {% if stock_info.ticker %}
-                var congressUrl = '/api/stock/{{ stock_info.ticker }}/congress';
-                {% else %}
-                var congressUrl = null;
-                {% endif %}
+                {% if stock_info.ticker %}var congressUrl = '/api/stock/{{ stock_info.ticker }}/congress';{% else %}var congressUrl = null;{% endif %}
                 if (congressUrl) {
-                    fetch(congressUrl)
-                        .then(function(resp) {
-                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                            return resp.text();
-                        })
-                        .then(function(html) {
-                            var el = document.getElementById('congress-content');
-                            el.innerHTML = html;
-                            activateScripts(el);
-                            if (window.initSortableTables) window.initSortableTables();
-                        })
-                        .catch(function() {
-                            document.getElementById('congress-content').innerHTML =
-                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                                'Failed to load congressional trading data. Please try again later.</p>';
-                        });
-                } else {
-                    document.getElementById('congress-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Congressional trading data requires a ticker symbol.</p>';
-                }
+                    fetch(congressUrl).then(function(resp) { if (!resp.ok) throw new Error('HTTP ' + resp.status); return resp.text(); })
+                        .then(function(html) { var el = document.getElementById('congress-content'); el.innerHTML = html; activateScripts(el); if (window.initSortableTables) window.initSortableTables(); })
+                        .catch(function() { document.getElementById('congress-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Failed to load congressional trading data. Please try again later.</p>'; });
+                } else { document.getElementById('congress-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Congressional trading data requires a ticker symbol.</p>'; }
             }
 
-            // Lazy-load SEC filings on first pill click
             if (pill.dataset.ownTab === 'filings' && !filingsLoaded) {
                 filingsLoaded = true;
-                {% if stock_info.ticker %}
-                var filingsUrl = '/api/company-filings/{{ stock_info.ticker }}';
-                {% else %}
-                var filingsUrl = null;
-                {% endif %}
+                {% if stock_info.ticker %}var filingsUrl = '/api/company-filings/{{ stock_info.ticker }}';{% else %}var filingsUrl = null;{% endif %}
                 if (filingsUrl) {
-                    fetch(filingsUrl)
-                        .then(function(resp) { return resp.text(); })
-                        .then(function(html) {
-                            var el = document.getElementById('filings-content');
-                            el.innerHTML = html;
-                            activateScripts(el);
-                        })
-                        .catch(function() {
-                            document.getElementById('filings-content').innerHTML =
-                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                                'Failed to load SEC filings. Please try again later.</p>';
-                        });
-                } else {
-                    document.getElementById('filings-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'SEC filings require a ticker symbol.</p>';
-                }
+                    fetch(filingsUrl).then(function(resp) { return resp.text(); })
+                        .then(function(html) { var el = document.getElementById('filings-content'); el.innerHTML = html; activateScripts(el); })
+                        .catch(function() { document.getElementById('filings-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Failed to load SEC filings. Please try again later.</p>'; });
+                } else { document.getElementById('filings-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">SEC filings require a ticker symbol.</p>'; }
             }
 
-            // Lazy-load insider trading on first pill click
             if (pill.dataset.ownTab === 'insider' && !insiderLoaded) {
                 insiderLoaded = true;
                 {% if stock_info.ticker %}
                 var insiderUrl = '/api/insider-trades/{{ stock_info.ticker }}';
                 var insightsUrl = '/api/insider-insights/{{ stock_info.ticker }}';
-                {% else %}
-                var insiderUrl = null;
-                var insightsUrl = null;
-                {% endif %}
+                {% else %}var insiderUrl = null; var insightsUrl = null;{% endif %}
                 if (insiderUrl) {
                     if (insightsUrl) {
-                        fetch(insightsUrl)
-                            .then(function(resp) { return resp.ok ? resp.text() : ''; })
-                            .then(function(html) {
-                                if (html && html.trim()) {
-                                    document.getElementById('insider-insights-container').innerHTML = html;
-                                }
-                            })
+                        fetch(insightsUrl).then(function(resp) { return resp.ok ? resp.text() : ''; })
+                            .then(function(html) { if (html && html.trim()) document.getElementById('insider-insights-container').innerHTML = html; })
                             .catch(function() {});
                     }
                     var insiderRetried = false;
                     function fetchInsider() {
-                        fetch(insiderUrl)
-                            .then(function(resp) {
-                                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                                return resp.text();
-                            })
-                            .then(function(html) {
-                                var el = document.getElementById('insider-content');
-                                el.innerHTML = html;
-                                activateScripts(el);
-                                if (window.initSortableTables) window.initSortableTables();
-                            })
+                        fetch(insiderUrl).then(function(resp) { if (!resp.ok) throw new Error('HTTP ' + resp.status); return resp.text(); })
+                            .then(function(html) { var el = document.getElementById('insider-content'); el.innerHTML = html; activateScripts(el); if (window.initSortableTables) window.initSortableTables(); })
                             .catch(function() {
-                                if (!insiderRetried) {
-                                    insiderRetried = true;
-                                    setTimeout(fetchInsider, 1500);
-                                    return;
-                                }
-                                document.getElementById('insider-content').innerHTML =
-                                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                                    'Failed to load insider trading data. Please try again later.</p>';
+                                if (!insiderRetried) { insiderRetried = true; setTimeout(fetchInsider, 1500); return; }
+                                document.getElementById('insider-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Failed to load insider trading data. Please try again later.</p>';
                             });
                     }
                     fetchInsider();
-                } else {
-                    document.getElementById('insider-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Insider trading data requires a ticker symbol.</p>';
-                }
+                } else { document.getElementById('insider-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Insider trading data requires a ticker symbol.</p>'; }
             }
 
             if (window.initSortableTables) window.initSortableTables();
         });
     });
 
-    // ── Forecasts inner pill switcher (Analysts / Earnings) ──
+    // ── Wire forecasts + signals pill click handlers ──
     document.getElementById('forecasts-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
-        pill.addEventListener('click', function() {
-            switchForecastPill(pill.dataset.forecastTab);
-        });
+        pill.addEventListener('click', function() { switchForecastPill(pill.dataset.forecastTab); });
     });
-
-    // ── Signals inner pill switcher (Sentiment / Short Interest) ──
     document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
-        pill.addEventListener('click', function() {
-            switchSignalPill(pill.dataset.signalTab);
-        });
+        pill.addEventListener('click', function() { switchSignalPill(pill.dataset.signalTab); });
     });
 })();
 </script>
@@ -1630,27 +1329,13 @@ window.toggleHolders = function(btn) {
 {% if stock and history %}
 <script>
 (function() {
-    // ── Data: Jinja2 → JavaScript (reversed to chronological order) ──
     const rawQuarters = [
         {% for quarter in history | reverse %}
-        {
-            period: "{{ quarter.period }}",
-            entries: [
-                {% for entry in quarter.entries %}
-                {
-                    investor: "{{ entry.fund_display_name | e }}",
-                    activity: "{{ entry.activity }}",
-                    shareChange: {{ entry.share_change }},
-                },
-                {% endfor %}
-            ]
-        },
+        { period: "{{ quarter.period }}", entries: [{% for entry in quarter.entries %}{ investor: "{{ entry.fund_display_name | e }}", activity: "{{ entry.activity }}", shareChange: {{ entry.share_change }} },{% endfor %}] },
         {% endfor %}
     ];
-
     const labels = rawQuarters.map(q => q.period);
 
-    // ── Number formatting helpers ────────────────────────────────
     function fmtAxis(num) {
         if (num === 0) return "0";
         const a = Math.abs(num);
@@ -1658,221 +1343,115 @@ window.toggleHolders = function(btn) {
         if (a >= 1e3) return (num / 1e3).toFixed(0) + "K";
         return num.toLocaleString();
     }
+    function fmtShares(num) { return (num > 0 ? "+" : "") + num.toLocaleString() + " shares"; }
 
-    function fmtShares(num) {
-        return (num > 0 ? "+" : "") + num.toLocaleString() + " shares";
-    }
-
-    // ── Simple view: 2 datasets (total adds / total reduces) ────
     function buildSimpleData() {
         const adds = [], reduces = [], addCounts = [], reduceCounts = [];
-
         for (const q of rawQuarters) {
             let aSum = 0, rSum = 0, aN = 0, rN = 0;
             for (const e of q.entries) {
-                if (e.activity === "NEW BUY" || e.activity === "ADD") {
-                    aSum += e.shareChange;
-                    aN++;
-                } else {
-                    rSum += e.shareChange;   // already negative
-                    rN++;
-                }
+                if (e.activity === "NEW BUY" || e.activity === "ADD") { aSum += e.shareChange; aN++; }
+                else { rSum += e.shareChange; rN++; }
             }
-            adds.push(aSum);
-            reduces.push(rSum);
-            addCounts.push(aN);
-            reduceCounts.push(rN);
+            adds.push(aSum); reduces.push(rSum); addCounts.push(aN); reduceCounts.push(rN);
         }
-
-        return {
-            datasets: [
-                {
-                    label: "Total Adds",
-                    data: adds,
-                    backgroundColor: "rgba(46, 125, 50, 0.8)",
-                    borderColor: "#1b5e20",
-                    borderWidth: 1,
-                    _counts: addCounts,
-                },
-                {
-                    label: "Total Reduces",
-                    data: reduces,
-                    backgroundColor: "rgba(198, 40, 40, 0.8)",
-                    borderColor: "#b71c1c",
-                    borderWidth: 1,
-                    _counts: reduceCounts,
-                },
-            ],
-        };
+        return { datasets: [
+            { label: "Total Adds", data: adds, backgroundColor: "rgba(46,125,50,0.8)", borderColor: "#1b5e20", borderWidth: 1, _counts: addCounts },
+            { label: "Total Reduces", data: reduces, backgroundColor: "rgba(198,40,40,0.8)", borderColor: "#b71c1c", borderWidth: 1, _counts: reduceCounts }
+        ]};
     }
 
-    // ── Detailed view: one dataset per investor (split add/reduce) ──
     function buildDetailedData() {
-        const investorAdds = {};
-        const investorReduces = {};
+        const investorAdds = {}, investorReduces = {};
         const n = rawQuarters.length;
-
         for (let i = 0; i < n; i++) {
             for (const e of rawQuarters[i].entries) {
                 if (e.activity === "NEW BUY" || e.activity === "ADD") {
-                    if (!investorAdds[e.investor])
-                        investorAdds[e.investor] = new Array(n).fill(0);
+                    if (!investorAdds[e.investor]) investorAdds[e.investor] = new Array(n).fill(0);
                     investorAdds[e.investor][i] = e.shareChange;
                 } else {
-                    if (!investorReduces[e.investor])
-                        investorReduces[e.investor] = new Array(n).fill(0);
+                    if (!investorReduces[e.investor]) investorReduces[e.investor] = new Array(n).fill(0);
                     investorReduces[e.investor][i] = e.shareChange;
                 }
             }
         }
-
         const datasets = [];
-        const addNames = Object.keys(investorAdds);
-        const redNames = Object.keys(investorReduces);
+        const addNames = Object.keys(investorAdds), redNames = Object.keys(investorReduces);
         const greens = palette("#2e7d32", "#a5d6a7", addNames.length);
         const reds   = palette("#c62828", "#ef9a9a", redNames.length);
-
-        addNames.forEach((name, i) => {
-            datasets.push({
-                label: name,
-                data: investorAdds[name],
-                backgroundColor: greens[i],
-                borderColor: greens[i],
-                borderWidth: 0.5,
-                stack: "adds",
-            });
-        });
-
-        redNames.forEach((name, i) => {
-            datasets.push({
-                label: name,
-                data: investorReduces[name],
-                backgroundColor: reds[i],
-                borderColor: reds[i],
-                borderWidth: 0.5,
-                stack: "reduces",
-            });
-        });
-
+        addNames.forEach((name, i) => datasets.push({ label: name, data: investorAdds[name], backgroundColor: greens[i], borderColor: greens[i], borderWidth: 0.5, stack: "adds" }));
+        redNames.forEach((name, i) => datasets.push({ label: name, data: investorReduces[name], backgroundColor: reds[i], borderColor: reds[i], borderWidth: 0.5, stack: "reduces" }));
         return { datasets };
     }
 
-    // ── Color palette: interpolate dark → light ─────────────────
     function palette(darkHex, lightHex, count) {
         if (count === 0) return [];
         if (count === 1) return [darkHex];
         const d = hexRgb(darkHex), l = hexRgb(lightHex), out = [];
-        for (let i = 0; i < count; i++) {
-            const t = i / (count - 1);
-            out.push(`rgb(${mix(d.r,l.r,t)},${mix(d.g,l.g,t)},${mix(d.b,l.b,t)})`);
-        }
+        for (let i = 0; i < count; i++) { const t = i / (count - 1); out.push(`rgb(${mix(d.r,l.r,t)},${mix(d.g,l.g,t)},${mix(d.b,l.b,t)})`); }
         return out;
     }
-    function hexRgb(h) {
-        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h);
-        return { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) };
-    }
+    function hexRgb(h) { const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h); return { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) }; }
     function mix(a, b, t) { return Math.round(a + (b - a) * t); }
 
-    // ── Gradient helper for Chart.js bars ───────────────────────
     function makeBarGradient(canvas, topColor, bottomColor) {
         const ctx2d = canvas.getContext('2d');
         const g = ctx2d.createLinearGradient(0, 0, 0, canvas.height);
-        g.addColorStop(0, topColor);
-        g.addColorStop(1, bottomColor);
+        g.addColorStop(0, topColor); g.addColorStop(1, bottomColor);
         return g;
     }
 
-    // ── Chart creation ──────────────────────────────────────────
-    let currentView = "simple";
-    let chart = null;
+    let currentView = "simple", chart = null;
 
     function createChart(viewData) {
         if (chart) { chart.destroy(); chart = null; }
-
         const ctx = document.getElementById("activityChart");
         if (!ctx) return;
 
-        // Apply gradients to simple-view datasets
         if (currentView === "simple") {
             for (const ds of viewData.datasets) {
-                if (ds.label === "Total Adds") {
-                    ds.backgroundColor = makeBarGradient(ctx, '#047857', '#34d399');
-                    ds.borderColor = '#047857';
-                    ds.borderWidth = 0;
-                    ds.borderRadius = 4;
-                } else if (ds.label === "Total Reduces") {
-                    ds.backgroundColor = makeBarGradient(ctx, '#f87171', '#b91c1c');
-                    ds.borderColor = '#b91c1c';
-                    ds.borderWidth = 0;
-                    ds.borderRadius = 4;
-                }
+                if (ds.label === "Total Adds") { ds.backgroundColor = makeBarGradient(ctx, '#047857', '#34d399'); ds.borderColor = '#047857'; ds.borderWidth = 0; ds.borderRadius = 4; }
+                else if (ds.label === "Total Reduces") { ds.backgroundColor = makeBarGradient(ctx, '#f87171', '#b91c1c'); ds.borderColor = '#b91c1c'; ds.borderWidth = 0; ds.borderRadius = 4; }
             }
         }
 
         const cs = getComputedStyle(document.documentElement);
-        const axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+        const axisColor     = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
         const axisSecondary = cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a';
-        const axisMuted = cs.getPropertyValue('--pp-chart-axis-muted').trim() || '#a1a1aa';
-        const gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
-        const gridZero = cs.getPropertyValue('--pp-chart-grid-zero').trim() || 'rgba(0,0,0,0.3)';
-        const legendColor = cs.getPropertyValue('--pp-chart-legend').trim() || '#52525b';
+        const axisMuted     = cs.getPropertyValue('--pp-chart-axis-muted').trim() || '#a1a1aa';
+        const gridColor     = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+        const gridZero      = cs.getPropertyValue('--pp-chart-grid-zero').trim() || 'rgba(0,0,0,0.3)';
+        const legendColor   = cs.getPropertyValue('--pp-chart-legend').trim() || '#52525b';
 
         chart = new Chart(ctx, {
             type: "bar",
-            data: { labels: labels, datasets: viewData.datasets },
+            data: { labels, datasets: viewData.datasets },
             options: {
-                responsive: true,
-                maintainAspectRatio: false,
+                responsive: true, maintainAspectRatio: false,
                 interaction: { mode: "index", intersect: false },
                 scales: {
-                    x: {
-                        stacked: true,
-                        grid: { display: false },
-                        ticks: { color: axisColor },
-                    },
+                    x: { stacked: true, grid: { display: false }, ticks: { color: axisColor } },
                     y: {
                         stacked: true,
                         title: { display: true, text: "Share Change", font: { size: 13 }, color: axisMuted },
                         ticks: { callback: function(v) { return fmtAxis(v); }, color: axisSecondary },
                         grid: {
-                            color: function(ctx) {
-                                return ctx.tick.value === 0
-                                    ? gridZero
-                                    : gridColor;
-                            },
-                            lineWidth: function(ctx) {
-                                return ctx.tick.value === 0 ? 2 : 1;
-                            },
+                            color: function(ctx) { return ctx.tick.value === 0 ? gridZero : gridColor; },
+                            lineWidth: function(ctx) { return ctx.tick.value === 0 ? 2 : 1; },
                         },
                     },
                 },
                 plugins: {
-                    legend: {
-                        display: currentView === "detailed",
-                        position: "bottom",
-                        labels: { font: { size: 11 }, color: legendColor, boxWidth: 12, padding: 8 },
-                    },
+                    legend: { display: currentView === "detailed", position: "bottom", labels: { font: { size: 11 }, color: legendColor, boxWidth: 12, padding: 8 } },
                     tooltip: {
                         callbacks: {
                             title: function(items) { return items[0].label; },
                             label: function(ctx) {
-                                const val = ctx.raw;
-                                if (val === 0) return null;
-                                if (currentView === "simple") {
-                                    const ds = ctx.dataset;
-                                    const cnt = ds._counts ? ds._counts[ctx.dataIndex] : 0;
-                                    return ds.label + ": " + fmtShares(val)
-                                        + " (" + cnt + " investor" + (cnt !== 1 ? "s" : "") + ")";
-                                }
+                                const val = ctx.raw; if (val === 0) return null;
+                                if (currentView === "simple") { const ds = ctx.dataset; const cnt = ds._counts ? ds._counts[ctx.dataIndex] : 0; return ds.label + ": " + fmtShares(val) + " (" + cnt + " investor" + (cnt !== 1 ? "s" : "") + ")"; }
                                 return ctx.dataset.label + ": " + fmtShares(val);
                             },
-                            afterBody: function(items) {
-                                let net = 0;
-                                for (const it of items) net += it.raw;
-                                if (net !== 0) return ["", "Net: " + fmtShares(net)];
-                                return [];
-                            },
+                            afterBody: function(items) { let net = 0; for (const it of items) net += it.raw; if (net !== 0) return ["", "Net: " + fmtShares(net)]; return []; },
                         },
                     },
                 },
@@ -1880,44 +1459,139 @@ window.toggleHolders = function(btn) {
         });
     }
 
-    // ── Toggle simple ↔ detailed ────────────────────────────────
     window.toggleChartView = function() {
         const btn = document.getElementById("chart-toggle-btn");
-        if (currentView === "simple") {
-            currentView = "detailed";
-            btn.textContent = "Show Simple View";
-            createChart(buildDetailedData());
-        } else {
-            currentView = "simple";
-            btn.textContent = "Show Detailed View";
-            createChart(buildSimpleData());
-        }
+        if (currentView === "simple") { currentView = "detailed"; btn.textContent = "Show Simple View"; createChart(buildDetailedData()); }
+        else { currentView = "simple"; btn.textContent = "Show Detailed View"; createChart(buildSimpleData()); }
     };
 
-    // ── Re-render on theme change ──────────────────────────────
     document.addEventListener('pp-theme-changed', function() {
-        const viewData = currentView === "simple" ? buildSimpleData() : buildDetailedData();
-        createChart(viewData);
+        createChart(currentView === "simple" ? buildSimpleData() : buildDetailedData());
     });
 
-    // ── Initialize with simple view (wait for deferred Chart.js) ──
     function _initActivityChart() {
-        if (typeof Chart === 'undefined') {
-            window.requireChartJS(function() { _initActivityChart(); });
-            return;
-        }
+        if (typeof Chart === 'undefined') { window.requireChartJS(function() { _initActivityChart(); }); return; }
         createChart(buildSimpleData());
     }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _initActivityChart);
-    } else {
-        _initActivityChart();
-    }
+    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', _initActivityChart); }
+    else { _initActivityChart(); }
 })();
 </script>
 {% endif %}
-{% endblock %}
 
-{% block extra_head_scripts %}
-{# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
+{# ── SEO: Server-Rendered Company Overview (visible to Googlebot, below the fold) ── #}
+{% if stock_info.long_business_summary or stock_info.sector or (stock and stock.holders) %}
+<section class="seo-overview">
+    {% if stock_info.market_cap or stock_info.current_price %}
+    <div class="seo-metrics-grid">
+        {% if stock_info.current_price %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Price</span>
+            <span class="seo-metric-value">${{ "%.2f"|format(stock_info.current_price) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.market_cap %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Market Cap</span>
+            <span class="seo-metric-value">
+                {% if stock_info.market_cap >= 1e12 %}${{ "%.2f"|format(stock_info.market_cap / 1e12) }}T
+                {% elif stock_info.market_cap >= 1e9 %}${{ "%.1f"|format(stock_info.market_cap / 1e9) }}B
+                {% else %}${{ "%.0f"|format(stock_info.market_cap / 1e6) }}M{% endif %}
+            </span>
+        </div>
+        {% endif %}
+        {% if stock_info.trailing_pe %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">P/E Ratio</span>
+            <span class="seo-metric-value">{{ "%.1f"|format(stock_info.trailing_pe) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.dividend_yield %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Div. Yield</span>
+            <span class="seo-metric-value">{{ "%.2f"|format(stock_info.dividend_yield * 100) }}%</span>
+        </div>
+        {% endif %}
+        {% if stock_info.fifty_two_week_low and stock_info.fifty_two_week_high %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">52-Week Range</span>
+            <span class="seo-metric-value">${{ "%.2f"|format(stock_info.fifty_two_week_low) }} – ${{ "%.2f"|format(stock_info.fifty_two_week_high) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.beta %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Beta</span>
+            <span class="seo-metric-value">{{ "%.2f"|format(stock_info.beta) }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if stock_info.long_business_summary %}
+    <details class="seo-description" open>
+        <summary>
+            <h2 style="display: inline; font-size: 1.05em; margin: 0;">About {{ stock_info.issuer_name or stock_info.ticker }}</h2>
+        </summary>
+        <p>{{ stock_info.long_business_summary }}</p>
+        {% if stock_info.sector or stock_info.industry %}
+        <p class="seo-classification">
+            {% if stock_info.sector %}<span>Sector: <strong>{{ stock_info.sector }}</strong></span>{% endif %}
+            {% if stock_info.industry %}<span>Industry: <strong>{{ stock_info.industry }}</strong></span>{% endif %}
+            {% if stock_info.exchange %}<span>Exchange: <strong>{{ stock_info.exchange }}</strong></span>{% endif %}
+        </p>
+        {% endif %}
+    </details>
+    {% endif %}
+
+    {% if stock and stock.holders %}
+    <div class="seo-holder-summary">
+        <h2 style="font-size: 1.05em;">Who Owns {{ stock_info.ticker or "This Stock" }}? Superinvestor Holdings</h2>
+        <p>
+            {{ stock_info.issuer_name or stock_info.ticker }} is held by
+            <strong>{{ stock.num_holders }}</strong> tracked superinvestor{{ "s" if stock.num_holders != 1 else "" }},
+            with a combined position value of
+            <strong>
+                {% if stock.combined_value >= 1e9 %}${{ "%.1f"|format(stock.combined_value / 1e9) }} billion
+                {% elif stock.combined_value >= 1e6 %}${{ "%.0f"|format(stock.combined_value / 1e6) }} million
+                {% else %}${{ "{:,.0f}".format(stock.combined_value) }}{% endif %}
+            </strong>.
+            {% set top_holders = stock.holders[:3] %}
+            The largest positions are held by
+            {% for h in top_holders %}
+                <a href="/holdings/{{ h.fund_cik }}">{{ h.fund_display_name }}</a>
+                ({{ "%.1f"|format(h.pct_of_portfolio) }}% of portfolio){% if not loop.last %}, {% else %}.{% endif %}
+            {% endfor %}
+        </p>
+        {% set buyers = [] %}
+        {% set sellers = [] %}
+        {% for h in stock.holders %}
+            {% if h.activity in ["NEW BUY", "ADD"] %}{% if buyers.append(h) %}{% endif %}{% endif %}
+            {% if h.activity in ["REDUCE", "SOLD"] %}{% if sellers.append(h) %}{% endif %}{% endif %}
+        {% endfor %}
+        {% if buyers or sellers %}
+        <p>
+            In the most recent quarter{% if buyers %},
+            <strong>{{ buyers|length }}</strong> superinvestor{{ "s" if buyers|length != 1 else "" }} added or initiated positions{% endif %}{% if buyers and sellers %} while {% endif %}{% if sellers %}<strong>{{ sellers|length }}</strong> reduced or exited{% endif %}.
+        </p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% if related_stocks %}
+    <div class="seo-related">
+        <h3 style="font-size: 0.92em; margin-bottom: 0.6em;">Also Held by These Superinvestors</h3>
+        <div class="seo-related-grid">
+            {% for rs in related_stocks %}
+            <a href="/stock/{{ rs.ticker }}" class="seo-related-link">
+                <strong>{{ rs.ticker }}</strong>
+                <span>{{ rs.issuer }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endif %}
+
+</section>
 {% endblock %}

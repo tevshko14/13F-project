@@ -18,36 +18,140 @@
 </script>
 {% endblock %}
 {% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
 {# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
 {% endblock %}
 {% block content %}
-<hgroup>
+<section class="retail-shell">
+<div class="retail-aurora retail-aurora-one" aria-hidden="true"></div>
+<div class="retail-aurora retail-aurora-two" aria-hidden="true"></div>
+<hgroup class="retail-hero">
+    <p class="retail-kicker">PaperPanda Retail Lens</p>
     <h1>Retail Sentiment & Trending Stocks</h1>
     <p>Reddit sentiment, trending tickers, market fear &amp; greed index, and finance YouTuber schedules.</p>
 </hgroup>
 
 {# ── Sub-tab CSS (same pattern as grand_portfolio.html) ── #}
 <style>
-    .rt-subtab {
-        background: none;
-        border: none;
-        border-bottom: 3px solid transparent;
-        padding: 0.5em 1.2em;
-        margin: 0;
-        margin-bottom: -2px;
-        cursor: pointer;
-        font-size: 0.95em;
-        font-weight: 600;
-        color: var(--pp-overlay-50);
-        transition: color 0.15s, border-color 0.15s;
+    main.container {
+        max-width: 1280px !important;
+        width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
     }
-    .rt-subtab:hover { color: var(--pp-text-secondary); }
+    .retail-shell {
+        --retail-ink: #0f172a;
+        position: relative;
+        isolation: isolate;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        padding-bottom: 2rem;
+    }
+    .retail-aurora {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(56px);
+        opacity: 0.56;
+        pointer-events: none;
+        z-index: -1;
+    }
+    .retail-aurora-one {
+        width: min(40vw, 520px);
+        height: min(34vw, 440px);
+        top: -90px;
+        left: -90px;
+        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.36), rgba(13, 148, 136, 0.08) 72%);
+    }
+    .retail-aurora-two {
+        width: min(34vw, 430px);
+        height: min(30vw, 390px);
+        top: 40px;
+        right: -80px;
+        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.22), rgba(194, 65, 12, 0.08) 72%);
+    }
+    .retail-hero {
+        text-align: center;
+        margin: 0 auto 1rem;
+        max-width: 1060px;
+        border-radius: 24px;
+        padding: 1.5rem 1.1rem 1.15rem;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background:
+            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+    .retail-kicker {
+        margin: 0 0 0.45rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.62);
+    }
+    .retail-hero h1 {
+        margin: 0;
+        font-size: clamp(1.8rem, 4.2vw, 3.15rem);
+        letter-spacing: -0.03em;
+        line-height: 1.05;
+        color: var(--retail-ink);
+        font-family: "Fraunces", Georgia, serif;
+    }
+    .retail-hero p {
+        margin: 0.85rem auto 0;
+        max-width: 740px;
+        font-size: 1rem;
+        color: rgba(15, 23, 42, 0.72);
+    }
+    .rt-nav-shell {
+        max-width: 1180px;
+        margin: 0 auto 1rem;
+        padding: 0.5rem;
+        border-radius: 16px;
+        border: 1px solid rgba(13, 148, 136, 0.2);
+        background: rgba(255, 255, 255, 0.62);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+    .rt-nav-list {
+        list-style: none;
+        display: flex;
+        gap: 0.42rem;
+        padding: 0 0 0 0.5rem;
+        margin: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .rt-subtab {
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 0.5rem 1rem;
+        margin: 0;
+        background: transparent;
+        cursor: pointer;
+        font-size: 0.87rem;
+        font-weight: 700;
+        white-space: nowrap;
+        color: rgba(15, 23, 42, 0.62);
+        transition: all 0.16s ease;
+    }
+    .rt-subtab:hover {
+        color: var(--retail-ink);
+        border-color: rgba(13, 148, 136, 0.24);
+        background: rgba(13, 148, 136, 0.08);
+    }
     .rt-subtab.active {
-        color: #ef4444;
-        border-bottom-color: #ef4444;
+        color: #fff;
+        border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
     }
     .rt-panel { display: none; opacity: 0; transition: opacity 0.25s ease; }
-    .rt-panel.active { display: block; opacity: 1; }
+    .rt-panel.active { display: block; opacity: 1; max-width: 1180px; margin: 0 auto; }
 
     /* Summary cards */
     .rt-cards {
@@ -57,11 +161,11 @@
         margin-bottom: 1.5em;
     }
     .rt-card {
-        border: 1px solid var(--pp-overlay-8);
-        border-radius: 12px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 16px;
         padding: 1.25em;
-        background: var(--pp-surface);
-        box-shadow: var(--pp-card-shadow-sm);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
     }
     .rt-card-label {
         font-size: 0.75em;
@@ -107,16 +211,80 @@
     }
     .yt-table tbody tr:hover { background: var(--pp-surface-alt); }
 
+    #panel-leaderboard .retail-charts-row > article,
+    #panel-sentiment > article,
+    #panel-leaderboard article,
+    #panel-calendar article {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 16px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+        padding: 1rem;
+    }
+
+    :root[data-theme="dark"] .retail-shell { --retail-ink: #e2e8f0; }
+    :root[data-theme="dark"] .retail-hero {
+        border-color: rgba(148, 163, 184, 0.22);
+        background:
+            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
+    }
+    :root[data-theme="dark"] .retail-kicker,
+    :root[data-theme="dark"] .retail-hero p { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] .rt-nav-shell {
+        border-color: rgba(45, 212, 191, 0.2);
+        background: rgba(15, 23, 42, 0.72);
+    }
+    :root[data-theme="dark"] .rt-subtab { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] .rt-subtab:hover {
+        color: #e2e8f0;
+        background: rgba(45, 212, 191, 0.12);
+        border-color: rgba(45, 212, 191, 0.26);
+    }
+    :root[data-theme="dark"] .rt-card,
+    :root[data-theme="dark"] #panel-leaderboard .retail-charts-row > article,
+    :root[data-theme="dark"] #panel-sentiment > article,
+    :root[data-theme="dark"] #panel-leaderboard article,
+    :root[data-theme="dark"] #panel-calendar article {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+
     /* Responsive: stack charts on mobile */
     @media (max-width: 768px) {
+        main.container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        .retail-hero {
+            border-radius: 20px;
+            padding: 1.2rem 0.85rem 1rem;
+        }
         .retail-charts-row { grid-template-columns: 1fr !important; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .retail-aurora,
+        .rt-subtab,
+        .rt-card,
+        .rt-panel,
+        #panel-leaderboard .retail-charts-row > article,
+        #panel-sentiment > article,
+        #panel-leaderboard article,
+        #panel-calendar article {
+            animation: none !important;
+            transition: none !important;
+            transform: none !important;
+        }
     }
 </style>
 
 {# ── Sub-tab navigation ── #}
-<div style="margin-bottom: 1.5em;">
+<div class="rt-nav-shell">
     <nav>
-        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
+        <ul class="rt-nav-list">
             <li>
                 <button class="rt-subtab{% if view == 'sentiment' %} active{% endif %}"
                         data-view="sentiment" onclick="switchRetailView('sentiment')">
@@ -178,7 +346,7 @@
             <span style="display: inline-block; font-size: 2.2em; font-weight: 700; color: {{ mood_color }};">
                 {{ score|round(0)|int }}
             </span>
-            <span style="font-size: 0.9em; color: #888;">/100</span>
+            <span style="font-size: 0.9em; color: var(--pp-text-muted);">/100</span>
             <div>
                 <span class="badge" style="background: {{ mood_bg }}; color: {{ mood_color }}; font-size: 0.85em; padding: 0.2em 0.7em;">
                     {{ fear_greed.rating }}
@@ -193,14 +361,14 @@
                             width: 4px; height: 18px; background: #000; border-radius: 2px;
                             transform: translateX(-50%);"></div>
             </div>
-            <div style="display: flex; justify-content: space-between; font-size: 0.7em; color: #999; margin-top: 0.3em;">
+            <div style="display: flex; justify-content: space-between; font-size: 0.7em; color: var(--pp-text-muted); margin-top: 0.3em;">
                 <span>Extreme Fear</span>
                 <span>Neutral</span>
                 <span>Extreme Greed</span>
             </div>
         </div>
 
-        <div style="font-size: 0.85em; color: #666;">
+        <div style="font-size: 0.85em; color: var(--pp-text-muted);">
             {% if fear_greed.previous_close is not none %}
             <div>Previous close: <strong>{{ fear_greed.previous_close|round(0)|int }}</strong></div>
             {% endif %}
@@ -439,12 +607,12 @@
     /* ══════════════════════════════════════════════════════════════ */
     function renderBubbleChart(data) {
         if (!data || data.length === 0) return;
+        var ctx = document.getElementById('retail-bubble-chart');
+        if (!ctx) return;
         if (typeof Chart === 'undefined') {
             window.requireChartJS(function() { renderBubbleChart(data); });
             return;
         }
-        var ctx = document.getElementById('retail-bubble-chart');
-        if (!ctx) return;
         if (bubbleChart) { bubbleChart.destroy(); bubbleChart = null; }
 
         var maxMentions = Math.max.apply(null, data.map(function(d) { return d.r; })) || 1;
@@ -484,8 +652,8 @@
                 plugins: {
                     legend: { display: false },
                     tooltip: {
-                        titleFont: { family: "'Inter', 'system-ui', sans-serif", weight: '600', size: 13 },
-                        bodyFont: { family: "'Inter', 'system-ui', sans-serif", size: 12 },
+                        titleFont: { family: "'Space Grotesk', 'system-ui', sans-serif", weight: '600', size: 13 },
+                        bodyFont: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 12 },
                         padding: 10,
                         callbacks: {
                             title: function(items) {
@@ -512,12 +680,12 @@
                         title: {
                             display: true,
                             text: 'Engagement (upvotes/mention)',
-                            font: { family: "'Inter', 'system-ui', sans-serif", size: 11, weight: '500' },
+                            font: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 11, weight: '500' },
                             color: '#a1a1aa'
                         },
                         grid: { color: 'rgba(0,0,0,0.05)' },
                         ticks: {
-                            font: { family: "'Inter', 'system-ui', sans-serif", size: 10 },
+                            font: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 10 },
                             color: '#71717a'
                         }
                     },
@@ -525,7 +693,7 @@
                         title: {
                             display: true,
                             text: 'Mention Velocity (% 24h)',
-                            font: { family: "'Inter', 'system-ui', sans-serif", size: 11, weight: '500' },
+                            font: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 11, weight: '500' },
                             color: '#a1a1aa'
                         },
                         grid: {
@@ -534,7 +702,7 @@
                             }
                         },
                         ticks: {
-                            font: { family: "'Inter', 'system-ui', sans-serif", size: 10 },
+                            font: { family: "'Space Grotesk', 'system-ui', sans-serif", size: 10 },
                             color: '#71717a'
                         }
                     }
@@ -547,7 +715,7 @@
                     var xScale = chart.scales.x;
                     var yScale = chart.scales.y;
                     ctx2.save();
-                    ctx2.font = "10px 'Inter', system-ui, sans-serif";
+                    ctx2.font = "10px 'Space Grotesk', system-ui, sans-serif";
                     ctx2.globalAlpha = 0.35;
 
                     ctx2.fillStyle = '#2e7d32';
@@ -697,24 +865,34 @@
                     '</div>';
             });
     }
+    window.loadCalendar = loadCalendar;
 
-    /* ── Initialize: run immediately if DOM ready (hx-boost), else on DOMContentLoaded ── */
-    function _initRetailPage() {
+    /* Re-render bubble chart when user switches light ↔ dark mode */
+    document.addEventListener('pp-theme-changed', function() {
+        if (window._retailData) {
+            var guruToggle = document.getElementById('guru-toggle');
+            var enabled = guruToggle && guruToggle.checked;
+            var data = enabled
+                ? window._retailData.bubble_data.filter(function(d) { return d.guru_count > 0; })
+                : window._retailData.bubble_data;
+            renderBubbleChart(data);
+        }
+    });
+
+    /* Auto-load active panel on DOMContentLoaded */
+    document.addEventListener('DOMContentLoaded', function() {
+        /* Auto-load leaderboard if it's the active tab on page load */
         {% if view == 'leaderboard' %}
         leaderboardLoaded = true;
         loadLeaderboard();
         {% endif %}
 
+        /* Auto-load calendar if it's the active tab on page load */
         {% if view == 'calendar' %}
         calendarLoaded = true;
         loadCalendar();
         {% endif %}
-    }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', _initRetailPage);
-    } else {
-        _initRetailPage();
-    }
+    });
 
     /* Handle browser back/forward */
     window.addEventListener('popstate', function() {
@@ -746,4 +924,5 @@
 })();
 </script>
 {% endif %}
+    </section>
 {% endblock %}

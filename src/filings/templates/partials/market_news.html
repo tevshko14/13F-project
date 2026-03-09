@@ -282,27 +282,19 @@
 
 <script>
 (function() {
-    var articles = {{ articles | tojson }};
+    var articles = {{ articles[:7] | tojson }};
     var modal = document.getElementById('mn-modal');
     var currentPage = 0;
     var esc = window.escHtml || function(s) { return s; };
 
-    /* ── Compute perPage to match the Market Overview height ── */
-    var perPage = 6; /* default */
-    (function calcPerPage() {
-        var moWidget = document.querySelector('.mo-widget');
-        if (!moWidget) return;
-        /* Measure the market overview widget height */
-        var moH = moWidget.offsetHeight;
-        /* Subtract pagination bar (~36px) and border (2px) */
-        var available = moH - 38;
-        /* Each card is roughly 80px tall */
-        var cardH = 80;
-        var fit = Math.floor(available / cardH);
-        if (fit >= 3) perPage = fit;
-    })();
-
+    var perPage = 7; /* hard cap — show all 7 on one page */
     var totalPages = Math.ceil(articles.length / perPage);
+
+    /* Hide pagination when everything fits on one page */
+    if (totalPages <= 1) {
+        var pag = document.querySelector('.mn-pagination');
+        if (pag) pag.style.display = 'none';
+    }
 
     function renderCards() {
         var container = document.getElementById('mn-cards');

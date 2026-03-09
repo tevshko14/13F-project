@@ -11,12 +11,15 @@
       </div>
     </a>
     {% else %}
-    <a href="/notifications" class="pp-notif-item{% if n.is_new %} pp-notif-new{% endif %}{% if n.type == 'feature_release' %} pp-notif-item--feature{% endif %}">
+    <a href="{{ n.link or '/notifications' }}" class="pp-notif-item{% if n.is_new %} pp-notif-new{% endif %}{% if n.type == 'feature_release' %} pp-notif-item--feature{% endif %}">
       <span class="pp-notif-icon">{% if n.metadata and n.metadata.ticker and logo_tickers is defined and n.metadata.ticker in logo_tickers %}<img src="/api/logo/{{ n.metadata.ticker }}.png" width="20" height="20" loading="eager" decoding="async" onerror="this.outerHTML='{{ n.icon }}';" class="ticker-logo" style="border-radius: 4px;">{% else %}{{ n.icon }}{% endif %}</span>
       <div class="pp-notif-content">
         <div class="pp-notif-title">{{ n.title }}</div>
         <div class="pp-notif-msg">{{ n.message }}</div>
-        <div class="pp-notif-time">{{ n.time_ago }}</div>
+        <div class="pp-notif-meta">
+          <span class="pp-notif-kind">{{ n.type | replace('_', ' ') | title }}</span>
+          <span class="pp-notif-time">{{ n.time_ago }}</span>
+        </div>
       </div>
     </a>
     {% endif %}

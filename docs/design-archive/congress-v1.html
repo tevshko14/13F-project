@@ -19,142 +19,35 @@
 {% endblock %}
 {% block extra_head_scripts %}
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
 {% endblock %}
 {% block content %}
-<section class="congress-shell">
-<div class="congress-aurora congress-aurora-one" aria-hidden="true"></div>
-<div class="congress-aurora congress-aurora-two" aria-hidden="true"></div>
-<header class="congress-hero">
-    <p class="congress-kicker">PaperPanda Capitol Monitor</p>
+<hgroup>
     <h1>Congress Trading</h1>
-    <p>STOCK Act disclosures tracking what House and Senate members are buying and selling.</p>
-</header>
+    <p>STOCK Act disclosures — track what the House &amp; Senate are buying and selling</p>
+</hgroup>
 
 {# ── Subtab Navigation ── #}
 <style>
-    main.container {
-        max-width: 1280px !important;
-        width: 100% !important;
-        padding-left: 1.5rem !important;
-        padding-right: 1.5rem !important;
-    }
-
-    .congress-shell {
-        --cg-ink: #0f172a;
-        --cg-accent: #0d9488;
-        position: relative;
-        isolation: isolate;
-        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
-        padding-bottom: 2rem;
-    }
-    .congress-aurora {
-        position: absolute;
-        border-radius: 999px;
-        filter: blur(56px);
-        opacity: 0.56;
-        pointer-events: none;
-        z-index: -1;
-    }
-    .congress-aurora-one {
-        width: min(40vw, 520px);
-        height: min(34vw, 440px);
-        top: -90px;
-        left: -90px;
-        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.36), rgba(13, 148, 136, 0.08) 72%);
-    }
-    .congress-aurora-two {
-        width: min(34vw, 430px);
-        height: min(30vw, 390px);
-        top: 40px;
-        right: -80px;
-        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.22), rgba(194, 65, 12, 0.08) 72%);
-    }
-    .congress-hero {
-        text-align: center;
-        margin: 0 auto 1rem;
-        max-width: 1060px;
-        border-radius: 24px;
-        padding: 1.5rem 1.1rem 1.15rem;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        background:
-            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
-            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
-            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
-    }
-    .congress-kicker {
-        margin: 0 0 0.45rem;
-        text-transform: uppercase;
-        letter-spacing: 0.16em;
-        font-size: 0.72rem;
-        font-weight: 700;
-        color: rgba(15, 23, 42, 0.62);
-    }
-    .congress-hero h1 {
-        margin: 0;
-        font-size: clamp(1.8rem, 4.2vw, 3.15rem);
-        letter-spacing: -0.03em;
-        line-height: 1.05;
-        color: var(--cg-ink);
-        font-family: "Fraunces", Georgia, serif;
-    }
-    .congress-hero p {
-        margin: 0.85rem auto 0;
-        max-width: 740px;
-        font-size: 1rem;
-        color: rgba(15, 23, 42, 0.72);
-    }
-
-    .cg-nav-shell {
-        max-width: 1180px;
-        margin: 0 auto 1rem;
-        padding: 0.5rem;
-        border-radius: 16px;
-        border: 1px solid rgba(13, 148, 136, 0.2);
-        background: rgba(255, 255, 255, 0.62);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-    }
-    .cg-nav-list {
-        list-style: none;
-        display: flex;
-        gap: 0.42rem;
-        padding: 0 0 0 0.5rem;
-        margin: 0;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
     .cg-subtab {
-        border: 1px solid transparent;
-        border-radius: 999px;
-        padding: 0.5rem 1rem;
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
         margin: 0;
-        background: transparent;
+        margin-bottom: -2px;
         cursor: pointer;
-        font-size: 0.87rem;
-        font-weight: 700;
-        white-space: nowrap;
-        color: rgba(15, 23, 42, 0.62);
-        transition: all 0.16s ease;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: var(--pp-overlay-50);
+        transition: color 0.15s, border-color 0.15s;
     }
-    .cg-subtab:hover {
-        color: var(--cg-ink);
-        border-color: rgba(13, 148, 136, 0.24);
-        background: rgba(13, 148, 136, 0.08);
-    }
+    .cg-subtab:hover { color: var(--pp-text-secondary); }
     .cg-subtab.active {
-        color: #fff;
-        border-color: #0f766e;
-        background: linear-gradient(120deg, #0f766e, #0d9488);
-        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
+        color: #ef4444;
+        border-bottom-color: #ef4444;
     }
     .cg-panel { display: none; opacity: 0; transition: opacity 0.25s ease; }
-    .cg-panel.active { display: block; opacity: 1; max-width: 1180px; margin: 0 auto; }
+    .cg-panel.active { display: block; opacity: 1; }
 
     /* ── Leaderboard toggle pills ── */
     .cg-lb-pill {
@@ -172,10 +65,13 @@
         transition: all 0.15s;
         cursor: pointer;
     }
-    .cg-lb-pill:hover { border-color: #0f766e; color: #0f766e; }
+    .cg-lb-pill:hover {
+        border-color: #ef4444;
+        color: #ef4444;
+    }
     .cg-lb-pill.active {
-        border-color: #0f766e;
-        background: #0f766e;
+        border-color: #ef4444;
+        background: #ef4444;
         color: #fff;
     }
     .cg-lb-pill.active:hover {
@@ -190,10 +86,9 @@
         gap: 1.5em;
         margin-bottom: 2em;
         padding: 1em 1.5em;
-        background: linear-gradient(165deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.64));
-        border-radius: 16px;
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+        background: var(--pp-surface-alt);
+        border-radius: 12px;
+        border: 1px solid var(--pp-overlay-8);
     }
     .cg-stat {
         text-align: center;
@@ -205,7 +100,7 @@
     }
     .cg-stat-label {
         font-size: 0.78em;
-        color: rgba(15, 23, 42, 0.62);
+        color: var(--pp-overlay-50);
         text-transform: uppercase;
         letter-spacing: 0.06em;
     }
@@ -242,11 +137,11 @@
 
     /* ── Dashboard Cards (reuse from grand_portfolio) ── */
     .cg-card {
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        border-radius: 18px;
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 12px;
         padding: 1.5em;
-        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
-        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+        background: var(--pp-surface);
+        box-shadow: var(--pp-card-shadow-sm);
         margin-bottom: 2em;
     }
     .cg-card-header {
@@ -274,7 +169,7 @@
         text-transform: uppercase;
         letter-spacing: 0.06em;
         color: var(--pp-text-muted);
-        background: rgba(15, 23, 42, 0.03);
+        background: var(--pp-surface-alt);
         border-bottom: 1px solid var(--pp-border);
         white-space: nowrap;
         vertical-align: middle;
@@ -291,7 +186,7 @@
         transition: background-color 0.15s ease;
     }
     .cg-table tbody tr:hover {
-        background-color: rgba(15, 23, 42, 0.04);
+        background-color: var(--pp-surface-alt);
     }
     .cg-table tbody tr:last-child td {
         border-bottom: none;
@@ -336,71 +231,18 @@
     }
     .cg-fade.expanded::after { opacity: 0; height: 0; }
 
-    :root[data-theme="dark"] .congress-shell { --cg-ink: #e2e8f0; }
-    :root[data-theme="dark"] .congress-hero {
-        border-color: rgba(148, 163, 184, 0.22);
-        background:
-            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
-            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
-            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
-    }
-    :root[data-theme="dark"] .congress-kicker,
-    :root[data-theme="dark"] .congress-hero p {
-        color: rgba(226, 232, 240, 0.72);
-    }
-    :root[data-theme="dark"] .cg-nav-shell {
-        border-color: rgba(45, 212, 191, 0.2);
-        background: rgba(15, 23, 42, 0.72);
-    }
-    :root[data-theme="dark"] .cg-subtab { color: rgba(226, 232, 240, 0.72); }
-    :root[data-theme="dark"] .cg-subtab:hover {
-        color: #e2e8f0;
-        background: rgba(45, 212, 191, 0.12);
-        border-color: rgba(45, 212, 191, 0.26);
-    }
-    :root[data-theme="dark"] .cg-stats,
-    :root[data-theme="dark"] .cg-card {
-        border-color: rgba(148, 163, 184, 0.2);
-        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
-        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
-    }
-    :root[data-theme="dark"] .cg-stat-label,
-    :root[data-theme="dark"] .cg-card-sub { color: rgba(226, 232, 240, 0.72); }
-    :root[data-theme="dark"] .cg-table thead th { background: rgba(148, 163, 184, 0.08); }
-    :root[data-theme="dark"] .cg-table tbody tr:hover { background-color: rgba(148, 163, 184, 0.08); }
-
     @media (max-width: 768px) {
-        main.container {
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-        }
-        .congress-hero {
-            border-radius: 20px;
-            padding: 1.2rem 0.85rem 1rem;
-        }
         .cg-stats { gap: 1em; padding: 0.8em; }
         .cg-stat-value { font-size: 1.2em; }
         .cg-table thead th, .cg-table tbody td {
             padding: 10px 12px; font-size: 13px;
         }
     }
-
-    /* ── Accessibility: reduced motion ── */
-    @media (prefers-reduced-motion: reduce) {
-        .congress-hero,
-        .cg-subtab,
-        .cg-stats,
-        .cg-card,
-        .cg-lb-pill {
-            animation: none !important;
-            transition: none !important;
-        }
-    }
 </style>
 
-<div class="cg-nav-shell">
+<div style="margin-bottom: 1.5em;">
     <nav>
-        <ul class="cg-nav-list">
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
             <li>
                 <button class="cg-subtab{% if view == 'congress' %} active{% endif %}"
                         data-view="congress" onclick="switchCongressView('congress')">
@@ -1209,5 +1051,4 @@
 })();
 </script>
 
-    </section>
 {% endblock %}

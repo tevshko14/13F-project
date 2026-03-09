@@ -5,47 +5,153 @@
 {% block og_description %}Alternative market signals — Google Trends, search interest, macro sentiment, trending searches.{% endblock %}
 {% block twitter_title %}Alternative Signals | PaperPanda{% endblock %}
 {% block twitter_description %}Alternative market signals — Google Trends, search interest & macro sentiment.{% endblock %}
+{% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{% endblock %}
 {% block content %}
-<hgroup>
-    <h1>Alternative Signals</h1>
-    <p>Short interest rankings, search interest, trending topics &amp; macro sentiment</p>
-</hgroup>
+<section class="alt-signals-shell">
+    <div class="alt-signals-aurora alt-signals-aurora-one" aria-hidden="true"></div>
+    <div class="alt-signals-aurora alt-signals-aurora-two" aria-hidden="true"></div>
+    <hgroup class="alt-signals-hero">
+        <p class="alt-signals-kicker">PaperPanda Signals</p>
+        <h1>Alternative Signals</h1>
+        <p>Search interest, trending topics, and macro sentiment from Google Trends</p>
+    </hgroup>
 
 <style>
-    .alt-tabs {
+    main.container {
+        max-width: 1240px !important;
+        width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+    .alt-signals-shell {
+        --alt-ink: #0f172a;
+        position: relative;
+        isolation: isolate;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        padding-bottom: 2rem;
+    }
+    .alt-signals-aurora {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(56px);
+        opacity: 0.56;
+        pointer-events: none;
+        z-index: -1;
+    }
+    .alt-signals-aurora-one {
+        width: min(40vw, 520px);
+        height: min(34vw, 440px);
+        top: -90px;
+        left: -90px;
+        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.36), rgba(13, 148, 136, 0.08) 72%);
+    }
+    .alt-signals-aurora-two {
+        width: min(34vw, 430px);
+        height: min(30vw, 390px);
+        top: 40px;
+        right: -80px;
+        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.22), rgba(194, 65, 12, 0.08) 72%);
+    }
+    .alt-signals-hero {
+        margin: 0 auto 1.1rem;
+        max-width: 1140px;
+        border-radius: 24px;
+        padding: 1.2rem 1.1rem 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.34);
+        background:
+            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+    }
+    .alt-signals-kicker {
+        margin: 0 0 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.62);
+    }
+    .alt-signals-hero h1 {
+        margin: 0;
+        font-family: "Fraunces", Georgia, serif;
+        font-size: clamp(1.7rem, 3.9vw, 2.8rem);
+        letter-spacing: -0.03em;
+        line-height: 1.04;
+        color: var(--alt-ink);
+    }
+    .alt-signals-hero p {
+        margin-top: 0.55rem;
+        color: rgba(15, 23, 42, 0.72);
+    }
+
+    /* ── Tab nav shell (matches stock/retail/congress pattern) ── */
+    .alt-signals-nav-shell {
+        max-width: 1140px;
+        margin: 0 auto 1rem;
+        padding: 0.5rem;
+        border-radius: 16px;
+        border: 1px solid rgba(13, 148, 136, 0.2);
+        background: rgba(255, 255, 255, 0.62);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+    .alt-signals-nav-list {
+        list-style: none;
         display: flex;
-        gap: 0;
-        border-bottom: 2px solid var(--pp-overlay-8);
-        margin-bottom: 1.5em;
+        gap: 0.42rem;
+        padding: 0 0 0 0.5rem;
+        margin: 0;
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
     }
     .alt-tab {
-        padding: 0.7em 1.3em;
-        font-size: 0.9em;
-        font-weight: 600;
-        color: var(--pp-sub-text);
+        padding: 0.5rem 1rem;
+        font-size: 0.87rem;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.62);
         cursor: pointer;
-        border-bottom: 2px solid transparent;
-        margin-bottom: -2px;
+        border: 1px solid transparent;
+        border-radius: 999px;
         white-space: nowrap;
-        transition: color 0.15s, border-color 0.15s;
+        transition: all 0.16s ease;
         background: none;
-        border-top: none;
-        border-left: none;
-        border-right: none;
+        margin: 0;
     }
-    .alt-tab:hover { color: var(--pp-text); }
+    .alt-tab:hover {
+        color: var(--alt-ink);
+        border-color: rgba(13, 148, 136, 0.24);
+        background: rgba(13, 148, 136, 0.08);
+    }
     .alt-tab.active {
-        color: var(--pp-accent, #1976d2);
-        border-bottom-color: var(--pp-accent, #1976d2);
+        color: #fff;
+        border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
     }
     .alt-panel { display: none; }
     .alt-panel.active { display: block; }
+
+    /* ── Card surfaces ── */
+    .alt-card {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 18px;
+        padding: 1.25rem;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        margin-bottom: 1.2em;
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+    }
     .gt-card {
-        border: 1px solid var(--pp-overlay-8);
-        border-radius: 10px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 14px;
         padding: 1.5em;
-        background: var(--pp-surface);
+        background: rgba(255, 255, 255, 0.52);
         margin-bottom: 1.2em;
     }
     .gt-card-header {
@@ -61,6 +167,7 @@
         font-weight: 700;
         margin: 0;
         color: var(--pp-text);
+        font-family: "Fraunces", Georgia, serif;
     }
     .gt-card-header .gt-source {
         font-size: 0.75em;
@@ -158,158 +265,242 @@
         width: 20px;
         height: 20px;
         border: 2px solid var(--pp-overlay-15);
-        border-top-color: var(--pp-accent, #1976d2);
+        border-top-color: #0d9488;
         border-radius: 50%;
         animation: gt-spin 0.6s linear infinite;
     }
-    @keyframes gt-spin { to { transform: rotate(360deg); } }
 
-    /* Pill switcher styles live in base.html (.pp-pill-nav / .pp-pill-btn / .pp-pill-panel) */
+    /* ── Lookup controls ── */
+    .gt-lookup-controls {
+        display: flex;
+        gap: 0.7em;
+        margin-bottom: 1.5em;
+        flex-wrap: wrap;
+    }
+    .gt-lookup-input {
+        flex: 1;
+        min-width: 200px;
+        padding: 0.62em 1em;
+        border-radius: 10px;
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        background: rgba(255, 255, 255, 0.86);
+        color: var(--alt-ink);
+        font-size: 0.95em;
+    }
+    .gt-lookup-input:focus {
+        outline: none;
+        border-color: #0d9488;
+        box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.16);
+    }
+    .gt-lookup-btn {
+        padding: 0.62em 1.45em;
+        border-radius: 10px;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        color: #fff;
+        border: none;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 0.9em;
+        transition: filter 0.15s;
+    }
+    .gt-lookup-btn:hover { filter: brightness(1.07); }
+    .gt-quick-wrap {
+        margin-top: 1em;
+    }
+    .gt-quick-label {
+        font-size: 0.78em;
+        color: var(--pp-sub-text-light);
+        margin-right: 0.5em;
+    }
+    .gt-quick-ticker {
+        cursor: pointer;
+        border: none;
+        margin: 0.15em;
+    }
+
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .alt-signals-shell { --alt-ink: #e2e8f0; }
+    :root[data-theme="dark"] .alt-signals-hero {
+        border-color: rgba(148, 163, 184, 0.22);
+        background:
+            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.10), transparent 45%);
+    }
+    :root[data-theme="dark"] .alt-signals-kicker,
+    :root[data-theme="dark"] .alt-signals-hero p { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] .alt-signals-nav-shell {
+        border-color: rgba(45, 212, 191, 0.2);
+        background: rgba(15, 23, 42, 0.72);
+    }
+    :root[data-theme="dark"] .alt-tab { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] .alt-tab:hover {
+        color: #e2e8f0;
+        background: rgba(45, 212, 191, 0.12);
+        border-color: rgba(45, 212, 191, 0.26);
+    }
+    :root[data-theme="dark"] .alt-card,
+    :root[data-theme="dark"] .gt-card {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+    :root[data-theme="dark"] .gt-lookup-input {
+        background: rgba(15, 23, 42, 0.74);
+        border-color: rgba(148, 163, 184, 0.32);
+        color: #e2e8f0;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+        main.container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        .alt-signals-hero {
+            border-radius: 20px;
+            padding: 1rem 0.85rem 0.9rem;
+        }
+        .alt-signals-nav-list {
+            padding-left: 0;
+        }
+        .alt-tab {
+            flex: 1 1 auto;
+            text-align: center;
+        }
+    }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+        .alt-signals-aurora,
+        .alt-tab,
+        .alt-card,
+        .gt-card,
+        .gt-lookup-btn {
+            animation: none !important;
+            transition: none !important;
+            transform: none !important;
+        }
+    }
+
+    @keyframes gt-spin { to { transform: rotate(360deg); } }
 </style>
 
-{# ═══ Outer Tab Navigation ═══ #}
-<div class="alt-tabs" role="tablist">
-    <button class="alt-tab active" data-tab="short-interest" role="tab" aria-selected="true">Short Interest</button>
-    <button class="alt-tab" data-tab="google-trends" role="tab" aria-selected="false">Google Trends</button>
+{# ═══ Tab Navigation ═══ #}
+<div class="alt-signals-nav-shell">
+    <nav>
+        <ul class="alt-signals-nav-list" role="tablist">
+            <li><button class="alt-tab active" data-tab="trending" role="tab" aria-selected="true">Trending Now</button></li>
+            <li><button class="alt-tab" data-tab="macro" role="tab" aria-selected="false">Macro Trends</button></li>
+            <li><button class="alt-tab" data-tab="lookup" role="tab" aria-selected="false">Ticker Lookup</button></li>
+        </ul>
+    </nav>
 </div>
 
-{# ═══ Panel: Short Interest Leaderboard ═══ #}
-<div class="alt-panel active" id="panel-short-interest">
-    <div hx-get="/api/alt-signals/short-interest" hx-trigger="load" hx-swap="innerHTML">
-        <div class="gt-loading">
-            <div class="gt-loading-spinner"></div>
-            <div style="margin-top: 0.5em; font-size: 0.85em;">Loading short interest data...</div>
+{# ═══ Panel 1: Trending Searches → Ticker Mapping ═══ #}
+<div class="alt-panel active" id="panel-trending">
+    <div class="alt-card">
+        <div class="gt-card-header">
+            <h3>Trending Searches</h3>
+            <span class="gt-source">via Google Trends Daily</span>
+        </div>
+        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
+            Today's trending Google searches, automatically matched to tickers when possible.
+            A trending search linked to a stock can signal incoming retail attention or a news catalyst.
+        </p>
+        <div hx-get="/api/google-trends/trending"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div class="gt-loading">
+                <div class="gt-loading-spinner"></div>
+                <div style="margin-top: 0.5em; font-size: 0.85em;">Loading trending searches...</div>
+            </div>
         </div>
     </div>
-    <div class="gt-footer" style="margin-top: 1.5em;">
-        Short interest reported by FINRA twice monthly. Data sourced from Yahoo Finance,
-        covering all tickers held by tracked superinvestors (~1,600+ stocks).
-    </div>
 </div>
 
-{# ═══ Panel: Google Trends (with inner pill switcher) ═══ #}
-<div class="alt-panel" id="panel-google-trends">
-
-    {# ── Inner pill nav ── #}
-    <div class="pp-pill-nav" role="tablist">
-        <button class="pp-pill-btn active" data-gt-tab="macro" role="tab">Macro</button>
-        <button class="pp-pill-btn" data-gt-tab="trending" role="tab">Trending</button>
-        <button class="pp-pill-btn" data-gt-tab="lookup" role="tab">Ticker Lookup</button>
-    </div>
-
-    {# ── Sub-panel: Macro Sentiment ── #}
-    <div class="pp-pill-panel active" id="gt-panel-macro">
-        <div class="glass-card" style="padding: 1.5em;">
-            <div class="gt-card-header">
-                <h3>Macro Sentiment Trends</h3>
-                <span class="gt-source">via Google Trends</span>
-            </div>
-            <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1.2em;">
-                Search interest for market-moving macro keywords over the last 3 months.
-                Rising interest in "recession" or "stock market crash" often precedes volatility.
-            </p>
-            <div class="gt-macro-grid">
-                {% for cat_name, keywords in macro_categories.items() %}
-                <div class="gt-macro-card">
-                    <h4>{{ cat_name }}</h4>
-                    <div class="gt-macro-keywords">
-                        {% for kw in keywords %}
-                        <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
-                        {% endfor %}
-                    </div>
-                    <div style="margin-top: 0.8em;">
-                        <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
-                             hx-trigger="revealed"
-                             hx-swap="innerHTML">
-                            <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
-                                <div class="gt-loading-spinner"></div>
-                            </div>
+{# ═══ Panel 2: Macro Trends Dashboard ═══ #}
+<div class="alt-panel" id="panel-macro">
+    <div class="alt-card">
+        <div class="gt-card-header">
+            <h3>Macro Sentiment Trends</h3>
+            <span class="gt-source">via Google Trends</span>
+        </div>
+        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1.2em;">
+            Search interest for market-moving macro keywords over the last 3 months.
+            Rising interest in "recession" or "stock market crash" often precedes volatility.
+        </p>
+        <div class="gt-macro-grid">
+            {% for cat_name, keywords in macro_categories.items() %}
+            <div class="gt-macro-card">
+                <h4>{{ cat_name }}</h4>
+                <div class="gt-macro-keywords">
+                    {% for kw in keywords %}
+                    <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
+                    {% endfor %}
+                </div>
+                <div style="margin-top: 0.8em;">
+                    <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
+                         hx-trigger="revealed"
+                         hx-swap="innerHTML">
+                        <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
+                            <div class="gt-loading-spinner"></div>
                         </div>
                     </div>
                 </div>
-                {% endfor %}
             </div>
-            <div class="gt-footer">
-                Data from Google Trends (relative search interest 0-100). Updated daily.
-                Use these macro signals alongside individual stock signals for a fuller picture.
-            </div>
+            {% endfor %}
+        </div>
+        <div class="gt-footer">
+            Data from Google Trends (relative search interest 0-100). Updated daily.
+            Use these macro signals alongside individual stock signals for a fuller picture.
         </div>
     </div>
-
-    {# ── Sub-panel: Trending Market Searches ── #}
-    <div class="pp-pill-panel" id="gt-panel-trending">
-        <div class="glass-card" style="padding: 1.5em;">
-            <div class="gt-card-header">
-                <h3>Trending Market Searches</h3>
-                <span class="gt-source">via Google Trends Daily</span>
-            </div>
-            <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
-                Today's trending Google searches filtered to stocks, markets, and crypto.
-                A trending search linked to a ticker can signal incoming retail attention or a news catalyst.
-            </p>
-            <div hx-get="/api/google-trends/trending"
-                 hx-trigger="revealed"
-                 hx-swap="innerHTML">
-                <div class="gt-loading">
-                    <div class="gt-loading-spinner"></div>
-                    <div style="margin-top: 0.5em; font-size: 0.85em;">Loading trending searches...</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    {# ── Sub-panel: Ticker Lookup ── #}
-    <div class="pp-pill-panel" id="gt-panel-lookup">
-        <div class="glass-card" style="padding: 1.5em;">
-            <div class="gt-card-header">
-                <h3>Search Interest by Ticker</h3>
-                <span class="gt-source">via Google Trends</span>
-            </div>
-            <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
-                Look up auto-generated search keywords for any ticker. We generate intent-based,
-                product-specific, and comparison terms tailored to each company type.
-            </p>
-
-            <div style="display: flex; gap: 0.7em; margin-bottom: 1.5em; flex-wrap: wrap;">
-                <input type="text" id="gt-ticker-input"
-                       placeholder="Enter ticker (e.g. HOOD, NKE, AAPL)"
-                       style="flex: 1; min-width: 200px; padding: 0.6em 1em; border-radius: 8px;
-                              border: 1px solid var(--pp-overlay-15); background: var(--pp-surface);
-                              color: var(--pp-text); font-size: 0.95em;"
-                       maxlength="10">
-                <button id="gt-lookup-btn"
-                        style="padding: 0.6em 1.5em; border-radius: 8px; background: var(--pp-accent, #1976d2);
-                               color: white; border: none; font-weight: 600; cursor: pointer; font-size: 0.9em;">
-                    Look Up
-                </button>
-            </div>
-
-            <div id="gt-ticker-result"></div>
-
-            <div style="margin-top: 1em;">
-                <span style="font-size: 0.78em; color: var(--pp-sub-text-light); margin-right: 0.5em;">Quick lookup:</span>
-                {% for t in quick_tickers %}
-                <button class="gt-pill gt-quick-ticker" data-ticker="{{ t }}"
-                        style="cursor: pointer; border: none; margin: 0.15em;">
-                    {{ t }}
-                </button>
-                {% endfor %}
-            </div>
-        </div>
-    </div>
-
 </div>
 
-{# ═══ Tab switching + pill switching + lookup logic ═══ #}
+{# ═══ Panel 3: Per-Ticker Keyword Lookup ═══ #}
+<div class="alt-panel" id="panel-lookup">
+    <div class="alt-card">
+        <div class="gt-card-header">
+            <h3>Search Interest by Ticker</h3>
+            <span class="gt-source">via Google Trends</span>
+        </div>
+        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1em;">
+            Look up auto-generated search keywords for any ticker. We generate intent-based,
+            product-specific, and comparison terms tailored to each company type.
+        </p>
+
+        <div class="gt-lookup-controls">
+            <input type="text" id="gt-ticker-input"
+                   placeholder="Enter ticker (e.g. HOOD, NKE, AAPL)"
+                   class="gt-lookup-input"
+                   maxlength="10">
+            <button id="gt-lookup-btn" class="gt-lookup-btn">
+                Look Up
+            </button>
+        </div>
+
+        <div id="gt-ticker-result"></div>
+
+        {# Quick-access buttons for popular tickers #}
+        <div class="gt-quick-wrap">
+            <span class="gt-quick-label">Quick lookup:</span>
+            {% for t in quick_tickers %}
+            <button class="gt-pill gt-quick-ticker" data-ticker="{{ t }}">
+                {{ t }}
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+{# ═══ Tab switching + lookup logic ═══ #}
 <script>
 (function() {
-    // ── Outer tab switching ──
+    // Tab switching
     document.querySelectorAll('.alt-tab').forEach(function(tab) {
         tab.addEventListener('click', function() {
-            document.querySelectorAll('.alt-tab').forEach(function(t) {
-                t.classList.remove('active');
-                t.setAttribute('aria-selected', 'false');
-            });
+            document.querySelectorAll('.alt-tab').forEach(function(t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
             document.querySelectorAll('.alt-panel').forEach(function(p) { p.classList.remove('active'); });
             tab.classList.add('active');
             tab.setAttribute('aria-selected', 'true');
@@ -317,20 +508,7 @@
         });
     });
 
-    // ── Inner Google Trends pill switcher ──
-    document.querySelectorAll('.pp-pill-btn').forEach(function(pill) {
-        pill.addEventListener('click', function() {
-            document.querySelectorAll('.pp-pill-btn').forEach(function(p) { p.classList.remove('active'); });
-            document.querySelectorAll('.pp-pill-panel').forEach(function(p) { p.classList.remove('active'); });
-            pill.classList.add('active');
-            var subPanel = document.getElementById('gt-panel-' + pill.dataset.gtTab);
-            subPanel.classList.add('active');
-            // Nudge HTMX to re-check revealed triggers inside the newly visible panel
-            if (window.htmx) htmx.process(subPanel);
-        });
-    });
-
-    // ── Ticker lookup ──
+    // Ticker lookup
     function lookupTicker(ticker) {
         ticker = ticker.trim().toUpperCase();
         if (!ticker) return;
@@ -353,4 +531,5 @@
     });
 })();
 </script>
+</section>
 {% endblock %}

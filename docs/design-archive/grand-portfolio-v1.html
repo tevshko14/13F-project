@@ -1,0 +1,588 @@
+{% extends "base.html" %}
+{% block title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
+{% block meta_description %}Track 13F holdings of 84 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more. See portfolio values, top holdings, and recent buys and sells.{% endblock %}
+{% block og_title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
+{% block og_description %}Track 13F holdings of 84 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more.{% endblock %}
+{% block twitter_title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
+{% block twitter_description %}Track 13F holdings of 84 superinvestors. See portfolio values, top holdings & recent changes.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Top Funds"}
+    ]
+}
+</script>
+{% endblock %}
+{% block content %}
+{% from "partials/ticker_link.html" import ticker_link %}
+<hgroup>
+    <h1>Top Superinvestor Funds</h1>
+    <p>13F portfolio holdings across 84 tracked superinvestors, powered by SEC EDGAR data.</p>
+</hgroup>
+
+{# ── Subtab Navigation ── #}
+<style>
+    /* ── Subtab bar (matches stock page tab pattern) ── */
+    .gp-subtab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: var(--pp-overlay-50);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .gp-subtab:hover {
+        color: var(--pp-text-secondary);
+    }
+    .gp-subtab.active {
+        color: #ef4444;
+        border-bottom-color: #ef4444;
+    }
+
+    /* ── Tab content panels with fade transition ── */
+    .gp-panel { display: none; opacity: 0; transition: opacity 0.25s ease; }
+    .gp-panel.active { display: block; opacity: 1; }
+
+    /* ── Dashboard Cards ── */
+    .dash-card {
+        border: 1px solid var(--pp-overlay-8);
+        border-radius: 12px;
+        padding: 1.5em;
+        background: transparent;
+        box-shadow: var(--pp-card-shadow-sm);
+    }
+    .dash-card-header {
+        font-size: 1.05em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .dash-card-sub {
+        font-size: 0.82em;
+        color: var(--pp-overlay-50);
+        margin-bottom: 1em;
+    }
+    .dash-spacing { margin-bottom: 2rem; }
+    .dash-top-spacing { margin-bottom: 3rem; }
+
+    /* ── Table styling: alias .gp-table to Paper Panda design ── */
+    .gp-table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+        font-size: max(14px, 0.875rem);
+    }
+    .gp-table thead th {
+        padding: 12px 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-text-muted);
+        background: transparent;
+        border-bottom: 1px solid var(--pp-border);
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    .gp-table tbody td {
+        padding: 14px 20px;
+        vertical-align: middle;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+        line-height: 1.5;
+        white-space: normal;
+    }
+    .gp-table tbody tr {
+        transition: background-color 0.15s ease;
+    }
+    .gp-table tbody tr:hover {
+        background-color: rgba(255, 255, 255, 0.04);
+    }
+    .gp-table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    /* ── Tag list for holders ── */
+    .tag-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+    }
+    .tag {
+        background: rgba(25, 118, 210, 0.08);
+        color: #1565c0;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.78em;
+        font-weight: 500;
+        white-space: nowrap;
+        text-decoration: none;
+    }
+    a.tag:hover {
+        background: rgba(25, 118, 210, 0.15);
+    }
+
+    /* ── Holdings overflow + expand ── */
+    .gp-overflow { display: none; }
+    .gp-fade { position: relative; }
+    .gp-fade::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 60px;
+        background: var(--pp-gradient-fade);
+        pointer-events: none;
+        transition: opacity 0.3s ease;
+    }
+    .gp-fade.expanded::after {
+        opacity: 0;
+        height: 0;
+    }
+    /* ── Cache info bar ── */
+    .cache-info {
+        display: flex;
+        align-items: center;
+        gap: 1em;
+        margin-bottom: 1em;
+        font-size: 0.85em;
+        color: var(--pp-overlay-50);
+    }
+    .sync-badge {
+        display: inline-block;
+        background: rgba(76, 175, 80, 0.12);
+        color: #2e7d32;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.78em;
+        font-weight: 500;
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+        .gp-table thead th,
+        .gp-table tbody td {
+            padding: 10px 12px; font-size: 13px;
+        }
+    }
+</style>
+
+<div style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
+            <li>
+                <button class="gp-subtab{% if view == 'funds' %} active{% endif %}"
+                        data-view="funds" onclick="switchGPView('funds')">
+                    Funds
+                </button>
+            </li>
+            <li>
+                <button class="gp-subtab{% if view == 'holdings' %} active{% endif %}"
+                        data-view="holdings" onclick="switchGPView('holdings')">
+                    Holdings
+                </button>
+            </li>
+            <li>
+                <button class="gp-subtab{% if view == 'activity' %} active{% endif %}"
+                        data-view="activity" onclick="switchGPView('activity')">
+                    Activity
+                </button>
+            </li>
+            <li>
+                <button class="gp-subtab{% if view == 'deployment' %} active{% endif %}"
+                        data-view="deployment" onclick="switchGPView('deployment')">
+                    Capital Deployed
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 1: Holdings (Charts + Table)                             #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-holdings" class="gp-panel{% if view == 'holdings' %} active{% endif %}">
+
+{% if empty is defined and empty %}
+<article>
+    <p>No portfolio data available yet. Data will load as superinvestor portfolios are cached.</p>
+    <p><a href="/funds?view=funds" role="button">View Top Funds</a> to trigger data loading.</p>
+</article>
+{% else %}
+
+{# ── Consensus Leaders ── #}
+<div class="dash-card dash-spacing">
+    <div class="dash-card-header">Consensus Leaders</div>
+    <div class="dash-card-sub">Top 10 stocks by total superinvestor ownership - the most universally held names</div>
+    <div id="consensus-chart" style="width: 100%; height: 360px;"></div>
+</div>
+
+{# ── Recent Momentum ── #}
+<div class="dash-card dash-top-spacing">
+    <div class="dash-card-header">Recent Momentum</div>
+    <div class="dash-card-sub">Top stocks added by superinvestors this quarter - hover to see who is buying</div>
+    <div id="momentum-chart" style="width: 100%; height: 320px;"></div>
+</div>
+
+{# ── Dual Chart Script ── #}
+<script>
+(function() {
+    var consensusData = {{ consensus_json | safe }};
+    var momentumData  = {{ momentum_json | safe }};
+
+    var consensusEl = document.getElementById('consensus-chart');
+    var momentumEl  = document.getElementById('momentum-chart');
+    if (!consensusEl || !momentumEl) return;
+
+    window.requireECharts(function(err) {
+    if (err) {
+        consensusEl.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>';
+        momentumEl.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em;">Chart unavailable</p>';
+        return;
+    }
+
+    var consensusTickerMap = {};
+    for (var i = 0; i < consensusData.length; i++) {
+        if (consensusData[i].ticker) consensusTickerMap[consensusData[i].ticker.toUpperCase()] = i;
+    }
+    var momentumTickerMap = {};
+    for (var j = 0; j < momentumData.length; j++) {
+        if (momentumData[j].ticker) momentumTickerMap[momentumData[j].ticker.toUpperCase()] = j;
+    }
+
+    var cs = getComputedStyle(document.documentElement);
+    var axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+    var gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+
+    var consensusChart = echarts.init(consensusEl);
+    var cTickers = consensusData.map(function(d) { return d.ticker; }).reverse();
+    var cCounts  = consensusData.map(function(d) { return d.holders; }).reverse();
+    var cDataRev = consensusData.slice().reverse();
+
+    consensusChart.setOption({
+        animation: false,
+        grid: { left: 80, right: 30, top: 10, bottom: 20 },
+        xAxis: { type: 'value', name: 'Holders', nameTextStyle: { fontSize: 10, color: axisColor }, axisLabel: { color: axisColor }, minInterval: 1 },
+        yAxis: { type: 'category', data: cTickers, axisLabel: { fontSize: 11, fontWeight: 'bold', fontFamily: 'monospace', color: axisColor } },
+        tooltip: {
+            trigger: 'axis', axisPointer: { type: 'shadow' },
+            formatter: function(params) {
+                if (!params || params.length === 0) return '';
+                var d = cDataRev[params[0].dataIndex]; if (!d) return '';
+                var html = '<strong style="font-size: 1.15em;">' + d.ticker + '</strong>'
+                    + '<br/><span style="opacity: 0.7;">' + d.issuer + '</span>'
+                    + '<br/><br/>Owned by <strong>' + d.holders + '</strong> superinvestor' + (d.holders > 1 ? 's' : '');
+                if (d.avg_weight > 0) html += '<br/>Avg. Weight: <strong>' + d.avg_weight.toFixed(1) + '%</strong>';
+                var valStr = d.combined_value >= 1e9 ? '$' + (d.combined_value / 1e9).toFixed(1) + 'B' : '$' + (d.combined_value / 1e6).toFixed(0) + 'M';
+                html += '<br/>Combined Value: <strong>' + valStr + '</strong>';
+                if (d.top_holders && d.top_holders.length > 0) {
+                    html += '<br/><br/><span style="opacity: 0.5;">Top Holders:</span>';
+                    for (var i = 0; i < d.top_holders.length; i++) html += '<br/>&nbsp;&nbsp;' + d.top_holders[i];
+                }
+                return html;
+            }
+        },
+        series: [{
+            type: 'bar', data: cCounts,
+            itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#64b5f6' }]), borderRadius: [0, 4, 4, 0] },
+            emphasis: { itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#1976d2' }]) } },
+            barMaxWidth: 28,
+            label: { show: true, position: 'right', fontSize: 11, fontWeight: 'bold', color: axisColor, formatter: '{c}' }
+        }]
+    });
+    consensusChart.on('click', function(params) { var d = cDataRev[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
+
+    var momentumChart = echarts.init(momentumEl);
+    var mTickers = momentumData.map(function(d) { return d.ticker || '?'; });
+    var mCounts  = momentumData.map(function(d) { return d.add_count; });
+    var mGradients = momentumData.map(function(d) {
+        return d.is_trending
+            ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#fdba74' }, { offset: 1, color: '#7c2d12' }])
+            : new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#64b5f6' }, { offset: 1, color: '#0d47a1' }]);
+    });
+
+    momentumChart.setOption({
+        animation: false,
+        grid: { left: 40, right: 16, top: 10, bottom: 60 },
+        xAxis: { type: 'category', data: mTickers, axisLabel: { rotate: 45, fontSize: 10, fontWeight: 'bold', fontFamily: 'monospace' }, axisTick: { alignWithLabel: true } },
+        yAxis: { type: 'value', name: '# Added', nameTextStyle: { fontSize: 10 }, minInterval: 1 },
+        tooltip: {
+            trigger: 'axis',
+            formatter: function(params) {
+                if (!params || params.length === 0) return '';
+                var d = momentumData[params[0].dataIndex]; if (!d) return '';
+                var badge = d.is_trending ? ' <span style="background:#e65100;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em;margin-left:4px;">Trending</span>' : '';
+                var html = '<strong style="font-size: 1.1em;">' + (d.ticker || '?') + '</strong>' + badge
+                    + '<br/><span style="opacity: 0.8;">' + d.issuer + '</span>'
+                    + '<br/><br/>Added by <strong>' + d.add_count + '</strong> superinvestor' + (d.add_count > 1 ? 's' : '') + ':';
+                var adders = d.adders || []; var show = adders.slice(0, 5);
+                for (var i = 0; i < show.length; i++) html += '<br/>&nbsp;&nbsp;' + show[i];
+                if (adders.length > 5) html += '<br/>&nbsp;&nbsp;+ ' + (adders.length - 5) + ' more';
+                return html;
+            }
+        },
+        series: [{
+            type: 'bar',
+            data: mCounts.map(function(count, idx) { return { value: count, itemStyle: { color: mGradients[idx], borderRadius: [3, 3, 0, 0] } }; }),
+            emphasis: { itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: '#0d47a1' }, { offset: 1, color: '#1976d2' }]) } }, barMaxWidth: 40
+        }]
+    });
+    momentumChart.on('click', function(params) { var d = momentumData[params.dataIndex]; if (d && d.link) window.location.href = d.link; });
+
+    // Cross-highlighting
+    consensusChart.on('mouseover', function(params) { var d = cDataRev[params.dataIndex]; if (d && d.ticker) { var m = momentumTickerMap[d.ticker.toUpperCase()]; if (m !== undefined) momentumChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: m }); } });
+    consensusChart.on('mouseout', function() { momentumChart.dispatchAction({ type: 'downplay', seriesIndex: 0 }); });
+    momentumChart.on('mouseover', function(params) { var d = momentumData[params.dataIndex]; if (d && d.ticker) { var c = consensusTickerMap[d.ticker.toUpperCase()]; if (c !== undefined) consensusChart.dispatchAction({ type: 'highlight', seriesIndex: 0, dataIndex: consensusData.length - 1 - c }); } });
+    momentumChart.on('mouseout', function() { consensusChart.dispatchAction({ type: 'downplay', seriesIndex: 0 }); });
+
+    if (window._ppRegisterResize) window._ppRegisterResize(function() { consensusChart.resize(); momentumChart.resize(); });
+
+    // Resize charts when holdings panel becomes visible
+    window._gpCharts = { consensus: consensusChart, momentum: momentumChart };
+    }); // end requireECharts
+})();
+</script>
+
+{# ── Holdings Table ── #}
+<article class="glass-card" style="margin-top: 2rem;">
+    <header>
+        <strong>All Holdings</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            Top {{ entries|length }} stocks sorted by number of holders
+        </span>
+    </header>
+    <div class="gp-fade{% if entries|length <= 25 %} expanded{% endif %}" id="gp-table-wrap">
+    <div class="pp-table-wrap">
+    <table class="gp-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th data-sort="text">Ticker</th>
+                <th data-sort="text">Stock</th>
+                <th class="text-right" data-sort="number">Holders</th>
+                <th class="text-right" data-sort="number" data-sort-default="desc">Combined Value ($)</th>
+                <th class="text-right" data-sort="number">% of Aggregate</th>
+                <th>Held By</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in entries %}
+            <tr{% if loop.index > 25 %} class="gp-overflow"{% endif %}>
+                <td>{{ loop.index }}</td>
+                <td>{{ ticker_link(e.ticker, e.cusip) }}</td>
+                <td><strong>{{ e.issuer_name }}</strong></td>
+                <td class="text-right"><strong>{{ e.num_holders }}</strong></td>
+                <td class="text-right">${{ "{:,.0f}".format(e.combined_value) }}</td>
+                <td class="text-right">{{ "%.2f"|format(e.pct_of_aggregate) }}%</td>
+                <td>
+                    <div class="tag-list">
+                        {% for h in e.holders %}
+                        <span class="tag">{{ h }}</span>
+                        {% endfor %}
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>{# end pp-table-wrap #}
+    </div>
+    {% if entries|length > 25 %}
+    <button class="gp-expand-btn" onclick="toggleGrandPortfolio(this)">
+        <span>View All {{ entries|length }} Stocks</span>
+        <span class="gp-expand-arrow">&#9660;</span>
+    </button>
+    {% endif %}
+</article>
+{% endif %}
+
+</div>{# end panel-holdings #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel: Funds (Investor listing table)                           #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-funds" class="gp-panel{% if view == 'funds' %} active{% endif %}">
+
+<div class="cache-info" title="This data is automatically synchronized with official SEC filings every 24 hours.">
+    <small>Data as of {{ cache_age }}</small>
+    <small class="sync-badge">Auto-synced</small>
+</div>
+
+<div class="glass-card" style="padding: 0; overflow: hidden;">
+<div class="pp-table-wrap">
+<table class="gp-table">
+    <thead>
+        <tr>
+            <th data-sort="text">Investor</th>
+            <th data-sort="text">Fund</th>
+            <th class="text-right" data-sort="number" data-sort-default="desc">Portfolio Value</th>
+            <th class="text-right" data-sort="number">Holdings</th>
+            <th>Top Holdings</th>
+            <th data-sort="text">Period</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for i in range(superinvestors|length) %}
+        {% set si = superinvestors[i] %}
+        {% set summary = summaries[i] %}
+        {% if summary %}
+        <tr>
+            <td>
+                <a href="/holdings/{{ si.cik }}"><strong>{{ summary.display_name }}</strong></a>
+            </td>
+            <td class="text-small">
+                <a href="/holdings/{{ si.cik }}">{{ summary.fund_name }}</a>
+            </td>
+            <td class="text-right">${{ "{:,.0f}".format(summary.portfolio_value) }}</td>
+            <td class="text-right">{{ summary.num_holdings }}</td>
+            <td>
+                <div class="tag-list">
+                    {% for t in summary.top_holdings %}
+                    <a href="/stock/{{ t }}" class="tag">{{ t }}</a>
+                    {% endfor %}
+                </div>
+            </td>
+            <td class="text-small">{{ summary.report_period }}</td>
+        </tr>
+        {% else %}
+        <tr hx-get="/api/fund-row/{{ si.cik }}"
+            hx-trigger="load delay:{{ (loop.index0 // 3) }}s"
+            hx-swap="outerHTML">
+            <td>
+                <a href="/holdings/{{ si.cik }}"><strong>{{ si.display_name }}</strong></a>
+            </td>
+            <td class="text-small">
+                <a href="/holdings/{{ si.cik }}">{{ si.fund_name }}</a>
+            </td>
+            <td colspan="4" aria-busy="true">
+                <span class="spinner"></span> Loading from SEC EDGAR...
+            </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+    </tbody>
+</table>
+</div>{# end pp-table-wrap #}
+</div>{# end glass-card #}
+
+</div>{# end panel-funds #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 3: Activity Intelligence Dashboard                       #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-activity" class="gp-panel{% if view == 'activity' %} active{% endif %}">
+    <div class="glass-card" style="padding: 1.5em; overflow: hidden;">
+    <div id="activity-dashboard"
+         hx-get="/api/activity-feed?timeframe=ALL&ptype=guru"
+         hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
+         hx-swap="innerHTML">
+        <article>
+            <p aria-busy="true"><span class="spinner"></span> Loading activity intelligence...</p>
+        </article>
+    </div>
+    </div>{# end glass-card #}
+    <script>
+    /* Read URL params on load and override the default hx-get if ptype/timeframe specified */
+    (function() {
+        var params = new URLSearchParams(window.location.search);
+        var ptype = params.get('ptype') || 'guru';
+        var tf = params.get('timeframe') || 'ALL';
+        var el = document.getElementById('activity-dashboard');
+        if (el) {
+            el.setAttribute('hx-get', '/api/activity-feed?timeframe=' + tf + '&ptype=' + ptype);
+            if (window.htmx) htmx.process(el);
+        }
+    })();
+    </script>
+</div>{# end panel-activity #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Panel 4: Deployment (lazy-loaded HTMX)                         #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="panel-deployment" class="gp-panel{% if view == 'deployment' %} active{% endif %}">
+    <div class="glass-card" style="padding: 0; overflow: hidden;">
+    <div id="deployment-leaderboard"
+         hx-get="/api/deployment-leaderboard"
+         hx-trigger="{% if view == 'deployment' %}load{% else %}revealed{% endif %}"
+         hx-swap="innerHTML">
+        <article>
+            <p aria-busy="true"><span class="spinner"></span> Loading deployment data...</p>
+        </article>
+    </div>
+    </div>{# end glass-card #}
+</div>{# end panel-deployment #}
+
+{# ── Tab Switching + URL Sync Script ── #}
+<script>
+(function() {
+    window.switchGPView = function(view) {
+        // Toggle subtab buttons
+        document.querySelectorAll('.gp-subtab').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.view === view);
+        });
+
+        // Toggle panels
+        document.querySelectorAll('.gp-panel').forEach(function(panel) {
+            panel.classList.remove('active');
+        });
+        var target = document.getElementById('panel-' + view);
+        if (target) {
+            target.classList.add('active');
+        }
+
+        // Resize charts when switching to holdings (they may have been hidden)
+        if (view === 'holdings' && window._gpCharts) {
+            setTimeout(function() {
+                if (window._gpCharts.consensus) window._gpCharts.consensus.resize();
+                if (window._gpCharts.momentum) window._gpCharts.momentum.resize();
+            }, 50);
+        }
+
+        // Re-init sortable tables for the new visible content
+        if (window.initSortableTables) window.initSortableTables();
+
+        // Update URL without page reload
+        var url = new URL(window.location);
+        url.searchParams.set('view', view);
+        history.replaceState(null, '', url.toString());
+    };
+
+    // Handle browser back/forward
+    window.addEventListener('popstate', function() {
+        var params = new URLSearchParams(window.location.search);
+        var view = params.get('view') || 'funds';
+        switchGPView(view);
+    });
+})();
+</script>
+
+<script>
+window.toggleGrandPortfolio = function(btn) {
+    var rows = document.querySelectorAll('.gp-overflow');
+    var wrap = document.getElementById('gp-table-wrap');
+    var arrow = btn.querySelector('.gp-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+    var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+    rows.forEach(function(row) {
+        row.style.display = expanded ? 'none' : '';
+    });
+    wrap.classList.toggle('expanded', !expanded);
+    arrow.classList.toggle('expanded', !expanded);
+    label.textContent = expanded
+        ? 'View All ' + (rows.length + 25) + ' Stocks'
+        : 'Show Top 25';
+
+    if (window.initSortableTables) window.initSortableTables();
+};
+</script>
+{% endblock %}

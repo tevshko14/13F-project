@@ -1,19 +1,191 @@
 {% extends "base.html" %}
 {% block title %}Search - PaperPanda{% endblock %}
+{% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{% endblock %}
 {% block content %}
-<h1>Search Fund Managers</h1>
-<p>Look up SEC 13F filings to see what institutional investors are holding.</p>
+<style>
+  main.container {
+    max-width: 900px !important;
+    width: 100% !important;
+    padding-left: 1.5rem !important;
+    padding-right: 1.5rem !important;
+  }
+  .search-shell {
+    --search-ink: #0f172a;
+    position: relative;
+    isolation: isolate;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    padding-bottom: 2rem;
+  }
+  .search-aurora {
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(56px);
+    opacity: 0.54;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .search-aurora-one {
+    width: min(38vw, 480px);
+    height: min(32vw, 380px);
+    top: -70px;
+    left: -80px;
+    background: radial-gradient(circle at 35% 30%, rgba(249, 115, 22, 0.22), rgba(180, 83, 9, 0.06) 72%);
+  }
+  .search-aurora-two {
+    width: min(34vw, 420px);
+    height: min(29vw, 340px);
+    top: 20px;
+    right: -80px;
+    background: radial-gradient(circle at 60% 40%, rgba(13, 148, 136, 0.22), rgba(15, 118, 110, 0.08) 72%);
+  }
+  .search-hero {
+    margin-bottom: 1.4em;
+    border-radius: 24px;
+    padding: 1.2rem 1.3rem 1.1rem;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    background:
+      linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+      radial-gradient(circle at 8% 12%, rgba(14, 165, 233, 0.14), transparent 48%),
+      radial-gradient(circle at 92% 12%, rgba(45, 212, 191, 0.12), transparent 45%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 18px 46px rgba(15, 23, 42, 0.12);
+  }
+  .search-hero-kicker {
+    margin: 0 0 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: rgba(15, 23, 42, 0.62);
+  }
+  .search-hero h1 {
+    margin: 0 0 0.5rem;
+    font-size: clamp(1.6rem, 3.8vw, 2.5rem);
+    font-family: "Fraunces", Georgia, serif;
+    letter-spacing: -0.03em;
+    line-height: 1.04;
+    color: var(--search-ink);
+  }
+  .search-hero-sub {
+    margin: 0 0 1.1rem;
+    color: rgba(15, 23, 42, 0.68);
+    font-size: 0.92rem;
+  }
+  .search-form-wrap {
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(13, 148, 136, 0.18);
+    border-radius: 12px;
+    padding: 0.9em 1em;
+  }
+  .search-form-wrap form {
+    margin: 0;
+  }
+  .search-form-wrap fieldset {
+    margin: 0;
+  }
+  .search-form-wrap input[type="search"]:focus {
+    border-color: #0d9488;
+    box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.14);
+    outline: none;
+  }
+  .search-form-wrap button[type="submit"] {
+    background: linear-gradient(120deg, #0f766e, #0d9488);
+    border-color: #0d9488;
+    color: #fff;
+    font-weight: 600;
+  }
+  .search-form-wrap button[type="submit"]:hover {
+    background: linear-gradient(120deg, #0d9488, #14b8a6);
+  }
+  .search-results-card {
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 18px;
+    background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+    box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+    overflow: hidden;
+    margin-top: 1.4em;
+  }
+  .search-results-card figure {
+    margin: 0;
+    overflow: auto;
+  }
+  .search-results-label {
+    padding: 0.75em 1em;
+    font-size: 0.85em;
+    color: rgba(15, 23, 42, 0.68);
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    font-weight: 500;
+  }
 
-<form action="/search" method="get"
-      hx-get="/search" hx-target="#results" hx-indicator="#loading"
-      hx-push-url="true">
-    <fieldset role="group">
-        <input type="search" name="q"
-               placeholder='e.g. "Berkshire Hathaway" or "Citadel"'
-               value="{{ query or '' }}" required autofocus>
-        <button type="submit">Search</button>
-    </fieldset>
-</form>
+  /* ── Dark mode ── */
+  :root[data-theme="dark"] .search-shell { --search-ink: #e2e8f0; }
+  :root[data-theme="dark"] .search-hero {
+    border-color: rgba(148, 163, 184, 0.22);
+    background:
+      linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+      radial-gradient(circle at 8% 12%, rgba(14, 165, 233, 0.14), transparent 48%),
+      radial-gradient(circle at 92% 12%, rgba(45, 212, 191, 0.12), transparent 45%);
+  }
+  :root[data-theme="dark"] .search-hero-kicker,
+  :root[data-theme="dark"] .search-hero-sub {
+    color: rgba(226, 232, 240, 0.72);
+  }
+  :root[data-theme="dark"] .search-form-wrap {
+    background: rgba(15, 23, 42, 0.4);
+    border-color: rgba(13, 148, 136, 0.28);
+  }
+  :root[data-theme="dark"] .search-results-card {
+    border-color: rgba(148, 163, 184, 0.2);
+    background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+    box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+  }
+  :root[data-theme="dark"] .search-results-label {
+    color: rgba(226, 232, 240, 0.68);
+    border-bottom-color: rgba(148, 163, 184, 0.12);
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    main.container {
+      padding-left: 1rem !important;
+      padding-right: 1rem !important;
+    }
+    .search-hero {
+      border-radius: 20px;
+      padding: 1rem 0.9rem 0.9rem;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<section class="search-shell">
+<div class="search-aurora search-aurora-one" aria-hidden="true"></div>
+<div class="search-aurora search-aurora-two" aria-hidden="true"></div>
+
+<div class="search-hero">
+  <p class="search-hero-kicker">SEC EDGAR</p>
+  <h1>Search Fund Managers</h1>
+  <p class="search-hero-sub">Look up SEC 13F filings to see what institutional investors are holding.</p>
+  <div class="search-form-wrap">
+    <form action="/search" method="get"
+          hx-get="/search" hx-target="#results" hx-indicator="#loading"
+          hx-push-url="true">
+        <fieldset role="group">
+            <input type="search" name="q"
+                   placeholder='e.g. "Berkshire Hathaway" or "Citadel"'
+                   value="{{ query or '' }}" required autofocus>
+            <button type="submit">Search</button>
+        </fieldset>
+    </form>
+  </div>
+</div>
 
 <div id="loading" class="htmx-indicator" aria-busy="true">
     <p><span class="spinner"></span> Searching SEC EDGAR (this may take a few seconds)...</p>
@@ -21,33 +193,36 @@
 
 <div id="results">
 {% if results is defined and results %}
-<p>Found {{ results|length }} result(s) for "{{ query }}"</p>
-<figure>
-<table>
-    <thead>
-        <tr>
-            <th>#</th>
-            <th data-sort="text">Name</th>
-            <th data-sort="number">CIK</th>
-            <th data-sort="text">Ticker</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for r in results %}
-        <tr>
-            <td>{{ loop.index }}</td>
-            <td>
-                <a href="/holdings/{{ r.cik }}"><strong>{{ r.name }}</strong></a>
-            </td>
-            <td>{{ r.cik }}</td>
-            <td>{{ r.ticker or '-' }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-</figure>
+<div class="search-results-card">
+  <div class="search-results-label">Found {{ results|length }} result(s) for "{{ query }}"</div>
+  <figure>
+  <table>
+      <thead>
+          <tr>
+              <th>#</th>
+              <th data-sort="text">Name</th>
+              <th data-sort="number">CIK</th>
+              <th data-sort="text">Ticker</th>
+          </tr>
+      </thead>
+      <tbody>
+          {% for r in results %}
+          <tr>
+              <td>{{ loop.index }}</td>
+              <td>
+                  <a href="/holdings/{{ r.cik }}"><strong>{{ r.name }}</strong></a>
+              </td>
+              <td>{{ r.cik }}</td>
+              <td>{{ r.ticker or '-' }}</td>
+          </tr>
+          {% endfor %}
+      </tbody>
+  </table>
+  </figure>
+</div>
 {% elif query is defined and query %}
 <p>No fund managers found matching "{{ query }}".</p>
 {% endif %}
 </div>
+</section>
 {% endblock %}

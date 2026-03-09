@@ -17,15 +17,305 @@
 }
 </script>
 {% endblock %}
+{% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{% endblock %}
 {% block content %}
-<hgroup>
-    <h1>Capital Deployed</h1>
-    <p>How much of each fund's total AUM is deployed in equities (13F holdings). Data from SEC Form ADV &amp; XBRL filings.</p>
-</hgroup>
+<style>
+  main.container {
+    max-width: 1240px !important;
+    width: 100% !important;
+    padding-left: 1.5rem !important;
+    padding-right: 1.5rem !important;
+  }
+  .deploy-shell {
+    --deploy-ink: #0f172a;
+    position: relative;
+    isolation: isolate;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    padding-bottom: 2rem;
+  }
+  .deploy-aurora {
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(56px);
+    opacity: 0.54;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .deploy-aurora-one {
+    width: min(38vw, 480px);
+    height: min(32vw, 400px);
+    top: -80px;
+    left: -90px;
+    background: radial-gradient(circle at 35% 30%, rgba(249, 115, 22, 0.22), rgba(180, 83, 9, 0.06) 72%);
+  }
+  .deploy-aurora-two {
+    width: min(34vw, 440px);
+    height: min(29vw, 360px);
+    top: 28px;
+    right: -82px;
+    background: radial-gradient(circle at 60% 40%, rgba(13, 148, 136, 0.22), rgba(15, 118, 110, 0.08) 72%);
+  }
+  .deploy-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.4em;
+    border-radius: 24px;
+    padding: 1.2rem 1.3rem 1.1rem;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    background:
+      linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+      radial-gradient(circle at 8% 12%, rgba(14, 165, 233, 0.14), transparent 48%),
+      radial-gradient(circle at 92% 12%, rgba(45, 212, 191, 0.12), transparent 45%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 18px 46px rgba(15, 23, 42, 0.12);
+  }
+  .deploy-hero-kicker {
+    margin: 0 0 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: rgba(15, 23, 42, 0.62);
+  }
+  .deploy-hero h1 {
+    margin: 0;
+    font-size: clamp(1.6rem, 3.8vw, 2.5rem);
+    font-family: "Fraunces", Georgia, serif;
+    letter-spacing: -0.03em;
+    line-height: 1.04;
+    color: var(--deploy-ink);
+  }
+  .deploy-hero-sub {
+    margin: 0.45rem 0 0;
+    color: rgba(15, 23, 42, 0.72);
+    font-size: 0.92rem;
+    max-width: 46ch;
+  }
+  .deploy-hero-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.35em;
+    flex-shrink: 0;
+  }
+  .deploy-hero-badge small {
+    color: rgba(15, 23, 42, 0.68);
+    font-size: 0.82rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .deploy-hero-badge .badge-synced {
+    display: inline-block;
+    background: rgba(76, 175, 80, 0.12);
+    color: #2e7d32;
+    padding: 2px 10px;
+    border-radius: 4px;
+    font-size: 0.78em;
+    font-weight: 600;
+  }
 
-<div class="cache-info">
+  /* ── Existing functional CSS — preserved exactly ── */
+  .deploy-bar-bg {
+    width: 100%;
+    height: 22px;
+    background: var(--pp-overlay-5);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .deploy-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s ease;
+    min-width: 2px;
+  }
+  .deploy-bar-label {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 0.75em;
+    font-weight: 600;
+    color: var(--pp-text-muted);
+  }
+  .deploy-low { background: linear-gradient(90deg, #ef5350, #ff7043); }
+  .deploy-med { background: linear-gradient(90deg, #ffa726, #ffca28); }
+  .deploy-high { background: linear-gradient(90deg, #66bb6a, #43a047); }
+  .deploy-over { background: linear-gradient(90deg, #42a5f5, #1976d2); }
+
+  .deploy-table {
+    width: 100%;
+    table-layout: auto;
+    border-collapse: collapse;
+    font-size: max(14px, 0.875rem);
+  }
+  .deploy-table thead th {
+    padding: 12px 16px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--pp-text-muted);
+    background: var(--pp-surface-alt);
+    border-bottom: 1px solid var(--pp-border);
+    white-space: nowrap;
+  }
+  .deploy-table tbody td {
+    padding: 12px 16px;
+    vertical-align: middle;
+    color: var(--pp-text-secondary);
+    border-bottom: 1px solid var(--pp-border-light);
+  }
+  .deploy-table tbody tr:hover {
+    background-color: var(--pp-surface-alt);
+  }
+  .source-badge {
+    display: inline-block;
+    font-size: 0.7em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 500;
+  }
+  .source-adv { background: rgba(33, 150, 243, 0.12); color: #1565c0; }
+  .source-xbrl { background: rgba(76, 175, 80, 0.12); color: #2e7d32; }
+  .source-both { background: rgba(156, 39, 176, 0.12); color: #7b1fa2; }
+
+  /* ── Table overflow: allow tooltips to escape ── */
+  .deploy-table-figure { overflow: visible; margin: 0; }
+  .deploy-table-figure .pp-table-wrap { overflow: visible; }
+  .deploy-table { overflow: visible; }
+
+  /* ── Unified tooltip system ── */
+  .pp-tooltip {
+    position: relative;
+    cursor: help;
+  }
+  .pp-tooltip .pp-tip-box {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 8px);
+    right: 0;
+    background: var(--pp-surface);
+    border: 1px solid var(--pp-border);
+    border-radius: 8px;
+    padding: 0.65em 0.85em;
+    font-size: 0.82em;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    line-height: 1.55;
+    white-space: normal;
+    max-width: 320px;
+    min-width: 220px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    z-index: 100;
+    color: var(--pp-text-secondary);
+    pointer-events: none;
+  }
+  .pp-tooltip.pp-tip-left .pp-tip-box { right: auto; left: 0; }
+  .pp-tooltip.pp-tip-center .pp-tip-box { right: auto; left: 50%; transform: translateX(-50%); }
+  /* Header tooltips drop below (no room above at top of table) */
+  thead .pp-tooltip .pp-tip-box { bottom: auto; top: calc(100% + 8px); }
+  .pp-tooltip:hover .pp-tip-box { display: block; }
+  .pp-tip-title {
+    font-weight: 600;
+    color: var(--pp-text);
+    margin-bottom: 0.3em;
+    font-size: 0.95em;
+    display: block;
+  }
+  .pp-tip-label { color: var(--pp-text-muted); font-size: 0.9em; }
+  .pp-tip-note {
+    color: var(--pp-text-muted);
+    font-size: 0.85em;
+    font-style: italic;
+    margin-top: 0.4em;
+    border-top: 1px solid var(--pp-border-light);
+    padding-top: 0.4em;
+    display: block;
+  }
+  .pp-tip-divider { border-top: 1px solid var(--pp-border-light); margin: 0.4em 0; }
+  .pp-tooltip-data { border-bottom: 1px dotted var(--pp-text-muted); }
+  .pp-info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    border: 1px solid var(--pp-text-muted);
+    font-size: 0.6em;
+    font-weight: 700;
+    font-style: italic;
+    color: var(--pp-text-muted);
+    margin-left: 3px;
+    vertical-align: middle;
+    cursor: help;
+    line-height: 1;
+  }
+
+  /* ── Dark mode ── */
+  :root[data-theme="dark"] .deploy-shell { --deploy-ink: #e2e8f0; }
+  :root[data-theme="dark"] .deploy-hero {
+    border-color: rgba(148, 163, 184, 0.22);
+    background:
+      linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+      radial-gradient(circle at 8% 12%, rgba(14, 165, 233, 0.14), transparent 48%),
+      radial-gradient(circle at 92% 12%, rgba(45, 212, 191, 0.12), transparent 45%);
+  }
+  :root[data-theme="dark"] .deploy-hero-kicker,
+  :root[data-theme="dark"] .deploy-hero-sub {
+    color: rgba(226, 232, 240, 0.72);
+  }
+  :root[data-theme="dark"] .deploy-hero-badge small {
+    color: rgba(226, 232, 240, 0.68);
+  }
+  :root[data-theme="dark"] .deploy-hero-badge .badge-synced {
+    background: rgba(76, 175, 80, 0.18);
+    color: #86efac;
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 768px) {
+    main.container {
+      padding-left: 1rem !important;
+      padding-right: 1rem !important;
+    }
+    .deploy-hero {
+      border-radius: 20px;
+      padding: 1rem 0.9rem 0.9rem;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.7rem;
+    }
+    .deploy-hero-badge {
+      align-items: flex-start;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .deploy-bar-fill { transition: none !important; }
+  }
+</style>
+
+<section class="deploy-shell">
+<div class="deploy-aurora deploy-aurora-one" aria-hidden="true"></div>
+<div class="deploy-aurora deploy-aurora-two" aria-hidden="true"></div>
+
+<div class="deploy-hero">
+  <div>
+    <p class="deploy-hero-kicker">Capital Intelligence</p>
+    <h1>Capital Deployed</h1>
+    <p class="deploy-hero-sub">How much of each fund's total AUM is deployed in equities (13F holdings). Data from SEC Form ADV &amp; XBRL filings.</p>
+  </div>
+  <div class="deploy-hero-badge">
     <small>{{ funds_with_data }} of {{ total_funds }} funds with AUM data</small>
-    <small style="display:inline-block; background:rgba(76,175,80,.12); color:#2e7d32; padding:2px 8px; border-radius:4px; font-size:0.78em; font-weight:500;">Auto-synced</small>
+    <span class="badge-synced">Auto-synced</span>
+  </div>
 </div>
 
 {% if not leaderboard %}
@@ -37,146 +327,6 @@
     </p>
 </article>
 {% else %}
-
-<style>
-    .deploy-bar-bg {
-        width: 100%;
-        height: 22px;
-        background: var(--pp-overlay-5);
-        border-radius: 4px;
-        overflow: hidden;
-        position: relative;
-    }
-    .deploy-bar-fill {
-        height: 100%;
-        border-radius: 4px;
-        transition: width 0.4s ease;
-        min-width: 2px;
-    }
-    .deploy-bar-label {
-        position: absolute;
-        right: 6px;
-        top: 50%;
-        transform: translateY(-50%);
-        font-size: 0.75em;
-        font-weight: 600;
-        color: var(--pp-text-muted);
-    }
-    .deploy-low { background: linear-gradient(90deg, #ef5350, #ff7043); }
-    .deploy-med { background: linear-gradient(90deg, #ffa726, #ffca28); }
-    .deploy-high { background: linear-gradient(90deg, #66bb6a, #43a047); }
-    .deploy-over { background: linear-gradient(90deg, #42a5f5, #1976d2); }
-
-    .deploy-table {
-        width: 100%;
-        table-layout: auto;
-        border-collapse: collapse;
-        font-size: max(14px, 0.875rem);
-    }
-    .deploy-table thead th {
-        padding: 12px 16px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--pp-text-muted);
-        background: var(--pp-surface-alt);
-        border-bottom: 1px solid var(--pp-border);
-        white-space: nowrap;
-    }
-    .deploy-table tbody td {
-        padding: 12px 16px;
-        vertical-align: middle;
-        color: var(--pp-text-secondary);
-        border-bottom: 1px solid var(--pp-border-light);
-    }
-    .deploy-table tbody tr:hover {
-        background-color: var(--pp-surface-alt);
-    }
-    .source-badge {
-        display: inline-block;
-        font-size: 0.7em;
-        padding: 1px 6px;
-        border-radius: 3px;
-        font-weight: 500;
-    }
-    .source-adv { background: rgba(33, 150, 243, 0.12); color: #1565c0; }
-    .source-xbrl { background: rgba(76, 175, 80, 0.12); color: #2e7d32; }
-    .source-both { background: rgba(156, 39, 176, 0.12); color: #7b1fa2; }
-
-    /* ── Table overflow: allow tooltips to escape ── */
-    .deploy-table-figure { overflow: visible; margin: 0; }
-    .deploy-table-figure .pp-table-wrap { overflow: visible; }
-    .deploy-table { overflow: visible; }
-
-    /* ── Unified tooltip system ── */
-    .pp-tooltip {
-        position: relative;
-        cursor: help;
-    }
-    .pp-tooltip .pp-tip-box {
-        display: none;
-        position: absolute;
-        bottom: calc(100% + 8px);
-        right: 0;
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 8px;
-        padding: 0.65em 0.85em;
-        font-size: 0.82em;
-        font-weight: 400;
-        text-transform: none;
-        letter-spacing: normal;
-        line-height: 1.55;
-        white-space: normal;
-        max-width: 320px;
-        min-width: 220px;
-        box-shadow: 0 4px 16px rgba(0,0,0,0.18);
-        z-index: 100;
-        color: var(--pp-text-secondary);
-        pointer-events: none;
-    }
-    .pp-tooltip.pp-tip-left .pp-tip-box { right: auto; left: 0; }
-    .pp-tooltip.pp-tip-center .pp-tip-box { right: auto; left: 50%; transform: translateX(-50%); }
-    /* Header tooltips drop below (no room above at top of table) */
-    thead .pp-tooltip .pp-tip-box { bottom: auto; top: calc(100% + 8px); }
-    .pp-tooltip:hover .pp-tip-box { display: block; }
-    .pp-tip-title {
-        font-weight: 600;
-        color: var(--pp-text);
-        margin-bottom: 0.3em;
-        font-size: 0.95em;
-        display: block;
-    }
-    .pp-tip-label { color: var(--pp-text-muted); font-size: 0.9em; }
-    .pp-tip-note {
-        color: var(--pp-text-muted);
-        font-size: 0.85em;
-        font-style: italic;
-        margin-top: 0.4em;
-        border-top: 1px solid var(--pp-border-light);
-        padding-top: 0.4em;
-        display: block;
-    }
-    .pp-tip-divider { border-top: 1px solid var(--pp-border-light); margin: 0.4em 0; }
-    .pp-tooltip-data { border-bottom: 1px dotted var(--pp-text-muted); }
-    .pp-info-icon {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 13px; height: 13px;
-        border-radius: 50%;
-        border: 1px solid var(--pp-text-muted);
-        font-size: 0.6em;
-        font-weight: 700;
-        font-style: italic;
-        color: var(--pp-text-muted);
-        margin-left: 3px;
-        vertical-align: middle;
-        cursor: help;
-        line-height: 1;
-    }
-</style>
 
 <figure class="deploy-table-figure">
 <div class="pp-table-wrap">
@@ -474,4 +624,5 @@
     </div>
 </details>
 {% endif %}
+</section>
 {% endblock %}

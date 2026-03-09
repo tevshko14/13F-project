@@ -1,0 +1,1923 @@
+{% extends "base.html" %}
+{% block title %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }}{% if stock and stock.num_holders %} | {{ stock.num_holders }} Superinvestor Holder{{ "s" if stock.num_holders != 1 }}{% endif %}, 13F Activity & Analysis | PaperPanda{% endblock %}
+{% block meta_description %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} ({{ stock_info.issuer_name or "Stock Detail" }}){% if stock_info.sector %} — {{ stock_info.sector }}{% endif %}{% if stock_info.industry %}, {{ stock_info.industry }}{% endif %} stock held by {{ stock.num_holders if stock else 0 }} superinvestors. Track 13F filings, analyst ratings, insider trades, and quarterly activity on PaperPanda.{% endblock %}
+{% block og_title %}{{ stock_info.ticker or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} | PaperPanda{% endblock %}
+{% block og_description %}See which superinvestors hold {{ stock_info.ticker or "this stock" }}{% if stock_info.issuer_name %} ({{ stock_info.issuer_name }}){% endif %}. Track 13F filings, analyst ratings, insider trades, and quarterly activity.{% endblock %}
+{% block twitter_title %}{{ stock_info.ticker or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} | PaperPanda{% endblock %}
+{% block twitter_description %}See which superinvestors hold {{ stock_info.ticker or "this stock" }}{% if stock_info.issuer_name %} ({{ stock_info.issuer_name }}){% endif %}. 13F filings, analyst ratings & insider trades.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Stocks", "item": "https://paperpanda.io/funds"},
+        {"@type": "ListItem", "position": 3, "name": "{{ stock_info.ticker or stock_info.cusip or 'Stock' }}"}
+    ]
+}
+</script>
+{% if stock_info.issuer_name %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Dataset",
+    "name": "{{ stock_info.ticker }} — {{ stock_info.issuer_name }} Superinvestor Holdings",
+    "description": "13F filing data showing which superinvestors hold {{ stock_info.ticker }} ({{ stock_info.issuer_name }}), including position sizes, portfolio weights, and quarterly activity.",
+    "url": "https://paperpanda.io/stock/{{ stock_info.ticker }}",
+    "keywords": ["13F filings", "{{ stock_info.ticker }}", "{{ stock_info.issuer_name }}", "superinvestor", "hedge fund holdings"{% if stock_info.sector %}, "{{ stock_info.sector }}"{% endif %}],
+    "creator": {
+        "@type": "Organization",
+        "name": "PaperPanda",
+        "url": "https://paperpanda.io"
+    }{% if stock %},
+    "variableMeasured": [
+        {"@type": "PropertyValue", "name": "Number of Superinvestor Holders", "value": "{{ stock.num_holders }}"},
+        {"@type": "PropertyValue", "name": "Combined Position Value (USD)", "value": "{{ stock.combined_value }}"}
+    ]{% endif %}
+}
+</script>
+{% endif %}
+{% endblock %}
+{% block content %}
+<hgroup>
+    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75em;">
+        <h1 style="display: flex; align-items: center; gap: 0.5em; flex-wrap: wrap; margin-bottom: 0; min-width: 0;">
+            {% if logo_tickers is defined and stock_info.ticker in logo_tickers %}
+            <img src="/api/logo/{{ stock_info.ticker }}.png"
+                 alt="{{ stock_info.ticker }} logo" width="40" height="40"
+                 loading="lazy" decoding="async"
+                 style="border-radius: 6px; object-fit: contain;"
+                 onerror="this.style.display='none'">
+            {% endif %}
+            {% if stock_info.ticker %}
+            <span class="ticker">{{ stock_info.ticker }}</span> &mdash;
+            {% endif %}
+            {{ stock_info.issuer_name or "Unknown Company" }}
+        </h1>
+        <div id="pp-header-price" style="display: none; flex-direction: column; align-items: flex-end; white-space: nowrap; padding-top: 0.15em;"></div>
+    </div>
+    <p>
+        {% if stock_info.cusip %}CUSIP: {{ stock_info.cusip }} &middot; {% endif %}
+        {% if stock and stock.num_holders > 0 %}
+            Held by <strong>{{ stock.num_holders }}</strong> superinvestor{{ "s" if stock.num_holders != 1 else "" }}
+            &middot;
+            Combined value: <strong>${{ "{:,.0f}".format(stock.combined_value) }}</strong>
+        {% else %}
+            <span class="text-muted">Not held by any tracked superinvestor</span>
+        {% endif %}
+    </p>
+</hgroup>
+
+{# ── SEO: Server-Rendered Company Overview (visible to Googlebot) ── #}
+<style>
+    .seo-overview {
+        margin-bottom: 1.5em;
+        padding-bottom: 1em;
+        border-bottom: 1px solid var(--pp-border-light);
+    }
+    .seo-metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.6em;
+        margin-bottom: 1.2em;
+    }
+    .seo-metric {
+        display: flex;
+        flex-direction: column;
+        gap: 0.15em;
+        padding: 0.55em 0.75em;
+        border-radius: 8px;
+        background: var(--pp-surface-alt);
+        border: 1px solid var(--pp-border-light);
+    }
+    .seo-metric-label {
+        font-size: 0.68em;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--pp-sub-text-light);
+    }
+    .seo-metric-value {
+        font-size: 1.05em;
+        font-weight: 700;
+        color: var(--pp-text);
+    }
+    .seo-description {
+        margin-bottom: 1.2em;
+    }
+    .seo-description summary {
+        cursor: pointer;
+        list-style: none;
+        margin-bottom: 0.5em;
+    }
+    .seo-description summary::-webkit-details-marker { display: none; }
+    .seo-description p {
+        font-size: 0.88em;
+        line-height: 1.6;
+        color: var(--pp-text-secondary);
+        margin: 0.4em 0;
+    }
+    .seo-classification {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5em 1.2em;
+        font-size: 0.82em !important;
+        color: var(--pp-sub-text) !important;
+    }
+    .seo-holder-summary {
+        margin-bottom: 1.2em;
+    }
+    .seo-holder-summary p {
+        font-size: 0.88em;
+        line-height: 1.6;
+        color: var(--pp-text-secondary);
+        margin: 0.4em 0;
+    }
+    .seo-holder-summary a {
+        color: var(--pp-link);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .seo-holder-summary a:hover { text-decoration: underline; }
+    .seo-related {
+        margin-top: 0.8em;
+    }
+    .seo-related-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 0.5em;
+    }
+    .seo-related-link {
+        display: flex;
+        flex-direction: column;
+        padding: 0.5em 0.7em;
+        border-radius: 6px;
+        border: 1px solid var(--pp-border-light);
+        background: var(--pp-surface);
+        text-decoration: none;
+        transition: background 0.15s, border-color 0.15s;
+    }
+    .seo-related-link:hover {
+        background: var(--pp-surface-alt);
+        border-color: var(--pp-overlay-20);
+    }
+    .seo-related-link strong {
+        font-size: 0.92em;
+        color: var(--pp-text);
+    }
+    .seo-related-link span {
+        font-size: 0.72em;
+        color: var(--pp-sub-text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    @media (max-width: 600px) {
+        .seo-metrics-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+        .seo-related-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+</style>
+{% if stock_info.long_business_summary or stock_info.sector or (stock and stock.holders) %}
+<section class="seo-overview">
+    {# ── Key Metrics Grid ── #}
+    {% if stock_info.market_cap or stock_info.current_price %}
+    <div class="seo-metrics-grid">
+        {% if stock_info.current_price %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Price</span>
+            <span class="seo-metric-value">${{ "%.2f"|format(stock_info.current_price) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.market_cap %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Market Cap</span>
+            <span class="seo-metric-value">
+                {% if stock_info.market_cap >= 1e12 %}${{ "%.2f"|format(stock_info.market_cap / 1e12) }}T
+                {% elif stock_info.market_cap >= 1e9 %}${{ "%.1f"|format(stock_info.market_cap / 1e9) }}B
+                {% else %}${{ "%.0f"|format(stock_info.market_cap / 1e6) }}M{% endif %}
+            </span>
+        </div>
+        {% endif %}
+        {% if stock_info.trailing_pe %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">P/E Ratio</span>
+            <span class="seo-metric-value">{{ "%.1f"|format(stock_info.trailing_pe) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.dividend_yield %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Div. Yield</span>
+            <span class="seo-metric-value">{{ "%.2f"|format(stock_info.dividend_yield * 100) }}%</span>
+        </div>
+        {% endif %}
+        {% if stock_info.fifty_two_week_low and stock_info.fifty_two_week_high %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">52-Week Range</span>
+            <span class="seo-metric-value">${{ "%.2f"|format(stock_info.fifty_two_week_low) }} – ${{ "%.2f"|format(stock_info.fifty_two_week_high) }}</span>
+        </div>
+        {% endif %}
+        {% if stock_info.beta %}
+        <div class="seo-metric">
+            <span class="seo-metric-label">Beta</span>
+            <span class="seo-metric-value">{{ "%.2f"|format(stock_info.beta) }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Company Description ── #}
+    {% if stock_info.long_business_summary %}
+    <details class="seo-description" open>
+        <summary>
+            <h2 style="display: inline; font-size: 1.05em; margin: 0;">About {{ stock_info.issuer_name or stock_info.ticker }}</h2>
+        </summary>
+        <p>{{ stock_info.long_business_summary }}</p>
+        {% if stock_info.sector or stock_info.industry %}
+        <p class="seo-classification">
+            {% if stock_info.sector %}<span>Sector: <strong>{{ stock_info.sector }}</strong></span>{% endif %}
+            {% if stock_info.industry %}<span>Industry: <strong>{{ stock_info.industry }}</strong></span>{% endif %}
+            {% if stock_info.exchange %}<span>Exchange: <strong>{{ stock_info.exchange }}</strong></span>{% endif %}
+        </p>
+        {% endif %}
+    </details>
+    {% endif %}
+
+    {# ── Superinvestor Ownership Summary (natural language for Googlebot) ── #}
+    {% if stock and stock.holders %}
+    <div class="seo-holder-summary">
+        <h2 style="font-size: 1.05em;">Who Owns {{ stock_info.ticker or "This Stock" }}? Superinvestor Holdings</h2>
+        <p>
+            {{ stock_info.issuer_name or stock_info.ticker }} is held by
+            <strong>{{ stock.num_holders }}</strong> tracked superinvestor{{ "s" if stock.num_holders != 1 else "" }},
+            with a combined position value of
+            <strong>
+                {% if stock.combined_value >= 1e9 %}${{ "%.1f"|format(stock.combined_value / 1e9) }} billion
+                {% elif stock.combined_value >= 1e6 %}${{ "%.0f"|format(stock.combined_value / 1e6) }} million
+                {% else %}${{ "{:,.0f}".format(stock.combined_value) }}{% endif %}
+            </strong>.
+            {% set top_holders = stock.holders[:3] %}
+            The largest positions are held by
+            {% for h in top_holders %}
+                <a href="/holdings/{{ h.fund_cik }}">{{ h.fund_display_name }}</a>
+                ({{ "%.1f"|format(h.pct_of_portfolio) }}% of portfolio){% if not loop.last %}, {% else %}.{% endif %}
+            {% endfor %}
+        </p>
+        {% set buyers = [] %}
+        {% set sellers = [] %}
+        {% for h in stock.holders %}
+            {% if h.activity in ["NEW BUY", "ADD"] %}{% if buyers.append(h) %}{% endif %}{% endif %}
+            {% if h.activity in ["REDUCE", "SOLD"] %}{% if sellers.append(h) %}{% endif %}{% endif %}
+        {% endfor %}
+        {% if buyers or sellers %}
+        <p>
+            In the most recent quarter{% if buyers %},
+            <strong>{{ buyers|length }}</strong> superinvestor{{ "s" if buyers|length != 1 else "" }} added or initiated positions{% endif %}{% if buyers and sellers %} while {% endif %}{% if sellers %}<strong>{{ sellers|length }}</strong> reduced or exited{% endif %}.
+        </p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Related Stocks (internal linking) ── #}
+    {% if related_stocks %}
+    <div class="seo-related">
+        <h3 style="font-size: 0.92em; margin-bottom: 0.6em;">Also Held by These Superinvestors</h3>
+        <div class="seo-related-grid">
+            {% for rs in related_stocks %}
+            <a href="/stock/{{ rs.ticker }}" class="seo-related-link">
+                <strong>{{ rs.ticker }}</strong>
+                <span>{{ rs.issuer }}</span>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</section>
+{% endif %}
+
+{# ── Tab Navigation ── #}
+<div class="stock-tabs" style="margin-bottom: 1.5em;">
+    <nav>
+        <ul style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0; border-bottom: 2px solid var(--pp-overlay-10);">
+            <li>
+                <button id="tab-overview-btn"
+                        class="stock-tab active"
+                        onclick="switchTab('overview')">
+                    Overview
+                </button>
+            </li>
+            <li>
+                <button id="tab-ownership-btn"
+                        class="stock-tab"
+                        onclick="switchTab('ownership')">
+                    Ownership
+                </button>
+            </li>
+            <li>
+                <button id="tab-forecasts-btn"
+                        class="stock-tab"
+                        onclick="switchTab('forecasts')">
+                    Forecasts
+                </button>
+            </li>
+            <li>
+                <button id="tab-signals-btn"
+                        class="stock-tab"
+                        onclick="switchTab('signals')">
+                    Signals
+                </button>
+            </li>
+            <li>
+                <button id="tab-vitals-btn"
+                        class="stock-tab"
+                        onclick="switchTab('vitals')">
+                    Vitals
+                </button>
+            </li>
+        </ul>
+    </nav>
+</div>
+
+<style>
+    button.stock-tab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.5em 1.2em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: var(--pp-overlay-50);
+        transition: color 0.15s, border-color 0.15s;
+    }
+    button.stock-tab:hover {
+        color: var(--pp-text-secondary);
+    }
+    button.stock-tab.active {
+        color: #ef4444;
+        border-bottom-color: #ef4444;
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Quarter history tabs */
+    .quarter-tab {
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.4em 1em;
+        margin: 0;
+        margin-bottom: -2px;
+        cursor: pointer;
+        font-size: 0.85em;
+        font-weight: 600;
+        color: var(--pp-overlay-50);
+        transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+        text-align: center;
+    }
+    .quarter-tab:hover { color: var(--pp-text-secondary); }
+    .quarter-tab.active {
+        color: #ef4444;
+        border-bottom-color: #ef4444;
+    }
+    .quarter-panel { display: none; }
+    .quarter-panel.active { display: block; }
+
+    /* Holders expand/collapse */
+    .holders-expand-btn {
+        background: none;
+        border: 1px solid var(--pp-overlay-10);
+        border-radius: 6px;
+        padding: 0.4em 1.2em;
+        cursor: pointer;
+        font-size: 0.85em;
+        color: var(--pp-text-muted);
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+        margin: 0.5em auto 0;
+        transition: background 0.15s, color 0.15s;
+    }
+    .holders-expand-btn:hover {
+        background: var(--pp-overlay-5);
+        color: var(--pp-text-secondary);
+    }
+    .holders-expand-arrow {
+        display: inline-block;
+        transition: transform 0.2s;
+        font-size: 0.75em;
+    }
+    .holders-expand-arrow.expanded {
+        transform: rotate(180deg);
+    }
+
+    /* ── Chart container ── */
+    .chart-container {
+        width: 100%;
+        min-height: 500px;
+        aspect-ratio: 21 / 9;
+        margin-bottom: 2em;
+    }
+    .pp-period-row {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.3em;
+        margin-bottom: 0.5em;
+    }
+    .pp-period-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.3em 0.7em;
+        border-radius: 999px;
+        font-size: 0.78em;
+        font-weight: 600;
+        border: 1.5px solid var(--pico-muted-border-color);
+        color: var(--pico-muted-color);
+        background: transparent;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .pp-period-btn:hover { border-color: #ef4444; color: #ef4444; }
+    .pp-period-btn.active {
+        border-color: #ef4444;
+        background: #ef4444;
+        color: #fff;
+    }
+
+    /* ── Table spacing: proper padding, line-height, min font ── */
+    #tab-overview table,
+    #tab-ownership table {
+        width: 100%;
+        table-layout: auto;
+        border-collapse: collapse;
+        font-size: max(14px, 0.875rem);
+    }
+    #tab-overview table thead th,
+    #tab-ownership table thead th {
+        padding: 12px 20px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-text-muted);
+        background: var(--pp-surface-alt);
+        border-bottom: 1px solid var(--pp-border);
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    #tab-overview table tbody td,
+    #tab-ownership table tbody td {
+        padding: 14px 20px;
+        vertical-align: middle;
+        color: var(--pp-text-secondary);
+        border-bottom: 1px solid var(--pp-border-light);
+        line-height: 1.5;
+        white-space: normal;
+    }
+    #tab-overview table tbody tr,
+    #tab-ownership table tbody tr {
+        transition: background-color 0.15s ease;
+    }
+    #tab-overview table tbody tr:hover,
+    #tab-ownership table tbody tr:hover {
+        background-color: var(--pp-surface-alt);
+    }
+    #tab-overview table tbody tr:last-child td,
+    #tab-ownership table tbody tr:last-child td {
+        border-bottom: none;
+    }
+
+    /* ── Force full-width on overview panels (break out of PicoCSS container) ── */
+    #tab-overview .financials-container,
+    #tab-overview .chart-container {
+        max-width: none;
+        box-sizing: border-box;
+    }
+
+    /* ── Ticker news cards (matches homepage mn-card style) ── */
+    .tn-card {
+        display: flex;
+        gap: 0.7em;
+        padding: 0.65em 0;
+        border-bottom: 1px solid var(--pp-border-light, var(--pp-nav-border));
+        cursor: pointer;
+        transition: background 0.15s;
+        border-radius: 6px;
+    }
+    .tn-card:last-child { border-bottom: none; }
+    .tn-card:hover { background: var(--pp-surface-hover, rgba(255,255,255,0.04)); }
+    .tn-card-icon {
+        width: 20px; height: 20px;
+        border-radius: 3px; flex-shrink: 0;
+        margin-top: 0.15em;
+    }
+    .tn-card-body { flex: 1; min-width: 0; }
+    .tn-headline {
+        font-weight: 600; font-size: 0.88em; line-height: 1.35;
+        display: -webkit-box; -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical; overflow: hidden;
+        color: var(--pp-text-secondary, inherit);
+    }
+    .tn-meta {
+        font-size: 0.74em; color: var(--pp-text-muted, var(--pp-overlay-50));
+        margin-top: 0.2em;
+    }
+    .tn-meta .tn-source { font-weight: 600; }
+    .tn-meta .tn-dot { margin: 0 0.25em; }
+
+    /* ── News pagination ── */
+    .news-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.8em;
+        padding: 0.45em 0;
+        border-top: 1px solid var(--pp-border-light, var(--pp-overlay-8));
+    }
+    .news-pagination button {
+        background: transparent;
+        border: 1px solid var(--pp-border-light, var(--pp-overlay-10));
+        border-radius: 4px;
+        padding: 0.15em 0.5em;
+        font-size: 0.9em; font-weight: 600;
+        color: var(--pp-text-muted);
+        cursor: pointer; margin: 0; line-height: 1.2;
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .news-pagination button:hover:not(:disabled) {
+        color: var(--pp-text);
+        border-color: var(--pp-text-muted);
+    }
+    .news-pagination button:disabled { opacity: 0.3; cursor: default; }
+    .news-pagination .page-info {
+        font-size: 0.75em;
+        color: var(--pp-text-muted);
+        font-weight: 500;
+    }
+
+    /* ── Responsive: stack on mobile, full-width on desktop ── */
+    @media (max-width: 768px) {
+        .chart-container {
+            aspect-ratio: 16 / 9;
+            min-height: 350px;
+        }
+        .financials-container {
+            height: 600px;
+        }
+        .financials-container iframe {
+            min-height: 580px;
+        }
+        #tab-overview,
+        #tab-ownership {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+        }
+        #tab-overview.active {
+            display: flex;
+        }
+        #tab-overview table th,
+        #tab-overview table td,
+        #tab-ownership table th,
+        #tab-ownership table td {
+            font-size: 14px;    /* enforce 14px minimum on mobile */
+        }
+    }
+    @media (min-width: 769px) {
+        #tab-overview,
+        #tab-ownership {
+            width: 100%;
+            max-width: 100%;
+        }
+    }
+</style>
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── NEW Overview Tab: Price Chart, Financials, News ──            #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="tab-overview" class="tab-content active">
+
+{% if stock_info.ticker %}
+    {# ── Self-hosted OHLCV Candlestick Chart (ECharts) ── #}
+    <div class="chart-container">
+        <div class="pp-period-row">
+            <button class="pp-period-btn" data-period="1M" onclick="ppChartPeriod('1M')">1M</button>
+            <button class="pp-period-btn" data-period="3M" onclick="ppChartPeriod('3M')">3M</button>
+            <button class="pp-period-btn" data-period="6M" onclick="ppChartPeriod('6M')">6M</button>
+            <button class="pp-period-btn active" data-period="1Y" onclick="ppChartPeriod('1Y')">1Y</button>
+            <button class="pp-period-btn" data-period="5Y" onclick="ppChartPeriod('5Y')">5Y</button>
+        </div>
+        <div id="pp-ohlcv-chart" style="width: 100%; height: calc(100% - 2em);"></div>
+    </div>
+
+    {# ── News section ── #}
+    <h4 style="margin-top: 0.5em;">Latest News</h4>
+    <div id="ticker-news-container">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading news...
+        </p>
+    </div>
+
+    {# ── ECharts OHLCV candlestick chart ── #}
+    <script>
+    (function() {
+        var TICKER = "{{ stock_info.ticker }}";
+        var chartEl = document.getElementById('pp-ohlcv-chart');
+        if (!chartEl) return;
+
+        requireECharts(function(err) {
+            if (err) { chartEl.innerHTML = '<p style="text-align:center;padding:3em 0;color:var(--pico-muted-color)">Chart unavailable</p>'; return; }
+
+            var chart = echarts.init(chartEl);
+            var _lastData = null;
+
+            function themeColors() {
+                var cs = getComputedStyle(document.documentElement);
+                var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                return {
+                    axis: cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a',
+                    grid: cs.getPropertyValue('--pp-chart-grid').trim() || (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'),
+                    bg: 'transparent',
+                    upColor: '#1976d2',
+                    upBorder: '#1565c0',
+                    downColor: '#dc2626',
+                    downBorder: '#b91c1c',
+                    tooltip: isDark ? 'rgba(30,30,40,0.95)' : 'rgba(255,255,255,0.97)',
+                    tooltipText: isDark ? '#e4e4e7' : '#27272a',
+                };
+            }
+
+            var _currentPeriod = '1Y';
+
+            function updateHeaderPrice(data) {
+                var el = document.getElementById('pp-header-price');
+                if (!el || data.price == null) return;
+                var pct = data.pct_change || 0;
+                var isUp = pct >= 0;
+                var color = isUp ? '#16a34a' : '#dc2626';
+                var arrow = isUp ? '▲' : '▼';
+                var sign = isUp ? '+' : '';
+                el.innerHTML =
+                    '<span style="font-size: 1.9em; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em;">$' + data.price.toFixed(2) + '</span>' +
+                    '<span style="font-size: 0.85em; font-weight: 600; color:' + color + ';">' +
+                    arrow + ' ' + sign + pct.toFixed(2) + '% <span style="opacity:0.6; font-weight:500;">(' + _currentPeriod + ')</span></span>';
+                el.style.display = 'flex';
+            }
+
+            function renderChart(data) {
+                _lastData = data;
+                updateHeaderPrice(data);
+                var tc = themeColors();
+                var dates = [], candleData = [], volumes = [], rawDates = [];
+                var n = data.ohlcv.length;
+                var prevMonth = -1;
+
+                for (var i = 0; i < n; i++) {
+                    var d = data.ohlcv[i];
+                    // d = [epoch_ms, O, H, L, C, V]
+                    var dt = new Date(d[0]);
+                    rawDates.push(dt);
+                    var m = dt.getMonth();
+                    if (n <= 35) {
+                        // 1M: show day number, add month name at month boundary
+                        if (m !== prevMonth) {
+                            dates.push(dt.toLocaleDateString('en-US', {month:'short'}) + ' ' + dt.getDate());
+                        } else {
+                            dates.push(String(dt.getDate()));
+                        }
+                    } else if (n <= 70) {
+                        // 3M: "Feb 3" format
+                        dates.push(dt.toLocaleDateString('en-US', {month:'short', day:'numeric'}));
+                    } else {
+                        // 6M/1Y/5Y: "Mar '25" format
+                        dates.push(dt.toLocaleDateString('en-US', {month:'short', year:'2-digit'}));
+                    }
+                    prevMonth = m;
+                    // ECharts candlestick: [open, close, low, high]
+                    candleData.push([d[1], d[4], d[3], d[2]]);
+                    var isUp = d[4] >= d[1];
+                    volumes.push({
+                        value: d[5],
+                        itemStyle: { color: isUp ? 'rgba(25,118,210,0.35)' : 'rgba(220,38,38,0.35)' }
+                    });
+                }
+
+                chart.setOption({
+                    animation: false,
+                    backgroundColor: tc.bg,
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'cross', crossStyle: { color: tc.axis } },
+                        backgroundColor: tc.tooltip,
+                        borderColor: tc.grid,
+                        textStyle: { color: tc.tooltipText, fontSize: 12 },
+                        formatter: function(params) {
+                            if (!params || !params.length) return '';
+                            var c = params[0];
+                            if (!c || c.data == null) return '';
+                            var idx = c.dataIndex;
+                            var ds = rawDates[idx] ? rawDates[idx].toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : c.name;
+                            // data = [open, close, low, high]
+                            var vals = Array.isArray(c.data) ? c.data : c.value;
+                            var html = '<b>' + ds + '</b><br/>';
+                            html += 'O: <b>' + vals[0].toFixed(2) + '</b> ';
+                            html += 'H: <b>' + vals[3].toFixed(2) + '</b><br/>';
+                            html += 'L: <b>' + vals[2].toFixed(2) + '</b> ';
+                            html += 'C: <b>' + vals[1].toFixed(2) + '</b>';
+                            if (params[1] && params[1].data != null) {
+                                var vol = typeof params[1].data === 'object' ? params[1].data.value : params[1].data;
+                                if (vol) html += '<br/>Vol: <b>' + (vol >= 1e6 ? (vol/1e6).toFixed(1)+'M' : vol >= 1e3 ? (vol/1e3).toFixed(0)+'K' : vol) + '</b>';
+                            }
+                            return html;
+                        }
+                    },
+                    grid: [
+                        { left: 60, right: 15, top: 15, bottom: '28%' },
+                        { left: 60, right: 15, height: '15%', bottom: 30 }
+                    ],
+                    xAxis: [
+                        {
+                            type: 'category', gridIndex: 0, data: dates, boundaryGap: true,
+                            axisLine: { lineStyle: { color: tc.grid } },
+                            axisTick: { show: false },
+                            axisLabel: { show: false },
+                            axisPointer: { label: { show: false } },
+                            splitLine: { show: false }
+                        },
+                        {
+                            type: 'category', gridIndex: 1, data: dates, boundaryGap: true,
+                            axisLine: { lineStyle: { color: tc.grid } },
+                            axisTick: { show: false },
+                            axisLabel: {
+                                color: tc.axis, fontSize: 11,
+                                interval: function(idx) {
+                                    var n = dates.length;
+                                    if (n <= 25) return true;
+                                    if (n <= 70) return idx % 5 === 0;
+                                    if (n <= 150) return idx % 10 === 0;
+                                    return idx % 20 === 0;
+                                }
+                            },
+                            axisPointer: { label: { show: false } },
+                            splitLine: { show: false }
+                        }
+                    ],
+                    yAxis: [
+                        { type: 'value', gridIndex: 0, scale: true, splitLine: { lineStyle: { color: tc.grid } }, axisLabel: { color: tc.axis, fontSize: 11 }, axisLine: { show: false }, axisTick: { show: false }, axisPointer: { label: { show: false } } },
+                        { type: 'value', gridIndex: 1, scale: true, show: false, splitLine: { show: false } }
+                    ],
+                    dataZoom: [{ type: 'inside', xAxisIndex: [0, 1], start: 0, end: 100 }],
+                    series: [
+                        {
+                            type: 'candlestick',
+                            data: candleData,
+                            itemStyle: {
+                                color: tc.upColor,
+                                color0: tc.downColor,
+                                borderColor: tc.upBorder,
+                                borderColor0: tc.downBorder,
+                            },
+                            xAxisIndex: 0,
+                            yAxisIndex: 0,
+                        },
+                        {
+                            type: 'bar',
+                            data: volumes,
+                            xAxisIndex: 1,
+                            yAxisIndex: 1,
+                            barMaxWidth: 6,
+                        }
+                    ],
+                }, true);
+            }
+
+            function fetchOHLCV(period) {
+                _currentPeriod = period;
+                chartEl.style.opacity = '0.5';
+                fetch('/api/stock/' + TICKER + '/ohlcv?period=' + period)
+                    .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                    .then(function(data) { chartEl.style.opacity = '1'; renderChart(data); })
+                    .catch(function() {
+                        chartEl.style.opacity = '1';
+                        chartEl.innerHTML = '<p style="text-align:center;padding:3em 0;color:var(--pico-muted-color)">Price data unavailable for ' + TICKER + '</p>';
+                    });
+            }
+
+            window.ppChartPeriod = function(period) {
+                document.querySelectorAll('.pp-period-btn').forEach(function(b) {
+                    b.classList.toggle('active', b.getAttribute('data-period') === period);
+                });
+                fetchOHLCV(period);
+            };
+
+            // Initial load
+            fetchOHLCV('1Y');
+
+            // Theme change
+            document.addEventListener('pp-theme-changed', function() { if (_lastData) renderChart(_lastData); });
+
+            // Responsive resize
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { chart.resize(); });
+        });
+    })();
+    </script>
+
+    <script>
+    (function() {
+        var allStories = [];
+        var currentPage = 0;
+        var perPage = 10;
+
+        // Auto-load news
+        loadTickerNews('{{ stock_info.ticker }}');
+
+        function loadTickerNews(ticker) {
+            var container = document.getElementById('ticker-news-container');
+            var url = 'https://api.tickertick.com/feed?q=tt:' + ticker.toLowerCase() + '&n=50';
+
+            fetch(url)
+                .then(function(resp) { return resp.json(); })
+                .then(function(data) {
+                    if (!data.stories || data.stories.length === 0) {
+                        container.innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'No recent news found for ' + ticker + '.</p>';
+                        return;
+                    }
+                    allStories = data.stories;
+                    currentPage = 0;
+                    renderNewsPage(container);
+                })
+                .catch(function() {
+                    container.innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Failed to load news. Please try again later.</p>';
+                });
+        }
+
+        function renderNewsPage(container) {
+            var totalPages = Math.ceil(allStories.length / perPage);
+            var start = currentPage * perPage;
+            var end = Math.min(start + perPage, allStories.length);
+            var pageStories = allStories.slice(start, end);
+
+            var html = '';
+            for (var i = 0; i < pageStories.length; i++) {
+                var story = pageStories[i];
+                var date = new Date(story.time);
+                var timeAgo = getTimeAgo(date);
+                html += '<a class="tn-card" href="' + escapeHtml(story.url) + '" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">';
+                if (story.favicon_url) {
+                    html += '<img class="tn-card-icon" src="' + escapeHtml(story.favicon_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+                }
+                html += '<div class="tn-card-body">';
+                html += '<div class="tn-headline">' + escapeHtml(story.title) + '</div>';
+                html += '<div class="tn-meta">';
+                html += '<span class="tn-source">' + escapeHtml(story.site || '') + '</span>';
+                html += '<span class="tn-dot">&middot;</span>';
+                html += '<span>' + timeAgo + '</span>';
+                html += '</div></div></a>';
+            }
+
+            // Pagination
+            html += '<div class="news-pagination">' +
+                '<button onclick="event.preventDefault();window._newsPrev()" ' +
+                (currentPage === 0 ? 'disabled' : '') + '>&lsaquo;</button>' +
+                '<span class="page-info">' + (currentPage + 1) + ' / ' + totalPages + '</span>' +
+                '<button onclick="event.preventDefault();window._newsNext()" ' +
+                (currentPage >= totalPages - 1 ? 'disabled' : '') + '>&rsaquo;</button>' +
+                '</div>';
+
+            container.innerHTML = html;
+        }
+
+        window._newsPrev = function() {
+            if (currentPage > 0) {
+                currentPage--;
+                renderNewsPage(document.getElementById('ticker-news-container'));
+                document.getElementById('ticker-news-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+
+        window._newsNext = function() {
+            var totalPages = Math.ceil(allStories.length / perPage);
+            if (currentPage < totalPages - 1) {
+                currentPage++;
+                renderNewsPage(document.getElementById('ticker-news-container'));
+                document.getElementById('ticker-news-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        };
+
+        function getTimeAgo(date) {
+            var now = new Date();
+            var diffMs = now - date;
+            var diffMin = Math.floor(diffMs / 60000);
+            var diffHr = Math.floor(diffMs / 3600000);
+            var diffDay = Math.floor(diffMs / 86400000);
+            if (diffMin < 60) return diffMin + 'm ago';
+            if (diffHr < 24) return diffHr + 'h ago';
+            if (diffDay < 7) return diffDay + 'd ago';
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+    })();
+    </script>
+{% else %}
+    <article style="text-align: center; padding: 3em 1em;">
+        <p class="text-muted" style="font-size: 1.1em;">
+            Overview requires a ticker symbol. This stock only has a CUSIP identifier.
+        </p>
+    </article>
+{% endif %}
+
+</div>{# end tab-overview #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Ownership Tab (renamed from Overview) ──                      #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="tab-ownership" class="tab-content">
+
+{# ── Ownership pill nav: Funds / Congress ── #}
+<div class="pp-pill-nav" id="ownership-pill-nav">
+    <button class="pp-pill-btn active" data-own-tab="funds">Funds</button>
+    <button class="pp-pill-btn" data-own-tab="congress">Congress</button>
+    <button class="pp-pill-btn" data-own-tab="insider">Insiders</button>
+    <button class="pp-pill-btn" data-own-tab="filings">SEC Filings</button>
+</div>
+
+{# ── Sub-panel: Funds (superinvestor holdings — pre-rendered) ── #}
+<div class="pp-pill-panel active" id="own-panel-funds">
+
+{% if stock and stock.holders %}
+
+{% if history %}
+<article id="chart-section">
+    <header style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+            <strong>Quarterly Activity Chart</strong>
+            <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+                Adds vs. Reduces by Quarter
+            </span>
+        </div>
+        <button id="chart-toggle-btn"
+                class="secondary outline"
+                style="font-size: 0.8em; padding: 0.25em 0.75em; margin: 0;"
+                onclick="toggleChartView()">
+            Show Detailed View
+        </button>
+    </header>
+    <div style="position: relative; width: 100%; height: 350px;">
+        <canvas id="activityChart"></canvas>
+    </div>
+    <footer class="text-muted text-small" style="text-align: center; padding-top: 0.5em;">
+        Green bars = share additions &middot; Red bars = share reductions
+    </footer>
+</article>
+{% endif %}
+
+<article>
+    <header>
+        <strong>Superinvestor Holders</strong>
+    </header>
+    <div class="pp-table-wrap">
+    <table class="pp-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th data-sort="text">Investor</th>
+                <th class="text-right" data-sort="number">% of Portfolio</th>
+                <th class="text-right" data-sort="number" data-sort-default="desc">Value ($)</th>
+                <th class="text-right" data-sort="number">Shares</th>
+                <th data-sort="activity">Recent Activity</th>
+                <th class="text-right" data-sort="number">Share Change</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for h in stock.holders %}
+            <tr{% if loop.index > 10 %} class="holder-overflow" style="display: none;"{% endif %}>
+                <td>{{ loop.index }}</td>
+                <td>
+                    <a href="/holdings/{{ h.fund_cik }}">
+                        <strong>{{ h.fund_display_name }}</strong>
+                    </a>
+                </td>
+                <td class="text-right">{{ "%.1f"|format(h.pct_of_portfolio) }}%</td>
+                <td class="text-right">${{ "{:,.0f}".format(h.value) }}</td>
+                <td class="text-right">{{ "{:,}".format(h.shares) }}</td>
+                <td>
+                    {% if h.activity == "NEW BUY" %}
+                        <span class="badge badge-new">NEW BUY</span>
+                    {% elif h.activity == "ADD" %}
+                        <span class="badge badge-add">ADD</span>
+                    {% elif h.activity == "REDUCE" %}
+                        <span class="badge badge-reduce">REDUCE</span>
+                    {% elif h.activity == "SOLD" %}
+                        <span class="badge badge-sold">SOLD</span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+                <td class="text-right">
+                    {% if h.share_change != 0 %}
+                        <span class="{% if h.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                            {{ "{:+,}".format(h.share_change) }}
+                        </span>
+                    {% else %}
+                        <span class="text-muted">-</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>{# end pp-table-wrap #}
+    {% if stock.holders | length > 10 %}
+    <button class="holders-expand-btn" onclick="toggleHolders(this)">
+        <span>Show all {{ stock.holders | length }} holders</span>
+        <span class="holders-expand-arrow">&#9660;</span>
+    </button>
+    {% endif %}
+</article>
+
+{% if history %}
+<article>
+    <header>
+        <strong>Quarterly Activity History</strong>
+        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
+            ({{ history | length }} quarter{{ "s" if history | length != 1 else "" }})
+        </span>
+    </header>
+
+    {# ── Quarter Tabs (left=newest, right=oldest, default=newest) ── #}
+    <nav>
+        <ul class="quarter-tabs" style="list-style: none; display: flex; gap: 0; padding: 0; margin: 0 0 1em 0; border-bottom: 2px solid var(--pp-overlay-10); overflow-x: auto;">
+            {% for quarter in history %}
+            <li>
+                <button class="quarter-tab{% if loop.first %} active{% endif %}"
+                        onclick="switchQuarterTab({{ loop.index0 }})"
+                        data-quarter-idx="{{ loop.index0 }}">
+                    {{ quarter.period }}
+                    <span class="text-muted text-small" style="font-weight: normal; display: block; font-size: 0.75em;">
+                        {{ quarter.entries | length }} investor{{ "s" if quarter.entries | length != 1 else "" }}
+                    </span>
+                </button>
+            </li>
+            {% endfor %}
+        </ul>
+    </nav>
+
+    {# ── Quarter Tab Panels ── #}
+    {% for quarter in history %}
+    <div class="quarter-panel{% if loop.first %} active{% endif %}" data-quarter-idx="{{ loop.index0 }}">
+        <div class="pp-table-wrap">
+        <table class="pp-table">
+            <thead>
+                <tr>
+                    <th data-sort="text">Investor</th>
+                    <th data-sort="activity">Activity</th>
+                    <th class="text-right" data-sort="number">Share Change</th>
+                    <th class="text-right" data-sort="number">% Change</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in quarter.entries %}
+                <tr>
+                    <td>
+                        <a href="/holdings/{{ entry.fund_cik }}">
+                            <strong>{{ entry.fund_display_name }}</strong>
+                        </a>
+                    </td>
+                    <td>
+                        {% if entry.activity == "NEW BUY" %}
+                            <span class="badge badge-new">NEW BUY</span>
+                        {% elif entry.activity == "ADD" %}
+                            <span class="badge badge-add">ADD</span>
+                        {% elif entry.activity == "REDUCE" %}
+                            <span class="badge badge-reduce">REDUCE</span>
+                        {% elif entry.activity == "SOLD" %}
+                            <span class="badge badge-sold">SOLD</span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if entry.share_change != 0 %}
+                            <span class="{% if entry.share_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                {{ "{:+,}".format(entry.share_change) }}
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        {% if entry.activity == "NEW BUY" %}
+                            <span class="activity-new-buy">New</span>
+                        {% elif entry.activity == "SOLD" %}
+                            <span class="activity-sold">Exit</span>
+                        {% elif entry.pct_change != 0 %}
+                            <span class="{% if entry.pct_change > 0 %}activity-add{% else %}activity-reduce{% endif %}">
+                                {{ "%+.1f"|format(entry.pct_change) }}%
+                            </span>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>{# end pp-table-wrap #}
+    </div>
+    {% endfor %}
+</article>
+{% endif %}
+
+{% else %}
+    {# ── Empty state: no superinvestor holds this stock ── #}
+    <article style="text-align: center; padding: 3em 1em;">
+        <p class="text-muted" style="font-size: 1.1em;">
+            Not held by any tracked superinvestor.
+        </p>
+        <p class="text-muted">
+            This stock does not appear in any of the 13F filings we track.
+            <a href="/funds">View all tracked funds</a>.
+        </p>
+    </article>
+{% endif %}
+
+</div>{# end own-panel-funds #}
+
+{# ── Sub-panel: Congress (lazy-loaded on first pill click) ── #}
+<div class="pp-pill-panel" id="own-panel-congress">
+    <div id="congress-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading congressional trading data...
+        </p>
+    </div>
+</div>
+
+{# ── Sub-panel: SEC Filings (lazy-loaded on first pill click) ── #}
+<div class="pp-pill-panel" id="own-panel-filings">
+    <div id="filings-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading SEC filings...
+        </p>
+    </div>
+</div>
+
+{# ── Sub-panel: Insider Trading (lazy-loaded on first pill click) ── #}
+<div class="pp-pill-panel" id="own-panel-insider">
+    <div id="insider-insights-container"></div>
+    <div id="insider-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading insider trading data...
+        </p>
+    </div>
+</div>
+
+</div>{# end tab-ownership #}
+
+{# ── Forecasts Tab (Analysts + Earnings pills) ── #}
+<div id="tab-forecasts" class="tab-content">
+    <div class="pp-pill-nav" id="forecasts-pill-nav">
+        <button id="pill-analysts-btn" class="pp-pill-btn active" data-forecast-tab="analysts">Analysts</button>
+        <button id="pill-earnings-btn" class="pp-pill-btn" data-forecast-tab="earnings">Earnings</button>
+        <button id="pill-estimates-btn" class="pp-pill-btn" data-forecast-tab="estimates">Estimates</button>
+    </div>
+    <div id="forecast-analysts-panel" class="pp-pill-panel active">
+        <div id="analyst-ratings-content">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading analyst ratings...</p>
+        </div>
+    </div>
+    <div id="forecast-earnings-panel" class="pp-pill-panel">
+        <div id="earnings-content">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading earnings data...</p>
+        </div>
+    </div>
+    <div id="forecast-estimates-panel" class="pp-pill-panel">
+        <div id="estimates-content">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading estimates data...</p>
+        </div>
+    </div>
+</div>
+
+{# ── Signals Tab (pills: Sentiment | Short Interest) ── #}
+<div id="tab-signals" class="tab-content">
+    <div class="pp-pill-nav" id="signals-pill-nav">
+        <button class="pp-pill-btn active" data-signal-tab="sentiment">Sentiment</button>
+        <button class="pp-pill-btn" data-signal-tab="short-interest">Short Interest</button>
+    </div>
+    <div id="signal-panel-sentiment" class="pp-pill-panel active">
+        <div id="signals-content">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading signals data...</p>
+        </div>
+    </div>
+    <div id="signal-panel-short-interest" class="pp-pill-panel">
+        <div id="short-interest-content">
+            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading short interest data...</p>
+        </div>
+    </div>
+</div>
+
+{# ── Vitals Tab ── #}
+<div id="tab-vitals" class="tab-content">
+    <div id="vitals-content">
+        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
+            Loading vitals data...
+        </p>
+    </div>
+</div>
+
+
+{# ── Quarter Tab Switching ── #}
+<script>
+window.switchQuarterTab = function(idx) {
+    document.querySelectorAll('.quarter-tab').forEach(function(btn) {
+        btn.classList.toggle('active', parseInt(btn.dataset.quarterIdx) === idx);
+    });
+    document.querySelectorAll('.quarter-panel').forEach(function(panel) {
+        panel.classList.toggle('active', parseInt(panel.dataset.quarterIdx) === idx);
+    });
+    if (window.initSortableTables) window.initSortableTables();
+};
+
+window.toggleHolders = function(btn) {
+    var rows = document.querySelectorAll('.holder-overflow');
+    var arrow = btn.querySelector('.holders-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+    var expanded = rows.length > 0 && rows[0].style.display !== 'none';
+
+    rows.forEach(function(row) {
+        row.style.display = expanded ? 'none' : '';
+    });
+    arrow.classList.toggle('expanded', !expanded);
+    label.textContent = expanded
+        ? 'Show all ' + (document.querySelectorAll('.holder-overflow').length + 10) + ' holders'
+        : 'Show top 10';
+};
+</script>
+
+{# ── Tab Switching Logic ── #}
+<script>
+(function() {
+    // Helper: innerHTML doesn't execute <script> tags — re-insert them as live elements
+    function activateScripts(container) {
+        container.querySelectorAll('script').forEach(function(old) {
+            var s = document.createElement('script');
+            s.textContent = old.textContent;
+            old.parentNode.replaceChild(s, old);
+        });
+    }
+
+    var analystLoaded = false;
+    var signalsLoaded = false;
+    var shortInterestLoaded = false;
+    var vitalsLoaded = false;
+    var earningsLoaded = false;
+    var estimatesLoaded = false;
+    var filingsLoaded = false;
+    var insiderLoaded = false;
+    var activeForecastPill = 'analysts';
+    var activeSignalPill = 'sentiment';
+
+    function switchForecastPill(pill) {
+        activeForecastPill = pill;
+        document.getElementById('forecasts-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        document.getElementById('pill-' + pill + '-btn').classList.add('active');
+        document.getElementById('tab-forecasts').querySelectorAll('.pp-pill-panel').forEach(function(panel) {
+            panel.classList.remove('active');
+        });
+        document.getElementById('forecast-' + pill + '-panel').classList.add('active');
+
+        if (pill === 'analysts' && !analystLoaded) {
+            analystLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/analysts/{{ stock_info.ticker }}')
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    var el = document.getElementById('analyst-ratings-content');
+                    el.innerHTML = html; activateScripts(el);
+                })
+                .catch(function() {
+                    document.getElementById('analyst-ratings-content').innerHTML =
+                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load analyst ratings.</p>';
+                });
+            {% else %}
+            document.getElementById('analyst-ratings-content').innerHTML =
+                '<p class="text-muted" style="text-align:center;padding:2em 0;">Analyst ratings require a ticker symbol.</p>';
+            {% endif %}
+        }
+
+        if (pill === 'earnings' && !earningsLoaded) {
+            earningsLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/earnings/{{ stock_info.ticker }}')
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    var el = document.getElementById('earnings-content');
+                    el.innerHTML = html; activateScripts(el);
+                })
+                .catch(function() {
+                    document.getElementById('earnings-content').innerHTML =
+                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load earnings data.</p>';
+                });
+            {% else %}
+            document.getElementById('earnings-content').innerHTML =
+                '<p class="text-muted" style="text-align:center;padding:2em 0;">Earnings data requires a ticker symbol.</p>';
+            {% endif %}
+        }
+
+        if (pill === 'estimates' && !estimatesLoaded) {
+            estimatesLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/estimates/{{ stock_info.ticker }}')
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    var el = document.getElementById('estimates-content');
+                    el.innerHTML = html; activateScripts(el);
+                })
+                .catch(function() {
+                    document.getElementById('estimates-content').innerHTML =
+                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load estimates data.</p>';
+                });
+            {% else %}
+            document.getElementById('estimates-content').innerHTML =
+                '<p class="text-muted" style="text-align:center;padding:2em 0;">Estimates data requires a ticker symbol.</p>';
+            {% endif %}
+        }
+    }
+    window.switchForecastPill = switchForecastPill;
+
+    // ── Signals pill switcher (Sentiment / Short Interest) ──
+    function switchSignalPill(pill) {
+        activeSignalPill = pill;
+        document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        // Activate the clicked pill button by matching data-signal-tab
+        document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
+            if (btn.dataset.signalTab === pill) btn.classList.add('active');
+        });
+        document.getElementById('tab-signals').querySelectorAll('.pp-pill-panel').forEach(function(panel) {
+            panel.classList.remove('active');
+        });
+        document.getElementById('signal-panel-' + pill).classList.add('active');
+
+        if (pill === 'sentiment' && !signalsLoaded) {
+            signalsLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/signals/{{ stock_info.ticker }}')
+                .then(function(resp) { return resp.text(); })
+                .then(function(html) {
+                    var el = document.getElementById('signals-content');
+                    el.innerHTML = html;
+                    activateScripts(el);
+                    if (window.initSortableTables) window.initSortableTables();
+                })
+                .catch(function() {
+                    document.getElementById('signals-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Failed to load signals data. Please try again later.</p>';
+                });
+            {% else %}
+            document.getElementById('signals-content').innerHTML =
+                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                'Signals data requires a ticker symbol.</p>';
+            {% endif %}
+        }
+
+        if (pill === 'short-interest' && !shortInterestLoaded) {
+            shortInterestLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/signals/{{ stock_info.ticker }}/short-interest')
+                .then(function(resp) { return resp.text(); })
+                .then(function(html) {
+                    var el = document.getElementById('short-interest-content');
+                    el.innerHTML = html;
+                    activateScripts(el);
+                })
+                .catch(function() {
+                    document.getElementById('short-interest-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Failed to load short interest data. Please try again later.</p>';
+                });
+            {% else %}
+            document.getElementById('short-interest-content').innerHTML =
+                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                'Short interest data requires a ticker symbol.</p>';
+            {% endif %}
+        }
+    }
+    window.switchSignalPill = switchSignalPill;
+
+    var _tabBtns = document.querySelectorAll('.stock-tab');
+    var _tabPanels = document.querySelectorAll('.tab-content');
+
+    window.switchTab = function(tab) {
+        // Toggle tab buttons
+        _tabBtns.forEach(function(btn) {
+            btn.classList.remove('active');
+        });
+        document.getElementById('tab-' + tab + '-btn').classList.add('active');
+
+        // Toggle tab content
+        _tabPanels.forEach(function(el) {
+            el.classList.remove('active');
+        });
+        document.getElementById('tab-' + tab).classList.add('active');
+
+        // Re-init sortable tables when switching to ownership tab
+        if (tab === 'ownership') {
+            if (window.initSortableTables) window.initSortableTables();
+        }
+
+        // Lazy-load forecasts tab (triggers active pill load)
+        if (tab === 'forecasts') {
+            switchForecastPill(activeForecastPill);
+        }
+
+        // Lazy-load signals tab (triggers active pill load)
+        if (tab === 'signals') {
+            switchSignalPill(activeSignalPill);
+        }
+
+        // Lazy-load vitals data on first click
+        if (tab === 'vitals' && !vitalsLoaded) {
+            vitalsLoaded = true;
+            {% if stock_info.ticker %}
+            var vitalsUrl = '/api/vitals/{{ stock_info.ticker }}';
+            {% else %}
+            var vitalsUrl = null;
+            {% endif %}
+
+            if (vitalsUrl) {
+                fetch(vitalsUrl)
+                    .then(function(resp) { return resp.text(); })
+                    .then(function(html) {
+                        document.getElementById('vitals-content').innerHTML = html;
+                    })
+                    .catch(function() {
+                        document.getElementById('vitals-content').innerHTML =
+                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                            'Failed to load vitals data. Please try again later.</p>';
+                    });
+            } else {
+                document.getElementById('vitals-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                    'Vitals data requires a ticker symbol.</p>';
+            }
+        }
+
+    };
+
+    // ── Ownership inner pill switcher (Funds / Congress / SEC Filings / Insider) ──
+    var congressLoaded = false;
+    document.getElementById('ownership-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
+        pill.addEventListener('click', function() {
+            document.getElementById('ownership-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(p) { p.classList.remove('active'); });
+            document.getElementById('tab-ownership').querySelectorAll('.pp-pill-panel').forEach(function(p) { p.classList.remove('active'); });
+            pill.classList.add('active');
+            document.getElementById('own-panel-' + pill.dataset.ownTab).classList.add('active');
+
+            // Lazy-load congress on first pill click
+            if (pill.dataset.ownTab === 'congress' && !congressLoaded) {
+                congressLoaded = true;
+                {% if stock_info.ticker %}
+                var congressUrl = '/api/stock/{{ stock_info.ticker }}/congress';
+                {% else %}
+                var congressUrl = null;
+                {% endif %}
+                if (congressUrl) {
+                    fetch(congressUrl)
+                        .then(function(resp) {
+                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                            return resp.text();
+                        })
+                        .then(function(html) {
+                            var el = document.getElementById('congress-content');
+                            el.innerHTML = html;
+                            activateScripts(el);
+                            if (window.initSortableTables) window.initSortableTables();
+                        })
+                        .catch(function() {
+                            document.getElementById('congress-content').innerHTML =
+                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                                'Failed to load congressional trading data. Please try again later.</p>';
+                        });
+                } else {
+                    document.getElementById('congress-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Congressional trading data requires a ticker symbol.</p>';
+                }
+            }
+
+            // Lazy-load SEC filings on first pill click
+            if (pill.dataset.ownTab === 'filings' && !filingsLoaded) {
+                filingsLoaded = true;
+                {% if stock_info.ticker %}
+                var filingsUrl = '/api/company-filings/{{ stock_info.ticker }}';
+                {% else %}
+                var filingsUrl = null;
+                {% endif %}
+                if (filingsUrl) {
+                    fetch(filingsUrl)
+                        .then(function(resp) { return resp.text(); })
+                        .then(function(html) {
+                            var el = document.getElementById('filings-content');
+                            el.innerHTML = html;
+                            activateScripts(el);
+                        })
+                        .catch(function() {
+                            document.getElementById('filings-content').innerHTML =
+                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                                'Failed to load SEC filings. Please try again later.</p>';
+                        });
+                } else {
+                    document.getElementById('filings-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'SEC filings require a ticker symbol.</p>';
+                }
+            }
+
+            // Lazy-load insider trading on first pill click
+            if (pill.dataset.ownTab === 'insider' && !insiderLoaded) {
+                insiderLoaded = true;
+                {% if stock_info.ticker %}
+                var insiderUrl = '/api/insider-trades/{{ stock_info.ticker }}';
+                var insightsUrl = '/api/insider-insights/{{ stock_info.ticker }}';
+                {% else %}
+                var insiderUrl = null;
+                var insightsUrl = null;
+                {% endif %}
+                if (insiderUrl) {
+                    if (insightsUrl) {
+                        fetch(insightsUrl)
+                            .then(function(resp) { return resp.ok ? resp.text() : ''; })
+                            .then(function(html) {
+                                if (html && html.trim()) {
+                                    document.getElementById('insider-insights-container').innerHTML = html;
+                                }
+                            })
+                            .catch(function() {});
+                    }
+                    var insiderRetried = false;
+                    function fetchInsider() {
+                        fetch(insiderUrl)
+                            .then(function(resp) {
+                                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                                return resp.text();
+                            })
+                            .then(function(html) {
+                                var el = document.getElementById('insider-content');
+                                el.innerHTML = html;
+                                activateScripts(el);
+                                if (window.initSortableTables) window.initSortableTables();
+                            })
+                            .catch(function() {
+                                if (!insiderRetried) {
+                                    insiderRetried = true;
+                                    setTimeout(fetchInsider, 1500);
+                                    return;
+                                }
+                                document.getElementById('insider-content').innerHTML =
+                                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                                    'Failed to load insider trading data. Please try again later.</p>';
+                            });
+                    }
+                    fetchInsider();
+                } else {
+                    document.getElementById('insider-content').innerHTML =
+                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'Insider trading data requires a ticker symbol.</p>';
+                }
+            }
+
+            if (window.initSortableTables) window.initSortableTables();
+        });
+    });
+
+    // ── Forecasts inner pill switcher (Analysts / Earnings) ──
+    document.getElementById('forecasts-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
+        pill.addEventListener('click', function() {
+            switchForecastPill(pill.dataset.forecastTab);
+        });
+    });
+
+    // ── Signals inner pill switcher (Sentiment / Short Interest) ──
+    document.getElementById('signals-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(pill) {
+        pill.addEventListener('click', function() {
+            switchSignalPill(pill.dataset.signalTab);
+        });
+    });
+})();
+</script>
+
+{% if stock and history %}
+<script>
+(function() {
+    // ── Data: Jinja2 → JavaScript (reversed to chronological order) ──
+    const rawQuarters = [
+        {% for quarter in history | reverse %}
+        {
+            period: "{{ quarter.period }}",
+            entries: [
+                {% for entry in quarter.entries %}
+                {
+                    investor: "{{ entry.fund_display_name | e }}",
+                    activity: "{{ entry.activity }}",
+                    shareChange: {{ entry.share_change }},
+                },
+                {% endfor %}
+            ]
+        },
+        {% endfor %}
+    ];
+
+    const labels = rawQuarters.map(q => q.period);
+
+    // ── Number formatting helpers ────────────────────────────────
+    function fmtAxis(num) {
+        if (num === 0) return "0";
+        const a = Math.abs(num);
+        if (a >= 1e6) return (num / 1e6).toFixed(1) + "M";
+        if (a >= 1e3) return (num / 1e3).toFixed(0) + "K";
+        return num.toLocaleString();
+    }
+
+    function fmtShares(num) {
+        return (num > 0 ? "+" : "") + num.toLocaleString() + " shares";
+    }
+
+    // ── Simple view: 2 datasets (total adds / total reduces) ────
+    function buildSimpleData() {
+        const adds = [], reduces = [], addCounts = [], reduceCounts = [];
+
+        for (const q of rawQuarters) {
+            let aSum = 0, rSum = 0, aN = 0, rN = 0;
+            for (const e of q.entries) {
+                if (e.activity === "NEW BUY" || e.activity === "ADD") {
+                    aSum += e.shareChange;
+                    aN++;
+                } else {
+                    rSum += e.shareChange;   // already negative
+                    rN++;
+                }
+            }
+            adds.push(aSum);
+            reduces.push(rSum);
+            addCounts.push(aN);
+            reduceCounts.push(rN);
+        }
+
+        return {
+            datasets: [
+                {
+                    label: "Total Adds",
+                    data: adds,
+                    backgroundColor: "rgba(46, 125, 50, 0.8)",
+                    borderColor: "#1b5e20",
+                    borderWidth: 1,
+                    _counts: addCounts,
+                },
+                {
+                    label: "Total Reduces",
+                    data: reduces,
+                    backgroundColor: "rgba(198, 40, 40, 0.8)",
+                    borderColor: "#b71c1c",
+                    borderWidth: 1,
+                    _counts: reduceCounts,
+                },
+            ],
+        };
+    }
+
+    // ── Detailed view: one dataset per investor (split add/reduce) ──
+    function buildDetailedData() {
+        const investorAdds = {};
+        const investorReduces = {};
+        const n = rawQuarters.length;
+
+        for (let i = 0; i < n; i++) {
+            for (const e of rawQuarters[i].entries) {
+                if (e.activity === "NEW BUY" || e.activity === "ADD") {
+                    if (!investorAdds[e.investor])
+                        investorAdds[e.investor] = new Array(n).fill(0);
+                    investorAdds[e.investor][i] = e.shareChange;
+                } else {
+                    if (!investorReduces[e.investor])
+                        investorReduces[e.investor] = new Array(n).fill(0);
+                    investorReduces[e.investor][i] = e.shareChange;
+                }
+            }
+        }
+
+        const datasets = [];
+        const addNames = Object.keys(investorAdds);
+        const redNames = Object.keys(investorReduces);
+        const greens = palette("#2e7d32", "#a5d6a7", addNames.length);
+        const reds   = palette("#c62828", "#ef9a9a", redNames.length);
+
+        addNames.forEach((name, i) => {
+            datasets.push({
+                label: name,
+                data: investorAdds[name],
+                backgroundColor: greens[i],
+                borderColor: greens[i],
+                borderWidth: 0.5,
+                stack: "adds",
+            });
+        });
+
+        redNames.forEach((name, i) => {
+            datasets.push({
+                label: name,
+                data: investorReduces[name],
+                backgroundColor: reds[i],
+                borderColor: reds[i],
+                borderWidth: 0.5,
+                stack: "reduces",
+            });
+        });
+
+        return { datasets };
+    }
+
+    // ── Color palette: interpolate dark → light ─────────────────
+    function palette(darkHex, lightHex, count) {
+        if (count === 0) return [];
+        if (count === 1) return [darkHex];
+        const d = hexRgb(darkHex), l = hexRgb(lightHex), out = [];
+        for (let i = 0; i < count; i++) {
+            const t = i / (count - 1);
+            out.push(`rgb(${mix(d.r,l.r,t)},${mix(d.g,l.g,t)},${mix(d.b,l.b,t)})`);
+        }
+        return out;
+    }
+    function hexRgb(h) {
+        const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h);
+        return { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) };
+    }
+    function mix(a, b, t) { return Math.round(a + (b - a) * t); }
+
+    // ── Gradient helper for Chart.js bars ───────────────────────
+    function makeBarGradient(canvas, topColor, bottomColor) {
+        const ctx2d = canvas.getContext('2d');
+        const g = ctx2d.createLinearGradient(0, 0, 0, canvas.height);
+        g.addColorStop(0, topColor);
+        g.addColorStop(1, bottomColor);
+        return g;
+    }
+
+    // ── Chart creation ──────────────────────────────────────────
+    let currentView = "simple";
+    let chart = null;
+
+    function createChart(viewData) {
+        if (chart) { chart.destroy(); chart = null; }
+
+        const ctx = document.getElementById("activityChart");
+        if (!ctx) return;
+
+        // Apply gradients to simple-view datasets
+        if (currentView === "simple") {
+            for (const ds of viewData.datasets) {
+                if (ds.label === "Total Adds") {
+                    ds.backgroundColor = makeBarGradient(ctx, '#047857', '#34d399');
+                    ds.borderColor = '#047857';
+                    ds.borderWidth = 0;
+                    ds.borderRadius = 4;
+                } else if (ds.label === "Total Reduces") {
+                    ds.backgroundColor = makeBarGradient(ctx, '#f87171', '#b91c1c');
+                    ds.borderColor = '#b91c1c';
+                    ds.borderWidth = 0;
+                    ds.borderRadius = 4;
+                }
+            }
+        }
+
+        const cs = getComputedStyle(document.documentElement);
+        const axisColor = cs.getPropertyValue('--pp-chart-axis').trim() || '#27272a';
+        const axisSecondary = cs.getPropertyValue('--pp-chart-axis-secondary').trim() || '#71717a';
+        const axisMuted = cs.getPropertyValue('--pp-chart-axis-muted').trim() || '#a1a1aa';
+        const gridColor = cs.getPropertyValue('--pp-chart-grid').trim() || 'rgba(0,0,0,0.06)';
+        const gridZero = cs.getPropertyValue('--pp-chart-grid-zero').trim() || 'rgba(0,0,0,0.3)';
+        const legendColor = cs.getPropertyValue('--pp-chart-legend').trim() || '#52525b';
+
+        chart = new Chart(ctx, {
+            type: "bar",
+            data: { labels: labels, datasets: viewData.datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: "index", intersect: false },
+                scales: {
+                    x: {
+                        stacked: true,
+                        grid: { display: false },
+                        ticks: { color: axisColor },
+                    },
+                    y: {
+                        stacked: true,
+                        title: { display: true, text: "Share Change", font: { size: 13 }, color: axisMuted },
+                        ticks: { callback: function(v) { return fmtAxis(v); }, color: axisSecondary },
+                        grid: {
+                            color: function(ctx) {
+                                return ctx.tick.value === 0
+                                    ? gridZero
+                                    : gridColor;
+                            },
+                            lineWidth: function(ctx) {
+                                return ctx.tick.value === 0 ? 2 : 1;
+                            },
+                        },
+                    },
+                },
+                plugins: {
+                    legend: {
+                        display: currentView === "detailed",
+                        position: "bottom",
+                        labels: { font: { size: 11 }, color: legendColor, boxWidth: 12, padding: 8 },
+                    },
+                    tooltip: {
+                        callbacks: {
+                            title: function(items) { return items[0].label; },
+                            label: function(ctx) {
+                                const val = ctx.raw;
+                                if (val === 0) return null;
+                                if (currentView === "simple") {
+                                    const ds = ctx.dataset;
+                                    const cnt = ds._counts ? ds._counts[ctx.dataIndex] : 0;
+                                    return ds.label + ": " + fmtShares(val)
+                                        + " (" + cnt + " investor" + (cnt !== 1 ? "s" : "") + ")";
+                                }
+                                return ctx.dataset.label + ": " + fmtShares(val);
+                            },
+                            afterBody: function(items) {
+                                let net = 0;
+                                for (const it of items) net += it.raw;
+                                if (net !== 0) return ["", "Net: " + fmtShares(net)];
+                                return [];
+                            },
+                        },
+                    },
+                },
+            },
+        });
+    }
+
+    // ── Toggle simple ↔ detailed ────────────────────────────────
+    window.toggleChartView = function() {
+        const btn = document.getElementById("chart-toggle-btn");
+        if (currentView === "simple") {
+            currentView = "detailed";
+            btn.textContent = "Show Simple View";
+            createChart(buildDetailedData());
+        } else {
+            currentView = "simple";
+            btn.textContent = "Show Detailed View";
+            createChart(buildSimpleData());
+        }
+    };
+
+    // ── Re-render on theme change ──────────────────────────────
+    document.addEventListener('pp-theme-changed', function() {
+        const viewData = currentView === "simple" ? buildSimpleData() : buildDetailedData();
+        createChart(viewData);
+    });
+
+    // ── Initialize with simple view (wait for deferred Chart.js) ──
+    function _initActivityChart() {
+        if (typeof Chart === 'undefined') {
+            window.requireChartJS(function() { _initActivityChart(); });
+            return;
+        }
+        createChart(buildSimpleData());
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', _initActivityChart);
+    } else {
+        _initActivityChart();
+    }
+})();
+</script>
+{% endif %}
+{% endblock %}
+
+{% block extra_head_scripts %}
+{# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
+{% endblock %}

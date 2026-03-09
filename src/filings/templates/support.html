@@ -1,33 +1,97 @@
 {% extends "base.html" %}
 {% block title %}Support the Panda - PaperPanda{% endblock %}
 {% block meta_description %}Help keep PaperPanda free. See exactly where your support goes — API costs, infrastructure, and monthly funding progress.{% endblock %}
+{% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{% endblock %}
 
 {% block content %}
 {# Stripe Embedded Checkout — loaded async #}
 <script async src="https://js.stripe.com/v3/"></script>
 <style>
+    main.container {
+        max-width: 1240px !important;
+        width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+    .support-shell {
+        --support-ink: #0f172a;
+        position: relative;
+        isolation: isolate;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        padding-bottom: 2rem;
+    }
+    .support-aurora {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(58px);
+        opacity: 0.56;
+        pointer-events: none;
+        z-index: -1;
+    }
+    .support-aurora-one {
+        width: min(40vw, 520px);
+        height: min(34vw, 440px);
+        top: -90px;
+        left: -90px;
+        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.36), rgba(13, 148, 136, 0.08) 72%);
+    }
+    .support-aurora-two {
+        width: min(34vw, 430px);
+        height: min(30vw, 390px);
+        top: 40px;
+        right: -80px;
+        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.22), rgba(194, 65, 12, 0.08) 72%);
+    }
     .support-hero {
-        text-align: center;
-        padding: 2em 0 1em;
+        text-align: left;
+        margin: 0 auto 1rem;
+        max-width: 1140px;
+        border-radius: 24px;
+        padding: 1.2rem 1.1rem 1rem;
+        border: 1px solid rgba(255, 255, 255, 0.34);
+        background:
+            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.52)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+    }
+    .support-kicker {
+        margin: 0 0 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.62);
     }
     .support-hero h1 {
-        font-size: 2em;
-        margin-bottom: 0.3em;
+        font-family: "Fraunces", Georgia, serif;
+        font-size: clamp(1.7rem, 4vw, 2.9rem);
+        margin: 0;
+        letter-spacing: -0.03em;
+        line-height: 1.04;
+        color: var(--support-ink);
     }
     .support-hero .hero-sub {
-        color: var(--pp-text-muted);
-        max-width: 600px;
-        margin: 0 auto;
-        font-size: 1.05em;
+        color: rgba(15, 23, 42, 0.72);
+        max-width: 700px;
+        margin: 0.55rem 0 0;
+        font-size: 1em;
     }
 
-    /* ── Progress bar ── */
+    /* ── Progress module ── */
     .panda-progress {
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 12px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.68));
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 18px;
         padding: 1.5em 2em;
         margin: 1.5em 0;
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
     }
     .panda-progress .progress-header {
         display: flex;
@@ -39,19 +103,20 @@
         font-size: 1.8em;
         font-weight: 700;
         color: var(--pp-text);
+        font-family: "Fraunces", Georgia, serif;
     }
     .panda-progress .progress-header .goal {
         font-size: 0.95em;
         color: var(--pp-text-muted);
     }
     .progress-track {
-        background: var(--pp-surface-hover);
+        background: rgba(15, 23, 42, 0.08);
         border-radius: 999px;
         height: 14px;
         overflow: hidden;
     }
     .progress-fill {
-        background: #22c55e;
+        background: linear-gradient(90deg, #15803d, #22c55e);
         height: 100%;
         border-radius: 999px;
         transition: width 0.6s ease;
@@ -76,36 +141,55 @@
 
     /* ── Donation widget ── */
     .donate-widget {
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 12px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.68));
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 18px;
         padding: 1.5em 2em;
         margin: 1.5em 0;
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
     }
-    .donate-tabs {
+
+    /* ── Donate tab nav shell (matches page-level nav pattern) ── */
+    .donate-nav-shell {
+        max-width: fit-content;
+        margin: 0 0 1.5em;
+        padding: 0.35rem;
+        border-radius: 999px;
+        border: 1px solid rgba(13, 148, 136, 0.2);
+        background: rgba(255, 255, 255, 0.62);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+    }
+    .donate-nav-list {
+        list-style: none;
         display: flex;
-        gap: 0;
-        margin-bottom: 1.5em;
-        border-bottom: 2px solid var(--pp-border);
+        gap: 0.45rem;
+        padding: 0;
+        margin: 0;
+        -webkit-overflow-scrolling: touch;
     }
     .donate-tab {
         background: none;
-        border: none;
-        border-bottom: 3px solid transparent;
-        padding: 0.6em 1.5em;
-        margin-bottom: -2px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 0.55em 1.3em;
         cursor: pointer;
-        font-size: 0.95em;
+        font-size: 0.9em;
         font-weight: 600;
-        color: var(--pp-text-faint);
-        transition: color 0.15s, border-color 0.15s;
+        color: rgba(15, 23, 42, 0.62);
+        transition: all 0.16s ease;
+        white-space: nowrap;
     }
     .donate-tab.active {
-        color: var(--pp-text);
-        border-bottom-color: var(--pp-text);
+        color: #fff;
+        border-color: #15803d;
+        background: linear-gradient(120deg, #15803d, #22c55e);
+        box-shadow: 0 8px 18px rgba(34, 197, 94, 0.26);
     }
     .donate-tab:hover:not(.active) {
-        color: var(--pp-text-muted);
+        color: var(--support-ink);
+        border-color: rgba(22, 163, 74, 0.24);
+        background: rgba(22, 163, 74, 0.08);
     }
     .donate-panel {
         display: none;
@@ -128,9 +212,9 @@
         gap: 1em;
     }
     .tier-card {
-        background: var(--pp-surface);
-        border: 2px solid var(--pp-border);
-        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.6);
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 14px;
         padding: 1.5em 1.2em;
         text-align: center;
         cursor: pointer;
@@ -139,11 +223,12 @@
     }
     .tier-card:hover {
         border-color: #22c55e;
-        box-shadow: 0 4px 16px rgba(34, 197, 94, 0.15);
+        box-shadow: 0 8px 24px rgba(34, 197, 94, 0.18);
         transform: translateY(-2px);
     }
     .tier-card.popular {
         border-color: #22c55e;
+        box-shadow: 0 4px 16px rgba(34, 197, 94, 0.14);
     }
     .tier-card.popular::before {
         content: 'Most popular';
@@ -174,17 +259,19 @@
         font-size: 1.6em;
         font-weight: 700;
         color: var(--pp-text);
+        font-family: "Fraunces", Georgia, serif;
     }
     .tier-price small {
         font-size: 0.5em;
         font-weight: 400;
         color: var(--pp-text-muted);
+        font-family: "Space Grotesk", "Avenir Next", sans-serif;
     }
     .tier-btn {
         display: inline-block;
         margin-top: 1em;
-        background: var(--pp-text);
-        color: var(--pp-surface);
+        background: linear-gradient(120deg, #166534, #22c55e);
+        color: #fff;
         border: none;
         padding: 0.55em 1.8em;
         border-radius: 8px;
@@ -285,6 +372,7 @@
         color: #166534;
         font-size: 1.3em;
         margin-bottom: 0.3em;
+        font-family: "Fraunces", Georgia, serif;
     }
     .thank-you-banner p {
         color: #15803d;
@@ -302,7 +390,9 @@
         margin: 2.5em 0 1.5em;
     }
     .where-it-goes h2 {
-        font-size: 1.3em;
+        font-size: 1.4em;
+        font-family: "Fraunces", Georgia, serif;
+        letter-spacing: -0.02em;
         margin-bottom: 0.5em;
     }
     .where-it-goes .explainer {
@@ -320,16 +410,18 @@
     .cost-tile {
         flex: 1 1 0;
         min-width: 100px;
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 10px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 14px;
         padding: 1em 0.8em;
         text-align: center;
-        transition: border-color 0.15s, box-shadow 0.15s;
+        transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
     }
     .cost-tile:hover {
-        border-color: #22c55e;
-        box-shadow: 0 2px 10px rgba(34, 197, 94, 0.1);
+        border-color: rgba(13, 148, 136, 0.3);
+        box-shadow: 0 4px 16px rgba(13, 148, 136, 0.1);
+        transform: translateY(-1px);
     }
     .cost-tile-icon {
         font-size: 1.5em;
@@ -354,14 +446,17 @@
 
     /* ── Funding history chart ── */
     .funding-history {
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 12px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.68));
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 18px;
         padding: 1.5em 2em;
         margin: 1.5em 0;
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
     }
     .funding-history h3 {
-        font-size: 1.1em;
+        font-size: 1.15em;
+        font-family: "Fraunces", Georgia, serif;
+        letter-spacing: -0.02em;
         margin-bottom: 1em;
     }
     .chart-container {
@@ -393,7 +488,9 @@
         margin: 2.5em 0 1.5em;
     }
     .roadmap-section h2 {
-        font-size: 1.3em;
+        font-size: 1.4em;
+        font-family: "Fraunces", Georgia, serif;
+        letter-spacing: -0.02em;
         margin-bottom: 0.3em;
     }
     .roadmap-caveat {
@@ -409,16 +506,17 @@
         gap: 0.7em;
     }
     .roadmap-tile {
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 10px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 14px;
         padding: 1em 0.7em;
         text-align: center;
         transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
     }
     .roadmap-tile:hover {
-        border-color: #1976d2;
-        box-shadow: 0 2px 10px rgba(25, 118, 210, 0.12);
+        border-color: rgba(13, 148, 136, 0.3);
+        box-shadow: 0 4px 16px rgba(13, 148, 136, 0.12);
         transform: translateY(-1px);
     }
     .roadmap-tile-icon {
@@ -450,15 +548,18 @@
 
     /* ── Other ways to support ── */
     .other-support {
-        background: var(--pp-surface-alt);
-        border: 1px solid var(--pp-border);
-        border-radius: 12px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.68));
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 18px;
         padding: 1.8em 2em;
         margin: 2em 0;
         text-align: center;
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
     }
     .other-support h3 {
-        font-size: 1.15em;
+        font-size: 1.2em;
+        font-family: "Fraunces", Georgia, serif;
+        letter-spacing: -0.02em;
         margin-bottom: 0.4em;
     }
     .other-support .other-sub {
@@ -472,8 +573,8 @@
         display: inline-flex;
         align-items: center;
         gap: 0.5em;
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
+        background: rgba(255, 255, 255, 0.75);
+        border: 1px solid rgba(15, 23, 42, 0.12);
         padding: 0.6em 1.4em;
         border-radius: 10px;
         font-weight: 600;
@@ -484,7 +585,7 @@
     }
     .other-support .yt-link:hover {
         border-color: #ff0000;
-        box-shadow: 0 2px 8px rgba(255,0,0,0.1);
+        box-shadow: 0 2px 8px rgba(255, 0, 0, 0.1);
     }
     .yt-icon {
         width: 20px;
@@ -493,15 +594,18 @@
 
     /* ── Feedback CTA ── */
     .feedback-section {
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 12px;
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.68));
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 18px;
         padding: 1.8em 2em;
         margin: 1.5em 0 2.5em;
         text-align: center;
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
     }
     .feedback-section h3 {
-        font-size: 1.15em;
+        font-size: 1.2em;
+        font-family: "Fraunces", Georgia, serif;
+        letter-spacing: -0.02em;
         margin-bottom: 0.3em;
     }
     .feedback-section .feedback-sub {
@@ -511,19 +615,21 @@
     }
     .feedback-section .btn-feedback {
         display: inline-block;
-        background: var(--pp-surface);
-        color: var(--pp-text);
-        border: 2px solid var(--pp-text);
+        background: rgba(255, 255, 255, 0.75);
+        color: var(--support-ink);
+        border: 1px solid rgba(15, 23, 42, 0.14);
         padding: 0.6em 2em;
         border-radius: 10px;
         font-size: 1em;
         font-weight: 600;
         cursor: pointer;
-        transition: background 0.15s, color 0.15s;
+        transition: background 0.15s, color 0.15s, box-shadow 0.15s;
     }
     .feedback-section .btn-feedback:hover {
-        background: var(--pp-support-btn-bg);
-        color: var(--pp-support-btn-text);
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        color: #fff;
+        border-color: #0f766e;
+        box-shadow: 0 4px 14px rgba(13, 148, 136, 0.24);
     }
 
     /* ── Feedback Modal ── */
@@ -569,6 +675,7 @@
     .feedback-modal-header h3 {
         margin: 0;
         font-size: 1.1em;
+        font-family: "Fraunces", Georgia, serif;
     }
     .feedback-modal-close {
         background: none;
@@ -609,16 +716,96 @@
         .feedback-modal-loading { height: 440px; }
     }
 
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .support-shell { --support-ink: #e2e8f0; }
+    :root[data-theme="dark"] .support-hero {
+        border-color: rgba(148, 163, 184, 0.22);
+        background:
+            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.10), transparent 45%);
+    }
+    :root[data-theme="dark"] .support-kicker,
+    :root[data-theme="dark"] .support-hero .hero-sub {
+        color: rgba(226, 232, 240, 0.72);
+    }
+    :root[data-theme="dark"] .panda-progress,
+    :root[data-theme="dark"] .donate-widget,
+    :root[data-theme="dark"] .funding-history,
+    :root[data-theme="dark"] .other-support,
+    :root[data-theme="dark"] .feedback-section {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+    :root[data-theme="dark"] .roadmap-tile,
+    :root[data-theme="dark"] .tier-card,
+    :root[data-theme="dark"] .cost-tile {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 8px 20px rgba(2, 6, 23, 0.36);
+    }
+    :root[data-theme="dark"] .donate-nav-shell {
+        border-color: rgba(34, 197, 94, 0.24);
+        background: rgba(15, 23, 42, 0.56);
+    }
+    :root[data-theme="dark"] .donate-tab { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] .donate-tab:hover:not(.active) {
+        color: #e2e8f0;
+        background: rgba(34, 197, 94, 0.12);
+        border-color: rgba(34, 197, 94, 0.24);
+    }
+    :root[data-theme="dark"] .feedback-section .btn-feedback {
+        background: rgba(15, 23, 42, 0.56);
+        border-color: rgba(148, 163, 184, 0.28);
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .other-support .yt-link {
+        background: rgba(15, 23, 42, 0.56);
+        border-color: rgba(148, 163, 184, 0.28);
+        color: #e2e8f0;
+    }
+
+    /* ── Responsive ── */
     @media (max-width: 640px) {
+        main.container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        .support-hero {
+            border-radius: 20px;
+            padding: 1rem 0.85rem 0.9rem;
+        }
         .panda-progress { padding: 1em 1.2em; }
         .panda-progress .progress-header .amount { font-size: 1.4em; }
         .chart-container { height: 220px; }
         .other-support, .feedback-section { padding: 1.2em 1em; }
+        .donate-widget { padding: 1.2em 1em; }
+    }
+
+    /* ── Reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+        .support-aurora,
+        .donate-tab,
+        .tier-card,
+        .roadmap-tile,
+        .cost-tile,
+        .progress-fill,
+        .checkout-overlay-inner,
+        .feedback-modal {
+            animation: none !important;
+            transition: none !important;
+            transform: none !important;
+        }
     }
 </style>
 
 {# ── Hero ── #}
+<section class="support-shell">
+<div class="support-aurora support-aurora-one" aria-hidden="true"></div>
+<div class="support-aurora support-aurora-two" aria-hidden="true"></div>
 <div class="support-hero">
+    <p class="support-kicker">PaperPanda Support</p>
     <h1>The Panda Fund</h1>
     <p class="hero-sub">PaperPanda is free and open. Here's exactly where your support goes -- no mystery, no paywall.</p>
 </div>
@@ -665,9 +852,11 @@
 
 {# ── Donate Widget ── #}
 <div class="donate-widget">
-    <div class="donate-tabs">
-        <button class="donate-tab" onclick="switchDonateTab('monthly')" id="tab-monthly">Monthly</button>
-        <button class="donate-tab active" onclick="switchDonateTab('onetime')" id="tab-onetime">One-time</button>
+    <div class="donate-nav-shell">
+        <ul class="donate-nav-list" role="tablist">
+            <li><button class="donate-tab" onclick="switchDonateTab('monthly')" id="tab-monthly" role="tab">Monthly</button></li>
+            <li><button class="donate-tab active" onclick="switchDonateTab('onetime')" id="tab-onetime" role="tab" aria-selected="true">One-time</button></li>
+        </ul>
     </div>
 
     {# ── Monthly tab: Tier cards ── #}
@@ -733,9 +922,10 @@ var _stripeInstance = null;
 var _checkoutInstance = null;
 
 function switchDonateTab(tab) {
-    document.querySelectorAll('.donate-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.donate-tab').forEach(function(t) { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
     document.querySelectorAll('.donate-panel').forEach(function(p) { p.classList.remove('active'); });
     document.getElementById('tab-' + tab).classList.add('active');
+    document.getElementById('tab-' + tab).setAttribute('aria-selected', 'true');
     document.getElementById('panel-' + tab).classList.add('active');
 }
 
@@ -1047,8 +1237,5 @@ if (window.location.hash === '#feedback') {
     }); // end requireECharts
 })();
 </script>
-
-<p style="text-align:center; margin-top: 2.5em; font-size: 0.85em; color: var(--pp-text-muted);">
-    <a href="/privacy" style="color: var(--pp-text-muted); text-decoration: underline;">Privacy Policy</a>
-</p>
+</section>
 {% endblock %}
