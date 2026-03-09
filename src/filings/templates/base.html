@@ -847,6 +847,11 @@
             background: rgba(239, 68, 68, 1);
             box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
         }
+        /* Auth buttons (Sign In / Profile / Sign Out) use transparent bg — need themed text */
+        .pp-sidebar-support-btn.pp-auth-signout,
+        .pp-sidebar-support-btn.pp-auth-signin {
+            color: var(--pp-text) !important;
+        }
 
         /* Expand/collapse toggle button — vertical pill on sidebar edge */
         .pp-sidebar-toggle {
