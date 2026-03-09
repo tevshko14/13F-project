@@ -47,7 +47,7 @@
     <header>
         <strong>Recently Posted</strong>
         <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            {{ recent_uploads|length }} video{{ 's' if recent_uploads|length != 1 else '' }} in the last 48 hours
+            Latest {{ [recent_uploads|length, 12]|min }} video{{ 's' if [recent_uploads|length, 12]|min != 1 else '' }}{% if recent_uploads|length > 12 %} of {{ recent_uploads|length }} in the last 48 hours{% endif %}
         </span>
     </header>
 
