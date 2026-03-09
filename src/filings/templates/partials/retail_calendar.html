@@ -146,7 +146,7 @@
 
     <div id="calendar-events-list">
         {% for event in events %}
-        <div class="calendar-event-card" data-sentiment="{{ event.sentiment }}"
+        <div class="calendar-event-card{% if loop.index > 12 %} calendar-event-extra{% endif %}" data-sentiment="{{ event.sentiment }}"
              style="display: flex; gap: 1em; padding: 1em 0;
                     border-bottom: 1px solid var(--pp-border-light); align-items: flex-start;">
 
@@ -243,6 +243,20 @@
         </div>
         {% endfor %}
     </div>
+
+    {% if events|length > 12 %}
+    <div style="text-align: center; margin-top: 0.75em;">
+        <button id="calendar-events-expand-btn"
+                onclick="expandCalendarEvents()"
+                style="background: none; border: 1px solid var(--pp-border); border-radius: 8px;
+                       padding: 0.4em 1.2em; font-size: 0.85em; color: var(--pp-text-muted);
+                       cursor: pointer; display: inline-flex; align-items: center; gap: 0.4em;
+                       transition: background 0.15s, color 0.15s;">
+            <span>Show {{ events|length - 12 }} more</span>
+            <span style="font-size: 0.8em;">&#x25BC;</span>
+        </button>
+    </div>
+    {% endif %}
 
     <footer class="text-muted text-small" style="text-align: center; padding-top: 0.75em;">
         Data from YouTube Data API v3 - Updated every 6 hours. Sentiment is keyword-based (approximate).
@@ -387,6 +401,7 @@
         margin-top: 0.5em;
     }
     .recent-upload-extra { display: none; }
+    .calendar-event-extra { display: none; }
     .recent-upload-card {
         border: 1px solid var(--pp-border-light);
         border-radius: 10px;
@@ -485,15 +500,33 @@ window.expandRecentUploads = function() {
     if (btn) btn.parentNode.removeChild(btn);
 };
 
+window._calendarEventsExpanded = false;
+
+window.expandCalendarEvents = function() {
+    window._calendarEventsExpanded = true;
+    document.querySelectorAll('.calendar-event-extra').forEach(function(card) {
+        card.style.display = '';
+    });
+    var btn = document.getElementById('calendar-events-expand-btn');
+    if (btn) btn.parentNode.removeChild(btn);
+    /* Re-apply active filter so newly-shown cards respect it */
+    var activeBtn = document.querySelector('.calendar-filter-pill.active');
+    if (activeBtn) filterCalendar(activeBtn.dataset.filter);
+};
+
 window.filterCalendar = function(sentiment) {
     document.querySelectorAll('.calendar-filter-pill').forEach(function(btn) {
         btn.classList.toggle('active', btn.dataset.filter === sentiment);
     });
     document.querySelectorAll('.calendar-event-card').forEach(function(card) {
-        if (sentiment === 'all' || card.dataset.sentiment === sentiment) {
-            card.style.display = '';
-        } else {
+        var isExtra = card.classList.contains('calendar-event-extra');
+        var matchesSentiment = (sentiment === 'all' || card.dataset.sentiment === sentiment);
+        if (!matchesSentiment) {
             card.style.display = 'none';
+        } else if (isExtra && !window._calendarEventsExpanded) {
+            card.style.display = 'none';
+        } else {
+            card.style.display = '';
         }
     });
 };
