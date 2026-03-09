@@ -734,6 +734,20 @@
         }
         .pp-sidebar:not(.expanded) .pp-nav-link span { display: none; }
 
+        /* PRO badge on nav links */
+        .pp-nav-badge {
+            font-size: 0.6rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            padding: 0.15em 0.45em;
+            border-radius: 4px;
+            background: linear-gradient(120deg, #0f766e, #0d9488);
+            color: #fff;
+            margin-left: auto;
+            line-height: 1;
+            flex-shrink: 0;
+        }
+
         /* Sidebar footer (pinned bottom) */
         .pp-sidebar-footer {
             flex-shrink: 0;
@@ -1514,6 +1528,11 @@
                 <a href="/alternative-signals" class="pp-nav-link {% if request.url.path.startswith('/alternative') %}active{% endif %}">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
                     <span>Alt Signals</span>
+                </a>
+                <a href="/options" class="pp-nav-link {% if request.url.path.startswith('/options') %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>
+                    <span>Options</span>
+                    <span class="pp-nav-badge pp-auth-signout" style="{% if not request.state.user %}display:none;{% endif %}">PRO</span>
                 </a>
             </div>
         </nav>

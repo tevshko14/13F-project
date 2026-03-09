@@ -2691,6 +2691,127 @@ async def company_filings_tab(request: Request, ticker: str):
     )
 
 
+# --- Unusual Options Activity ---
+
+
+@app.get("/options", response_class=HTMLResponse)
+async def unusual_options_page(request: Request):
+    """Full page with SSR data for Googlebot."""
+    from filings import unusual_options
+
+    feed: list[dict] = []
+    heatmap_json: str = "[]"
+    try:
+        _feed, _heatmap = await asyncio.gather(
+            asyncio.to_thread(unusual_options.get_unusual_options_feed),
+            asyncio.to_thread(unusual_options.get_options_heatmap_data),
+        )
+        feed = _feed or []
+        heatmap_json = json_module.dumps(_heatmap or [])
+    except Exception:
+        pass  # Graceful fallback — JS will retry via HTMX
+
+    return templates.TemplateResponse(
+        "unusual_options.html",
+        {
+            "request": request,
+            "feed": feed,
+            "heatmap_json": heatmap_json,
+        },
+    )
+
+
+@app.get("/api/options/feed", response_class=HTMLResponse)
+async def options_feed_api(
+    request: Request,
+    sentiment: str = "",
+    sort: str = "premium",
+    ticker: str = "",
+):
+    """HTMX partial: sortable/filterable unusual options feed."""
+    from filings import unusual_options
+
+    feed = await asyncio.to_thread(
+        unusual_options.get_unusual_options_feed,
+        sentiment=sentiment,
+        sort_by=sort,
+        ticker=ticker,
+    )
+    return templates.TemplateResponse(
+        "partials/options_feed.html",
+        {"request": request, "feed": feed},
+    )
+
+
+@app.get("/api/options/heatmap", response_class=HTMLResponse)
+async def options_heatmap_api(request: Request):
+    """HTMX partial: sector heatmap for unusual options premium."""
+    from filings import unusual_options
+
+    heatmap = await asyncio.to_thread(unusual_options.get_options_heatmap_data)
+    return templates.TemplateResponse(
+        "partials/options_heatmap.html",
+        {"request": request, "heatmap_json": json_module.dumps(heatmap or [])},
+    )
+
+
+@app.get("/api/options/convergence", response_class=HTMLResponse)
+async def options_convergence_api(
+    request: Request,
+    signals: str = "",
+    min_signals: int = 2,
+):
+    """HTMX partial: cross-reference convergence engine results."""
+    from filings import convergence
+
+    # Parse signal filter
+    signals_filter: set[str] | None = None
+    valid_types = {"options", "insider", "congress", "short", "superinvestor"}
+    if signals:
+        requested = {s.strip().lower() for s in signals.split(",")}
+        signals_filter = requested & valid_types
+        if not signals_filter:
+            signals_filter = None
+
+    min_signals = max(2, min(min_signals, 5))
+
+    cache_data = _fund_cache()
+    results = await asyncio.to_thread(
+        convergence.build_convergence,
+        cache_data=cache_data,
+        superinvestors_by_cik=SUPERINVESTORS_BY_CIK,
+        signals_filter=signals_filter,
+        min_signals=min_signals,
+    )
+
+    return templates.TemplateResponse(
+        "partials/options_convergence.html",
+        {
+            "request": request,
+            "results": results,
+            "signal_count": len(results),
+            "min_signals": min_signals,
+        },
+    )
+
+
+@app.get("/api/stock/{ticker}/options", response_class=HTMLResponse)
+async def stock_options_api(request: Request, ticker: str):
+    """HTMX partial: unusual options activity for a specific stock."""
+    from filings import unusual_options
+
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("", status_code=400)
+
+    feed = await asyncio.to_thread(
+        unusual_options.get_ticker_options_activity, ticker.upper()
+    )
+    return templates.TemplateResponse(
+        "partials/stock_options.html",
+        {"request": request, "feed": feed, "ticker": ticker.upper()},
+    )
+
+
 # --- Insider Trading ---
 
 
@@ -5285,6 +5406,8 @@ if _has_limiter:
     gt_trending_api = limiter.limit("10/minute")(gt_trending_api)
     gt_macro_api = limiter.limit("10/minute")(gt_macro_api)
     gt_ticker_api = limiter.limit("10/minute")(gt_ticker_api)
+    # Convergence engine (aggregates multiple signal sources)
+    options_convergence_api = limiter.limit("10/minute")(options_convergence_api)
     # Auth pages (bot/scraper prevention)
     login_page = limiter.limit("10/minute")(login_page)
     signup_page = limiter.limit("10/minute")(signup_page)

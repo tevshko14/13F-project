@@ -1,0 +1,208 @@
+{# Options heatmap — HTMX partial, ECharts treemap for sector activity (no extends) #}
+<style>
+    .options-heatmap-card {
+        max-width: 1160px;
+        margin: 0 auto 1rem;
+        border-radius: 18px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+        overflow: hidden;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        padding: 1rem;
+    }
+    .options-heatmap-card header {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        margin-bottom: 0.6rem;
+    }
+    .options-heatmap-title {
+        font-weight: 700;
+        font-size: 1rem;
+        color: var(--options-ink, #0f172a);
+    }
+    .options-heatmap-subtitle {
+        font-size: 0.82rem;
+        color: rgba(15, 23, 42, 0.55);
+        font-weight: 500;
+    }
+    .options-heatmap-empty {
+        text-align: center;
+        padding: 2.5rem 1rem;
+        color: rgba(15, 23, 42, 0.5);
+        font-size: 0.92rem;
+    }
+
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .options-heatmap-card {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+    :root[data-theme="dark"] .options-heatmap-subtitle {
+        color: rgba(226, 232, 240, 0.55);
+    }
+    :root[data-theme="dark"] .options-heatmap-empty {
+        color: rgba(226, 232, 240, 0.5);
+    }
+
+    /* ── Fade-in animation ── */
+    @keyframes optionsHeatmapFadeIn {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    .options-heatmap-fadein {
+        animation: optionsHeatmapFadeIn 0.35s ease-out;
+    }
+
+    /* ── Accessibility: reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+        .options-heatmap-fadein {
+            animation: none !important;
+        }
+    }
+</style>
+
+{% if heatmap_json %}
+<article class="options-heatmap-card options-heatmap-fadein">
+    <header>
+        <span class="options-heatmap-title">Sector Activity Heatmap</span>
+        <span class="options-heatmap-subtitle">Premium volume by sector &middot; Click a ticker to view details</span>
+    </header>
+    <div id="options-heatmap-chart" style="width:100%;height:420px;"></div>
+</article>
+
+<script>
+(function() {
+    var rawData = {{ heatmap_json|safe }};
+    var container = document.getElementById('options-heatmap-chart');
+    if (!container || !rawData || rawData.length === 0) return;
+
+    function initChart() {
+        if (typeof echarts === 'undefined') {
+            /* ECharts not available — fail gracefully */
+            container.innerHTML = '<p style="text-align:center;padding:2em;color:rgba(15,23,42,0.5);">Chart library unavailable. Please refresh the page.</p>';
+            return;
+        }
+
+        /* Dispose previous instance if HTMX re-rendered */
+        var existing = echarts.getInstanceByDom(container);
+        if (existing) existing.dispose();
+
+        var chart = echarts.init(container);
+        var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        var borderColor = isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.4)';
+        var labelBg = isDark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.25)';
+
+        chart.setOption({
+            animation: false,
+            tooltip: {
+                appendToBody: true,
+                confine: true,
+                formatter: function(info) {
+                    var d = info.data;
+                    if (!d) return info.name;
+                    var lines = ['<strong>' + (d.name || '') + '</strong>'];
+                    if (d.contract_count !== undefined) {
+                        lines.push('Contracts: ' + d.contract_count);
+                    }
+                    if (d.bullish_premium !== undefined) {
+                        lines.push('<span style="color:#2e7d32;">Bullish: ' + d.bullish_premium + '</span>');
+                    }
+                    if (d.bearish_premium !== undefined) {
+                        lines.push('<span style="color:#c62828;">Bearish: ' + d.bearish_premium + '</span>');
+                    }
+                    return lines.join('<br/>');
+                }
+            },
+            series: [{
+                type: 'treemap',
+                data: rawData,
+                width: '100%',
+                height: '100%',
+                roam: false,
+                nodeClick: false,
+                breadcrumb: { show: false },
+                levels: [
+                    {
+                        /* Sector groups */
+                        itemStyle: {
+                            borderColor: borderColor,
+                            borderWidth: 2,
+                            gapWidth: 2
+                        },
+                        upperLabel: {
+                            show: true,
+                            height: 22,
+                            fontSize: 11,
+                            fontWeight: 'bold',
+                            fontFamily: "'Space Grotesk', sans-serif",
+                            color: '#fff',
+                            backgroundColor: labelBg,
+                            padding: [2, 6]
+                        }
+                    },
+                    {
+                        /* Individual tickers */
+                        label: {
+                            show: true,
+                            formatter: function(params) {
+                                var d = params.data;
+                                if (!d) return params.name;
+                                return d.name || params.name;
+                            },
+                            fontSize: 12,
+                            fontWeight: 'bold',
+                            fontFamily: "'Space Grotesk', sans-serif",
+                            color: '#fff',
+                            textShadowColor: 'rgba(0,0,0,0.4)',
+                            textShadowBlur: 3
+                        },
+                        itemStyle: {
+                            borderColor: borderColor,
+                            borderWidth: 1,
+                            gapWidth: 1
+                        }
+                    }
+                ]
+            }]
+        });
+
+        /* Click handler — navigate to stock detail page */
+        chart.on('click', function(params) {
+            var d = params.data;
+            if (d && d.ticker) {
+                window.location.href = '/stock/' + encodeURIComponent(d.ticker);
+            }
+        });
+
+        /* Responsive resize */
+        var resizeTimer;
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(function() { chart.resize(); }, 150);
+        });
+    }
+
+    /* Use requireECharts if available, otherwise check directly */
+    if (typeof window.requireECharts === 'function') {
+        window.requireECharts(function(err) {
+            if (err) {
+                container.innerHTML = '<p style="text-align:center;padding:2em;color:rgba(15,23,42,0.5);">Chart library failed to load</p>';
+                return;
+            }
+            initChart();
+        });
+    } else {
+        initChart();
+    }
+})();
+</script>
+{% else %}
+<article class="options-heatmap-card">
+    <p class="options-heatmap-empty">No sector heatmap data available. Check back during US market hours.</p>
+</article>
+{% endif %}

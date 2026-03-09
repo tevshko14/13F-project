@@ -1,0 +1,1013 @@
+{% extends "base.html" %}
+{% block title %}Unusual Options Activity | PaperPanda{% endblock %}
+{% block meta_description %}Unusual options activity screener — contracts where traded volume exceeds 5x open interest, signaling large institutional positioning.{% endblock %}
+{% block og_title %}Unusual Options Activity | PaperPanda{% endblock %}
+{% block og_description %}Contracts where traded volume exceeds 5x open interest — a signal of large institutional positioning.{% endblock %}
+{% block twitter_title %}Unusual Options Activity | PaperPanda{% endblock %}
+{% block twitter_description %}Unusual options activity screener — spot large institutional positioning via volume/OI signals.{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+        {"@type": "ListItem", "position": 1, "name": "Home", "item": "https://paperpanda.io/"},
+        {"@type": "ListItem", "position": 2, "name": "Unusual Options Activity"}
+    ]
+}
+</script>
+{% endblock %}
+{% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{% endblock %}
+{% block content %}
+<section class="options-shell">
+    <div class="options-aurora options-aurora-one" aria-hidden="true"></div>
+    <div class="options-aurora options-aurora-two" aria-hidden="true"></div>
+
+    {# ── Hero (always visible) ── #}
+    <header class="options-hero">
+        <p class="options-kicker">PAPERPANDA SIGNAL DESK</p>
+        <h1>Unusual Options Activity</h1>
+        <p>Contracts where traded volume exceeds 5&times; open interest &mdash; a signal of large institutional positioning.</p>
+    </header>
+
+    {# ── Auth-gated wrapper ── #}
+    <div class="options-gated-wrap">
+
+        {# ── Blur overlay for logged-out users ── #}
+        <div id="options-auth-gate" class="options-auth-gate{% if request.state.user %} options-gate-hidden{% endif %}">
+            <div class="options-gate-card">
+                <div class="options-gate-icon" aria-hidden="true">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <h2>Sign in to unlock Options Intelligence</h2>
+                <p>The Unusual Options Activity screener is available to signed-in PaperPanda members. Create a free account to access real-time options flow, sentiment filters, and sector heatmaps.</p>
+                <div class="options-gate-actions">
+                    <button onclick="ppOpenSignIn()" class="options-gate-btn options-gate-btn-primary">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+                        Sign In
+                    </button>
+                    <button onclick="ppOpenSignUp()" class="options-gate-btn options-gate-btn-secondary">
+                        Create Free Account
+                    </button>
+                </div>
+                <p class="options-gate-note">Free forever &mdash; no credit card required.</p>
+            </div>
+        </div>
+
+        {# ── Gated content (blurred when logged out) ── #}
+        <div id="options-gated-content" class="options-gated-content{% if not request.state.user %} options-content-locked{% endif %}">
+
+            {# ── View tab bar ── #}
+            <div class="options-view-tabs">
+                <button class="options-view-tab active" data-view="flow" onclick="switchOptionsView(this, 'flow')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+                    Options Flow
+                </button>
+                <button class="options-view-tab" data-view="heatmap" onclick="switchOptionsView(this, 'heatmap')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                    Heatmap
+                </button>
+                <button class="options-view-tab" data-view="convergence" onclick="switchOptionsView(this, 'convergence')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
+                    Convergence Engine
+                    <span class="options-view-badge">NEW</span>
+                </button>
+            </div>
+
+            {# ── Flow panel (filter bar + feed) ── #}
+            <div data-view-panel="flow" class="options-view-panel active">
+
+                {# ── Filter bar ── #}
+                <div class="options-filter-bar">
+                    <div class="options-filter-row">
+                        {# Sentiment tabs #}
+                        <div class="options-tabs" role="tablist">
+                            <button class="options-tab active" data-sentiment="all"
+                                    role="tab" aria-selected="true"
+                                    onclick="switchOptionsSentiment(this, 'all')">All</button>
+                            <button class="options-tab" data-sentiment="bullish"
+                                    role="tab" aria-selected="false"
+                                    onclick="switchOptionsSentiment(this, 'bullish')">Bullish Calls</button>
+                            <button class="options-tab" data-sentiment="bearish"
+                                    role="tab" aria-selected="false"
+                                    onclick="switchOptionsSentiment(this, 'bearish')">Bearish Puts</button>
+                        </div>
+
+                        {# Sort dropdown #}
+                        <div class="options-sort-wrap">
+                            <label for="options-sort" class="options-sort-label">Sort</label>
+                            <select id="options-sort" name="sort" class="options-sort-select"
+                                    onchange="triggerOptionsFeed()">
+                                <option value="premium">Premium</option>
+                                <option value="vol_oi">Vol/OI Ratio</option>
+                                <option value="expiry">Expiry</option>
+                                <option value="ticker">Ticker</option>
+                            </select>
+                        </div>
+
+                        {# Ticker search #}
+                        <div class="options-search-wrap">
+                            <input type="text" id="options-ticker" name="ticker"
+                                   class="options-search-input"
+                                   placeholder="Filter by ticker..."
+                                   autocomplete="off"
+                                   onkeydown="if(event.key==='Enter'){event.preventDefault();triggerOptionsFeed();}">
+                            <button class="options-search-btn" onclick="triggerOptionsFeed()" aria-label="Search">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {# ── Feed section ── #}
+                {% if request.state.user %}
+                <div id="options-feed"
+                     hx-get="/api/options/feed"
+                     hx-trigger="load"
+                     hx-target="#options-feed"
+                     hx-swap="innerHTML"
+                     hx-indicator="#options-feed-spinner">
+                    <div id="options-feed-spinner" class="options-loading htmx-indicator">
+                        <span class="options-spinner" aria-hidden="true"></span>
+                        Loading activity intelligence...
+                    </div>
+                </div>
+                {% else %}
+                <div id="options-feed" class="options-placeholder-feed">
+                    {# Placeholder skeleton rows for visual effect behind blur #}
+                    {% for i in range(8) %}
+                    <div class="options-placeholder-row">
+                        <div class="options-ph-cell options-ph-w3"></div>
+                        <div class="options-ph-cell options-ph-w5"></div>
+                        <div class="options-ph-cell options-ph-w4"></div>
+                        <div class="options-ph-cell options-ph-w2"></div>
+                        <div class="options-ph-cell options-ph-w3"></div>
+                        <div class="options-ph-cell options-ph-w2"></div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+            </div>
+
+            {# ── Heatmap panel ── #}
+            <div data-view-panel="heatmap" class="options-view-panel" style="display:none;">
+
+                {# ── Heatmap section ── #}
+                {% if request.state.user %}
+                <div id="options-heatmap"
+                     hx-get="/api/options/heatmap"
+                     hx-trigger="load"
+                     hx-target="#options-heatmap"
+                     hx-swap="innerHTML"
+                     hx-indicator="#options-heatmap-spinner">
+                    <div id="options-heatmap-spinner" class="options-loading htmx-indicator">
+                        <span class="options-spinner" aria-hidden="true"></span>
+                        Loading sector heatmap...
+                    </div>
+                </div>
+                {% else %}
+                <div id="options-heatmap" class="options-placeholder-heatmap">
+                    <div class="options-ph-heatmap-block"></div>
+                </div>
+                {% endif %}
+
+            </div>
+
+            {# ── Convergence panel ── #}
+            <div data-view-panel="convergence" class="options-view-panel" style="display:none;">
+                <div class="convergence-filter-bar">
+                    <span class="convergence-filter-label">Include signals:</span>
+                    <label class="convergence-check"><input type="checkbox" value="options" checked onchange="triggerConvergence()"> <span class="convergence-check-icon">📊</span> Options Flow</label>
+                    <label class="convergence-check"><input type="checkbox" value="insider" checked onchange="triggerConvergence()"> <span class="convergence-check-icon">👤</span> Insider Buys</label>
+                    <label class="convergence-check"><input type="checkbox" value="congress" checked onchange="triggerConvergence()"> <span class="convergence-check-icon">🏛</span> Congress</label>
+                    <label class="convergence-check"><input type="checkbox" value="short" checked onchange="triggerConvergence()"> <span class="convergence-check-icon">📉</span> Short Interest</label>
+                    <label class="convergence-check"><input type="checkbox" value="superinvestor" checked onchange="triggerConvergence()"> <span class="convergence-check-icon">👑</span> Superinvestors</label>
+                    <div class="convergence-min-wrap">
+                        <label for="convergence-min" class="convergence-filter-label">Min signals:</label>
+                        <select id="convergence-min" onchange="triggerConvergence()">
+                            <option value="2" selected>2+</option>
+                            <option value="3">3+</option>
+                            <option value="4">4+</option>
+                            <option value="5">All 5</option>
+                        </select>
+                    </div>
+                </div>
+                {# Use the same auth conditional as the feed/heatmap #}
+                {% if request.state.user %}
+                <div id="convergence-results">
+                    <div class="options-loading">
+                        <span class="options-spinner" aria-hidden="true"></span>
+                        Click the tab to scan for multi-signal convergence...
+                    </div>
+                </div>
+                {% else %}
+                <div id="convergence-results" class="options-placeholder-feed">
+                    {% for i in range(6) %}
+                    <div class="options-placeholder-row">
+                        <div class="options-ph-cell options-ph-w3"></div>
+                        <div class="options-ph-cell options-ph-w5"></div>
+                        <div class="options-ph-cell options-ph-w4"></div>
+                        <div class="options-ph-cell options-ph-w2"></div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+
+        </div>
+    </div>
+</section>
+
+<script>
+(function() {
+    var currentSentiment = 'all';
+
+    window.switchOptionsSentiment = function(btn, sentiment) {
+        currentSentiment = sentiment;
+        var tabs = document.querySelectorAll('.options-tab');
+        for (var i = 0; i < tabs.length; i++) {
+            tabs[i].classList.remove('active');
+            tabs[i].setAttribute('aria-selected', 'false');
+        }
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        triggerOptionsFeed();
+    };
+
+    window.triggerOptionsFeed = function() {
+        var sort = document.getElementById('options-sort').value;
+        var ticker = document.getElementById('options-ticker').value.trim();
+        var params = '?sentiment=' + encodeURIComponent(currentSentiment)
+                   + '&sort=' + encodeURIComponent(sort);
+        if (ticker) params += '&ticker=' + encodeURIComponent(ticker);
+        htmx.ajax('GET', '/api/options/feed' + params, {target: '#options-feed', swap: 'innerHTML'});
+    };
+
+    /* ── View switcher ── */
+    window.switchOptionsView = function(btn, view) {
+        document.querySelectorAll('.options-view-tab').forEach(function(t) {
+            t.classList.remove('active');
+        });
+        btn.classList.add('active');
+
+        document.querySelectorAll('.options-view-panel').forEach(function(p) {
+            p.style.display = 'none';
+            p.classList.remove('active');
+        });
+        var panel = document.querySelector('[data-view-panel="' + view + '"]');
+        if (panel) {
+            panel.style.display = '';
+            panel.classList.add('active');
+        }
+
+        // Lazy-load convergence on first switch
+        if (view === 'convergence' && !window._convergenceLoaded) {
+            window._convergenceLoaded = true;
+            triggerConvergence();
+        }
+    };
+
+    /* ── Convergence trigger ── */
+    window.triggerConvergence = function() {
+        var checks = document.querySelectorAll('.convergence-check input:checked');
+        var signals = [];
+        checks.forEach(function(c) { signals.push(c.value); });
+        var minSig = document.getElementById('convergence-min').value;
+        var params = '?signals=' + encodeURIComponent(signals.join(','))
+                   + '&min_signals=' + encodeURIComponent(minSig);
+        htmx.ajax('GET', '/api/options/convergence' + params,
+                  {target: '#convergence-results', swap: 'innerHTML'});
+    };
+
+    /* ── Client-side auth gate ── */
+    function ppOptionsAuthCheck(user) {
+        var gate = document.getElementById('options-auth-gate');
+        var content = document.getElementById('options-gated-content');
+        var feedEl = document.getElementById('options-feed');
+        var hmEl = document.getElementById('options-heatmap');
+
+        if (user) {
+            /* Authenticated: remove blur, hide gate */
+            if (gate) gate.classList.add('options-gate-hidden');
+            if (content) content.classList.remove('options-content-locked');
+
+            /* If feed wasn't loaded (page served while logged out, then Clerk loaded),
+               trigger HTMX load for feed and heatmap */
+            if (feedEl && feedEl.classList.contains('options-placeholder-feed')) {
+                feedEl.classList.remove('options-placeholder-feed');
+                feedEl.innerHTML = '<div class="options-loading"><span class="options-spinner"></span> Loading activity intelligence...</div>';
+                htmx.ajax('GET', '/api/options/feed', {target: '#options-feed', swap: 'innerHTML'});
+            }
+            if (hmEl && hmEl.classList.contains('options-placeholder-heatmap')) {
+                hmEl.classList.remove('options-placeholder-heatmap');
+                hmEl.innerHTML = '<div class="options-loading"><span class="options-spinner"></span> Loading sector heatmap...</div>';
+                htmx.ajax('GET', '/api/options/heatmap', {target: '#options-heatmap', swap: 'innerHTML'});
+            }
+
+            var convEl = document.getElementById('convergence-results');
+            if (convEl && convEl.classList.contains('options-placeholder-feed')) {
+                convEl.classList.remove('options-placeholder-feed');
+                convEl.innerHTML = '<div class="options-loading"><span class="options-spinner"></span> Ready to scan...</div>';
+            }
+        } else {
+            /* Not authenticated: show gate, blur content */
+            if (gate) gate.classList.remove('options-gate-hidden');
+            if (content) content.classList.add('options-content-locked');
+        }
+    }
+
+    /* Hook into Clerk auth state changes */
+    if (typeof ppClerkReady === 'function') {
+        /* Clerk already initialised — check immediately */
+        if (window.Clerk && window.Clerk.user !== undefined) {
+            ppOptionsAuthCheck(window.Clerk.user);
+        }
+    }
+
+    /* Listen for Clerk to finish loading (covers async init) */
+    var origUpdateAuthUI = window.ppUpdateAuthUI;
+    window.ppUpdateAuthUI = function(user) {
+        if (origUpdateAuthUI) origUpdateAuthUI(user);
+        ppOptionsAuthCheck(user);
+    };
+})();
+</script>
+
+<style>
+    main.container {
+        max-width: 1280px !important;
+        width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+
+    /* ── Shell ── */
+    .options-shell {
+        --options-ink: #0f172a;
+        --options-accent: #0d9488;
+        --options-accent-hover: #0f766e;
+        --options-accent-soft: rgba(13, 148, 136, 0.12);
+        position: relative;
+        isolation: isolate;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        padding-bottom: 2rem;
+    }
+
+    /* ── Aurora background blobs ── */
+    .options-aurora {
+        position: absolute;
+        border-radius: 999px;
+        filter: blur(56px);
+        opacity: 0.56;
+        pointer-events: none;
+        z-index: -1;
+    }
+    .options-aurora-one {
+        width: min(40vw, 520px);
+        height: min(34vw, 440px);
+        top: -90px;
+        left: -100px;
+        background: radial-gradient(circle at 30% 35%, rgba(249, 115, 22, 0.22), rgba(194, 65, 12, 0.06) 72%);
+    }
+    .options-aurora-two {
+        width: min(34vw, 430px);
+        height: min(30vw, 390px);
+        top: 50px;
+        right: -80px;
+        background: radial-gradient(circle at 60% 40%, rgba(13, 148, 136, 0.22), rgba(13, 148, 136, 0.06) 72%);
+    }
+
+    /* ── Hero card ── */
+    .options-hero {
+        text-align: center;
+        margin: 0 auto 1rem;
+        max-width: 1040px;
+        border-radius: 24px;
+        padding: 1.5rem 1.1rem 1.15rem;
+        border: 1px solid rgba(255, 255, 255, 0.34);
+        background:
+            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+            radial-gradient(circle at 8% 12%, rgba(13, 148, 136, 0.16), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(249, 115, 22, 0.12), transparent 45%);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+    .options-kicker {
+        margin: 0 0 0.45rem;
+        text-transform: uppercase;
+        letter-spacing: 0.16em;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: #0f766e;
+    }
+    .options-hero h1 {
+        margin: 0;
+        font-family: "Fraunces", Georgia, serif;
+        font-size: clamp(1.8rem, 4.2vw, 3.15rem);
+        letter-spacing: -0.03em;
+        line-height: 1.05;
+        color: var(--options-ink);
+    }
+    .options-hero p {
+        margin: 0.85rem auto 0;
+        max-width: 740px;
+        font-size: 1rem;
+        color: rgba(15, 23, 42, 0.72);
+    }
+
+    /* ── Auth-gated wrapper ── */
+    .options-gated-wrap {
+        position: relative;
+    }
+
+    /* ── Blur overlay gate ── */
+    .options-auth-gate {
+        position: absolute;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding-top: 5rem;
+        pointer-events: auto;
+        transition: opacity 0.35s ease;
+    }
+    .options-auth-gate.options-gate-hidden {
+        opacity: 0;
+        pointer-events: none;
+        visibility: hidden;
+    }
+
+    .options-gate-card {
+        text-align: center;
+        max-width: 460px;
+        padding: 2.5rem 2rem;
+        border-radius: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        background:
+            linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.88));
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        box-shadow:
+            0 24px 64px rgba(15, 23, 42, 0.18),
+            0 4px 16px rgba(13, 148, 136, 0.06);
+    }
+    .options-gate-icon {
+        margin: 0 auto 1.25rem;
+        width: 72px;
+        height: 72px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, rgba(13, 148, 136, 0.12), rgba(13, 148, 136, 0.06));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #0f766e;
+    }
+    .options-gate-card h2 {
+        margin: 0 0 0.75rem;
+        font-family: "Fraunces", Georgia, serif;
+        font-size: 1.5rem;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+        color: #0f172a;
+    }
+    .options-gate-card > p {
+        margin: 0 0 1.5rem;
+        font-size: 0.92rem;
+        line-height: 1.55;
+        color: rgba(15, 23, 42, 0.72);
+    }
+    .options-gate-actions {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+    .options-gate-btn {
+        margin: 0;
+        padding: 0.65rem 1.5rem;
+        border-radius: 12px;
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 0.92rem;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.45rem;
+        transition: all 0.18s ease;
+        border: none;
+    }
+    .options-gate-btn-primary {
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        color: #fff;
+        box-shadow: 0 8px 24px rgba(13, 148, 136, 0.35);
+    }
+    .options-gate-btn-primary:hover {
+        background: linear-gradient(120deg, #0d6d63, #0b8278);
+        box-shadow: 0 12px 32px rgba(13, 148, 136, 0.45);
+        transform: translateY(-1px);
+    }
+    .options-gate-btn-secondary {
+        background: rgba(13, 148, 136, 0.08);
+        color: #0f766e;
+        border: 1px solid rgba(13, 148, 136, 0.25);
+    }
+    .options-gate-btn-secondary:hover {
+        background: rgba(13, 148, 136, 0.14);
+        border-color: rgba(13, 148, 136, 0.4);
+    }
+    .options-gate-note {
+        margin: 1rem 0 0 !important;
+        font-size: 0.78rem !important;
+        color: rgba(15, 23, 42, 0.5) !important;
+    }
+
+    /* ── Gated content blur ── */
+    .options-gated-content {
+        transition: filter 0.35s ease;
+    }
+    .options-gated-content.options-content-locked {
+        filter: blur(8px);
+        -webkit-filter: blur(8px);
+        pointer-events: none;
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    /* ── Placeholder skeleton rows (for logged-out view) ── */
+    .options-placeholder-feed {
+        padding: 1rem 0;
+    }
+    .options-placeholder-row {
+        display: flex;
+        gap: 1rem;
+        padding: 0.85rem 1rem;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    }
+    .options-ph-cell {
+        height: 14px;
+        border-radius: 6px;
+        background: rgba(15, 23, 42, 0.08);
+    }
+    .options-ph-w2 { width: 60px; }
+    .options-ph-w3 { width: 90px; }
+    .options-ph-w4 { width: 120px; }
+    .options-ph-w5 { width: 160px; }
+    .options-placeholder-heatmap {
+        margin-top: 1.5rem;
+    }
+    .options-ph-heatmap-block {
+        height: 260px;
+        border-radius: 16px;
+        background:
+            linear-gradient(135deg,
+                rgba(46, 125, 50, 0.15) 0%,
+                rgba(13, 148, 136, 0.1) 30%,
+                rgba(198, 40, 40, 0.12) 60%,
+                rgba(100, 116, 139, 0.08) 100%);
+    }
+
+    /* ── View tabs ── */
+    .options-view-tabs {
+        max-width: 1160px;
+        margin: 0 auto 1rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    .options-view-tab {
+        margin: 0;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 12px;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 0.84rem;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.65);
+        background: rgba(255, 255, 255, 0.6);
+        backdrop-filter: blur(8px);
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        transition: all 0.18s ease;
+    }
+    .options-view-tab:hover {
+        border-color: rgba(13, 148, 136, 0.3);
+        color: var(--options-ink);
+        background: rgba(13, 148, 136, 0.06);
+    }
+    .options-view-tab.active {
+        border-color: #0f766e;
+        color: #fff;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        box-shadow: 0 4px 14px rgba(13, 148, 136, 0.25);
+    }
+    .options-view-tab.active svg { stroke: #fff; }
+    .options-view-badge {
+        font-size: 0.6rem;
+        font-weight: 800;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #f97316;
+        color: #fff;
+        letter-spacing: 0.04em;
+    }
+
+    /* ── Convergence filter bar ── */
+    .convergence-filter-bar {
+        max-width: 1160px;
+        margin: 0 auto 1rem;
+        padding: 0.65rem 1rem;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.34);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+        display: flex;
+        align-items: center;
+        gap: 0.85rem;
+        flex-wrap: wrap;
+    }
+    .convergence-filter-label {
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.56);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+    }
+    .convergence-check {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        cursor: pointer;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--options-ink, #0f172a);
+        white-space: nowrap;
+    }
+    .convergence-check input[type="checkbox"] {
+        accent-color: #0d9488;
+        width: 15px;
+        height: 15px;
+    }
+    .convergence-check-icon {
+        font-size: 0.9rem;
+    }
+    .convergence-min-wrap {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+    .convergence-min-wrap select {
+        margin: 0;
+        padding: 0.35rem 0.6rem;
+        border: 1px solid rgba(15, 23, 42, 0.14);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.8);
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 0.82rem;
+        font-weight: 600;
+        cursor: pointer;
+        color: var(--options-ink, #0f172a);
+    }
+
+    /* ── Filter bar ── */
+    .options-filter-bar {
+        max-width: 1160px;
+        margin: 0 auto 1rem;
+        padding: 0.65rem 0.75rem;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.34);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+    }
+    .options-filter-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+    }
+
+    /* ── Sentiment tabs ── */
+    .options-tabs {
+        display: flex;
+        gap: 0.35rem;
+    }
+    .options-tab {
+        margin: 0;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        padding: 0.45rem 0.95rem;
+        cursor: pointer;
+        font-size: 0.84rem;
+        font-weight: 700;
+        color: rgba(15, 23, 42, 0.62);
+        background: transparent;
+        white-space: nowrap;
+        transition: all 0.16s ease;
+    }
+    .options-tab:hover {
+        color: var(--options-ink);
+        border-color: rgba(13, 148, 136, 0.24);
+        background: rgba(13, 148, 136, 0.08);
+    }
+    .options-tab.active {
+        color: #fff;
+        border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
+    }
+
+    /* ── Sort dropdown ── */
+    .options-sort-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-left: auto;
+    }
+    .options-sort-label {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.56);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }
+    .options-sort-select {
+        margin: 0;
+        padding: 0.38rem 0.7rem;
+        border: 1px solid rgba(15, 23, 42, 0.14);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.8);
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--options-ink);
+        cursor: pointer;
+        transition: border-color 0.15s ease;
+    }
+    .options-sort-select:focus {
+        border-color: var(--options-accent);
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+    }
+
+    /* ── Ticker search ── */
+    .options-search-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0;
+    }
+    .options-search-input {
+        margin: 0;
+        padding: 0.38rem 0.7rem;
+        border: 1px solid rgba(15, 23, 42, 0.14);
+        border-right: none;
+        border-radius: 10px 0 0 10px;
+        background: rgba(255, 255, 255, 0.8);
+        font-family: "Space Grotesk", sans-serif;
+        font-size: 0.82rem;
+        color: var(--options-ink);
+        width: 140px;
+        transition: border-color 0.15s ease;
+    }
+    .options-search-input:focus {
+        border-color: var(--options-accent);
+        outline: none;
+        box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+    }
+    .options-search-input::placeholder {
+        color: rgba(15, 23, 42, 0.4);
+    }
+    .options-search-btn {
+        margin: 0;
+        padding: 0.42rem 0.6rem;
+        border: 1px solid var(--options-accent);
+        border-radius: 0 10px 10px 0;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        color: #fff;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        transition: background 0.15s ease;
+    }
+    .options-search-btn:hover {
+        background: linear-gradient(120deg, #0d6d63, #0b8278);
+    }
+
+    /* ── Loading spinner ── */
+    .options-loading {
+        text-align: center;
+        padding: 2.5rem 1rem;
+        font-size: 0.92rem;
+        color: rgba(15, 23, 42, 0.6);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6rem;
+    }
+    .options-spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2.5px solid rgba(13, 148, 136, 0.2);
+        border-top-color: #0d9488;
+        border-radius: 50%;
+        animation: optionsSpin 0.7s linear infinite;
+    }
+    @keyframes optionsSpin {
+        to { transform: rotate(360deg); }
+    }
+
+    /* ── Dark mode overrides ── */
+    :root[data-theme="dark"] .options-shell {
+        --options-ink: #e2e8f0;
+    }
+    :root[data-theme="dark"] .options-hero {
+        border-color: rgba(148, 163, 184, 0.22);
+        background:
+            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+            radial-gradient(circle at 8% 12%, rgba(13, 148, 136, 0.14), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(249, 115, 22, 0.1), transparent 45%);
+    }
+    :root[data-theme="dark"] .options-kicker {
+        color: #5eead4;
+    }
+    :root[data-theme="dark"] .options-hero p {
+        color: rgba(226, 232, 240, 0.72);
+    }
+    :root[data-theme="dark"] .options-filter-bar {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+    }
+    :root[data-theme="dark"] .options-tab {
+        color: rgba(226, 232, 240, 0.72);
+    }
+    :root[data-theme="dark"] .options-tab:hover {
+        color: #e2e8f0;
+        background: rgba(45, 212, 191, 0.12);
+        border-color: rgba(45, 212, 191, 0.26);
+    }
+    :root[data-theme="dark"] .options-sort-select {
+        background: rgba(15, 23, 42, 0.8);
+        border-color: rgba(148, 163, 184, 0.3);
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .options-search-input {
+        background: rgba(15, 23, 42, 0.8);
+        border-color: rgba(148, 163, 184, 0.3);
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .options-search-input::placeholder {
+        color: rgba(226, 232, 240, 0.4);
+    }
+    :root[data-theme="dark"] .options-loading {
+        color: rgba(226, 232, 240, 0.6);
+    }
+
+    /* Dark mode: auth gate card */
+    :root[data-theme="dark"] .options-gate-card {
+        border-color: rgba(148, 163, 184, 0.2);
+        background:
+            linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.88));
+    }
+    :root[data-theme="dark"] .options-gate-card h2 {
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .options-gate-card > p {
+        color: rgba(226, 232, 240, 0.72);
+    }
+    :root[data-theme="dark"] .options-gate-icon {
+        color: #5eead4;
+        background: linear-gradient(135deg, rgba(45, 212, 191, 0.14), rgba(45, 212, 191, 0.06));
+    }
+    :root[data-theme="dark"] .options-gate-btn-secondary {
+        color: #5eead4;
+        background: rgba(45, 212, 191, 0.08);
+        border-color: rgba(45, 212, 191, 0.25);
+    }
+    :root[data-theme="dark"] .options-gate-btn-secondary:hover {
+        background: rgba(45, 212, 191, 0.14);
+        border-color: rgba(45, 212, 191, 0.4);
+    }
+    :root[data-theme="dark"] .options-gate-note {
+        color: rgba(226, 232, 240, 0.4) !important;
+    }
+
+    /* Dark mode: view tabs */
+    :root[data-theme="dark"] .options-view-tab {
+        border-color: rgba(148, 163, 184, 0.2);
+        color: rgba(226, 232, 240, 0.7);
+        background: rgba(15, 23, 42, 0.6);
+    }
+    :root[data-theme="dark"] .options-view-tab:hover {
+        background: rgba(45, 212, 191, 0.1);
+        border-color: rgba(45, 212, 191, 0.3);
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .convergence-filter-bar {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+    }
+    :root[data-theme="dark"] .convergence-check {
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .convergence-min-wrap select {
+        background: rgba(15, 23, 42, 0.8);
+        border-color: rgba(148, 163, 184, 0.3);
+        color: #e2e8f0;
+    }
+
+    /* Dark mode: placeholder skeleton */
+    :root[data-theme="dark"] .options-ph-cell {
+        background: rgba(226, 232, 240, 0.08);
+    }
+    :root[data-theme="dark"] .options-placeholder-row {
+        border-bottom-color: rgba(226, 232, 240, 0.06);
+    }
+    :root[data-theme="dark"] .options-ph-heatmap-block {
+        background:
+            linear-gradient(135deg,
+                rgba(46, 125, 50, 0.1) 0%,
+                rgba(45, 212, 191, 0.08) 30%,
+                rgba(198, 40, 40, 0.08) 60%,
+                rgba(100, 116, 139, 0.06) 100%);
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 767px) {
+        main.container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        .options-hero {
+            border-radius: 20px;
+            padding: 1.2rem 0.85rem 1rem;
+        }
+        .options-filter-row {
+            flex-direction: column;
+            align-items: stretch;
+        }
+        .options-sort-wrap {
+            margin-left: 0;
+        }
+        .options-search-input {
+            width: 100%;
+            flex: 1;
+        }
+        .options-search-wrap {
+            width: 100%;
+        }
+        .options-gate-card {
+            margin: 0 1rem;
+            padding: 2rem 1.25rem;
+        }
+        .options-auth-gate {
+            padding-top: 3rem;
+        }
+        .options-view-tabs {
+            gap: 0.35rem;
+        }
+        .options-view-tab {
+            padding: 0.4rem 0.75rem;
+            font-size: 0.78rem;
+        }
+        .convergence-filter-bar {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .convergence-min-wrap {
+            margin-left: 0;
+        }
+    }
+
+    /* ── Accessibility: reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+        .options-hero,
+        .options-filter-bar,
+        .options-tab,
+        .options-view-tab,
+        .options-sort-select,
+        .options-search-input,
+        .options-search-btn,
+        .options-spinner,
+        .options-gated-content,
+        .options-auth-gate,
+        .options-gate-btn {
+            animation: none !important;
+            transition: none !important;
+        }
+    }
+</style>
+{% endblock %}

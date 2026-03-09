@@ -1,0 +1,480 @@
+{# Convergence engine results — HTMX partial (no extends) #}
+<style>
+    /* ── Fade-in animation ── */
+    @keyframes convFadeIn {
+        from { opacity: 0; transform: translateY(6px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+    .conv-fadein {
+        animation: convFadeIn 0.35s ease-out;
+    }
+
+    /* ── Glass card ── */
+    .conv-card {
+        max-width: 1160px;
+        margin: 0 auto 1rem;
+        border-radius: 18px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+        overflow: hidden;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    }
+
+    /* ── Header ── */
+    .conv-card header {
+        padding: 0.85rem 1rem 0.5rem;
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    .conv-title {
+        font-weight: 700;
+        font-size: 1rem;
+        color: var(--conv-ink, #0f172a);
+    }
+    .conv-count {
+        font-size: 0.82rem;
+        color: rgba(15, 23, 42, 0.55);
+        font-weight: 500;
+    }
+    .conv-subtitle {
+        width: 100%;
+        font-size: 0.78rem;
+        color: rgba(15, 23, 42, 0.45);
+        font-weight: 400;
+        margin-top: -0.1rem;
+    }
+
+    /* ── Table wrapper ── */
+    .conv-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* ── Table ── */
+    table.conv-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+    }
+    table.conv-table thead th {
+        padding: 0.55rem 0.65rem;
+        text-align: left;
+        font-weight: 700;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: rgba(15, 23, 42, 0.55);
+        border-bottom: 1.5px solid rgba(15, 23, 42, 0.08);
+        white-space: nowrap;
+        user-select: none;
+    }
+    table.conv-table thead th.text-right {
+        text-align: right;
+    }
+    table.conv-table tbody tr.conv-row {
+        border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+        cursor: pointer;
+        transition: background 0.12s ease;
+    }
+    table.conv-table tbody tr.conv-row:hover {
+        background: rgba(13, 148, 136, 0.04);
+    }
+    table.conv-table tbody td {
+        padding: 0.55rem 0.65rem;
+        white-space: nowrap;
+        color: var(--conv-ink, #0f172a);
+    }
+    table.conv-table tbody td.text-right {
+        text-align: right;
+    }
+
+    /* ── Chevron toggle ── */
+    .conv-chevron {
+        display: inline-block;
+        font-size: 0.7em;
+        color: rgba(15, 23, 42, 0.35);
+        transition: transform 0.2s ease;
+        width: 1em;
+        text-align: center;
+    }
+    .conv-chevron.conv-open {
+        transform: rotate(180deg);
+    }
+
+    /* ── Ticker link ── */
+    .conv-ticker-link {
+        font-weight: 700;
+        color: var(--conv-ink, #0f172a);
+        text-decoration: none;
+    }
+    .conv-ticker-link:hover {
+        color: #0d9488;
+        text-decoration: underline;
+    }
+
+    /* ── Signal count badge ── */
+    .conv-sig-count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 24px;
+        height: 24px;
+        border-radius: 12px;
+        font-size: 0.78em;
+        font-weight: 700;
+        padding: 0 7px;
+    }
+    .conv-sig-2 { background: rgba(13, 148, 136, 0.08); color: #0d9488; }
+    .conv-sig-3 { background: rgba(13, 148, 136, 0.12); color: #0d9488; }
+    .conv-sig-4 { background: rgba(13, 148, 136, 0.18); color: #0d9488; }
+    .conv-sig-5 {
+        background: linear-gradient(135deg, #0f766e, #0d9488);
+        color: #fff;
+    }
+
+    /* ── Direction badge ── */
+    .conv-dir {
+        display: inline-block;
+        font-size: 0.78em;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 4px;
+    }
+    .conv-dir-bullish { background: rgba(46, 125, 50, 0.12); color: #2e7d32; }
+    .conv-dir-bearish { background: rgba(198, 40, 40, 0.12); color: #c62828; }
+    .conv-dir-mixed   { background: rgba(245, 158, 11, 0.12); color: #d97706; }
+
+    /* ── Signal type pills ── */
+    .conv-pills {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+    .conv-pill {
+        display: inline-block;
+        font-size: 0.68em;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .conv-pill-options      { background: rgba(59, 130, 246, 0.1);  color: #2563eb; }
+    .conv-pill-insider      { background: rgba(16, 185, 129, 0.1);  color: #059669; }
+    .conv-pill-congress     { background: rgba(139, 92, 246, 0.1);  color: #7c3aed; }
+    .conv-pill-short        { background: rgba(239, 68, 68, 0.1);   color: #dc2626; }
+    .conv-pill-superinvestor { background: rgba(245, 158, 11, 0.1); color: #d97706; }
+
+    /* ── Conviction bar ── */
+    .conv-bar-wrap {
+        width: 60px;
+        height: 6px;
+        background: rgba(15, 23, 42, 0.06);
+        border-radius: 3px;
+        overflow: hidden;
+        display: inline-block;
+        vertical-align: middle;
+    }
+    .conv-bar-fill {
+        height: 100%;
+        border-radius: 3px;
+        background: linear-gradient(90deg, #0f766e, #0d9488);
+        transition: width 0.3s ease;
+    }
+    .conv-bar-label {
+        font-size: 0.72em;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.55);
+        margin-left: 5px;
+        vertical-align: middle;
+    }
+
+    /* ── Detail row (hidden by default) ── */
+    .conv-detail {
+        display: none;
+    }
+    .conv-detail.conv-detail-open {
+        display: table-row;
+    }
+    .conv-detail td {
+        padding: 0.6rem 0.65rem 0.8rem !important;
+        background: rgba(13, 148, 136, 0.02);
+        border-bottom: 1.5px solid rgba(15, 23, 42, 0.06);
+    }
+    .conv-detail-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 0.6rem;
+    }
+    .conv-signal-card {
+        border: 1px solid rgba(15, 23, 42, 0.07);
+        border-radius: 10px;
+        padding: 0.6em 0.75em;
+        background: rgba(255, 255, 255, 0.7);
+    }
+    .conv-signal-type {
+        font-size: 0.68em;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.3em;
+    }
+    .conv-signal-type-options      { color: #2563eb; }
+    .conv-signal-type-insider      { color: #059669; }
+    .conv-signal-type-congress     { color: #7c3aed; }
+    .conv-signal-type-short        { color: #dc2626; }
+    .conv-signal-type-superinvestor { color: #d97706; }
+    .conv-signal-dir {
+        font-size: 0.72em;
+        font-weight: 600;
+        margin-bottom: 0.25em;
+    }
+    .conv-signal-dir-bullish { color: #2e7d32; }
+    .conv-signal-dir-bearish { color: #c62828; }
+    .conv-signal-dir-mixed   { color: #d97706; }
+    .conv-signal-summary {
+        font-size: 0.78em;
+        color: rgba(15, 23, 42, 0.65);
+        line-height: 1.45;
+        white-space: normal;
+    }
+
+    /* ── Empty state ── */
+    .conv-empty {
+        text-align: center;
+        padding: 2.5rem 1rem;
+        color: rgba(15, 23, 42, 0.5);
+        font-size: 0.92rem;
+    }
+
+    /* ══════════════════════════════════════
+       Dark mode
+       ══════════════════════════════════════ */
+    :root[data-theme="dark"] .conv-card {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+    :root[data-theme="dark"] .conv-count {
+        color: rgba(226, 232, 240, 0.55);
+    }
+    :root[data-theme="dark"] .conv-subtitle {
+        color: rgba(226, 232, 240, 0.4);
+    }
+    :root[data-theme="dark"] table.conv-table thead th {
+        color: rgba(226, 232, 240, 0.55);
+        border-bottom-color: rgba(148, 163, 184, 0.15);
+    }
+    :root[data-theme="dark"] table.conv-table tbody tr.conv-row {
+        border-bottom-color: rgba(148, 163, 184, 0.08);
+    }
+    :root[data-theme="dark"] table.conv-table tbody tr.conv-row:hover {
+        background: rgba(45, 212, 191, 0.06);
+    }
+    :root[data-theme="dark"] table.conv-table tbody td {
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .conv-chevron {
+        color: rgba(226, 232, 240, 0.35);
+    }
+    :root[data-theme="dark"] .conv-ticker-link {
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .conv-ticker-link:hover {
+        color: #5eead4;
+    }
+    :root[data-theme="dark"] .conv-bar-wrap {
+        background: rgba(148, 163, 184, 0.12);
+    }
+    :root[data-theme="dark"] .conv-bar-fill {
+        background: linear-gradient(90deg, #0d9488, #5eead4);
+    }
+    :root[data-theme="dark"] .conv-bar-label {
+        color: rgba(226, 232, 240, 0.55);
+    }
+    :root[data-theme="dark"] .conv-detail td {
+        background: rgba(45, 212, 191, 0.03);
+        border-bottom-color: rgba(148, 163, 184, 0.1);
+    }
+    :root[data-theme="dark"] .conv-signal-card {
+        border-color: rgba(148, 163, 184, 0.14);
+        background: rgba(15, 23, 42, 0.6);
+    }
+    :root[data-theme="dark"] .conv-signal-summary {
+        color: rgba(226, 232, 240, 0.6);
+    }
+    :root[data-theme="dark"] .conv-empty {
+        color: rgba(226, 232, 240, 0.5);
+    }
+    :root[data-theme="dark"] .conv-sig-2 { background: rgba(45, 212, 191, 0.1); color: #5eead4; }
+    :root[data-theme="dark"] .conv-sig-3 { background: rgba(45, 212, 191, 0.14); color: #5eead4; }
+    :root[data-theme="dark"] .conv-sig-4 { background: rgba(45, 212, 191, 0.2); color: #5eead4; }
+    :root[data-theme="dark"] .conv-sig-5 {
+        background: linear-gradient(135deg, #0d9488, #2dd4bf);
+        color: #fff;
+    }
+
+    /* ══════════════════════════════════════
+       Responsive
+       ══════════════════════════════════════ */
+    @media (max-width: 767px) {
+        .conv-card {
+            border-radius: 14px;
+        }
+        table.conv-table {
+            font-size: 0.78rem;
+        }
+        table.conv-table thead th,
+        table.conv-table tbody td {
+            padding: 0.45rem 0.5rem;
+        }
+        .conv-detail-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    /* ══════════════════════════════════════
+       Reduced motion
+       ══════════════════════════════════════ */
+    @media (prefers-reduced-motion: reduce) {
+        .conv-fadein {
+            animation: none !important;
+        }
+        .conv-chevron {
+            transition: none !important;
+        }
+        table.conv-table tbody tr.conv-row {
+            transition: none !important;
+        }
+        .conv-bar-fill {
+            transition: none !important;
+        }
+    }
+</style>
+
+{% if results %}
+<article class="conv-card conv-fadein">
+    <header>
+        <span class="conv-title">Convergence Engine</span>
+        <span class="conv-count">{{ signal_count }} result{{ 's' if signal_count != 1 }}</span>
+        <span class="conv-subtitle">Stocks with {{ min_signals }}+ aligned signals across options, insider, congress, short interest &amp; 13F data</span>
+    </header>
+    <div class="conv-table-wrap">
+        <table class="conv-table">
+            <thead>
+                <tr>
+                    <th style="width: 2em;"></th>
+                    <th>Ticker</th>
+                    <th class="text-right">Signals</th>
+                    <th>Direction</th>
+                    <th>Active Signals</th>
+                    <th class="text-right">Conviction</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for item in results %}
+                {# ── Main row ── #}
+                <tr class="conv-row" onclick="toggleConvDetail('conv-detail-{{ loop.index }}')">
+                    <td>
+                        <span class="conv-chevron" id="conv-chev-{{ loop.index }}">&#x25BC;</span>
+                    </td>
+                    <td>
+                        <a href="/stock/{{ item.ticker }}" class="conv-ticker-link" onclick="event.stopPropagation();">{{ item.ticker }}</a>
+                        {% if item.company_name %}
+                        <span style="font-size: 0.78em; color: rgba(15, 23, 42, 0.45); margin-left: 0.3em;">{{ item.company_name }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right">
+                        <span class="conv-sig-count conv-sig-{{ [item.signal_count, 5] | min }}">{{ item.signal_count }}</span>
+                    </td>
+                    <td>
+                        {% if item.net_direction == 'bullish' %}
+                            <span class="conv-dir conv-dir-bullish">&#x25B2; Bullish</span>
+                        {% elif item.net_direction == 'bearish' %}
+                            <span class="conv-dir conv-dir-bearish">&#x25BC; Bearish</span>
+                        {% else %}
+                            <span class="conv-dir conv-dir-mixed">&#x25C6; Mixed</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="conv-pills">
+                            {% if item.has_options %}
+                                <span class="conv-pill conv-pill-options">Options</span>
+                            {% endif %}
+                            {% if item.has_insider %}
+                                <span class="conv-pill conv-pill-insider">Insider</span>
+                            {% endif %}
+                            {% if item.has_congress %}
+                                <span class="conv-pill conv-pill-congress">Congress</span>
+                            {% endif %}
+                            {% if item.has_short %}
+                                <span class="conv-pill conv-pill-short">Short</span>
+                            {% endif %}
+                            {% if item.has_superinvestor %}
+                                <span class="conv-pill conv-pill-superinvestor">13F</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td class="text-right" style="min-width: 100px;">
+                        {% set conv_pct = [(item.conviction_score / 6.0 * 100), 100] | min %}
+                        <span class="conv-bar-wrap">
+                            <span class="conv-bar-fill" style="width: {{ "%.1f"|format(conv_pct) }}%;"></span>
+                        </span>
+                        <span class="conv-bar-label">{{ "%.1f"|format(item.conviction_score) }}</span>
+                    </td>
+                </tr>
+
+                {# ── Expandable detail row ── #}
+                <tr class="conv-detail" id="conv-detail-{{ loop.index }}">
+                    <td colspan="6">
+                        <div class="conv-detail-grid">
+                            {% for sig in item.signals %}
+                            <div class="conv-signal-card">
+                                <div class="conv-signal-type conv-signal-type-{{ sig.type }}">
+                                    {% if sig.type == 'superinvestor' %}13F{% else %}{{ sig.type | capitalize }}{% endif %}
+                                    {% if sig.strength %}
+                                    <span style="opacity: 0.55; font-weight: 500; text-transform: none;">&middot; {{ sig.strength }}</span>
+                                    {% endif %}
+                                </div>
+                                <div class="conv-signal-dir conv-signal-dir-{{ sig.direction }}">
+                                    {% if sig.direction == 'bullish' %}&#x25B2; Bullish{% elif sig.direction == 'bearish' %}&#x25BC; Bearish{% else %}&#x25C6; Mixed{% endif %}
+                                </div>
+                                <div class="conv-signal-summary">{{ sig.summary }}</div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</article>
+{% else %}
+<div class="conv-card conv-fadein">
+    <p class="conv-empty">No convergence signals detected. Try lowering the minimum signal threshold or check back later.</p>
+</div>
+{% endif %}
+
+<script>
+(function() {
+    window.toggleConvDetail = function(id) {
+        var row = document.getElementById(id);
+        if (!row) return;
+        var idx = id.replace('conv-detail-', '');
+        var chev = document.getElementById('conv-chev-' + idx);
+        if (row.classList.contains('conv-detail-open')) {
+            row.classList.remove('conv-detail-open');
+            if (chev) chev.classList.remove('conv-open');
+        } else {
+            row.classList.add('conv-detail-open');
+            if (chev) chev.classList.add('conv-open');
+        }
+    };
+})();
+</script>

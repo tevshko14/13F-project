@@ -1,0 +1,201 @@
+{# Per-ticker unusual options — HTMX partial for stock detail page (no extends) #}
+<style>
+    .stock-options-card {
+        border-radius: 18px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 34px rgba(15, 23, 42, 0.1);
+        overflow: hidden;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    }
+    .stock-options-card header {
+        padding: 0.85rem 1rem 0.5rem;
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+    }
+    .stock-options-title {
+        font-weight: 700;
+        font-size: 1rem;
+        color: var(--options-ink, #0f172a);
+    }
+    .stock-options-count {
+        font-size: 0.82rem;
+        color: rgba(15, 23, 42, 0.55);
+        font-weight: 500;
+    }
+
+    .stock-options-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    table.stock-options-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+    }
+    table.stock-options-table thead th {
+        padding: 0.55rem 0.65rem;
+        text-align: left;
+        font-weight: 700;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: rgba(15, 23, 42, 0.55);
+        border-bottom: 1.5px solid rgba(15, 23, 42, 0.08);
+        white-space: nowrap;
+    }
+    table.stock-options-table thead th.text-right {
+        text-align: right;
+    }
+    table.stock-options-table tbody tr {
+        border-bottom: 1px solid rgba(15, 23, 42, 0.05);
+        transition: background 0.12s ease;
+    }
+    table.stock-options-table tbody tr:hover {
+        background: rgba(13, 148, 136, 0.04);
+    }
+    table.stock-options-table tbody td {
+        padding: 0.55rem 0.65rem;
+        white-space: nowrap;
+        color: var(--options-ink, #0f172a);
+    }
+    table.stock-options-table tbody td.text-right {
+        text-align: right;
+    }
+
+    /* Row border sentiment colors */
+    .stock-options-row-bullish {
+        border-left: 3px solid #2e7d32;
+    }
+    .stock-options-row-bearish {
+        border-left: 3px solid #c62828;
+    }
+
+    /* Type badge */
+    .stock-options-type-badge {
+        display: inline-block;
+        font-size: 0.72em;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .stock-options-type-call {
+        background: rgba(46, 125, 50, 0.12);
+        color: #2e7d32;
+    }
+    .stock-options-type-put {
+        background: rgba(198, 40, 40, 0.12);
+        color: #c62828;
+    }
+
+    /* Vol/OI highlight */
+    .stock-options-vol-oi {
+        font-weight: 700;
+        color: #0f766e;
+    }
+
+    /* Premium emphasis */
+    .stock-options-premium {
+        font-weight: 600;
+    }
+
+    /* Empty state */
+    .stock-options-empty {
+        text-align: center;
+        padding: 2rem 1rem;
+        color: rgba(15, 23, 42, 0.5);
+        font-size: 0.9rem;
+    }
+
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .stock-options-card {
+        border-color: rgba(148, 163, 184, 0.2);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+    }
+    :root[data-theme="dark"] .stock-options-count {
+        color: rgba(226, 232, 240, 0.55);
+    }
+    :root[data-theme="dark"] table.stock-options-table thead th {
+        color: rgba(226, 232, 240, 0.55);
+        border-bottom-color: rgba(148, 163, 184, 0.15);
+    }
+    :root[data-theme="dark"] table.stock-options-table tbody tr {
+        border-bottom-color: rgba(148, 163, 184, 0.08);
+    }
+    :root[data-theme="dark"] table.stock-options-table tbody tr:hover {
+        background: rgba(45, 212, 191, 0.06);
+    }
+    :root[data-theme="dark"] table.stock-options-table tbody td {
+        color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .stock-options-vol-oi {
+        color: #5eead4;
+    }
+    :root[data-theme="dark"] .stock-options-empty {
+        color: rgba(226, 232, 240, 0.5);
+    }
+
+    /* ── Accessibility: reduced motion ── */
+    @media (prefers-reduced-motion: reduce) {
+        table.stock-options-table tbody tr {
+            transition: none !important;
+        }
+    }
+</style>
+
+{% if feed %}
+<article class="stock-options-card">
+    <header>
+        <span class="stock-options-title">Unusual Options</span>
+        <span class="stock-options-count">{{ feed | length }} contract{{ 's' if feed | length != 1 }}</span>
+    </header>
+    <div class="stock-options-table-wrap">
+        <table class="stock-options-table">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Strike</th>
+                    <th>Expiry</th>
+                    <th class="text-right">DTE</th>
+                    <th class="text-right">Volume</th>
+                    <th class="text-right">OI</th>
+                    <th class="text-right">Vol/OI</th>
+                    <th class="text-right">Premium</th>
+                    <th class="text-right">IV</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for row in feed %}
+                <tr class="{% if row.sentiment == 'bullish' %}stock-options-row-bullish{% elif row.sentiment == 'bearish' %}stock-options-row-bearish{% endif %}">
+                    <td>
+                        {% if row.type == 'call' %}
+                            <span class="stock-options-type-badge stock-options-type-call">Call</span>
+                        {% else %}
+                            <span class="stock-options-type-badge stock-options-type-put">Put</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ row.strike_fmt }}</td>
+                    <td>{{ row.expiry }}</td>
+                    <td class="text-right">{{ row.dte }}</td>
+                    <td class="text-right">{{ "{:,}".format(row.volume) }}</td>
+                    <td class="text-right">{{ "{:,}".format(row.open_interest) }}</td>
+                    <td class="text-right"><span class="stock-options-vol-oi">{{ row.vol_oi_fmt }}</span></td>
+                    <td class="text-right"><span class="stock-options-premium">{{ row.premium_fmt }}</span></td>
+                    <td class="text-right">{{ row.iv_fmt }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</article>
+{% else %}
+<div class="stock-options-card">
+    <p class="stock-options-empty">No unusual options activity for {{ ticker }}.</p>
+</div>
+{% endif %}

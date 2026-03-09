@@ -8,12 +8,13 @@ The notifications table is *global* (no per-user rows).  Dismiss state
 is tracked client-side via ``localStorage('pp-notifications-last-seen')``.
 
 Notification IDs are deterministic for deduplication:
-  - 13F changes:    ``13f-{cik}-{filing_date}-{cusip}``
-  - YouTube:         ``yt-{video_id}``
-  - Reddit spikes:   ``reddit-{ticker}-{YYYY-MM-DD}``
-  - Congress trades: ``congress-{member_id}-{trade_id}``
-  - Insider trades:  ``insider-{filing_date}-{ticker}-{hash8}``
-  - Feature releases: ``release-{announcement_id}``
+  - 13F changes:      ``13f-{cik}-{filing_date}-{cusip}``
+  - YouTube:           ``yt-{video_id}``
+  - Reddit spikes:     ``reddit-{ticker}-{YYYY-MM-DD}``
+  - Congress trades:   ``congress-{member_id}-{trade_id}``
+  - Insider trades:    ``insider-{filing_date}-{ticker}-{hash8}``
+  - Feature releases:  ``release-{announcement_id}``
+  - Unusual options:   ``options-{contract_symbol}-{YYYY-MM-DD}``
 """
 
 from __future__ import annotations
@@ -476,4 +477,75 @@ def create_feature_release_notification(announcement: dict) -> dict | None:
         "metadata": {"announcement_id": ann_id},
         "created_at": created_at
         or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
+# ── Unusual options activity notifications ───────────────────────
+
+
+def create_unusual_options_notification(option: dict) -> dict | None:
+    """Create a notification for a notably unusual options contract.
+
+    Deterministic ID: ``options-{contract_symbol}-{YYYY-MM-DD}``
+    Type: ``unusual_options``
+
+    Notable criteria:
+      - Estimated premium ≥ $500,000
+      - OR vol/OI ratio ≥ 20×
+
+    Args:
+        option: Dict with keys from ``unusual_options_activity`` row.
+
+    Returns:
+        A notification dict matching the Supabase schema, or None.
+    """
+    ticker = option.get("ticker", "")
+    contract = option.get("contract_symbol", "")
+    if not ticker or not contract:
+        return None
+
+    premium = float(option.get("premium_est") or 0)
+    ratio = float(option.get("vol_oi_ratio") or 0)
+
+    if premium < 500_000 and ratio < 20:
+        return None
+
+    option_type = option.get("option_type", "call")
+    sentiment = option.get("sentiment", "neutral")
+    strike = option.get("strike", 0)
+    expiry = option.get("expiry", "")
+    volume = option.get("volume", 0)
+
+    is_bullish = sentiment == "bullish"
+    icon = "🟢" if is_bullish else "🔴"
+    toast = "bullish" if is_bullish else "bearish"
+    type_label = "call" if option_type == "call" else "put"
+
+    # Format premium for display
+    if premium >= 1_000_000:
+        premium_str = f"${premium / 1_000_000:.1f}M"
+    else:
+        premium_str = f"${premium / 1_000:.0f}K"
+
+    today_str = date.today().isoformat()
+
+    return {
+        "id": f"options-{contract}-{today_str}",
+        "type": "unusual_options",
+        "title": f"Unusual {type_label} on ${ticker}",
+        "message": _sanitize(
+            f"{premium_str} premium — {volume:,} vol @ ${strike} "
+            f"{type_label} exp {expiry} ({ratio:.0f}× OI)"
+        ),
+        "icon": icon,
+        "toast_type": toast,
+        "link": f"/options?ticker={ticker}",
+        "metadata": {
+            "ticker": ticker,
+            "contract_symbol": contract,
+            "option_type": option_type,
+            "premium_est": premium,
+            "vol_oi_ratio": ratio,
+        },
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }

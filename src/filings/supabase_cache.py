@@ -83,6 +83,17 @@ _NOTIFICATION_COLS = (
     "id,type,title,message,icon,toast_type,link,metadata,created_at"
 )
 
+# Unusual options activity — feed + heatmap projections
+_UOA_FEED_COLS = (
+    "contract_symbol,ticker,company_name,sector,option_type,"
+    "strike,expiry,dte,volume,open_interest,vol_oi_ratio,"
+    "bid,ask,last_price,implied_vol,underlying_price,"
+    "premium_est,sentiment,fetched_at"
+)
+_UOA_HEATMAP_COLS = (
+    "ticker,sector,option_type,premium_est,vol_oi_ratio,sentiment"
+)
+
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS api_cache (
     cache_key     TEXT PRIMARY KEY,
@@ -428,6 +439,48 @@ CREATE INDEX IF NOT EXISTS idx_economic_events_impact
     ON economic_events (impact, release_date DESC);
 CREATE INDEX IF NOT EXISTS idx_economic_events_series
     ON economic_events (series_id, release_date DESC);
+
+-- ── Unusual options activity (vol >= 5x OI screener) ────────────────────────
+-- Hot table, 7-day retention.  Synced every 30 min during market hours.
+CREATE TABLE IF NOT EXISTS unusual_options_activity (
+    id                BIGSERIAL PRIMARY KEY,
+    contract_symbol   TEXT NOT NULL,
+    ticker            TEXT NOT NULL,
+    company_name      TEXT NOT NULL DEFAULT '',
+    sector            TEXT NOT NULL DEFAULT '',
+    option_type       TEXT NOT NULL,
+    strike            NUMERIC(12,2) NOT NULL,
+    expiry            DATE NOT NULL,
+    dte               INTEGER NOT NULL DEFAULT 0,
+    volume            INTEGER NOT NULL DEFAULT 0,
+    open_interest     INTEGER NOT NULL DEFAULT 0,
+    vol_oi_ratio      NUMERIC(10,2) NOT NULL DEFAULT 0,
+    bid               NUMERIC(10,4),
+    ask               NUMERIC(10,4),
+    last_price        NUMERIC(10,4),
+    implied_vol       NUMERIC(8,6),
+    underlying_price  NUMERIC(12,4),
+    premium_est       NUMERIC(16,2),
+    sentiment         TEXT NOT NULL DEFAULT 'neutral',
+    scan_date         DATE NOT NULL DEFAULT CURRENT_DATE,
+    fetched_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(contract_symbol, scan_date)
+);
+CREATE INDEX IF NOT EXISTS idx_uoa_fetched_at
+    ON unusual_options_activity (fetched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uoa_ticker_fetched
+    ON unusual_options_activity (ticker, fetched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uoa_sector_fetched
+    ON unusual_options_activity (sector, fetched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uoa_sentiment
+    ON unusual_options_activity (sentiment, fetched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uoa_premium_desc
+    ON unusual_options_activity (premium_est DESC NULLS LAST)
+    WHERE premium_est > 0;
+CREATE INDEX IF NOT EXISTS idx_uoa_ratio_desc
+    ON unusual_options_activity (vol_oi_ratio DESC)
+    WHERE vol_oi_ratio >= 5;
 """
 
 
@@ -2109,6 +2162,20 @@ def run_retention_cleanup() -> dict:
         logger.warning("Retention: api_cache cleanup failed: %s", exc)
         results["expired_cache_deleted"] = -1
 
+    # 5. Unusual options activity: keep 7 days
+    cutoff_options = (now - timedelta(days=7)).isoformat()
+    try:
+        resp = (
+            client.table("unusual_options_activity")
+            .delete(count="exact")
+            .lt("fetched_at", cutoff_options)
+            .execute()
+        )
+        results["unusual_options_deleted"] = resp.count if resp.count is not None else 0
+    except Exception as exc:
+        logger.warning("Retention: unusual_options cleanup failed: %s", exc)
+        results["unusual_options_deleted"] = -1
+
     logger.info("Retention cleanup: %s", results)
     return results
 
@@ -3461,3 +3528,181 @@ def get_economic_events(
             "get_economic_events(%s–%s) failed: %s", from_date, to_date, exc
         )
         return []
+
+
+# ── Unusual options activity ─────────────────────────────────────────────────
+
+
+def upsert_unusual_options(rows: list[dict]) -> int:
+    """Batch upsert rows into ``unusual_options_activity``.
+
+    Deduplicates by (contract_symbol, fetched_at::date).  On conflict the
+    row is updated — this lets a second scan within the same day refresh
+    volume/premium numbers without creating duplicates.
+
+    Returns the number of rows upserted, or 0 on failure.
+    """
+    client = _get_client()
+    if client is None or not rows:
+        return 0
+
+    upserted = 0
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
+        try:
+            client.table("unusual_options_activity").upsert(
+                chunk,
+                on_conflict="contract_symbol,scan_date",
+            ).execute()
+            upserted += len(chunk)
+        except Exception as exc:
+            logger.warning("upsert_unusual_options chunk %d failed: %s", i, exc)
+
+    return upserted
+
+
+def get_unusual_options_feed(
+    sentiment: str = "",
+    sort_by: str = "premium",
+    ticker: str = "",
+    limit: int = 100,
+) -> list[dict]:
+    """Fetch unusual options activity, newest first.
+
+    Args:
+        sentiment:  ``"bullish"``, ``"bearish"``, or ``""`` (all).
+        sort_by:    ``"premium"`` | ``"ratio"`` | ``"expiry"`` | ``"ticker"``.
+        ticker:     Filter to a single ticker (case-insensitive).
+        limit:      Max rows to return.
+
+    Returns a list of row dicts, or an empty list on error.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+
+    try:
+        q = client.table("unusual_options_activity").select(_UOA_FEED_COLS)
+
+        if sentiment:
+            q = q.eq("sentiment", sentiment)
+        if ticker:
+            q = q.eq("ticker", ticker.upper())
+
+        # Apply sort
+        if sort_by == "ratio":
+            q = q.order("vol_oi_ratio", desc=True)
+        elif sort_by == "expiry":
+            q = q.order("expiry", desc=False)
+        elif sort_by == "ticker":
+            q = q.order("ticker", desc=False)
+        else:  # default: premium
+            q = q.order("premium_est", desc=True)
+
+        resp = q.limit(limit).execute()
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_unusual_options_feed failed: %s", exc)
+        return []
+
+
+def get_unusual_options_for_ticker(ticker: str, limit: int = 20) -> list[dict]:
+    """Fetch unusual options activity for a specific ticker.
+
+    Returns rows sorted by premium descending.
+    """
+    return get_unusual_options_feed(ticker=ticker, sort_by="premium", limit=limit)
+
+
+def get_options_sector_summary() -> list[dict]:
+    """Aggregate today's unusual options by sector for the heatmap.
+
+    Returns one row per (sector, sentiment) with:
+      - sector, sentiment
+      - total_premium (SUM of premium_est)
+      - contract_count (COUNT)
+
+    We use ``fetched_at`` >= midnight today (UTC) to scope to today's data.
+    Falls back to the last 24 hours if today has no data.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+
+    try:
+        # Fetch today's lightweight heatmap rows
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).isoformat()
+        resp = (
+            client.table("unusual_options_activity")
+            .select(_UOA_HEATMAP_COLS)
+            .gte("fetched_at", today_start)
+            .execute()
+        )
+        rows = resp.data or []
+
+        # Fallback: if today has no data, use last 24 hours
+        if not rows:
+            cutoff_24h = (
+                datetime.now(timezone.utc) - timedelta(hours=24)
+            ).isoformat()
+            resp = (
+                client.table("unusual_options_activity")
+                .select(_UOA_HEATMAP_COLS)
+                .gte("fetched_at", cutoff_24h)
+                .execute()
+            )
+            rows = resp.data or []
+
+        # Aggregate in Python (faster than multiple RPC calls)
+        from collections import defaultdict
+
+        agg: dict[tuple[str, str], dict] = defaultdict(
+            lambda: {"total_premium": 0.0, "contract_count": 0}
+        )
+        for r in rows:
+            key = (r.get("sector", "Other"), r.get("sentiment", "neutral"))
+            premium = float(r.get("premium_est") or 0)
+            agg[key]["total_premium"] += premium
+            agg[key]["contract_count"] += 1
+
+        result = []
+        for (sector, sentiment), vals in sorted(agg.items()):
+            result.append({
+                "sector": sector,
+                "sentiment": sentiment,
+                "total_premium": round(vals["total_premium"], 2),
+                "contract_count": vals["contract_count"],
+            })
+        return result
+    except Exception as exc:
+        logger.warning("get_options_sector_summary failed: %s", exc)
+        return []
+
+
+def get_existing_option_symbols_today() -> set[str]:
+    """Lightweight query: return set of contract_symbols already stored today.
+
+    Used by the sync worker to skip contracts that were already flagged
+    in an earlier scan cycle.
+    """
+    client = _get_client()
+    if client is None:
+        return set()
+
+    try:
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ).isoformat()
+        resp = (
+            client.table("unusual_options_activity")
+            .select("contract_symbol")
+            .gte("fetched_at", today_start)
+            .execute()
+        )
+        return {r["contract_symbol"] for r in (resp.data or [])}
+    except Exception as exc:
+        logger.warning("get_existing_option_symbols_today failed: %s", exc)
+        return set()
