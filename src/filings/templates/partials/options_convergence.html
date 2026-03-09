@@ -48,6 +48,9 @@
         font-weight: 400;
         margin-top: -0.1rem;
     }
+    .conv-company-name {
+        color: rgba(15, 23, 42, 0.45);
+    }
 
     /* ── Table wrapper ── */
     .conv-table-wrap {
@@ -319,6 +322,33 @@
         color: #fff;
     }
 
+    /* Direction badges */
+    :root[data-theme="dark"] .conv-dir-bullish { background: rgba(46, 125, 50, 0.2); color: #4ade80; }
+    :root[data-theme="dark"] .conv-dir-bearish { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+    :root[data-theme="dark"] .conv-dir-mixed   { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+
+    /* Signal type pills */
+    :root[data-theme="dark"] .conv-pill-options      { background: rgba(59, 130, 246, 0.18);  color: #60a5fa; }
+    :root[data-theme="dark"] .conv-pill-insider      { background: rgba(16, 185, 129, 0.18);  color: #34d399; }
+    :root[data-theme="dark"] .conv-pill-congress     { background: rgba(139, 92, 246, 0.18);  color: #a78bfa; }
+    :root[data-theme="dark"] .conv-pill-short        { background: rgba(239, 68, 68, 0.18);   color: #f87171; }
+    :root[data-theme="dark"] .conv-pill-superinvestor { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
+
+    /* Signal card detail type labels */
+    :root[data-theme="dark"] .conv-signal-type-options      { color: #60a5fa; }
+    :root[data-theme="dark"] .conv-signal-type-insider      { color: #34d399; }
+    :root[data-theme="dark"] .conv-signal-type-congress     { color: #a78bfa; }
+    :root[data-theme="dark"] .conv-signal-type-short        { color: #f87171; }
+    :root[data-theme="dark"] .conv-signal-type-superinvestor { color: #fbbf24; }
+
+    /* Signal card direction labels */
+    :root[data-theme="dark"] .conv-signal-dir-bullish { color: #4ade80; }
+    :root[data-theme="dark"] .conv-signal-dir-bearish { color: #f87171; }
+    :root[data-theme="dark"] .conv-signal-dir-mixed   { color: #fbbf24; }
+
+    /* Company name in table rows */
+    :root[data-theme="dark"] .conv-company-name { color: rgba(226, 232, 240, 0.45); }
+
     /* ══════════════════════════════════════
        Responsive
        ══════════════════════════════════════ */
@@ -386,7 +416,7 @@
                     <td>
                         <a href="/stock/{{ item.ticker }}" class="conv-ticker-link" onclick="event.stopPropagation();">{{ item.ticker }}</a>
                         {% if item.company_name %}
-                        <span style="font-size: 0.78em; color: rgba(15, 23, 42, 0.45); margin-left: 0.3em;">{{ item.company_name }}</span>
+                        <span class="conv-company-name" style="font-size: 0.78em; margin-left: 0.3em;">{{ item.company_name }}</span>
                         {% endif %}
                     </td>
                     <td class="text-right">
