@@ -3898,10 +3898,19 @@ async def retail_page(request: Request, view: str = "sentiment"):
     if view not in ("sentiment", "leaderboard", "calendar"):
         view = "sentiment"
 
+    # Hard 12-second timeout per call — prevents page hang when external
+    # APIs (CNN, ApeWisdom) accept the connection but stall on response.
+    async def _safe(coro, fallback=None):
+        try:
+            return await asyncio.wait_for(coro, timeout=12)
+        except (asyncio.TimeoutError, Exception) as exc:
+            logger.warning("retail_page: call failed/timed out: %s", exc)
+            return fallback
+
     fear_greed, apewisdom, high_impact_events = await asyncio.gather(
-        _to_heavy(sentiment._get_cnn_fear_greed),
-        _to_heavy(sentiment._get_apewisdom_all),
-        asyncio.to_thread(youtube.get_high_impact_events, 9),
+        _safe(_to_heavy(sentiment._get_cnn_fear_greed)),
+        _safe(_to_heavy(sentiment._get_apewisdom_all), fallback=[]),
+        _safe(asyncio.to_thread(youtube.get_high_impact_events, 9), fallback=[]),
     )
 
     # Compute summary stats from ApeWisdom data
