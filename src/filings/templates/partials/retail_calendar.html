@@ -146,9 +146,7 @@
 
     <div id="calendar-events-list">
         {% for event in events %}
-        <div class="calendar-event-card{% if loop.index > 12 %} calendar-event-extra{% endif %}" data-sentiment="{{ event.sentiment }}"
-             style="display: flex; gap: 1em; padding: 1em 0;
-                    border-bottom: 1px solid var(--pp-border-light); align-items: flex-start;">
+        <div class="calendar-event-card{% if loop.index > 12 %} calendar-event-extra{% endif %}" data-sentiment="{{ event.sentiment }}">
 
             {# Sentiment indicator bar #}
             <div style="width: 4px; min-height: 60px; border-radius: 2px; flex-shrink: 0;
@@ -400,8 +398,6 @@
         gap: 1em;
         margin-top: 0.5em;
     }
-    .recent-upload-extra { display: none; }
-    .calendar-event-extra { display: none; }
     .recent-upload-card {
         border: 1px solid var(--pp-border-light);
         border-radius: 10px;
@@ -410,6 +406,16 @@
         display: flex;
         flex-direction: column;
     }
+    .calendar-event-card {
+        display: flex;
+        gap: 1em;
+        padding: 1em 0;
+        border-bottom: 1px solid var(--pp-border-light);
+        align-items: flex-start;
+    }
+    /* Hide overflow cards — MUST come after base class rules so display:none wins */
+    .recent-upload-extra { display: none; }
+    .calendar-event-extra { display: none; }
     .recent-upload-card:hover {
         box-shadow: 0 2px 8px var(--pp-overlay-8);
     }
@@ -494,7 +500,7 @@
 <script>
 window.expandRecentUploads = function() {
     document.querySelectorAll('.recent-upload-extra').forEach(function(card) {
-        card.style.display = '';
+        card.classList.remove('recent-upload-extra');
     });
     var btn = document.getElementById('recent-uploads-expand-btn');
     if (btn) btn.parentNode.removeChild(btn);
@@ -505,7 +511,7 @@ window._calendarEventsExpanded = false;
 window.expandCalendarEvents = function() {
     window._calendarEventsExpanded = true;
     document.querySelectorAll('.calendar-event-extra').forEach(function(card) {
-        card.style.display = '';
+        card.classList.remove('calendar-event-extra');
     });
     var btn = document.getElementById('calendar-events-expand-btn');
     if (btn) btn.parentNode.removeChild(btn);
