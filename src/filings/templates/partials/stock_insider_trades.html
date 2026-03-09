@@ -25,7 +25,7 @@
                 <span class="text-muted text-small">No buys/sells</span>
                 {% endif %}
             </div>
-            <div class="insider-card-date text-muted text-small">Last: {{ ins.last_trade_date }}</div>
+            <div class="insider-card-date text-muted text-small">Last: {{ ins.last_trade_date|format_pretty_date }}</div>
 
             {# ── Hover tooltip: quarterly breakdown ── #}
             {% if ins.quarterly_breakdown %}
@@ -145,7 +145,7 @@
                 <tr data-insider-type="{% if 'Purchase' in t.trade_type %}buy{% elif 'Sale' in t.trade_type %}sell{% else %}other{% endif %}" data-insider-name="{{ t.insider_name }}">
                     <td><strong>{{ t.insider_name }}</strong></td>
                     <td class="text-small text-muted">{{ t.title }}</td>
-                    <td style="white-space: nowrap;">{{ t.trade_date }}</td>
+                    <td style="white-space: nowrap;">{{ t.trade_date|format_pretty_date }}</td>
                     <td>
                         {% if "Purchase" in t.trade_type %}
                             <span class="badge badge-add">{{ t.trade_type }}</span>

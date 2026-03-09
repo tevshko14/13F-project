@@ -50,10 +50,36 @@
     {
         "@context": "https://schema.org",
         "@type": "Organization",
+        "@id": "https://paperpanda.io/#organization",
         "name": "PaperPanda",
         "url": "https://paperpanda.io",
-        "logo": "https://paperpanda.io/static/logo-nav.png",
-        "description": "Free, open-source superinvestor portfolio tracker powered by SEC EDGAR 13F filings."
+        "logo": {
+            "@type": "ImageObject",
+            "url": "https://paperpanda.io/static/logo-nav.png",
+            "width": 180,
+            "height": 60
+        },
+        "description": "Free, open-source investment research dashboard that tracks superinvestor 13F filings, insider trading, congressional stock activity, unusual options flow, and market sentiment — powered by SEC EDGAR data.",
+        "foundingDate": "2024",
+        "sameAs": [
+            "https://github.com/tevshko14/13F-project"
+        ],
+        "knowsAbout": [
+            "13F filings",
+            "superinvestor portfolios",
+            "insider trading",
+            "SEC Form 4",
+            "congressional stock trading",
+            "STOCK Act",
+            "unusual options activity",
+            "short interest",
+            "retail sentiment",
+            "S&P 500",
+            "analyst ratings",
+            "hedge fund holdings"
+        ],
+        "areaServed": "US",
+        "isAccessibleForFree": true
     }
     </script>
     {% block json_ld_extra %}{% endblock %}

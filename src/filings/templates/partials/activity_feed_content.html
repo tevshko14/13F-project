@@ -225,7 +225,7 @@
             {% elif has_prices %}
             <td class="text-right">-</td>
             {% endif %}
-            <td class="text-small">{{ item.filing_date }}</td>
+            <td class="text-small">{{ item.filing_date|format_pretty_date }}</td>
         </tr>
         {% endfor %}
         {% if has_more %}

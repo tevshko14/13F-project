@@ -356,7 +356,7 @@
     var _chartRetries = 0;
     function renderChart(chartData) {
         if (typeof Chart === 'undefined') {
-            if (_chartRetries < 10) {
+            if (_chartRetries < 30) {
                 _chartRetries++;
                 setTimeout(function() { renderChart(chartData); }, 300);
             }
@@ -489,6 +489,19 @@
             if (window.initSortableTables) window.initSortableTables();
         } else {
             loadTrades('all');
+        }
+    });
+
+    /* Fallback: window.load fires after ALL resources (incl. deferred scripts)
+       are fully loaded — catches cases where Chart.js CDN is slow on first visit */
+    window.addEventListener('load', function() {
+        if (!insiderChart) {
+            var ck = currentFilter + ':' + currentPeriod;
+            var cd = chartDataCache[ck];
+            if (cd) { renderChart(cd); }
+            else if (typeof __chartData !== 'undefined' && __chartData.length > 0) {
+                renderChart(__chartData);
+            }
         }
     });
 })();

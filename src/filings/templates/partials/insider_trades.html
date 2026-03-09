@@ -71,7 +71,7 @@
                 <td class="text-right">{{ t.qty }}</td>
                 <td class="text-right">{{ t.price }}</td>
                 <td class="text-right pp-primary" style="white-space: nowrap;">{{ t.value }}</td>
-                <td style="white-space: nowrap;">{{ t.trade_date }}</td>
+                <td style="white-space: nowrap;">{{ t.trade_date|format_pretty_date }}</td>
                 <td class="text-center">
                     {% if t.sec_url %}
                     <a href="{{ t.sec_url }}" target="_blank" rel="noopener" title="SEC Form 4">&#128279;</a>

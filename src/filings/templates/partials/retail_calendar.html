@@ -53,13 +53,13 @@
 
     <div class="recent-uploads-grid">
         {% for upl in recent_uploads %}
-        <div class="recent-upload-card{% if loop.index > 8 %} recent-upload-extra{% endif %}">
+        <div class="recent-upload-card{% if loop.index > 12 %} recent-upload-extra{% endif %}">
             {# Video thumbnail #}
             <a href="{{ upl.video_url }}" target="_blank" rel="noopener"
                class="recent-upload-thumb-link">
                 <img src="{{ upl.thumbnail_url }}" alt=""
                      class="recent-upload-thumb"
-                     loading="{% if loop.index <= 8 %}eager{% else %}lazy{% endif %}">
+                     loading="{% if loop.index <= 12 %}eager{% else %}lazy{% endif %}">
                 {# Sentiment dot overlay #}
                 <span class="recent-upload-sentiment-dot"
                       style="background: {% if upl.sentiment == 'bullish' %}#16a34a{% elif upl.sentiment == 'bearish' %}#e11d48{% else %}#a1a1aa{% endif %};"></span>
@@ -108,7 +108,7 @@
         {% endfor %}
     </div>
 
-    {% if recent_uploads|length > 8 %}
+    {% if recent_uploads|length > 12 %}
     <div style="text-align: center; margin-top: 0.75em;">
         <button id="recent-uploads-expand-btn"
                 onclick="expandRecentUploads()"
@@ -116,7 +116,7 @@
                        padding: 0.4em 1.2em; font-size: 0.85em; color: var(--pp-text-muted);
                        cursor: pointer; display: inline-flex; align-items: center; gap: 0.4em;
                        transition: background 0.15s, color 0.15s;">
-            <span>Show {{ recent_uploads|length - 8 }} more</span>
+            <span>Show {{ recent_uploads|length - 12 }} more</span>
             <span style="font-size: 0.8em;">&#x25BC;</span>
         </button>
     </div>

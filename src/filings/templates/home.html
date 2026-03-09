@@ -13,6 +13,80 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
 {% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+        {
+            "@type": "Question",
+            "name": "What is PaperPanda?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "PaperPanda is a free, open-source investment research dashboard that aggregates superinvestor 13F filings, insider trading data from SEC Form 4, congressional stock trading under the STOCK Act, unusual options activity, retail sentiment, and analyst ratings into a single real-time workspace. It tracks 84 superinvestor funds and over 1,000 stocks."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What is a 13F filing?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "A 13F filing is a quarterly report required by the SEC from institutional investment managers who manage over $100 million in qualifying assets. It discloses their U.S. equity holdings, providing transparency into what stocks top hedge funds and superinvestors like Warren Buffett, Bill Ackman, and Seth Klarman are buying and selling. PaperPanda tracks 84 of these filers."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "How does PaperPanda track insider trading?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "PaperPanda monitors SEC Form 4 filings in real-time, which corporate insiders (officers, directors, and 10% shareholders) must file within two business days of buying or selling their company's stock. The insider trading screener shows purchases and sales with dollar amounts, letting users filter by trade type, time period, and ticker."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What is congressional stock trading data?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Under the STOCK Act of 2012, U.S. senators and representatives must disclose stock trades within 45 days. PaperPanda tracks trading activity from 201 politicians (41 senators, 160 House members) across 2,034 stocks and over 30,000 reported trades, showing what Congress is buying and selling."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What is the Convergence Engine?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "The Convergence Engine is PaperPanda's cross-reference tool that identifies stocks where multiple bullish or bearish signals fire simultaneously. It combines 5 signal sources — unusual options activity, insider purchases, congressional buys, short interest data, and superinvestor 13F additions — and ranks results by a weighted conviction score to surface the highest-conviction investment setups."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What does unusual options activity mean?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Unusual options activity occurs when the traded volume on an options contract exceeds 5 times its open interest, signaling that large institutional investors may be making significant directional bets. PaperPanda's options screener scans the S&P 500 and top superinvestor holdings during market hours, flagging contracts with high volume-to-open-interest ratios and estimating total premium spent."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Is PaperPanda free to use?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Yes, PaperPanda is free and open-source. Core features including superinvestor fund tracking, insider trading data, congressional trades, retail sentiment, and market data are available without charge. The project is funded through optional community donations."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "Where does PaperPanda get its data?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "PaperPanda sources data from SEC EDGAR for 13F filings and Form 4 insider trades, the STOCK Act for congressional disclosures, Yahoo Finance for real-time market data and options chains, FRED (Federal Reserve Economic Data) for macroeconomic indicators, and Reddit for retail sentiment analysis. All data comes from public, authoritative sources."
+            }
+        }
+    ]
+}
+</script>
+{% endblock %}
 {% block content %}
 <section class="home-shell">
     <div class="home-aurora home-aurora-one" aria-hidden="true"></div>
@@ -176,6 +250,57 @@
             </div>
         </div>
     </div>
+</section>
+
+{# ── FAQ Section — AI-citable answer-first content ── #}
+<section class="pp-faq-section" style="
+    max-width: 880px;
+    margin: 2.5rem auto 1.5rem;
+    padding: 0 1rem;
+">
+
+<h2 class="pp-faq-title">Frequently Asked Questions</h2>
+
+<div class="pp-faq-item">
+    <div class="pp-faq-q" onclick="this.parentElement.classList.toggle('open')">What is PaperPanda?</div>
+    <div class="pp-faq-a"><p>PaperPanda is a free, open-source investment research dashboard that aggregates superinvestor 13F filings, insider trading data from SEC Form 4, congressional stock trading under the STOCK Act, unusual options activity, retail sentiment, and analyst ratings into a single real-time workspace. It tracks 84 superinvestor funds and over 1,000 stocks.</p></div>
+</div>
+
+<div class="pp-faq-item">
+    <div class="pp-faq-q" onclick="this.parentElement.classList.toggle('open')">What is a 13F filing?</div>
+    <div class="pp-faq-a"><p>A 13F filing is a quarterly report required by the SEC from institutional investment managers who manage over $100 million in qualifying assets. It discloses their U.S. equity holdings, providing transparency into what stocks top hedge funds and superinvestors like Warren Buffett, Bill Ackman, and Seth Klarman are buying and selling. PaperPanda tracks 84 of these filers.</p></div>
+</div>
+
+<div class="pp-faq-item">
+    <div class="pp-faq-q" onclick="this.parentElement.classList.toggle('open')">How does PaperPanda track insider trading?</div>
+    <div class="pp-faq-a"><p>PaperPanda monitors SEC Form 4 filings in real-time, which corporate insiders (officers, directors, and 10% shareholders) must file within two business days of buying or selling their company's stock. The insider trading screener shows purchases and sales with dollar amounts, letting users filter by trade type, time period, and ticker.</p></div>
+</div>
+
+<div class="pp-faq-item">
+    <div class="pp-faq-q" onclick="this.parentElement.classList.toggle('open')">What is congressional stock trading data?</div>
+    <div class="pp-faq-a"><p>Under the STOCK Act of 2012, U.S. senators and representatives must disclose stock trades within 45 days. PaperPanda tracks trading activity from 201 politicians (41 senators, 160 House members) across 2,034 stocks and over 30,000 reported trades, showing what Congress is buying and selling.</p></div>
+</div>
+
+<div class="pp-faq-item">
+    <div class="pp-faq-q" onclick="this.parentElement.classList.toggle('open')">What is the Convergence Engine?</div>
+    <div class="pp-faq-a"><p>The Convergence Engine is PaperPanda's cross-reference tool that identifies stocks where multiple bullish or bearish signals fire simultaneously. It combines 5 signal sources — unusual options activity, insider purchases, congressional buys, short interest data, and superinvestor 13F additions — and ranks results by a weighted conviction score to surface the highest-conviction investment setups.</p></div>
+</div>
+
+<div class="pp-faq-item">
+    <div class="pp-faq-q" onclick="this.parentElement.classList.toggle('open')">What does unusual options activity mean?</div>
+    <div class="pp-faq-a"><p>Unusual options activity occurs when the traded volume on an options contract exceeds 5 times its open interest, signaling that large institutional investors may be making significant directional bets. PaperPanda's options screener scans the S&P 500 and top superinvestor holdings during market hours, flagging contracts with high volume-to-open-interest ratios and estimating total premium spent.</p></div>
+</div>
+
+<div class="pp-faq-item">
+    <div class="pp-faq-q" onclick="this.parentElement.classList.toggle('open')">Is PaperPanda free to use?</div>
+    <div class="pp-faq-a"><p>Yes, PaperPanda is free and open-source. Core features including superinvestor fund tracking, insider trading data, congressional trades, retail sentiment, and market data are available without charge. The project is funded through optional community donations.</p></div>
+</div>
+
+<div class="pp-faq-item">
+    <div class="pp-faq-q" onclick="this.parentElement.classList.toggle('open')">Where does PaperPanda get its data?</div>
+    <div class="pp-faq-a"><p>PaperPanda sources data from SEC EDGAR for 13F filings and Form 4 insider trades, the STOCK Act for congressional disclosures, Yahoo Finance for real-time market data and options chains, FRED (Federal Reserve Economic Data) for macroeconomic indicators, and Reddit for retail sentiment analysis. All data comes from public, authoritative sources.</p></div>
+</div>
+
 </section>
 
 <script>
@@ -492,6 +617,8 @@ document.addEventListener('keydown', function(e) {
     }
 
     .ticker-tape-shell {
+        position: relative;
+        z-index: 0;
         margin: 1.2rem auto 1.5rem;
         max-width: 1180px;
         border-radius: 14px;
@@ -976,6 +1103,81 @@ document.addEventListener('keydown', function(e) {
         .pw-progress-fill {
             animation: none !important;
         }
+    }
+
+    /* ── FAQ Section ─────────────────────────────────────── */
+    .pp-faq-section h2.pp-faq-title {
+        font-family: 'Fraunces', Georgia, serif;
+        font-size: 1.5rem;
+        font-weight: 700;
+        text-align: center;
+        color: var(--home-ink, #0f172a);
+        margin-bottom: 1.5rem;
+    }
+    :root[data-theme="dark"] .pp-faq-section h2.pp-faq-title { color: #e2e8f0; }
+
+    .pp-faq-item {
+        border-radius: 14px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: linear-gradient(165deg, rgba(255,255,255,0.85), rgba(255,255,255,0.65));
+        backdrop-filter: blur(8px);
+        margin-bottom: 0.75rem;
+        overflow: hidden;
+        transition: box-shadow 0.2s ease;
+    }
+    :root[data-theme="dark"] .pp-faq-item {
+        border-color: rgba(255,255,255,0.08);
+        background: linear-gradient(165deg, rgba(30,41,59,0.8), rgba(15,23,42,0.6));
+    }
+    .pp-faq-item:hover { box-shadow: 0 4px 16px rgba(15,23,42,0.08); }
+
+    .pp-faq-q {
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 600;
+        font-size: 0.95rem;
+        padding: 0.85rem 1.1rem;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        color: var(--home-ink, #0f172a);
+        user-select: none;
+    }
+    :root[data-theme="dark"] .pp-faq-q { color: #e2e8f0; }
+    .pp-faq-q::after {
+        content: '+';
+        font-size: 1.2rem;
+        font-weight: 500;
+        color: #0d9488;
+        transition: transform 0.2s ease;
+        flex-shrink: 0;
+        margin-left: 0.5rem;
+    }
+    .pp-faq-item.open .pp-faq-q::after { content: '\2212'; }
+
+    .pp-faq-a {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease, padding 0.3s ease;
+        padding: 0 1.1rem;
+    }
+    .pp-faq-item.open .pp-faq-a {
+        max-height: 300px;
+        padding: 0 1.1rem 0.85rem;
+    }
+    .pp-faq-a p {
+        font-family: 'Space Grotesk', sans-serif;
+        font-size: 0.88rem;
+        line-height: 1.6;
+        color: rgba(15,23,42,0.72);
+        margin: 0;
+    }
+    :root[data-theme="dark"] .pp-faq-a p { color: rgba(226,232,240,0.75); }
+
+    @media (max-width: 640px) {
+        .pp-faq-section { margin-top: 1.5rem; }
+        .pp-faq-q { font-size: 0.9rem; padding: 0.75rem 0.9rem; }
+        .pp-faq-a p { font-size: 0.84rem; }
     }
 </style>
 {% endblock %}

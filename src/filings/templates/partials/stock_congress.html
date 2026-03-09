@@ -197,8 +197,8 @@
     <tbody>
         {% for t in recent_trades %}
         <tr>
-            <td style="white-space: nowrap;">{{ t.trade_date }}</td>
-            <td style="white-space: nowrap; color: var(--pp-text-muted);">{{ t.filing_date }}</td>
+            <td style="white-space: nowrap;">{{ t.trade_date|format_pretty_date }}</td>
+            <td style="white-space: nowrap; color: var(--pp-text-muted);">{{ t.filing_date|format_pretty_date }}</td>
             <td>
                 <a href="/politician/{{ t.member_id }}" style="font-weight: 600;">{{ t.politician_name }}</a>
             </td>

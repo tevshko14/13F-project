@@ -177,7 +177,7 @@
                     {% endif %}
                 </td>
                 <td class="text-right text-small">{{ item.amount_compact }}</td>
-                <td class="text-small">{{ item.trade_date }}</td>
+                <td class="text-small">{{ item.trade_date|format_pretty_date }}</td>
             </tr>
             {% endfor %}
         </table>
@@ -247,9 +247,9 @@
             </td>
             <td class="text-small">{{ item.asset_name[:30] }}</td>
             <td class="text-right text-small">{{ item.amount_compact }}</td>
-            <td class="text-small" style="white-space: nowrap;">{{ item.trade_date }}</td>
+            <td class="text-small" style="white-space: nowrap;">{{ item.trade_date|format_pretty_date }}</td>
             <td class="text-small" style="white-space: nowrap;">
-                {{ item.filing_date }}
+                {{ item.filing_date|format_pretty_date }}
                 {% if item.days_ago is defined and item.days_ago <= 7 %}
                 <span style="color: #059669; font-weight: 600; font-size: 0.75em; margin-left: 4px;">NEW</span>
                 {% endif %}

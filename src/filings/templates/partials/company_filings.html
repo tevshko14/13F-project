@@ -52,7 +52,7 @@
                         <span class="filing-badge filing-badge-other">{{ f.form }}</span>
                     {% endif %}
                 </td>
-                <td style="white-space: nowrap;">{{ f.filing_date }}</td>
+                <td style="white-space: nowrap;">{{ f.filing_date|format_pretty_date }}</td>
                 <td>
                     {{ f.description }}
                     {% if f.items %}

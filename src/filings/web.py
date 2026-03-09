@@ -324,6 +324,29 @@ async def lifespan(app: FastAPI):
     app.state.refresh_progress = {"total": 0, "done": 0, "failed": 0}
     app.state.deployment_cache = deploy_result or {}
 
+    # If no deployment data cached, sync in background on first startup
+    if not app.state.deployment_cache and app.state.fund_cache:
+
+        async def _bg_deploy_sync():
+            try:
+                await asyncio.to_thread(
+                    aum_data.sync_all_deployment_data,
+                    SUPERINVESTORS,
+                    app.state.fund_cache,
+                    force=True,
+                )
+                app.state.deployment_cache = await asyncio.to_thread(
+                    aum_data.load_all_deployment_data
+                )
+                logger.info(
+                    "Background deployment sync populated %d entries",
+                    len(app.state.deployment_cache),
+                )
+            except Exception as e:
+                logger.warning("Background deployment sync failed: %s", e)
+
+        asyncio.create_task(_bg_deploy_sync())
+
     if logo_rows:
         for row in logo_rows:
             t = row.get("ticker", "").upper()
@@ -462,7 +485,24 @@ def _abbreviate_sector(value: str) -> str:
     return _SECTOR_ABBREV.get(value, value)
 
 
+def _format_pretty_date(value: str) -> str:
+    """'2026-03-02' -> 'Mar 2nd, 2026'."""
+    if not value:
+        return "—"
+    try:
+        dt = datetime.strptime(value[:10], "%Y-%m-%d")
+        day = dt.day
+        if 11 <= day <= 13:
+            suffix = "th"
+        else:
+            suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+        return f"{dt.strftime('%b')} {day}{suffix}, {dt.year}"
+    except (ValueError, TypeError):
+        return value
+
+
 templates.env.filters["format_short_date"] = _format_short_date
+templates.env.filters["format_pretty_date"] = _format_pretty_date
 templates.env.filters["abbreviate_sector"] = _abbreviate_sector
 
 # Attach rate limiter
@@ -5263,11 +5303,116 @@ async def health_detail(request: Request):
 @app.get("/robots.txt")
 async def robots_txt():
     content = (
+        "# ── Standard crawlers ─────────────────────────────────\n"
         "User-agent: *\n"
         "Allow: /\n"
         "Disallow: /api/\n"
         "\n"
+        "# ── AI crawlers — explicitly welcomed ────────────────\n"
+        "# Tier 1: Primary AI search & assistant crawlers\n"
+        "User-agent: GPTBot\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: OAI-SearchBot\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: ChatGPT-User\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: ClaudeBot\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: PerplexityBot\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: anthropic-ai\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "# Tier 2: Platform AI training & indexing crawlers\n"
+        "User-agent: Google-Extended\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: GoogleOther\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: Applebot-Extended\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: Amazonbot\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: cohere-ai\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "# Tier 3: Social & discovery\n"
+        "User-agent: FacebookBot\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
+        "User-agent: Bytespider\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "\n"
         "Sitemap: https://paperpanda.io/sitemap.xml\n"
+        "\n"
+        "# ── AI-readable site summary ─────────────────────────\n"
+        "# See https://paperpanda.io/llms.txt\n"
+    )
+    return PlainTextResponse(content, media_type="text/plain")
+
+
+# ── llms.txt — AI-readable site summary ──────────────────────────────
+
+@app.get("/llms.txt")
+async def llms_txt():
+    """Machine-readable site overview for AI assistants and LLMs.
+
+    Follows the llms.txt specification: a structured Markdown file that
+    helps AI systems understand PaperPanda's content, features, and data
+    sources without crawling every page.
+    """
+    content = (
+        "# PaperPanda\n"
+        "\n"
+        "> Free, open-source investment research dashboard tracking superinvestor 13F filings, insider trades, congressional stock activity, and unusual options flow.\n"
+        "\n"
+        "## Main Pages\n"
+        "- [Home](https://paperpanda.io/): Market dashboard with S&P 500 heatmap, market news, and retail sentiment overview\n"
+        "- [Funds](https://paperpanda.io/funds): 13F portfolio intelligence across 84 tracked superinvestors with consensus and momentum charts\n"
+        "- [Insider Trading](https://paperpanda.io/insider-trading): Real-time SEC Form 4 filings showing insider purchases and sales across public companies\n"
+        "- [Congress Trading](https://paperpanda.io/congress): STOCK Act disclosures tracking what 201 House and Senate members are buying and selling\n"
+        "- [Retail Sentiment](https://paperpanda.io/retail): Reddit sentiment, trending tickers, market fear and greed index, and finance YouTuber schedules\n"
+        "- [Options Screener](https://paperpanda.io/options): Unusual options activity where traded volume exceeds 5x open interest, with convergence engine\n"
+        "- [Alternative Signals](https://paperpanda.io/alternative-signals): Short interest, analyst ratings, earnings calendar, and economic events from FRED\n"
+        "\n"
+        "## Data & Features\n"
+        "- [Stock Lookup](https://paperpanda.io/stock/AAPL): Per-ticker pages with superinvestor ownership, congressional trades, analyst forecasts, and sentiment\n"
+        "- [Grand Portfolio](https://paperpanda.io/funds): Aggregated superinvestor consensus — most-held and most-added stocks across all tracked funds\n"
+        "- [Macro Dashboard](https://paperpanda.io/macro): Federal Reserve economic indicators, GDP, CPI, unemployment, and interest rates from FRED\n"
+        "\n"
+        "## Key Facts\n"
+        "- Tracks 84 superinvestor funds via SEC EDGAR 13F filings, updated quarterly\n"
+        "- Covers 201 politicians (41 senators, 160 representatives) from STOCK Act disclosures\n"
+        "- Monitors over 1,000 stocks with real-time insider trading from SEC Form 4\n"
+        "- Unusual options scanner covers S&P 500 plus top superinvestor holdings\n"
+        "- Convergence engine cross-references 5 signal types: options, insider buys, congress trades, short interest, and 13F adds\n"
+        "- Data sourced from SEC EDGAR, Yahoo Finance, FRED, and Reddit\n"
+        "- Free and open-source project\n"
+        "\n"
+        "## Contact\n"
+        "- Website: https://paperpanda.io\n"
+        "- GitHub: https://github.com/tevshko14/13F-project\n"
     )
     return PlainTextResponse(content, media_type="text/plain")
 

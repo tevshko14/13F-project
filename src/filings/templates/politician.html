@@ -222,6 +222,8 @@
 
     /* ── Holdings overflow ── */
     .pol-overflow { display: none; }
+    .pol-trade-overflow { display: none; }
+    #trades-table.pol-trades-expanded .pol-trade-overflow { display: table-row; }
     .pol-expand-btn {
         background: none;
         border: 1px solid var(--pp-overlay-10);
@@ -364,20 +366,14 @@
 <div class="pol-header">
     <div class="pol-header-content">
         {% set party_key = 'dem' if member.party == 'Democrat' else ('rep' if member.party == 'Republican' else 'ind') %}
-        {% if headshot_members is defined and member.member_id in headshot_members %}
-            <img src="/api/headshot/{{ member.member_id }}.jpg"
-                 alt="{{ member.full_name }}"
-                 class="pol-headshot"
-                 loading="eager" decoding="async"
-                 onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-            <div class="pol-headshot-fallback pol-headshot-fallback--{{ party_key }}" style="display:none">
-                {{ member.first_name[0] if member.first_name else '?' }}
-            </div>
-        {% else %}
-            <div class="pol-headshot-fallback pol-headshot-fallback--{{ party_key }}">
-                {{ member.first_name[0] if member.first_name else '?' }}
-            </div>
-        {% endif %}
+        <img src="/api/headshot/{{ member.member_id }}.jpg"
+             alt="{{ member.full_name }}"
+             class="pol-headshot"
+             loading="eager" decoding="async"
+             onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+        <div class="pol-headshot-fallback pol-headshot-fallback--{{ party_key }}" style="display:none">
+            {{ member.first_name[0] if member.first_name else '?' }}
+        </div>
         <div>
             <h1>
                 {{ member.full_name }}
@@ -438,8 +434,8 @@
 <script>
 (function() {
     var COLORS = [
-        '#1976d2', '#388e3c', '#e65100', '#7b1fa2', '#c62828',
-        '#00838f', '#f9a825', '#4e342e', '#546e7a', '#ad1457'
+        '#1976d2', '#16a34a', '#e65100', '#9333ea', '#dc2626',
+        '#0891b2', '#eab308', '#ec4899', '#6366f1', '#f97316'
     ];
 
     var rawPortfolio = {{ portfolio | tojson }};
@@ -493,7 +489,7 @@
             buys: 0, sells: 0,
             last_action: '',
             last_trade_date: '',
-            itemStyle: { color: '#9e9e9e' }
+            itemStyle: { color: '#64748b' }
         });
     }
 
@@ -634,7 +630,7 @@
             <td>{{ pos.buys }}</td>
             <td>{{ pos.sells }}</td>
             <td style="text-align: right; font-weight: 600;">{{ pos.est_value_display }}</td>
-            <td style="color: var(--pp-text-muted);">{{ pos.last_trade_date }}</td>
+            <td style="color: var(--pp-text-muted);">{{ pos.last_trade_date|format_pretty_date }}</td>
         </tr>
         {% endfor %}
         {% for pos in portfolio[15:] %}
@@ -653,7 +649,7 @@
             <td>{{ pos.buys }}</td>
             <td>{{ pos.sells }}</td>
             <td style="text-align: right; font-weight: 600;">{{ pos.est_value_display }}</td>
-            <td style="color: var(--pp-text-muted);">{{ pos.last_trade_date }}</td>
+            <td style="color: var(--pp-text-muted);">{{ pos.last_trade_date|format_pretty_date }}</td>
         </tr>
         {% endfor %}
     </tbody>
@@ -709,10 +705,29 @@
         </tr>
     </thead>
     <tbody>
-        {% for t in trades %}
+        {% for t in trades[:10] %}
         <tr data-trade-type="{{ t.trade_type }}">
-            <td style="white-space: nowrap;">{{ t.trade_date }}</td>
-            <td style="white-space: nowrap; color: var(--pp-text-muted);">{{ t.filing_date }}</td>
+            <td style="white-space: nowrap;">{{ t.trade_date|format_pretty_date }}</td>
+            <td style="white-space: nowrap; color: var(--pp-text-muted);">{{ t.filing_date|format_pretty_date }}</td>
+            <td>
+                {% if t.ticker %}
+                    <a href="/stock/{{ t.ticker }}" style="font-weight: 600;">{% if logo_tickers is defined and t.ticker in logo_tickers %}<img src="/api/logo/{{ t.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ t.ticker }}</a>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>{{ t.asset_name }}</td>
+            <td>
+                <span class="trade-badge trade-badge--{{ t.trade_type }}">{{ t.trade_type }}</span>
+            </td>
+            <td style="text-align: right; font-weight: 500;">{{ t.amount_compact or t.amount_display }}</td>
+            <td style="color: var(--pp-text-muted);">{{ t.owner }}</td>
+        </tr>
+        {% endfor %}
+        {% for t in trades[10:] %}
+        <tr class="pol-trade-overflow" data-trade-type="{{ t.trade_type }}">
+            <td style="white-space: nowrap;">{{ t.trade_date|format_pretty_date }}</td>
+            <td style="white-space: nowrap; color: var(--pp-text-muted);">{{ t.filing_date|format_pretty_date }}</td>
             <td>
                 {% if t.ticker %}
                     <a href="/stock/{{ t.ticker }}" style="font-weight: 600;">{% if logo_tickers is defined and t.ticker in logo_tickers %}<img src="/api/logo/{{ t.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ t.ticker }}</a>
@@ -731,6 +746,13 @@
     </tbody>
 </table>
 </div>
+
+{% if trades|length > 10 %}
+<button class="pol-expand-btn" onclick="togglePolTradeOverflow(this)">
+    <span>Show all {{ trades|length }} trades</span>
+    <span class="holdings-expand-arrow">&#x25BC;</span>
+</button>
+{% endif %}
 
 {% if not trades %}
 <div style="text-align: center; padding: 3em 1em; color: var(--pp-text-muted);">
@@ -755,6 +777,26 @@ window.togglePolOverflow = function(btn) {
         arrow.classList.add('expanded');
         label.textContent = 'Show top 15';
     }
+};
+
+/* Toggle trade history overflow rows */
+window.togglePolTradeOverflow = function(btn) {
+    var table = document.getElementById('trades-table');
+    var expanded = table.classList.toggle('pol-trades-expanded');
+    var arrow = btn.querySelector('.holdings-expand-arrow');
+    var label = btn.querySelector('span:first-child');
+
+    if (expanded) {
+        arrow.classList.add('expanded');
+        label.textContent = 'Show last 10';
+    } else {
+        arrow.classList.remove('expanded');
+        label.textContent = 'Show all {{ trades|length }} trades';
+    }
+
+    /* Re-apply current filter to handle overflow/filter interaction */
+    var activeBtn = document.querySelector('.insider-filter.active');
+    if (activeBtn) activeBtn.click();
 };
 
 /* Filter trade table by type */
