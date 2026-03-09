@@ -3557,9 +3557,18 @@ _FINANCE_YOUTUBERS = [
 ]
 
 
+_ALT_SIGNALS_KEY = os.environ.get("MACRO_PAGE_KEY", "panda2026")
+
+
 @app.get("/alternative-signals", response_class=HTMLResponse)
 async def alternative_signals_page(request: Request):
-    """Alternative signals page — Google Trends + short interest dashboard."""
+    """Alternative signals page — Google Trends + short interest dashboard (key-protected)."""
+    if request.query_params.get("key") != _ALT_SIGNALS_KEY:
+        return templates.TemplateResponse(
+            "under_construction.html",
+            {"request": request},
+            status_code=200,
+        )
     quick_tickers = [
         "HOOD", "NKE", "AAPL", "TSLA", "COIN", "AMZN", "NFLX", "NVDA",
         "META", "LULU", "PLTR", "SOFI",
@@ -3718,6 +3727,7 @@ async def macro_page(
             "economic_periods": fred_calendar.PERIOD_CHOICES,
             "economic_impacts": fred_calendar.IMPACT_CHOICES,
             "economic_countries": fred_calendar.COUNTRY_CHOICES,
+            "macro_categories": google_trends.MACRO_CATEGORIES,
         },
     )
 

@@ -54,7 +54,8 @@
     <button class="macro-tab active" id="tab-earnings" data-macro-tab="earnings" role="tab" aria-selected="true" aria-controls="macro-panel-earnings">Earnings Scorecard</button>
     <button class="macro-tab" id="tab-breadth" data-macro-tab="breadth" role="tab" aria-selected="false" aria-controls="macro-panel-breadth">Market Performance</button>
     <button class="macro-tab" id="tab-calendar" data-macro-tab="calendar" role="tab" aria-selected="false" aria-controls="macro-panel-calendar">Earnings Calendar</button>
-    <button class="macro-tab" id="tab-economic" data-macro-tab="economic" role="tab" aria-selected="false" aria-controls="macro-panel-economic">Macro Dashboard</button>
+    <button class="macro-tab" id="tab-economic" data-macro-tab="economic" role="tab" aria-selected="false" aria-controls="macro-panel-economic">Events Calendar</button>
+    <button class="macro-tab" id="tab-trends" data-macro-tab="trends" role="tab" aria-selected="false" aria-controls="macro-panel-trends">Macro Trends</button>
 </div>
 
 {# ═══ Panel: Earnings Scorecard ═══ #}
@@ -120,10 +121,10 @@
     </div>
 </div>
 
-{# ═══ Panel: Macro Dashboard (Economic Calendar) ═══ #}
+{# ═══ Panel: Events Calendar (Economic Calendar) ═══ #}
 <div class="macro-panel" id="macro-panel-economic" role="tabpanel" aria-labelledby="tab-economic">
     <div class="macro-controls">
-        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Macro Dashboard</h2>
+        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Events Calendar</h2>
         <div class="pp-pill-nav" id="ed-period-nav" style="margin-bottom: 0;">
             {% for key, label in economic_periods.items() %}
             <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
@@ -145,10 +146,54 @@
     </div>
     <div id="ed-content">
         <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-            <span aria-busy="true">Loading macro dashboard…</span>
+            <span aria-busy="true">Loading events calendar…</span>
         </div>
     </div>
 </div>
+
+{# ═══ Panel: Macro Trends (Google Trends Sentiment) ═══ #}
+<div class="macro-panel" id="macro-panel-trends" role="tabpanel" aria-labelledby="tab-trends">
+    <h2 style="margin: 0 0 0.5em; font-size: 1.1em;">Macro Sentiment Trends</h2>
+    <p style="font-size: 0.85em; color: var(--pp-text-muted); margin-bottom: 1.2em;">
+        Search interest for market-moving macro keywords over the last 3 months.
+        Rising interest in "recession" or "stock market crash" often precedes volatility.
+    </p>
+    <div class="gt-macro-grid">
+        {% for cat_name, keywords in macro_categories.items() %}
+        <div class="gt-macro-card">
+            <h4>{{ cat_name }}</h4>
+            <div class="gt-macro-keywords">
+                {% for kw in keywords %}
+                <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
+                {% endfor %}
+            </div>
+            <div style="margin-top: 0.8em;">
+                <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
+                     hx-trigger="revealed"
+                     hx-swap="innerHTML">
+                    <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
+                        <div class="gt-loading-spinner"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <p style="font-size: 0.78em; color: var(--pp-text-muted); margin-top: 0.8em; padding-top: 0.5em; border-top: 1px solid var(--pp-overlay-5);">
+        Data from Google Trends (relative search interest 0-100). Updated daily.
+    </p>
+</div>
+
+<style>
+    .gt-macro-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1em; }
+    .gt-macro-card { border: 1px solid var(--pp-overlay-8); border-radius: 10px; padding: 1.2em; background: var(--pp-surface); }
+    .gt-macro-card h4 { font-size: 0.95em; font-weight: 700; margin: 0 0 0.3em 0; }
+    .gt-macro-keywords { font-size: 0.78em; color: var(--pp-text-muted); line-height: 1.5; }
+    .gt-pill { display: inline-block; padding: 0.25em 0.7em; border-radius: 14px; font-size: 0.78em; font-weight: 500; background: var(--pp-tag-bg, #f0f0f0); color: var(--pp-tag-text, #555); }
+    .gt-chart-container { width: 100%; height: 220px; position: relative; }
+    .gt-loading-spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--pp-overlay-15); border-top-color: #0d9488; border-radius: 50%; animation: gt-spin 0.6s linear infinite; }
+    @keyframes gt-spin { to { transform: rotate(360deg); } }
+</style>
 
 <script>
 (function() {
@@ -178,7 +223,7 @@
                 ecLoaded = true;
                 ecReload();
             }
-            /* Lazy-load Macro Dashboard on first tab click */
+            /* Lazy-load Events Calendar on first tab click */
             if (tab.dataset.macroTab === 'economic' && !edLoaded) {
                 edLoaded = true;
                 edReload();
@@ -256,7 +301,7 @@
         ecReload();
     };
 
-    /* ── Macro Dashboard (Economic Calendar) controls ── */
+    /* ── Events Calendar controls ── */
     var edCurrentPeriod = 'this_week';
     var edCurrentImpact = 'all';
     var edCurrentCountry = 'us';

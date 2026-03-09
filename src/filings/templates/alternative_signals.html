@@ -391,7 +391,6 @@
     <nav>
         <ul class="alt-signals-nav-list" role="tablist">
             <li><button class="alt-tab active" data-tab="trending" role="tab" aria-selected="true">Trending Now</button></li>
-            <li><button class="alt-tab" data-tab="macro" role="tab" aria-selected="false">Macro Trends</button></li>
             <li><button class="alt-tab" data-tab="lookup" role="tab" aria-selected="false">Ticker Lookup</button></li>
         </ul>
     </nav>
@@ -419,46 +418,7 @@
     </div>
 </div>
 
-{# ═══ Panel 2: Macro Trends Dashboard ═══ #}
-<div class="alt-panel" id="panel-macro">
-    <div class="alt-card">
-        <div class="gt-card-header">
-            <h3>Macro Sentiment Trends</h3>
-            <span class="gt-source">via Google Trends</span>
-        </div>
-        <p style="font-size: 0.85em; color: var(--pp-sub-text); margin-bottom: 1.2em;">
-            Search interest for market-moving macro keywords over the last 3 months.
-            Rising interest in "recession" or "stock market crash" often precedes volatility.
-        </p>
-        <div class="gt-macro-grid">
-            {% for cat_name, keywords in macro_categories.items() %}
-            <div class="gt-macro-card">
-                <h4>{{ cat_name }}</h4>
-                <div class="gt-macro-keywords">
-                    {% for kw in keywords %}
-                    <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
-                    {% endfor %}
-                </div>
-                <div style="margin-top: 0.8em;">
-                    <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
-                         hx-trigger="revealed"
-                         hx-swap="innerHTML">
-                        <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
-                            <div class="gt-loading-spinner"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        <div class="gt-footer">
-            Data from Google Trends (relative search interest 0-100). Updated daily.
-            Use these macro signals alongside individual stock signals for a fuller picture.
-        </div>
-    </div>
-</div>
-
-{# ═══ Panel 3: Per-Ticker Keyword Lookup ═══ #}
+{# ═══ Panel 2: Per-Ticker Keyword Lookup ═══ #}
 <div class="alt-panel" id="panel-lookup">
     <div class="alt-card">
         <div class="gt-card-header">
