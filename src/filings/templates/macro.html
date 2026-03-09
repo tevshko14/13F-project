@@ -106,12 +106,6 @@
 <div class="macro-panel" id="macro-panel-calendar" role="tabpanel" aria-labelledby="tab-calendar">
     <div class="macro-controls">
         <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Earnings Calendar</h2>
-        <div class="pp-pill-nav" id="ec-index-nav" style="margin-bottom: 0;">
-            {% for key, label in indices.items() %}
-            <button class="pp-pill-btn {% if key == 'sp500' %}active{% endif %}"
-                    data-key="{{ key }}" onclick="ecChangeIndex('{{ key }}')">{{ label }}</button>
-            {% endfor %}
-        </div>
         <div class="pp-pill-nav" id="ec-period-nav" style="margin-bottom: 0;">
             {% for key, label in calendar_periods.items() %}
             <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
@@ -238,7 +232,6 @@
     };
 
     /* ── Earnings Calendar controls ── */
-    var ecCurrentIndex = 'sp500';
     var ecCurrentPeriod = 'this_week';
 
     // Grid view state — persisted across HTMX partial swaps
@@ -253,15 +246,9 @@
     function ecReload() {
         // Grid modes always load period=all for client-side week/month navigation
         var period = window.ecGridState.view !== 'list' ? 'all' : ecCurrentPeriod;
-        htmx.ajax('GET', '/api/macro/calendar?key=' + macroKey + '&index=' + ecCurrentIndex + '&period=' + period, '#ec-content');
+        htmx.ajax('GET', '/api/macro/calendar?key=' + macroKey + '&period=' + period, '#ec-content');
     }
     window.ecReloadCalendar = ecReload;  // exported for partial to trigger reload on view switch
-
-    window.ecChangeIndex = function(idx) {
-        ecCurrentIndex = idx;
-        activatePill('ec-index-nav', idx);
-        ecReload();
-    };
 
     window.ecChangePeriod = function(p) {
         ecCurrentPeriod = p;

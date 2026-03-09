@@ -121,32 +121,32 @@
         text-align: center; color: var(--pp-text);
     }
 
-    /* Scroll wrapper so week grid doesn't crush on narrow screens */
-    .ecg-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* Scroll wrapper — horizontal scroll only, never clip vertically */
+    .ecg-scroll { overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; padding-bottom: 8px; }
 
     /* Week grid */
     .ecg-week-grid {
-        display: grid; grid-template-columns: repeat(5, 1fr);
-        gap: 6px; min-width: 580px;
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px; min-width: 580px; width: 100%;
     }
 
     /* Month grid */
-    .ecg-month-grid { display: flex; flex-direction: column; gap: 4px; }
+    .ecg-month-grid { display: flex; flex-direction: column; gap: 4px; width: 100%; }
     .ecg-month-header-row {
-        display: grid; grid-template-columns: repeat(5, 1fr);
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 4px; padding: 0 2px;
     }
     .ecg-month-header-cell {
         text-align: center; font-size: 0.74em; font-weight: 600;
         color: var(--pp-text-muted); padding: 4px 0;
     }
-    .ecg-month-week { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+    .ecg-month-week { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 
     /* Day column */
     .ecg-day-col {
         background: var(--pp-surface);
         border: 1px solid var(--pp-border-light, var(--pp-border));
-        border-radius: 8px; overflow: hidden;
+        border-radius: 8px;
         display: flex; flex-direction: column;
     }
     .ecg-day-col.ecg-today { border-color: var(--pp-accent, #ef4444); border-width: 2px; }
@@ -155,7 +155,7 @@
     /* Day header */
     .ecg-day-header {
         display: flex; align-items: center; gap: 4px;
-        padding: 5px 7px; font-size: 0.78em;
+        padding: 6px 10px; font-size: 0.78em;
         background: var(--pp-overlay-5, #f4f4f5);
         border-bottom: 1px solid var(--pp-border-light, var(--pp-border));
     }
@@ -170,24 +170,24 @@
     }
 
     /* Halves */
-    .ecg-half { padding: 5px; flex: 1; min-height: 72px; }
+    .ecg-half { padding: 10px 10px; flex: 1 1 auto; min-height: 48px; }
     .ecg-half-bmo { border-bottom: 1px dashed var(--pp-border-light, var(--pp-border)); }
     .ecg-half-label {
         font-size: 0.64em; font-weight: 700; text-transform: uppercase;
-        letter-spacing: 0.05em; margin-bottom: 4px; line-height: 1;
+        letter-spacing: 0.05em; margin-bottom: 6px; line-height: 1;
     }
     .ecg-half-bmo .ecg-half-label { color: #2563eb; }
     .ecg-half-amc .ecg-half-label { color: #7c3aed; }
 
     /* Tiles container */
-    .ecg-tiles { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-start; }
+    .ecg-tiles { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
 
     /* Individual tile */
     .ecg-tile {
         display: flex; flex-direction: column; align-items: center;
-        cursor: pointer; border-radius: 7px; padding: 3px;
+        cursor: pointer; border-radius: 7px; padding: 4px;
         transition: transform 0.15s ease, box-shadow 0.15s ease;
-        outline: none; width: 52px;
+        outline: none; width: 54px;
         position: relative; /* needed for z-index stacking on hover */
     }
     .ecg-tile:hover, .ecg-tile:focus-visible {
@@ -240,13 +240,25 @@
     /* Hover card */
     .ecg-hover-card {
         position: fixed; z-index: 1000; display: none;
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
+        background: #1e1e24;
+        border: 1px solid rgba(255,255,255,0.13);
         border-radius: 12px;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.2);
         padding: 0.9em 1em;
         min-width: 196px; max-width: 256px;
         pointer-events: none;
+    }
+    @media (prefers-color-scheme: light) {
+        .ecg-hover-card {
+            background: #ffffff;
+            border-color: rgba(0,0,0,0.12);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.06);
+        }
+    }
+    [data-theme="light"] .ecg-hover-card {
+        background: #ffffff;
+        border-color: rgba(0,0,0,0.12);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.06);
     }
     .ecg-hc-header { display: flex; align-items: center; gap: 0.65em; margin-bottom: 0.6em; }
     .ecg-hc-logo-wrap {
@@ -268,7 +280,9 @@
         border-top: 1px solid var(--pp-border-light, var(--pp-border));
     }
     .ecg-hc-label { color: var(--pp-text-muted); }
-    .ecg-hc-val { font-weight: 600; color: var(--pp-text); text-align: right; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ecg-hc-val { font-weight: 600; color: var(--pp-text); text-align: right; }
+    .ecg-hc-si .ecg-hc-val { text-align: left; white-space: normal; font-size: 0.72em; line-height: 1.35; max-height: 3.6em; overflow: hidden; }
+    .ecg-hc-si { flex-direction: column; align-items: flex-start; gap: 2px; }
     .ecg-hc-si .ecg-hc-val { color: #d97706; }
 
     /* Modal */
@@ -619,7 +633,7 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
         return (
             '<div class="ecg-tile' + siCls + smCls + '" data-symbol="' + _safeAttr(sym) + '"' +
             ' data-entry="' + entryAttr + '" tabindex="0" role="button" aria-label="' + aria + '"' +
-            ' onmouseenter="ecgShowCard(this)" onmouseleave="ecgScheduleHide()"' +
+            ' onmouseenter="ecgShowCard(this)" onmousemove="ecgMoveCard()" onmouseleave="ecgScheduleHide()"' +
             ' onfocus="ecgShowCard(this)" onblur="ecgScheduleHide()"' +
             ' onkeydown="ecgTileKey(event,this)">' +
             '<div class="ecg-logo-wrap" data-symbol="' + _safeAttr(sym) + '">' +
@@ -801,6 +815,22 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
     var _card      = document.getElementById('ecg-hover-card');
     var _hideTimer = null;
 
+    var _mouseX = 0, _mouseY = 0;
+    document.addEventListener('mousemove', function (e) { _mouseX = e.clientX; _mouseY = e.clientY; });
+
+    function _positionCard() {
+        var cw = _card.offsetWidth, ch = _card.offsetHeight;
+        var vw = window.innerWidth,  vh = window.innerHeight;
+        var left = _mouseX + 14;
+        var top  = _mouseY + 14;
+        if (left + cw > vw - 12) left = _mouseX - cw - 10;
+        if (left < 8) left = 8;
+        if (top + ch > vh - 12) top = _mouseY - ch - 10;
+        if (top < 8) top = 8;
+        _card.style.left = left + 'px';
+        _card.style.top  = top  + 'px';
+    }
+
     window.ecgShowCard = function (tile) {
         clearTimeout(_hideTimer);
         var raw;
@@ -828,22 +858,12 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
         };
         logo.src = 'https://assets.parqet.com/logos/symbol/' + encodeURIComponent(sym) + '?format=svg';
 
-        _card.style.visibility = 'hidden';
         _card.style.display    = 'block';
-        requestAnimationFrame(function () {
-            var rect = tile.getBoundingClientRect();
-            var cw = _card.offsetWidth, ch = _card.offsetHeight;
-            var vw = window.innerWidth,  vh = window.innerHeight;
-            var left = rect.right + 10;
-            var top  = rect.top;
-            if (left + cw > vw - 12) left = rect.left - cw - 10;
-            if (left < 8) left = 8;
-            if (top + ch > vh - 12) top = vh - ch - 12;
-            if (top < 8) top = 8;
-            _card.style.left       = left + 'px';
-            _card.style.top        = top  + 'px';
-            _card.style.visibility = 'visible';
-        });
+        _positionCard();
+    };
+
+    window.ecgMoveCard = function () {
+        if (_card.style.display === 'block') _positionCard();
     };
 
     window.ecgScheduleHide = function () {
