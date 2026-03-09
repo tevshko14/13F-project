@@ -2957,6 +2957,11 @@ async def privacy_page(request: Request):
     return templates.TemplateResponse("privacy.html", {"request": request})
 
 
+@app.get("/faq", response_class=HTMLResponse)
+async def faq_page(request: Request):
+    return templates.TemplateResponse("faq.html", {"request": request})
+
+
 @app.post("/api/create-checkout-session")
 async def create_checkout_session(request: Request):
     """Create a Stripe Embedded Checkout session."""
@@ -5405,6 +5410,7 @@ async def llms_txt():
         "- [Retail Sentiment](https://paperpanda.io/retail): Reddit sentiment, trending tickers, market fear and greed index, and finance YouTuber schedules\n"
         "- [Options Screener](https://paperpanda.io/options): Unusual options activity where traded volume exceeds 5x open interest, with convergence engine\n"
         "- [Alternative Signals](https://paperpanda.io/alternative-signals): Short interest, analyst ratings, earnings calendar, and economic events from FRED\n"
+        "- [FAQ](https://paperpanda.io/faq): Frequently asked questions about PaperPanda, 13F filings, insider trading, congressional trading, and more\n"
         "\n"
         "## Data & Features\n"
         "- [Stock Lookup](https://paperpanda.io/stock/AAPL): Per-ticker pages with superinvestor ownership, congressional trades, analyst forecasts, and sentiment\n"
