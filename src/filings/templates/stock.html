@@ -92,6 +92,13 @@
                 </button>
             </li>
             <li>
+                <button id="tab-financials-btn"
+                        class="stock-tab"
+                        onclick="switchTab('financials')">
+                    Financials
+                </button>
+            </li>
+            <li>
                 <button id="tab-ownership-btn"
                         class="stock-tab"
                         onclick="switchTab('ownership')">
@@ -495,7 +502,6 @@
     #tab-ownership table tbody tr:last-child td { border-bottom: none; }
 
     /* ── Force full-width on overview panels ── */
-    #tab-overview .financials-container,
     #tab-overview .chart-container { max-width: none; box-sizing: border-box; }
 
     /* ── Ticker news cards ── */
@@ -612,6 +618,106 @@
         background: rgba(45, 212, 191, 0.1);
         border-color: rgba(45, 212, 191, 0.4);
     }
+    /* ── Financial tables ── */
+    .fin-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        margin-bottom: 0.5rem;
+    }
+    .fin-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+        white-space: nowrap;
+    }
+    .fin-table th,
+    .fin-table td {
+        padding: 0.45rem 0.7rem;
+        border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+    }
+    .fin-label-col {
+        text-align: left;
+        position: sticky;
+        left: 0;
+        background: var(--pico-background-color, #fff);
+        z-index: 1;
+        min-width: 160px;
+    }
+    .fin-num-col {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        min-width: 95px;
+    }
+    .fin-subtotal td { font-weight: 700; }
+    td.fin-neg, .fin-neg { color: #dc2626 !important; }
+    .fin-freq-toggle {
+        border: 1.5px solid rgba(13, 148, 136, 0.22);
+        border-radius: 999px;
+        padding: 0.3rem 0.75rem;
+        font-size: 0.78rem;
+        font-weight: 600;
+        background: transparent;
+        color: rgba(15, 23, 42, 0.62);
+        cursor: pointer;
+        transition: all 0.16s ease;
+        white-space: nowrap;
+        margin: 0;
+    }
+    .fin-freq-toggle:hover {
+        border-color: rgba(13, 148, 136, 0.5);
+        color: #0d9488;
+        background: rgba(13, 148, 136, 0.07);
+    }
+    .fin-freq-group { /* shown/hidden by JS */ }
+
+    /* ── Financial chart cards ── */
+    .fin-chart-card {
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: 12px;
+        padding: 1.2em;
+        margin-bottom: 1em;
+        background: var(--pico-background-color, #fff);
+    }
+    .fin-chart-title {
+        font-size: 0.95em;
+        font-weight: 700;
+        margin: 0 0 0.8em;
+        color: var(--pp-text-secondary, #334155);
+    }
+    .fin-chart-wrap {
+        position: relative;
+        height: 280px;
+    }
+    @media (max-width: 768px) {
+        .fin-chart-wrap { height: 220px; }
+    }
+    :root[data-theme="dark"] .fin-chart-card {
+        border-color: rgba(148, 163, 184, 0.15);
+        background: rgba(15, 23, 42, 0.6);
+    }
+    :root[data-theme="dark"] .fin-chart-title {
+        color: rgba(226, 232, 240, 0.85);
+    }
+
+    :root[data-theme="dark"] .fin-label-col {
+        background: var(--pico-background-color, #0f172a);
+    }
+    :root[data-theme="dark"] .fin-table th,
+    :root[data-theme="dark"] .fin-table td {
+        border-color: rgba(255, 255, 255, 0.07);
+    }
+    :root[data-theme="dark"] td.fin-neg,
+    :root[data-theme="dark"] .fin-neg { color: #f87171 !important; }
+    :root[data-theme="dark"] .fin-freq-toggle {
+        color: rgba(226, 232, 240, 0.62);
+        border-color: rgba(45, 212, 191, 0.2);
+    }
+    :root[data-theme="dark"] .fin-freq-toggle:hover {
+        color: #2dd4bf;
+        background: rgba(45, 212, 191, 0.1);
+        border-color: rgba(45, 212, 191, 0.4);
+    }
+
     :root[data-theme="dark"] .seo-overview {
         border-color: rgba(148, 163, 184, 0.2);
         background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
@@ -642,11 +748,8 @@
         }
         .stock-hero { border-radius: 20px; padding: 1rem 0.85rem 0.9rem; }
         .chart-container { aspect-ratio: 16 / 9; min-height: 350px; }
-        .financials-container { height: 600px; }
-        .financials-container iframe { min-height: 580px; }
-        #tab-overview,
-        #tab-ownership { display: flex; flex-direction: column; width: 100%; }
-        #tab-overview.active { display: flex; }
+        #tab-overview.active,
+        #tab-ownership.active { display: flex; flex-direction: column; width: 100%; }
         #tab-overview table th,
         #tab-overview table td,
         #tab-ownership table th,
@@ -655,8 +758,8 @@
         .seo-related-grid { grid-template-columns: repeat(2, 1fr); }
     }
     @media (min-width: 769px) {
-        #tab-overview,
-        #tab-ownership { width: 100%; max-width: 100%; }
+        #tab-overview.active,
+        #tab-ownership.active { width: 100%; max-width: 100%; }
     }
 
     /* ── Reduced motion ── */
@@ -892,6 +995,19 @@
 {% endif %}
 
 </div>{# end tab-overview #}
+
+{# ══════════════════════════════════════════════════════════════════ #}
+{# ── Financials Tab ──                                              #}
+{# ══════════════════════════════════════════════════════════════════ #}
+<div id="tab-financials" class="tab-content">
+{% if stock_info.ticker %}
+    <div id="financials-container">
+        <p aria-busy="true" style="text-align:center;padding:2em 0;">Loading financials…</p>
+    </div>
+{% else %}
+    <p class="text-muted" style="text-align:center;padding:3em 1em;">Financial data requires a ticker symbol.</p>
+{% endif %}
+</div>{# end tab-financials #}
 
 {# ══════════════════════════════════════════════════════════════════ #}
 {# ── Ownership Tab (Funds / Congress / Insiders / SEC Filings) ──  #}
@@ -1163,6 +1279,7 @@ window.toggleHolders = function(btn) {
     var analystLoaded = false, signalsLoaded = false, shortInterestLoaded = false;
     var vitalsLoaded = false, earningsLoaded = false, estimatesLoaded = false;
     var filingsLoaded = false, insiderLoaded = false, congressLoaded = false;
+    var financialsLoaded = false;
     var activeForecastPill = 'analysts';
     var activeSignalPill = 'sentiment';
 
@@ -1265,6 +1382,15 @@ window.toggleHolders = function(btn) {
                 .catch(function() { document.getElementById('vitals-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Failed to load vitals data. Please try again later.</p>'; });
             {% else %}
             document.getElementById('vitals-content').innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">Vitals data requires a ticker symbol.</p>';
+            {% endif %}
+        }
+
+        if (tab === 'financials' && !financialsLoaded) {
+            financialsLoaded = true;
+            {% if stock_info.ticker %}
+            fetch('/api/financials/{{ stock_info.ticker }}').then(function(resp) { return resp.text(); })
+                .then(function(html) { var el = document.getElementById('financials-container'); if (el) { el.innerHTML = html; activateScripts(el); } })
+                .catch(function() { var el = document.getElementById('financials-container'); if (el) el.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load financials.</p>'; });
             {% endif %}
         }
     };

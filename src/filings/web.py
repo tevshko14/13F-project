@@ -2604,6 +2604,81 @@ async def vitals_data(request: Request, ticker: str):
     )
 
 
+def _extract_chart_data(data: dict) -> dict:
+    """Pull specific rows into flat arrays suitable for ECharts."""
+
+    def _row_values(stmt: dict | None, label: str, periods: list[str]) -> list:
+        """Get values for *label* across *periods* (reversed for chart L→R)."""
+        if not stmt:
+            return []
+        for row in stmt.get("rows", []):
+            if row["label"] == label:
+                return [row["values"].get(p) for p in reversed(periods)]
+        return [None] * len(periods)
+
+    chart: dict = {}
+    for freq in ("annual", "quarterly"):
+        fd = data.get(freq)
+        if not fd:
+            continue
+        periods = fd["income"]["periods"] if fd.get("income") else []
+        labels = [p[:4] if freq == "annual" else f"{p[5:7]}/{p[:4]}" for p in reversed(periods)]
+
+        chart[freq] = {
+            "labels": labels,
+            "income": {
+                "revenue": _row_values(fd.get("income"), "Revenue", periods),
+                "net_income": _row_values(fd.get("income"), "Net Income", periods),
+                "gross_profit": _row_values(fd.get("income"), "Gross Profit", periods),
+                "operating_income": _row_values(fd.get("income"), "Operating Income", periods),
+                "operating_margin": _row_values(fd.get("ratios"), "Operating Margin", periods),
+            },
+            "balance": {
+                "total_assets": _row_values(fd.get("balance"), "Total Assets", periods),
+                "current_assets": _row_values(fd.get("balance"), "Total Current Assets", periods),
+                "total_liabilities": _row_values(fd.get("balance"), "Total Liabilities", periods),
+                "current_liabilities": _row_values(fd.get("balance"), "Total Current Liabilities", periods),
+                "total_equity": _row_values(fd.get("balance"), "Total Equity", periods),
+            },
+            "cashflow": {
+                "operating_cf": _row_values(fd.get("cashflow"), "Operating Cash Flow", periods),
+                "investing_cf": _row_values(fd.get("cashflow"), "Investing Cash Flow", periods),
+                "financing_cf": _row_values(fd.get("cashflow"), "Financing Cash Flow", periods),
+                "capex": _row_values(fd.get("cashflow"), "Capital Expenditures", periods),
+                "free_cf": _row_values(fd.get("ratios"), "Free Cash Flow", periods),
+            },
+            "ratios": {
+                "gross_margin": _row_values(fd.get("ratios"), "Gross Margin", periods),
+                "operating_margin": _row_values(fd.get("ratios"), "Operating Margin", periods),
+                "net_margin": _row_values(fd.get("ratios"), "Net Margin", periods),
+                "roe": _row_values(fd.get("ratios"), "ROE", periods),
+                "fcf_margin": _row_values(fd.get("ratios"), "FCF Margin", periods),
+            },
+        }
+    return chart
+
+
+@app.get("/api/financials/{ticker}", response_class=HTMLResponse)
+async def api_financials(request: Request, ticker: str):
+    """Financial statements (Income, Balance Sheet, Cash Flow, Ratios) from SEC XBRL."""
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+
+    from filings import fundamentals
+
+    data = await _to_heavy(fundamentals.get_fundamentals, ticker)
+    if not data:
+        return HTMLResponse(
+            '<p class="text-muted" style="text-align:center;padding:2em 0;">'
+            "No financial data available for this company.</p>"
+        )
+    chart_data = _extract_chart_data(data)
+    return templates.TemplateResponse(
+        "partials/financials.html",
+        {"request": request, "data": data, "chart_data": chart_data},
+    )
+
+
 @app.get("/api/earnings/{ticker}", response_class=HTMLResponse)
 async def earnings_data(request: Request, ticker: str):
     """Earnings history tab: quarterly EPS results + forward estimates."""

@@ -1,0 +1,621 @@
+{# ── Financial Statements Partial ── #}
+{# Loaded via fetch('/api/financials/{ticker}') into #financials-container #}
+
+{% macro fmt_num(val, is_pct=false, is_eps=false, is_ratio=false, is_cash=false) -%}
+{%- if val is none %}&mdash;
+{%- elif is_pct %}{{ "%.1f"|format(val) }}%
+{%- elif is_eps %}${{ "%.2f"|format(val) }}
+{%- elif is_ratio %}{{ "%.2f"|format(val) }}x
+{%- elif is_cash and val|abs >= 1e9 %}${{ "%.2f"|format(val / 1e9) }}B
+{%- elif is_cash and val|abs >= 1e6 %}${{ "%.1f"|format(val / 1e6) }}M
+{%- elif val|abs >= 1e9 %}${{ "%.2f"|format(val / 1e9) }}B
+{%- elif val|abs >= 1e6 %}${{ "%.1f"|format(val / 1e6) }}M
+{%- elif val|abs >= 1e3 %}${{ "%.1f"|format(val / 1e3) }}K
+{%- else %}${{ "{:,.0f}".format(val|int) }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro fmt_period(p, freq) -%}
+{%- if freq == 'annual' %}FY {{ p[:4] }}
+{%- else %}{{ p[5:7] }}/{{ p[:4] }}
+{%- endif %}
+{%- endmacro %}
+
+{% macro render_table(stmt, freq) %}
+{% if stmt and stmt.rows %}
+<div class="fin-table-wrap">
+    <table class="fin-table">
+        <thead>
+            <tr>
+                <th class="fin-label-col"></th>
+                {% for p in stmt.periods %}
+                <th class="fin-num-col">{{ fmt_period(p, freq) }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in stmt.rows %}
+            <tr{% if row.is_subtotal %} class="fin-subtotal"{% endif %}>
+                <td class="fin-label-col">{{ row.label }}</td>
+                {% for p in stmt.periods %}
+                {% set val = row['values'][p] %}
+                <td class="fin-num-col{% if val is not none and val < 0 %} fin-neg{% endif %}">
+                    {{ fmt_num(val,
+                        is_pct=row.get('is_pct', false),
+                        is_eps=row.get('is_eps', false),
+                        is_ratio=row.get('is_ratio', false),
+                        is_cash=row.get('is_cash', false)) }}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p class="text-muted" style="text-align:center;padding:2em 0;">No data available.</p>
+{% endif %}
+{% endmacro %}
+
+{# ── Pill Navigation ── #}
+<div class="pp-pill-nav" id="financials-pill-nav" style="align-items: center;">
+    <button class="pp-pill-btn active" data-fin-tab="income">Income Statement</button>
+    <button class="pp-pill-btn" data-fin-tab="balance">Balance Sheet</button>
+    <button class="pp-pill-btn" data-fin-tab="cashflow">Cash Flow</button>
+    <button class="pp-pill-btn" data-fin-tab="ratios">Key Ratios</button>
+    <span style="flex:1;"></span>
+    <button class="fin-freq-toggle" id="fin-freq-btn" onclick="toggleFinFreq()">
+        Quarterly
+    </button>
+</div>
+
+{# ── Annual Panels ── #}
+<div id="fin-annual-panels" class="fin-freq-group active">
+    <div class="pp-pill-panel active" id="fin-panel-annual-income">
+        <div class="fin-chart-card">
+            <h3 class="fin-chart-title">Revenue &amp; Profitability</h3>
+            <div class="fin-chart-wrap" id="fin-chart-annual-income"></div>
+        </div>
+        {{ render_table(data.annual.income if data.annual else none, 'annual') }}
+    </div>
+    <div class="pp-pill-panel" id="fin-panel-annual-balance">
+        <div class="fin-chart-card">
+            <h3 class="fin-chart-title">Asset Composition</h3>
+            <div class="fin-chart-wrap" id="fin-chart-annual-balance"></div>
+        </div>
+        {{ render_table(data.annual.balance if data.annual else none, 'annual') }}
+    </div>
+    <div class="pp-pill-panel" id="fin-panel-annual-cashflow">
+        <div class="fin-chart-card">
+            <h3 class="fin-chart-title">Cash Flow Analysis</h3>
+            <div class="fin-chart-wrap" id="fin-chart-annual-cashflow"></div>
+        </div>
+        {{ render_table(data.annual.cashflow if data.annual else none, 'annual') }}
+    </div>
+    <div class="pp-pill-panel" id="fin-panel-annual-ratios">
+        <div class="fin-chart-card">
+            <h3 class="fin-chart-title">Margin &amp; Return Trends</h3>
+            <div class="fin-chart-wrap" id="fin-chart-annual-ratios"></div>
+        </div>
+        {{ render_table(data.annual.ratios if data.annual else none, 'annual') }}
+    </div>
+</div>
+
+{# ── Quarterly Panels ── #}
+<div id="fin-quarterly-panels" class="fin-freq-group" style="display:none;">
+    <div class="pp-pill-panel active" id="fin-panel-quarterly-income">
+        <div class="fin-chart-card">
+            <h3 class="fin-chart-title">Revenue &amp; Profitability</h3>
+            <div class="fin-chart-wrap" id="fin-chart-quarterly-income"></div>
+        </div>
+        {{ render_table(data.quarterly.income if data.quarterly else none, 'quarterly') }}
+    </div>
+    <div class="pp-pill-panel" id="fin-panel-quarterly-balance">
+        <div class="fin-chart-card">
+            <h3 class="fin-chart-title">Asset Composition</h3>
+            <div class="fin-chart-wrap" id="fin-chart-quarterly-balance"></div>
+        </div>
+        {{ render_table(data.quarterly.balance if data.quarterly else none, 'quarterly') }}
+    </div>
+    <div class="pp-pill-panel" id="fin-panel-quarterly-cashflow">
+        <div class="fin-chart-card">
+            <h3 class="fin-chart-title">Cash Flow Analysis</h3>
+            <div class="fin-chart-wrap" id="fin-chart-quarterly-cashflow"></div>
+        </div>
+        {{ render_table(data.quarterly.cashflow if data.quarterly else none, 'quarterly') }}
+    </div>
+    <div class="pp-pill-panel" id="fin-panel-quarterly-ratios">
+        <div class="fin-chart-card">
+            <h3 class="fin-chart-title">Margin &amp; Return Trends</h3>
+            <div class="fin-chart-wrap" id="fin-chart-quarterly-ratios"></div>
+        </div>
+        {{ render_table(data.quarterly.ratios if data.quarterly else none, 'quarterly') }}
+    </div>
+</div>
+
+<script>
+(function() {
+    var activeTab = 'income';
+    var activeFreq = 'annual';
+    var chartData = {{ chart_data | tojson }};
+    var chartInstances = {};    // id → echarts instance
+    var annualChartsInit = false;
+    var quarterlyChartsInit = false;
+
+    // ── Helpers ──
+    function isDark() {
+        return document.documentElement.getAttribute('data-theme') === 'dark';
+    }
+    function themeColors() {
+        var dark = isDark();
+        return {
+            text: dark ? 'rgba(226,232,240,0.7)' : 'rgba(15,23,42,0.55)',
+            grid: dark ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.07)',
+            tooltip: dark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+            tooltipText: dark ? '#e2e8f0' : '#1e293b',
+            tooltipBorder: dark ? 'rgba(148,163,184,0.2)' : 'rgba(0,0,0,0.08)'
+        };
+    }
+    function fmtB(v) {
+        if (v == null) return '—';
+        var abs = Math.abs(v);
+        var s = v < 0 ? '-' : '';
+        if (abs >= 1e9) return s + '$' + (abs/1e9).toFixed(2) + 'B';
+        if (abs >= 1e6) return s + '$' + (abs/1e6).toFixed(1) + 'M';
+        if (abs >= 1e3) return s + '$' + (abs/1e3).toFixed(1) + 'K';
+        return s + '$' + Math.round(abs).toLocaleString();
+    }
+
+    // ── Chart builders ──
+    function buildIncomeChart(freq) {
+        var cd = chartData[freq];
+        if (!cd) return;
+        var el = document.getElementById('fin-chart-' + freq + '-income');
+        if (!el) return;
+        var c = themeColors();
+
+        var chart = echarts.init(el);
+        chartInstances['fin-chart-' + freq + '-income'] = chart;
+
+        var hasMargin = cd.income.operating_margin && cd.income.operating_margin.some(function(v) { return v != null; });
+
+        chart.setOption({
+            animation: false,
+            backgroundColor: 'transparent',
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: c.tooltip,
+                borderColor: c.tooltipBorder,
+                textStyle: { color: c.tooltipText, fontSize: 12 },
+                formatter: function(params) {
+                    var html = '<strong>' + params[0].axisValue + '</strong>';
+                    params.forEach(function(p) {
+                        var val = p.seriesName.indexOf('Margin') >= 0
+                            ? (p.value != null ? p.value.toFixed(1) + '%' : '—')
+                            : fmtB(p.value);
+                        html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>' + val + '</strong>';
+                    });
+                    return html;
+                }
+            },
+            legend: {
+                bottom: 0,
+                textStyle: { color: c.text, fontSize: 11 },
+                itemWidth: 14, itemHeight: 10
+            },
+            grid: { left: 55, right: hasMargin ? 55 : 20, top: 15, bottom: 40 },
+            xAxis: {
+                type: 'category',
+                data: cd.labels,
+                axisLine: { lineStyle: { color: c.grid } },
+                axisTick: { show: false },
+                axisLabel: { color: c.text, fontSize: 11 }
+            },
+            yAxis: [
+                {
+                    type: 'value',
+                    axisLine: { show: false },
+                    axisTick: { show: false },
+                    splitLine: { lineStyle: { color: c.grid } },
+                    axisLabel: { color: c.text, fontSize: 10, formatter: function(v) { return fmtB(v); } }
+                },
+                hasMargin ? {
+                    type: 'value',
+                    axisLine: { show: false },
+                    axisTick: { show: false },
+                    splitLine: { show: false },
+                    axisLabel: { color: c.text, fontSize: 10, formatter: '{value}%' }
+                } : null
+            ].filter(Boolean),
+            series: [
+                {
+                    name: 'Revenue',
+                    type: 'bar',
+                    data: cd.income.revenue,
+                    barMaxWidth: 32,
+                    itemStyle: {
+                        color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+                            colorStops: [{ offset: 0, color: '#2dd4bf' }, { offset: 1, color: '#0f766e' }]
+                        },
+                        borderRadius: [3, 3, 0, 0]
+                    }
+                },
+                {
+                    name: 'Net Income',
+                    type: 'bar',
+                    data: cd.income.net_income,
+                    barMaxWidth: 32,
+                    itemStyle: {
+                        color: function(p) { return p.value < 0 ? '#dc2626' : '#1976d2'; },
+                        borderRadius: [3, 3, 0, 0]
+                    }
+                },
+                hasMargin ? {
+                    name: 'Op. Margin',
+                    type: 'line',
+                    yAxisIndex: 1,
+                    data: cd.income.operating_margin,
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    lineStyle: { color: '#f59e0b', width: 2 },
+                    itemStyle: { color: '#f59e0b' }
+                } : null
+            ].filter(Boolean)
+        });
+    }
+
+    function buildBalanceChart(freq) {
+        var cd = chartData[freq];
+        if (!cd) return;
+        var el = document.getElementById('fin-chart-' + freq + '-balance');
+        if (!el) return;
+        var c = themeColors();
+
+        var chart = echarts.init(el);
+        chartInstances['fin-chart-' + freq + '-balance'] = chart;
+
+        // Compute non-current assets and non-current liabilities
+        var nonCurrentAssets = cd.balance.total_assets.map(function(ta, i) {
+            var ca = cd.balance.current_assets[i];
+            return (ta != null && ca != null) ? ta - ca : null;
+        });
+        var nonCurrentLiab = cd.balance.total_liabilities.map(function(tl, i) {
+            var cl = cd.balance.current_liabilities[i];
+            return (tl != null && cl != null) ? tl - cl : null;
+        });
+
+        chart.setOption({
+            animation: false,
+            backgroundColor: 'transparent',
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: c.tooltip,
+                borderColor: c.tooltipBorder,
+                textStyle: { color: c.tooltipText, fontSize: 12 },
+                formatter: function(params) {
+                    var html = '<strong>' + params[0].axisValue + '</strong>';
+                    params.forEach(function(p) {
+                        html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>' + fmtB(p.value) + '</strong>';
+                    });
+                    return html;
+                }
+            },
+            legend: {
+                bottom: 0,
+                textStyle: { color: c.text, fontSize: 11 },
+                itemWidth: 14, itemHeight: 10
+            },
+            grid: { left: 55, right: 20, top: 15, bottom: 40 },
+            xAxis: {
+                type: 'category',
+                data: cd.labels,
+                axisLine: { lineStyle: { color: c.grid } },
+                axisTick: { show: false },
+                axisLabel: { color: c.text, fontSize: 11 }
+            },
+            yAxis: {
+                type: 'value',
+                axisLine: { show: false },
+                axisTick: { show: false },
+                splitLine: { lineStyle: { color: c.grid } },
+                axisLabel: { color: c.text, fontSize: 10, formatter: function(v) { return fmtB(v); } }
+            },
+            series: [
+                {
+                    name: 'Current Assets',
+                    type: 'bar',
+                    stack: 'assets',
+                    data: cd.balance.current_assets,
+                    barMaxWidth: 28,
+                    itemStyle: { color: '#2dd4bf', borderRadius: [0, 0, 0, 0] }
+                },
+                {
+                    name: 'Non-Current Assets',
+                    type: 'bar',
+                    stack: 'assets',
+                    data: nonCurrentAssets,
+                    barMaxWidth: 28,
+                    itemStyle: { color: '#0f766e', borderRadius: [3, 3, 0, 0] }
+                },
+                {
+                    name: 'Liabilities',
+                    type: 'bar',
+                    stack: 'funding',
+                    data: cd.balance.total_liabilities,
+                    barMaxWidth: 28,
+                    itemStyle: { color: 'rgba(220,38,38,0.65)', borderRadius: [0, 0, 0, 0] }
+                },
+                {
+                    name: 'Equity',
+                    type: 'bar',
+                    stack: 'funding',
+                    data: cd.balance.total_equity,
+                    barMaxWidth: 28,
+                    itemStyle: { color: '#1976d2', borderRadius: [3, 3, 0, 0] }
+                }
+            ]
+        });
+    }
+
+    function buildCashflowChart(freq) {
+        var cd = chartData[freq];
+        if (!cd) return;
+        var el = document.getElementById('fin-chart-' + freq + '-cashflow');
+        if (!el) return;
+        var c = themeColors();
+
+        var chart = echarts.init(el);
+        chartInstances['fin-chart-' + freq + '-cashflow'] = chart;
+
+        var hasFCF = cd.cashflow.free_cf && cd.cashflow.free_cf.some(function(v) { return v != null; });
+
+        chart.setOption({
+            animation: false,
+            backgroundColor: 'transparent',
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: c.tooltip,
+                borderColor: c.tooltipBorder,
+                textStyle: { color: c.tooltipText, fontSize: 12 },
+                formatter: function(params) {
+                    var html = '<strong>' + params[0].axisValue + '</strong>';
+                    params.forEach(function(p) {
+                        html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>' + fmtB(p.value) + '</strong>';
+                    });
+                    return html;
+                }
+            },
+            legend: {
+                bottom: 0,
+                textStyle: { color: c.text, fontSize: 11 },
+                itemWidth: 14, itemHeight: 10
+            },
+            grid: { left: 55, right: 20, top: 15, bottom: 40 },
+            xAxis: {
+                type: 'category',
+                data: cd.labels,
+                axisLine: { lineStyle: { color: c.grid } },
+                axisTick: { show: false },
+                axisLabel: { color: c.text, fontSize: 11 }
+            },
+            yAxis: {
+                type: 'value',
+                axisLine: { show: false },
+                axisTick: { show: false },
+                splitLine: { lineStyle: { color: c.grid } },
+                axisLabel: { color: c.text, fontSize: 10, formatter: function(v) { return fmtB(v); } }
+            },
+            series: [
+                {
+                    name: 'Operating',
+                    type: 'bar',
+                    data: cd.cashflow.operating_cf,
+                    barMaxWidth: 28,
+                    itemStyle: {
+                        color: function(p) { return p.value < 0 ? '#dc2626' : '#16a34a'; },
+                        borderRadius: [3, 3, 0, 0]
+                    }
+                },
+                {
+                    name: 'Investing',
+                    type: 'bar',
+                    data: cd.cashflow.investing_cf,
+                    barMaxWidth: 28,
+                    itemStyle: {
+                        color: function(p) { return p.value < 0 ? 'rgba(245,158,11,0.7)' : '#f59e0b'; },
+                        borderRadius: [3, 3, 0, 0]
+                    }
+                },
+                {
+                    name: 'Financing',
+                    type: 'bar',
+                    data: cd.cashflow.financing_cf,
+                    barMaxWidth: 28,
+                    itemStyle: {
+                        color: function(p) { return p.value < 0 ? 'rgba(25,118,210,0.6)' : '#1976d2'; },
+                        borderRadius: [3, 3, 0, 0]
+                    }
+                },
+                hasFCF ? {
+                    name: 'Free Cash Flow',
+                    type: 'line',
+                    data: cd.cashflow.free_cf,
+                    smooth: true,
+                    symbol: 'circle',
+                    symbolSize: 6,
+                    lineStyle: { color: '#0d9488', width: 2, type: 'dashed' },
+                    itemStyle: { color: '#0d9488' }
+                } : null
+            ].filter(Boolean)
+        });
+    }
+
+    function buildRatiosChart(freq) {
+        var cd = chartData[freq];
+        if (!cd) return;
+        var el = document.getElementById('fin-chart-' + freq + '-ratios');
+        if (!el) return;
+        var c = themeColors();
+
+        var chart = echarts.init(el);
+        chartInstances['fin-chart-' + freq + '-ratios'] = chart;
+
+        var lines = [
+            { key: 'gross_margin', name: 'Gross Margin', color: '#0d9488', dash: false },
+            { key: 'operating_margin', name: 'Op. Margin', color: '#1976d2', dash: false },
+            { key: 'net_margin', name: 'Net Margin', color: '#7c3aed', dash: false },
+            { key: 'roe', name: 'ROE', color: '#f59e0b', dash: false },
+            { key: 'fcf_margin', name: 'FCF Margin', color: '#16a34a', dash: true }
+        ];
+
+        var series = [];
+        lines.forEach(function(ln) {
+            var vals = cd.ratios[ln.key];
+            if (!vals || !vals.some(function(v) { return v != null; })) return;
+            series.push({
+                name: ln.name,
+                type: 'line',
+                data: vals,
+                smooth: true,
+                symbol: 'circle',
+                symbolSize: 5,
+                lineStyle: { color: ln.color, width: 2, type: ln.dash ? 'dashed' : 'solid' },
+                itemStyle: { color: ln.color }
+            });
+        });
+
+        chart.setOption({
+            animation: false,
+            backgroundColor: 'transparent',
+            tooltip: {
+                trigger: 'axis',
+                backgroundColor: c.tooltip,
+                borderColor: c.tooltipBorder,
+                textStyle: { color: c.tooltipText, fontSize: 12 },
+                formatter: function(params) {
+                    var html = '<strong>' + params[0].axisValue + '</strong>';
+                    params.forEach(function(p) {
+                        html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>' + (p.value != null ? p.value.toFixed(1) + '%' : '—') + '</strong>';
+                    });
+                    return html;
+                }
+            },
+            legend: {
+                bottom: 0,
+                textStyle: { color: c.text, fontSize: 11 },
+                itemWidth: 14, itemHeight: 10
+            },
+            grid: { left: 45, right: 20, top: 15, bottom: 40 },
+            xAxis: {
+                type: 'category',
+                data: cd.labels,
+                axisLine: { lineStyle: { color: c.grid } },
+                axisTick: { show: false },
+                axisLabel: { color: c.text, fontSize: 11 }
+            },
+            yAxis: {
+                type: 'value',
+                axisLine: { show: false },
+                axisTick: { show: false },
+                splitLine: { lineStyle: { color: c.grid } },
+                axisLabel: { color: c.text, fontSize: 10, formatter: '{value}%' }
+            },
+            series: series
+        });
+    }
+
+    // ── Init all 4 charts for a given frequency ──
+    function initCharts(freq) {
+        if (!chartData[freq]) return;
+        buildIncomeChart(freq);
+        buildBalanceChart(freq);
+        buildCashflowChart(freq);
+        buildRatiosChart(freq);
+    }
+
+    function ensureChartsInit() {
+        if (activeFreq === 'annual' && !annualChartsInit) {
+            annualChartsInit = true;
+            initCharts('annual');
+        }
+        if (activeFreq === 'quarterly' && !quarterlyChartsInit) {
+            quarterlyChartsInit = true;
+            initCharts('quarterly');
+        }
+    }
+
+    // ── Pill tab switching ──
+    document.getElementById('financials-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.getElementById('financials-pill-nav').querySelectorAll('.pp-pill-btn').forEach(function(b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            activeTab = btn.dataset.finTab;
+            showPanel();
+        });
+    });
+
+    function showPanel() {
+        // Hide all panels in both freq groups
+        document.querySelectorAll('.fin-freq-group .pp-pill-panel').forEach(function(p) { p.classList.remove('active'); });
+        // Show the correct one
+        var panelId = 'fin-panel-' + activeFreq + '-' + activeTab;
+        var panel = document.getElementById(panelId);
+        if (panel) panel.classList.add('active');
+
+        // Ensure charts are sized correctly after panel becomes visible
+        var chartId = 'fin-chart-' + activeFreq + '-' + activeTab;
+        if (chartInstances[chartId]) {
+            setTimeout(function() { chartInstances[chartId].resize(); }, 50);
+        }
+    }
+
+    // ── Annual / Quarterly toggle ──
+    window.toggleFinFreq = function() {
+        var btn = document.getElementById('fin-freq-btn');
+        if (activeFreq === 'annual') {
+            activeFreq = 'quarterly';
+            btn.textContent = 'Annual';
+            document.getElementById('fin-annual-panels').style.display = 'none';
+            document.getElementById('fin-quarterly-panels').style.display = '';
+        } else {
+            activeFreq = 'annual';
+            btn.textContent = 'Quarterly';
+            document.getElementById('fin-annual-panels').style.display = '';
+            document.getElementById('fin-quarterly-panels').style.display = 'none';
+        }
+        ensureChartsInit();
+        showPanel();
+    };
+
+    // ── Kick off charts (annual loads first) ──
+    window.requireECharts(function(err) {
+        if (err) return;
+        ensureChartsInit();
+
+        // Register resize handler
+        if (window._ppRegisterResize) {
+            window._ppRegisterResize(function() {
+                Object.keys(chartInstances).forEach(function(id) {
+                    if (chartInstances[id]) chartInstances[id].resize();
+                });
+            });
+        }
+    });
+
+    // ── Dark mode re-render ──
+    document.addEventListener('pp-theme-changed', function() {
+        // Re-init all charts that have been created
+        if (annualChartsInit) {
+            annualChartsInit = false;
+            initCharts('annual');
+            annualChartsInit = true;
+        }
+        if (quarterlyChartsInit) {
+            quarterlyChartsInit = false;
+            initCharts('quarterly');
+            quarterlyChartsInit = true;
+        }
+    });
+})();
+</script>
