@@ -69,61 +69,67 @@
     .pol-header {
         margin: 0 auto 1.2rem;
         max-width: 1080px;
-        border-radius: 24px;
-        padding: 1.1rem 1.1rem 1rem;
-        border: 1px solid rgba(255, 255, 255, 0.3);
-        background:
-            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
-            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
-            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
+        border-radius: 16px;
+        padding: 1.1rem 1.2rem;
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        background: linear-gradient(165deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.72));
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
-        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+        box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
     }
     .pol-header h1 {
-        margin: 0 0 0.2em;
-        font-size: clamp(1.55rem, 3.4vw, 2.4rem);
-        display: flex;
-        align-items: center;
-        gap: 0.5em;
-        flex-wrap: wrap;
+        margin: 0;
+        font-size: clamp(1.4rem, 3vw, 2rem);
         color: var(--pol-ink);
         font-family: "Fraunces", Georgia, serif;
+        line-height: 1.2;
+    }
+    .pol-age {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 0.45em;
+        font-weight: 500;
+        color: var(--pp-text-muted);
+        margin-left: 0.4em;
+        position: relative;
+        top: -0.15em;
     }
     .pol-header-meta {
-        font-size: 0.9em;
+        font-size: 0.82em;
         color: var(--pp-text-muted);
+        margin-top: 0.35em;
+        line-height: 1.5;
     }
     .party-badge {
         display: inline-flex;
         align-items: center;
-        gap: 0.3em;
-        padding: 0.2em 0.7em;
+        gap: 0.25em;
+        padding: 0.15em 0.55em;
         border-radius: 999px;
-        font-size: 0.55em;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
+        font-size: 0.65rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
         vertical-align: middle;
+        position: relative;
+        top: -1px;
     }
-    .party-badge--dem { background: rgba(37, 99, 235, 0.12); color: #2563eb; }
-    .party-badge--rep { background: rgba(220, 38, 38, 0.12); color: #dc2626; }
-    .party-badge--ind { background: rgba(107, 114, 128, 0.12); color: #6b7280; }
+    .party-badge--dem { background: rgba(37, 99, 235, 0.10); color: #2563eb; }
+    .party-badge--rep { background: rgba(220, 38, 38, 0.10); color: #dc2626; }
+    .party-badge--ind { background: rgba(107, 114, 128, 0.10); color: #6b7280; }
 
     /* ── Headshot ── */
-    .pol-header-content { display: flex; align-items: flex-start; gap: 1.2em; }
+    .pol-header-content { display: flex; align-items: center; gap: 1.1em; }
     .pol-headshot {
-        width: 80px; height: 80px;
+        width: 68px; height: 68px;
         border-radius: 50%;
         object-fit: cover;
-        border: 3px solid var(--pp-overlay-8, rgba(255,255,255,0.08));
+        border: 2.5px solid var(--pp-overlay-8, rgba(255,255,255,0.08));
         flex-shrink: 0;
     }
     .pol-headshot-fallback {
-        width: 80px; height: 80px;
+        width: 68px; height: 68px;
         border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        font-weight: 700; font-size: 1.8em; color: #fff;
+        font-weight: 700; font-size: 1.5em; color: #fff;
         flex-shrink: 0;
     }
     .pol-headshot-fallback--dem { background: #2563eb; }
@@ -133,29 +139,33 @@
     /* ── Stats Grid ── */
     .pol-stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 1em;
+        grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+        gap: 0.75em;
         margin-bottom: 2em;
     }
     .pol-stat-card {
-        border: 1px solid rgba(15, 23, 42, 0.08);
-        border-radius: 14px;
-        padding: 1em;
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        border-radius: 12px;
+        padding: 0.85em 0.75em;
         background: linear-gradient(165deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.66));
-        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+        box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05);
         text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
     }
     .pol-stat-value {
-        font-size: 1.4em;
+        font-size: 1.25em;
         font-weight: 700;
         color: var(--pp-text);
     }
     .pol-stat-label {
-        font-size: 0.75em;
+        font-size: 0.7em;
         color: var(--pp-text-muted);
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        margin-top: 0.2em;
+        margin-top: 0.15em;
     }
 
     /* ── Tables (reuse inv-table from investor.html) ── */
@@ -314,18 +324,16 @@
 
     :root[data-theme="dark"] .pol-shell { --pol-ink: #e2e8f0; }
     :root[data-theme="dark"] .pol-header {
-        border-color: rgba(148, 163, 184, 0.22);
-        background:
-            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
-            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
-            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
+        border-color: rgba(148, 163, 184, 0.15);
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.7));
+        box-shadow: 0 2px 12px rgba(2, 6, 23, 0.3);
     }
     :root[data-theme="dark"] .pol-header-meta { color: rgba(226, 232, 240, 0.72); }
     :root[data-theme="dark"] .pol-stat-card,
     :root[data-theme="dark"] .pol-chart-card {
-        border-color: rgba(148, 163, 184, 0.2);
+        border-color: rgba(148, 163, 184, 0.12);
         background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
-        box-shadow: 0 20px 36px rgba(2, 6, 23, 0.46);
+        box-shadow: 0 2px 8px rgba(2, 6, 23, 0.3);
     }
     :root[data-theme="dark"] .pol-table thead th { background: rgba(148, 163, 184, 0.08); }
     :root[data-theme="dark"] .pol-table tbody tr:hover { background-color: rgba(148, 163, 184, 0.08); }
@@ -375,16 +383,12 @@
             {{ member.first_name[0] if member.first_name else '?' }}
         </div>
         <div>
-            <h1>
-                {{ member.full_name }}
-                <span class="party-badge party-badge--{{ party_key }}">{{ member.party }}</span>
-            </h1>
+            <h1>{{ member.full_name }}{% if age %}<span class="pol-age">(age: {{ age }})</span>{% endif %}</h1>
             <p class="pol-header-meta">
-                {{ member.chamber }}
-                {% if member.state %} &middot; {{ member.state }}{% endif %}
-                {% if member.district %} ({{ member.district }}){% endif %}
-                {% if member.is_current %} &middot; <strong>Current Member</strong>{% else %} &middot; Former Member{% endif %}
-                {% if years_active %} &middot; Active: {{ years_active }}{% endif %}
+                <span class="party-badge party-badge--{{ party_key }}">{{ member.party }}</span>
+                {{ member.chamber }}{% if member.state %} · {{ member.state }}{% endif %}{% if member.district %} ({{ member.district }}){% endif %}
+                · {% if member.is_current %}<strong>Current Member</strong>{% else %}Former Member{% endif %}
+                {% if years_active %} · {{ years_active }}{% endif %}
             </p>
         </div>
     </div>

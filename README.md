@@ -75,6 +75,7 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
   - *Web Traffic* — Domain popularity (Cloudflare Radar + Tranco), Wikipedia event detector with daily views chart
 - **Vitals** - Employee headcount (People Data Labs), culture ratings (Glassdoor), App Store ratings (Apple iTunes)
 - **SEC Filings** - Direct links to the company's SEC filings
+- **Financials** - SEC XBRL financial statements (Income, Balance Sheet, Cash Flow, Key Ratios) with ECharts insight charts, annual/quarterly toggle, and full history back to 2007 for S&P 500 + NASDAQ
 - **Insider Trading** - Full insider trade history with quarterly groups, insider cards with hover tooltips, buy/sell timeline chart, per-insider filter, and SEC-resolved officer titles (CEO, CFO, etc.)
 - **Congress** - Congressional stock trading activity (STOCK Act disclosures)
 

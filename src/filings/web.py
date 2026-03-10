@@ -2679,6 +2679,27 @@ async def api_financials(request: Request, ticker: str):
     )
 
 
+@app.get("/api/financials/{ticker}/history", response_class=HTMLResponse)
+async def api_financials_history(request: Request, ticker: str):
+    """Full historical financial statements from cold storage."""
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+
+    from filings import fundamentals
+
+    data = await _to_heavy(fundamentals.get_full_history, ticker)
+    if not data:
+        return HTMLResponse(
+            '<p class="text-muted" style="text-align:center;padding:2em 0;">'
+            "No historical data available. This ticker may not have been backfilled yet.</p>"
+        )
+    chart_data = _extract_chart_data(data)
+    return templates.TemplateResponse(
+        "partials/financials.html",
+        {"request": request, "data": data, "chart_data": chart_data},
+    )
+
+
 @app.get("/api/earnings/{ticker}", response_class=HTMLResponse)
 async def earnings_data(request: Request, ticker: str):
     """Earnings history tab: quarterly EPS results + forward estimates."""

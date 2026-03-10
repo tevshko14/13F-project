@@ -186,6 +186,12 @@ def list_files(prefix: str) -> list[str]:
         return []
 
 
+# ── Protected prefixes (delete-protected cold data) ──────────────
+# Files under these prefixes cannot be deleted via delete_files().
+# This protects historical backfill data from accidental erasure.
+_PROTECTED_PREFIXES = ("fundamentals/",)
+
+
 def delete_files(paths: list[str]) -> bool:
     """Delete files from the archive bucket.
 
@@ -194,6 +200,9 @@ def delete_files(paths: list[str]) -> bool:
                ``["13f/1067983/quarterly/Q1_2023.json"]``
 
     Returns True on success, False on failure.
+
+    **Protected paths**: Files under ``fundamentals/`` are delete-protected.
+    Attempts to delete them are silently skipped with a warning log.
     """
     storage = _get_storage()
     if storage is None:
@@ -202,8 +211,19 @@ def delete_files(paths: list[str]) -> bool:
     if not paths:
         return True
 
+    # Filter out protected paths
+    safe_paths = []
+    for p in paths:
+        if any(p.startswith(prefix) for prefix in _PROTECTED_PREFIXES):
+            logger.warning("DELETE blocked (protected): %s", p)
+        else:
+            safe_paths.append(p)
+
+    if not safe_paths:
+        return True
+
     try:
-        storage.from_(BUCKET_NAME).remove(paths)
+        storage.from_(BUCKET_NAME).remove(safe_paths)
         return True
     except Exception as exc:
         logger.warning("delete_files failed: %s", exc)

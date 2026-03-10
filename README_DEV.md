@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-09 (Options screener upgrade: premium floor, OI delta tracking, urgency weighting, moneyness scoring, cluster detection, greek display; Tiingo integration for real-time IEX prices; Tradier integration for options chains with ORATS greeks)
+> Last updated: 2026-03-10 (Financials tab with SEC XBRL data + full history backfill; politician age + bio redesign; Supabase client race condition fix for headshot/logo loading)
 
 ---
 
@@ -204,6 +204,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
 
 ```
 13F-project/
+├── scripts/
+│   └── backfill_fundamentals.py      # CLI: bulk SEC XBRL backfill (--tier sp500/nasdaq/all, --force, --dry-run, --report)
 ├── pyproject.toml                    # deps, entry points, build config
 ├── README.md                         # Project overview
 ├── README_DEV.md                     # THIS FILE — source of truth
@@ -232,6 +234,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale) + display helpers (quarterly groups, insider cards, chart data, title resolution via SEC XML)
     ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
     ├── congress_trading.py           # STOCK Act: Capitol Trades scraper (with date cutoff) + 6 display prep functions (chamber viz, trending, consensus, momentum, activity)
+    ├── fundamentals.py               # SEC XBRL CompanyFacts: income/balance/cashflow/ratios with 52 GAAP concepts, 2-tier cache (L1+L2), full history backfill support
+    ├── cold_storage.py               # Supabase Storage (S3-compatible) cold archive: upload/download JSON blobs, delete protection for fundamentals/
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -284,6 +288,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── stock_congress.html     # Per-ticker Congress trading subtab (HTMX lazy-loaded)
             ├── options_feed.html       # Unusual options activity table: OI Δ (green/red), Moneyness badges (5 color variants), Delta, urgency
             ├── options_clusters.html   # Clustered unusual options cards: ticker, direction, contract count, premium, vol/OI, urgency
+            ├── financials.html        # SEC financial statements: 4 sub-tabs (Income, Balance, Cash Flow, Ratios) with ECharts insight charts + annual/quarterly toggle
             └── data_error.html         # Reusable error partial (rate limit CTA, generic fallback, HTMX-aware)
 ```
 
@@ -1323,6 +1328,8 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/api/stock/{ticker}/congress` | `stock_congress_api` | Supabase | `partials/stock_congress.html` |
 | GET | `/api/congress-activity` | `congress_activity_api` | Congress page cache | `partials/congress_activity.html` |
 | GET | `/api/congress-trending` | `congress_trending_api` | Congress page cache | `partials/congress_trending.html` |
+| GET | `/api/financials/{ticker}` | `api_financials` | SEC XBRL (L1+L2 cache) | `partials/financials.html` |
+| GET | `/api/financials/{ticker}/history` | `api_financials_history` | Cold storage (full history) | `partials/financials.html` |
 | GET | `/api/options/clusters` | `options_clusters_api` | Unusual options cache | `partials/options_clusters.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
@@ -1788,6 +1795,10 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Tradier integration: options chains with ORATS greeks (delta, gamma, theta, vega), sandbox/production toggle, DataFrame adapter for detect_unusual()
 - [x] Convergence Engine: urgency × OTM × cluster boosts in signal strength scoring
 - [x] Options sync cron worker: scans S&P 500 + superinvestor holdings every 30 min during market hours
+- [x] Financials tab: SEC XBRL CompanyFacts with 4 sub-tabs (Income, Balance, Cash Flow, Ratios), ECharts insight charts, annual/quarterly toggle
+- [x] Fundamentals historical backfill: S&P 500 + NASDAQ cold storage archive (back to 2007), merge-only writes, 3-layer delete protection
+- [x] Politician profiles: age display from congress-legislators GitHub dataset, cleaner bio section with subtle party badge
+- [x] Supabase client race condition fix: `_initialised` flag moved after `_client` assignment (headshots + logos now load on startup)
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)

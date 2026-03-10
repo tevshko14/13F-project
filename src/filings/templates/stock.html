@@ -1001,6 +1001,11 @@
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="tab-financials" class="tab-content">
 {% if stock_info.ticker %}
+    <div style="display:flex;justify-content:flex-end;margin-bottom:0.5em;">
+        <button id="fin-history-toggle" class="outline secondary" style="font-size:0.8em;padding:0.3em 0.8em;border-radius:8px;display:none;" onclick="toggleFinHistory()">
+            Show Full History
+        </button>
+    </div>
     <div id="financials-container">
         <p aria-busy="true" style="text-align:center;padding:2em 0;">Loading financials…</p>
     </div>
@@ -1280,6 +1285,45 @@ window.toggleHolders = function(btn) {
     var vitalsLoaded = false, earningsLoaded = false, estimatesLoaded = false;
     var filingsLoaded = false, insiderLoaded = false, congressLoaded = false;
     var financialsLoaded = false;
+    var financialsShowingHistory = false;
+
+    function toggleFinHistory() {
+        var btn = document.getElementById('fin-history-toggle');
+        var el = document.getElementById('financials-container');
+        if (!el || !btn) return;
+        financialsShowingHistory = !financialsShowingHistory;
+        if (financialsShowingHistory) {
+            btn.textContent = 'Loading…';
+            btn.disabled = true;
+            fetch('/api/financials/{{ stock_info.ticker }}/history')
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    el.innerHTML = html; activateScripts(el);
+                    btn.textContent = 'Show Recent Only';
+                    btn.disabled = false;
+                })
+                .catch(function() {
+                    btn.textContent = 'Show Full History';
+                    btn.disabled = false;
+                    financialsShowingHistory = false;
+                });
+        } else {
+            btn.textContent = 'Loading…';
+            btn.disabled = true;
+            fetch('/api/financials/{{ stock_info.ticker }}')
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    el.innerHTML = html; activateScripts(el);
+                    btn.textContent = 'Show Full History';
+                    btn.disabled = false;
+                })
+                .catch(function() {
+                    btn.textContent = 'Show Recent Only';
+                    btn.disabled = false;
+                    financialsShowingHistory = true;
+                });
+        }
+    }
     var activeForecastPill = 'analysts';
     var activeSignalPill = 'sentiment';
 
@@ -1389,7 +1433,12 @@ window.toggleHolders = function(btn) {
             financialsLoaded = true;
             {% if stock_info.ticker %}
             fetch('/api/financials/{{ stock_info.ticker }}').then(function(resp) { return resp.text(); })
-                .then(function(html) { var el = document.getElementById('financials-container'); if (el) { el.innerHTML = html; activateScripts(el); } })
+                .then(function(html) {
+                    var el = document.getElementById('financials-container');
+                    if (el) { el.innerHTML = html; activateScripts(el); }
+                    var btn = document.getElementById('fin-history-toggle');
+                    if (btn) btn.style.display = '';
+                })
                 .catch(function() { var el = document.getElementById('financials-container'); if (el) el.innerHTML = '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load financials.</p>'; });
             {% endif %}
         }

@@ -609,8 +609,6 @@ def _get_client():
         if _initialised:
             return _client
 
-        _initialised = True
-
         url = os.environ.get("SUPABASE_URL", "").strip()
         key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
 
@@ -618,6 +616,7 @@ def _get_client():
             logger.info(
                 "Supabase not configured (SUPABASE_URL / SUPABASE_SERVICE_KEY missing)"
             )
+            _initialised = True
             return None
 
         try:
@@ -630,6 +629,10 @@ def _get_client():
         except Exception as exc:
             logger.warning("Supabase client init failed: %s", exc)
             _client = None
+
+        # Mark initialised AFTER _client is assigned so concurrent threads
+        # on the fast path never see _initialised=True with _client=None.
+        _initialised = True
 
     return _client
 
@@ -2504,7 +2507,7 @@ _CONGRESS_MEMBER_COLS = (
     "state,state_abbr,district,is_current,"
     "first_trade_date,last_trade_date,total_trades,"
     "net_worth_estimate,net_worth_source,net_worth_year,"
-    "created_at,updated_at"
+    "birth_date,created_at,updated_at"
 )
 
 _CONGRESS_TRADE_COLS = (

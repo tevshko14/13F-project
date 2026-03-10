@@ -21,7 +21,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+from datetime import date as _date, datetime, timezone
 
 import httpx
 
@@ -696,6 +696,17 @@ def prepare_politician_display(
         nw_source = ""
         nw_year = None
 
+    # Compute age from birth_date
+    age = None
+    birth_date_str = member.get("birth_date", "")
+    if birth_date_str:
+        try:
+            bd = _date.fromisoformat(str(birth_date_str)[:10])
+            today = _date.today()
+            age = today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day))
+        except (ValueError, TypeError):
+            pass
+
     return {
         "member": member,
         "trades": display_trades,
@@ -710,6 +721,7 @@ def prepare_politician_display(
         "total_buys": total_buys,
         "total_sells": total_sells,
         "years_active": years_active,
+        "age": age,
     }
 
 

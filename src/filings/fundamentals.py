@@ -422,7 +422,9 @@ def _discover_periods(
     # Sort descending (most recent first)
     sorted_periods = sorted(all_periods, reverse=True)
 
-    return sorted_periods[:max_periods]
+    if max_periods is not None:
+        return sorted_periods[:max_periods]
+    return sorted_periods
 
 
 def _build_statement(
@@ -658,3 +660,80 @@ def get_fundamentals(ticker: str) -> dict | None:
         return None
 
     return result
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Bulk Backfill Helpers  (no cache — used by scripts/backfill_fundamentals.py)
+# ═════════════════════════════════════════════════════════════════════
+
+def fetch_raw_xbrl(ticker: str) -> dict | None:
+    """Fetch trimmed us-gaap facts from SEC.  No caching — for bulk backfill.
+
+    Returns the trimmed XBRL dict (only the 52 concepts we use) or None
+    if the ticker can't be resolved or has no XBRL data (404).
+    """
+    cik = _resolve_cik(ticker)
+    if cik is None:
+        return None
+
+    padded_cik = cik.zfill(10)
+    url = f"{_XBRL_BASE}/CIK{padded_cik}.json"
+
+    time.sleep(_MIN_REQUEST_GAP)
+    resp = httpx.get(url, headers=_HEADERS, timeout=30)
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+
+    data = resp.json()
+    usgaap = data.get("facts", {}).get("us-gaap", {})
+    return _trim_usgaap(usgaap)
+
+
+def build_full_statements(usgaap: dict, ticker: str = "") -> dict:
+    """Build income/balance/cashflow/ratios with ALL historical periods.
+
+    Same output shape as ``get_fundamentals()`` but with no period cap.
+    Used by the backfill script to archive full history to cold storage.
+    """
+    result: dict[str, Any] = {"ticker": ticker.upper()}
+
+    for freq, form_filter in [("annual", "10-K"), ("quarterly", "10-Q")]:
+        income_items = _extract_line_items(usgaap, _INCOME_CONCEPTS, form_filter)
+        balance_items = _extract_line_items(usgaap, _BALANCE_CONCEPTS, form_filter)
+        cashflow_items = _extract_line_items(usgaap, _CASHFLOW_CONCEPTS, form_filter)
+
+        all_items = {}
+        all_items.update(income_items)
+        all_items.update(balance_items)
+        all_items.update(cashflow_items)
+        periods = _discover_periods(all_items, max_periods=None)
+
+        if not periods:
+            result[freq] = None
+            continue
+
+        result[freq] = {
+            "income":   {"periods": periods, "rows": _build_statement(income_items, periods, _INCOME_CONCEPTS)},
+            "balance":  {"periods": periods, "rows": _build_statement(balance_items, periods, _BALANCE_CONCEPTS)},
+            "cashflow": {"periods": periods, "rows": _build_statement(cashflow_items, periods, _CASHFLOW_CONCEPTS)},
+            "ratios":   {"periods": periods, "rows": _compute_ratios(income_items, balance_items, cashflow_items, periods)},
+        }
+
+    result["fetched_at"] = datetime.now(timezone.utc).isoformat()
+
+    if result.get("annual") is None and result.get("quarterly") is None:
+        return {}
+
+    return result
+
+
+def get_full_history(ticker: str) -> dict | None:
+    """Retrieve full historical financial data from cold storage.
+
+    Returns the same shape as ``get_fundamentals()`` but with all periods.
+    Returns ``None`` if the ticker hasn't been backfilled yet.
+    """
+    from filings import cold_storage
+    path = f"fundamentals/{ticker.upper()}/full_history.json"
+    return cold_storage.download_json(path)
