@@ -62,21 +62,91 @@
 /* ── Assumptions Sidebar ─────────────────────────────────────────── */
 .scr-sidebar {
     background: var(--pp-surface); border: 1px solid var(--pp-border-light);
-    border-radius: 12px; padding: 1rem; position: sticky; top: 1rem;
+    border-radius: 12px; padding: 0.75rem 0.85rem; position: sticky; top: 1rem;
     max-height: calc(100vh - 2rem); overflow-y: auto;
 }
-.scr-sidebar h3 { font-size: 0.82rem; font-weight: 600; color: var(--pp-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 0.75rem; }
-.scr-group-title { font-size: 0.72rem; font-weight: 600; color: #0d9488; text-transform: uppercase; letter-spacing: 0.05em; margin: 1rem 0 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--pp-border-light); }
+.scr-sidebar h3 {
+    font-size: 0.68rem; font-weight: 700; color: var(--pp-text-muted);
+    text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem;
+}
+.scr-group-title {
+    font-size: 0.62rem; font-weight: 700; color: #0d9488; text-transform: uppercase;
+    letter-spacing: 0.06em; margin: 0.6rem 0 0.35rem; padding-top: 0.5rem;
+    border-top: 1px solid var(--pp-border-light);
+}
 .scr-group-title:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
-.scr-slider-label { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: var(--pp-text); margin-bottom: 0.2rem; }
-.scr-slider-val { font-weight: 600; color: #0d9488; font-variant-numeric: tabular-nums; }
-.scr-slider-row { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.65rem; }
-.scr-slider-row input[type="range"] { flex: 1; accent-color: #0d9488; height: 4px; }
+
+/* ── Slider parameter block ── */
+.scr-param {
+    margin-bottom: 0.55rem;
+}
+.scr-slider-label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 0.72rem; color: var(--pp-text-muted); margin-bottom: 0.2rem;
+    gap: 0.25rem; line-height: 1.3;
+}
+.scr-slider-val {
+    font-weight: 700; color: #2dd4bf; font-variant-numeric: tabular-nums;
+    font-size: 0.78rem; white-space: nowrap; flex-shrink: 0;
+}
+.scr-slider-row {
+    display: flex; gap: 0.4rem; align-items: center;
+}
+
+/* ── Custom range slider ── */
+.scr-slider-row input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    flex: 1; height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+    background: var(--pp-border, #333); margin: 0; padding: 0;
+    border: none !important;
+}
+.scr-slider-row input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px; border-radius: 2px; background: var(--pp-border, #333);
+}
+.scr-slider-row input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; border-radius: 50%; cursor: pointer;
+    background: #0d9488; border: 2px solid var(--pp-surface, #1a1a2e);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+    margin-top: -5px;
+    transition: box-shadow 0.15s, transform 0.1s;
+}
+.scr-slider-row input[type="range"]::-webkit-slider-thumb:hover {
+    box-shadow: 0 0 0 3px rgba(13,148,136,0.18), 0 1px 4px rgba(0,0,0,0.3);
+    transform: scale(1.12);
+}
+.scr-slider-row input[type="range"]:active::-webkit-slider-thumb {
+    background: #14b8a6;
+}
+.scr-slider-row input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px; border-radius: 50%; cursor: pointer;
+    background: #0d9488; border: 2px solid var(--pp-surface, #1a1a2e);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.35);
+}
+.scr-slider-row input[type="range"]::-moz-range-track {
+    height: 4px; border-radius: 2px; background: var(--pp-border, #333); border: none;
+}
+
+/* ── Compact number input ── */
 .scr-num-input {
-    width: 62px; padding: 0.2em 0.4em; font-size: 0.82rem;
-    background: var(--pp-surface-alt, var(--pp-surface)); color: var(--pp-text);
-    border: 1px solid var(--pp-border); border-radius: 6px; text-align: center;
-    font-variant-numeric: tabular-nums;
+    width: 50px !important; padding: 0.15em 0.25em !important;
+    font-size: 0.72rem !important; line-height: 1.3 !important;
+    background: transparent !important;
+    color: var(--pp-text) !important;
+    border: 1px solid var(--pp-border-light, rgba(255,255,255,0.08)) !important;
+    border-radius: 4px !important;
+    text-align: center; font-variant-numeric: tabular-nums;
+    margin: 0 !important; height: auto !important;
+    -moz-appearance: textfield;
+    transition: border-color 0.15s;
+}
+.scr-num-input::-webkit-inner-spin-button,
+.scr-num-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.scr-num-input:focus {
+    border-color: #0d9488 !important;
+    box-shadow: none !important;
+    outline: none !important;
+    background: rgba(13,148,136,0.06) !important;
 }
 
 /* ── Main Content ────────────────────────────────────────────────── */
@@ -135,11 +205,12 @@
 /* ── Tooltip ─────────────────────────────────────────────────────── */
 .scr-tip { position: relative; cursor: help; border-bottom: 1px dotted var(--pp-text-muted); }
 .scr-tip::after {
-    content: attr(data-tip); position: absolute; bottom: 120%; left: 50%;
-    transform: translateX(-50%); background: rgba(15,23,42,0.92); color: #e2e8f0;
-    padding: 0.35em 0.6em; border-radius: 6px; font-size: 0.72rem;
-    white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.15s;
-    z-index: 50;
+    content: attr(data-tip); position: absolute; bottom: 120%; left: 0;
+    background: rgba(15,23,42,0.95); color: #e2e8f0;
+    padding: 0.4em 0.65em; border-radius: 6px; font-size: 0.68rem;
+    white-space: normal; width: max-content; max-width: 220px; line-height: 1.4;
+    pointer-events: none; opacity: 0; transition: opacity 0.15s;
+    z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,0.25);
 }
 .scr-tip:hover::after { opacity: 1; }
 
@@ -207,40 +278,50 @@
                 <div id="scr-dcf-inputs">
                     <div class="scr-group-title">DCF Model</div>
 
-                    <label class="scr-slider-label">Revenue Growth (%) <span class="scr-slider-val" id="val-rev-growth">8.0%</span></label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-rev-growth" min="-20" max="50" step="0.5" value="8" oninput="SCR.syncSlider('rev-growth',this.value)">
-                        <input type="number" id="input-rev-growth" min="-20" max="50" step="0.5" value="8" class="scr-num-input" oninput="SCR.syncInput('rev-growth',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">Revenue Growth (%) <span class="scr-slider-val" id="val-rev-growth">8.0%</span></label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-rev-growth" min="-20" max="50" step="0.5" value="8" oninput="SCR.syncSlider('rev-growth',this.value)">
+                            <input type="number" id="input-rev-growth" min="-20" max="50" step="0.5" value="8" class="scr-num-input" oninput="SCR.syncInput('rev-growth',this.value)">
+                        </div>
                     </div>
 
-                    <label class="scr-slider-label">Operating Margin (%) <span class="scr-slider-val" id="val-op-margin">20.0%</span></label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-op-margin" min="-10" max="60" step="0.5" value="20" oninput="SCR.syncSlider('op-margin',this.value)">
-                        <input type="number" id="input-op-margin" min="-10" max="60" step="0.5" value="20" class="scr-num-input" oninput="SCR.syncInput('op-margin',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">Op. Margin (%) <span class="scr-slider-val" id="val-op-margin">20.0%</span></label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-op-margin" min="-10" max="60" step="0.5" value="20" oninput="SCR.syncSlider('op-margin',this.value)">
+                            <input type="number" id="input-op-margin" min="-10" max="60" step="0.5" value="20" class="scr-num-input" oninput="SCR.syncInput('op-margin',this.value)">
+                        </div>
                     </div>
 
-                    <label class="scr-slider-label">
-                        <span class="scr-tip" data-tip="Weighted Average Cost of Capital — the discount rate applied to future cash flows">Discount Rate / WACC (%)</span>
-                        <span class="scr-slider-val" id="val-wacc">10.0%</span>
-                    </label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-wacc" min="4" max="20" step="0.25" value="10" oninput="SCR.syncSlider('wacc',this.value)">
-                        <input type="number" id="input-wacc" min="4" max="20" step="0.25" value="10" class="scr-num-input" oninput="SCR.syncInput('wacc',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">
+                            <span class="scr-tip" data-tip="Weighted Average Cost of Capital — discount rate for future cash flows">WACC (%)</span>
+                            <span class="scr-slider-val" id="val-wacc">10.0%</span>
+                        </label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-wacc" min="4" max="20" step="0.25" value="10" oninput="SCR.syncSlider('wacc',this.value)">
+                            <input type="number" id="input-wacc" min="4" max="20" step="0.25" value="10" class="scr-num-input" oninput="SCR.syncInput('wacc',this.value)">
+                        </div>
                     </div>
 
-                    <label class="scr-slider-label">
-                        <span class="scr-tip" data-tip="Long-term growth rate after projection period (typically ~GDP growth)">Terminal Growth (%)</span>
-                        <span class="scr-slider-val" id="val-terminal">2.5%</span>
-                    </label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-terminal" min="0" max="5" step="0.25" value="2.5" oninput="SCR.syncSlider('terminal',this.value)">
-                        <input type="number" id="input-terminal" min="0" max="5" step="0.25" value="2.5" class="scr-num-input" oninput="SCR.syncInput('terminal',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">
+                            <span class="scr-tip" data-tip="Long-term growth rate after projection period (typically ~GDP growth)">Terminal Growth (%)</span>
+                            <span class="scr-slider-val" id="val-terminal">2.5%</span>
+                        </label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-terminal" min="0" max="5" step="0.25" value="2.5" oninput="SCR.syncSlider('terminal',this.value)">
+                            <input type="number" id="input-terminal" min="0" max="5" step="0.25" value="2.5" class="scr-num-input" oninput="SCR.syncInput('terminal',this.value)">
+                        </div>
                     </div>
 
-                    <label class="scr-slider-label">Projection Years <span class="scr-slider-val" id="val-proj-years">5</span></label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-proj-years" min="3" max="10" step="1" value="5" oninput="SCR.syncSlider('proj-years',this.value)">
-                        <input type="number" id="input-proj-years" min="3" max="10" step="1" value="5" class="scr-num-input" oninput="SCR.syncInput('proj-years',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">Projection Years <span class="scr-slider-val" id="val-proj-years">5</span></label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-proj-years" min="3" max="10" step="1" value="5" oninput="SCR.syncSlider('proj-years',this.value)">
+                            <input type="number" id="input-proj-years" min="3" max="10" step="1" value="5" class="scr-num-input" oninput="SCR.syncInput('proj-years',this.value)">
+                        </div>
                     </div>
                 </div>
 
@@ -248,34 +329,42 @@
                 <div id="scr-mc-inputs" class="scr-hidden">
                     <div class="scr-group-title">Monte Carlo</div>
 
-                    <label class="scr-slider-label">Simulations <span class="scr-slider-val" id="val-mc-sims">5,000</span></label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-mc-sims" min="1000" max="10000" step="1000" value="5000" oninput="SCR.syncSlider('mc-sims',this.value)">
-                        <input type="number" id="input-mc-sims" min="1000" max="10000" step="1000" value="5000" class="scr-num-input" oninput="SCR.syncInput('mc-sims',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">Simulations <span class="scr-slider-val" id="val-mc-sims">5,000</span></label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-mc-sims" min="1000" max="10000" step="1000" value="5000" oninput="SCR.syncSlider('mc-sims',this.value)">
+                            <input type="number" id="input-mc-sims" min="1000" max="10000" step="1000" value="5000" class="scr-num-input" oninput="SCR.syncInput('mc-sims',this.value)">
+                        </div>
                     </div>
 
-                    <label class="scr-slider-label">
-                        <span class="scr-tip" data-tip="Annualized volatility — higher = wider range of outcomes">Volatility / Sigma</span>
-                        <span class="scr-slider-val" id="val-mc-sigma">0.30</span>
-                    </label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-mc-sigma" min="0.05" max="1.0" step="0.01" value="0.30" oninput="SCR.syncSlider('mc-sigma',this.value)">
-                        <input type="number" id="input-mc-sigma" min="0.05" max="1.0" step="0.01" value="0.30" class="scr-num-input" oninput="SCR.syncInput('mc-sigma',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">
+                            <span class="scr-tip" data-tip="Annualized volatility — higher = wider range of outcomes">Volatility (σ)</span>
+                            <span class="scr-slider-val" id="val-mc-sigma">0.30</span>
+                        </label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-mc-sigma" min="0.05" max="1.0" step="0.01" value="0.30" oninput="SCR.syncSlider('mc-sigma',this.value)">
+                            <input type="number" id="input-mc-sigma" min="0.05" max="1.0" step="0.01" value="0.30" class="scr-num-input" oninput="SCR.syncInput('mc-sigma',this.value)">
+                        </div>
                     </div>
 
-                    <label class="scr-slider-label">
-                        <span class="scr-tip" data-tip="Expected annual drift (return) — e.g. 0.08 = 8% annual growth">Drift / Mu</span>
-                        <span class="scr-slider-val" id="val-mc-mu">0.08</span>
-                    </label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-mc-mu" min="-0.20" max="0.50" step="0.01" value="0.08" oninput="SCR.syncSlider('mc-mu',this.value)">
-                        <input type="number" id="input-mc-mu" min="-0.20" max="0.50" step="0.01" value="0.08" class="scr-num-input" oninput="SCR.syncInput('mc-mu',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">
+                            <span class="scr-tip" data-tip="Expected annual drift (return) — e.g. 0.08 = 8% annual growth">Drift (μ)</span>
+                            <span class="scr-slider-val" id="val-mc-mu">0.08</span>
+                        </label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-mc-mu" min="-0.20" max="0.50" step="0.01" value="0.08" oninput="SCR.syncSlider('mc-mu',this.value)">
+                            <input type="number" id="input-mc-mu" min="-0.20" max="0.50" step="0.01" value="0.08" class="scr-num-input" oninput="SCR.syncInput('mc-mu',this.value)">
+                        </div>
                     </div>
 
-                    <label class="scr-slider-label">Projection (Trading Days) <span class="scr-slider-val" id="val-mc-days">252</span></label>
-                    <div class="scr-slider-row">
-                        <input type="range" id="slider-mc-days" min="63" max="756" step="63" value="252" oninput="SCR.syncSlider('mc-days',this.value)">
-                        <input type="number" id="input-mc-days" min="63" max="756" step="63" value="252" class="scr-num-input" oninput="SCR.syncInput('mc-days',this.value)">
+                    <div class="scr-param">
+                        <label class="scr-slider-label">Trading Days <span class="scr-slider-val" id="val-mc-days">252</span></label>
+                        <div class="scr-slider-row">
+                            <input type="range" id="slider-mc-days" min="63" max="756" step="63" value="252" oninput="SCR.syncSlider('mc-days',this.value)">
+                            <input type="number" id="input-mc-days" min="63" max="756" step="63" value="252" class="scr-num-input" oninput="SCR.syncInput('mc-days',this.value)">
+                        </div>
                     </div>
                 </div>
             </div>
