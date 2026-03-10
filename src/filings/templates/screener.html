@@ -11,31 +11,31 @@
 .scr-hero p { color: var(--pp-text-muted); font-size: 0.95rem; margin: 0; }
 
 /* ── Search ──────────────────────────────────────────────────────── */
-.scr-search-wrap { position: relative; max-width: 500px; margin: 0 auto 1.5rem; }
-.scr-search-input {
-    width: 100%; padding: 0.65rem 1rem 0.65rem 2.5rem;
-    border: 1px solid var(--pp-border); border-radius: 10px;
-    background: var(--pp-surface); color: var(--pp-text);
-    font-size: 0.95rem; outline: none; transition: border-color 0.15s;
+.scr-search-wrap {
+    position: relative; max-width: 500px; margin: 0 auto 1.5rem;
 }
-.scr-search-input:focus { border-color: #0d9488; box-shadow: 0 0 0 3px rgba(13,148,136,0.12); }
+.scr-search-wrap #ticker-search { display: block; width: 100%; }
+.scr-search-wrap #ticker-search-input {
+    width: 100% !important; padding: 0.65rem 1rem 0.65rem 2.5rem !important;
+    border: 1px solid var(--pp-border) !important; border-radius: 10px !important;
+    background: var(--pp-surface) !important; color: var(--pp-text) !important;
+    font-size: 0.95rem !important; outline: none; transition: border-color 0.15s;
+    height: auto !important; box-sizing: border-box;
+}
+.scr-search-wrap #ticker-search-input:focus {
+    border-color: #0d9488 !important;
+    box-shadow: 0 0 0 3px rgba(13,148,136,0.12) !important;
+}
+.scr-search-wrap #ticker-search-results {
+    width: 100% !important; border-radius: 10px !important;
+    background: var(--pp-surface) !important; border: 1px solid var(--pp-border) !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15) !important;
+    max-height: 320px !important;
+}
 .scr-search-icon {
     position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%);
-    color: var(--pp-text-muted); pointer-events: none;
+    color: var(--pp-text-muted); pointer-events: none; z-index: 2;
 }
-.scr-search-results {
-    display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
-    background: var(--pp-surface); border: 1px solid var(--pp-border);
-    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.15);
-    max-height: 300px; overflow-y: auto; z-index: 100;
-}
-.scr-search-item {
-    padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.9rem;
-    color: var(--pp-text); border-bottom: 1px solid var(--pp-border-light);
-}
-.scr-search-item:last-child { border-bottom: none; }
-.scr-search-item:hover, .scr-search-item.active { background: rgba(13,148,136,0.08); }
-.scr-search-item strong { color: #0d9488; }
 
 /* ── Loading ─────────────────────────────────────────────────────── */
 .scr-loading { text-align: center; padding: 3rem 0; color: var(--pp-text-muted); }
@@ -162,11 +162,10 @@
         <p>DCF, Monte Carlo simulation &amp; peer comparison analysis</p>
     </div>
 
-    <!-- Search -->
+    <!-- Search — reuses global ticker-search from base.html -->
     <div class="scr-search-wrap">
         <svg class="scr-search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" class="scr-search-input" id="scr-ticker-search" placeholder="Search ticker (e.g. AAPL, MSFT)..." autocomplete="off" spellcheck="false">
-        <div class="scr-search-results" id="scr-search-results"></div>
+        {% include "partials/ticker_search.html" %}
     </div>
 
     <!-- Loading -->
@@ -334,8 +333,6 @@
     var _currentTab = 'dcf';
     var _recalcTimer = null;
     var _chart = null;      // ECharts instance
-    var _fuseInstance = null;
-    var _searchHighlight = -1;
 
     /* ═══════════════════════════════════════════════════════════════
        Helpers
@@ -427,99 +424,43 @@
     }
 
     /* ═══════════════════════════════════════════════════════════════
-       Search / Fuse.js
+       Search — override global tickerSearchGo for screener context
        ═══════════════════════════════════════════════════════════════ */
     function initSearch() {
-        var input = $('scr-ticker-search');
-        var results = $('scr-search-results');
-
-        function _buildFuse(allItems) {
-            // Filter to stocks only (same logic as base.html _initFuse)
-            var stocks = [];
-            for (var i = 0; i < allItems.length; i++) {
-                var t = allItems[i].type;
-                if (t !== 'investor' && t !== 'politician') stocks.push(allItems[i]);
-            }
-            _fuseInstance = new Fuse(stocks, {
-                keys: [{ name: 'ticker', weight: 1.0 }, { name: 'name', weight: 0.5 }],
-                threshold: 0.3, distance: 100, includeScore: true, minMatchCharLength: 1
-            });
+        // Customise the included ticker-search partial for screener context
+        var input = document.getElementById('ticker-search-input');
+        if (input) {
+            input.placeholder = 'Search ticker (e.g. AAPL, MSFT)...';
         }
 
-        function loadFuse(cb) {
-            if (_fuseInstance) { cb(); return; }
-            // Try sessionStorage first (base.html caches here)
-            try {
-                var raw = sessionStorage.getItem('pp_ticker_index');
-                if (raw) {
-                    var parsed = JSON.parse(raw);
-                    if (parsed && parsed.ts && (Date.now() - parsed.ts) < 1800000 && parsed.data) {
-                        _buildFuse(parsed.data);
-                        cb(); return;
-                    }
+        // Override tickerSearchGo AFTER base.html script finishes
+        // (base.html script runs after block content, so we defer)
+        function _applyOverride() {
+            var _origSearchGo = window.tickerSearchGo;
+            window.tickerSearchGo = function(ticker, type, cik, memberId) {
+                if (type === 'investor' && cik) {
+                    window.location.href = '/holdings/' + cik;
+                } else if (type === 'politician' && memberId) {
+                    window.location.href = '/politician/' + memberId;
+                } else {
+                    // Stocks — load into screener instead of navigating
+                    var searchInput = document.getElementById('ticker-search-input');
+                    var searchResults = document.getElementById('ticker-search-results');
+                    if (searchInput) searchInput.value = ticker;
+                    if (searchResults) searchResults.style.display = 'none';
+                    loadTicker(ticker);
                 }
-            } catch(e) {}
-
-            fetch('/api/ticker-search-index')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    _buildFuse(data);
-                    cb();
-                })
-                .catch(function() {});
+            };
         }
 
-        input.addEventListener('input', function() {
-            var q = this.value.trim();
-            _searchHighlight = -1;
-            if (q.length < 1) { results.style.display = 'none'; return; }
-            loadFuse(function() {
-                var matches = _fuseInstance.search(q, { limit: 8 });
-                if (matches.length === 0) { results.style.display = 'none'; return; }
-                results.innerHTML = matches.map(function(r, i) {
-                    return '<div class="scr-search-item" data-idx="' + i + '" data-ticker="' + escHtml(r.item.ticker) + '">'
-                        + '<strong>' + escHtml(r.item.ticker) + '</strong> &mdash; ' + escHtml(r.item.name) + '</div>';
-                }).join('');
-                results.style.display = 'block';
-
-                results.querySelectorAll('.scr-search-item').forEach(function(el) {
-                    el.addEventListener('click', function() {
-                        var t = this.getAttribute('data-ticker');
-                        input.value = t;
-                        results.style.display = 'none';
-                        loadTicker(t);
-                    });
-                });
-            });
-        });
-
-        // Keyboard nav
-        input.addEventListener('keydown', function(e) {
-            var items = results.querySelectorAll('.scr-search-item');
-            if (!items.length) return;
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                _searchHighlight = Math.min(_searchHighlight + 1, items.length - 1);
-                items.forEach(function(el, i) { el.classList.toggle('active', i === _searchHighlight); });
-            } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                _searchHighlight = Math.max(_searchHighlight - 1, 0);
-                items.forEach(function(el, i) { el.classList.toggle('active', i === _searchHighlight); });
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                if (_searchHighlight >= 0 && items[_searchHighlight]) {
-                    items[_searchHighlight].click();
-                } else if (input.value.trim().length >= 1) {
-                    loadTicker(input.value.trim().toUpperCase());
-                    results.style.display = 'none';
-                }
-            }
-        });
-
-        // Close on blur
-        document.addEventListener('click', function(e) {
-            if (!e.target.closest('.scr-search-wrap')) results.style.display = 'none';
-        });
+        // DOMContentLoaded ensures base.html scripts have all run
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', _applyOverride);
+        } else {
+            // DOM already loaded — defer to next microtask so base.html
+            // IIFE (which may be in a <script> tag after ours) has finished
+            setTimeout(_applyOverride, 0);
+        }
     }
 
     /* ═══════════════════════════════════════════════════════════════
