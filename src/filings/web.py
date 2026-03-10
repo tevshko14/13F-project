@@ -5725,7 +5725,16 @@ async def api_screener_peers(request: Request, tickers: str = ""):
 
     tasks = [_to_heavy(screener.get_peer_valuation, t) for t in valid]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    return JSONResponse([r for r in results if not isinstance(r, Exception) and r is not None])
+    peers = []
+    for i, r in enumerate(results):
+        if isinstance(r, Exception):
+            logger.warning("Peer valuation failed for %s: %s", valid[i], r)
+        elif r is None:
+            logger.warning("Peer valuation returned None for %s", valid[i])
+        else:
+            peers.append(r)
+    logger.info("Peer valuation: requested=%d, returned=%d", len(valid), len(peers))
+    return JSONResponse(peers)
 
 
 @app.get("/api/screener/{ticker}", response_class=JSONResponse)
