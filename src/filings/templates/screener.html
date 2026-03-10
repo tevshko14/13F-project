@@ -522,17 +522,16 @@
             input.placeholder = 'Search ticker (e.g. AAPL, MSFT)...';
         }
 
-        // Override tickerSearchGo AFTER base.html script finishes
-        // (base.html script runs after block content, so we defer)
+        // Override tickerSearchGo and tickerSearchFilter AFTER base.html
+        // script finishes (base.html runs after block content, so we defer)
         function _applyOverride() {
-            var _origSearchGo = window.tickerSearchGo;
+            // Only load stocks into screener (not navigate away)
             window.tickerSearchGo = function(ticker, type, cik, memberId) {
                 if (type === 'investor' && cik) {
                     window.location.href = '/holdings/' + cik;
                 } else if (type === 'politician' && memberId) {
                     window.location.href = '/politician/' + memberId;
                 } else {
-                    // Stocks — load into screener instead of navigating
                     var searchInput = document.getElementById('ticker-search-input');
                     var searchResults = document.getElementById('ticker-search-results');
                     if (searchInput) searchInput.value = ticker;
@@ -540,6 +539,29 @@
                     loadTicker(ticker);
                 }
             };
+
+            // Strip non-stock results whenever the dropdown updates
+            var resultsEl = document.getElementById('ticker-search-results');
+            if (resultsEl) {
+                new MutationObserver(function() {
+                    var cats = resultsEl.querySelectorAll('.ts-category');
+                    cats.forEach(function(cat) {
+                        if (cat.textContent.trim() !== 'Stocks') {
+                            var next = cat.nextElementSibling;
+                            while (next && !next.classList.contains('ts-category')) {
+                                var toRemove = next;
+                                next = next.nextElementSibling;
+                                toRemove.remove();
+                            }
+                            cat.remove();
+                        }
+                    });
+                    // Hide dropdown if nothing left after stripping
+                    if (!resultsEl.querySelector('.ts-item')) {
+                        resultsEl.style.display = 'none';
+                    }
+                }).observe(resultsEl, { childList: true });
+            }
         }
 
         // DOMContentLoaded ensures base.html scripts have all run
