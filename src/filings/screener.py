@@ -53,6 +53,77 @@ def _row_values_with_periods(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# 52-Week Range & Beta from Tiingo EOD
+# ═══════════════════════════════════════════════════════════════════════
+
+def _get_52w_and_beta(ticker: str) -> dict:
+    """Compute 52-week high/low and beta from Tiingo EOD data.
+
+    Returns {"fifty_two_week_high": ..., "fifty_two_week_low": ..., "beta": ...}.
+    Any field may be None if data is unavailable.
+    """
+    result: dict = {"fifty_two_week_high": None, "fifty_two_week_low": None, "beta": None}
+
+    try:
+        from filings import tiingo
+        if not tiingo.has_tiingo_key():
+            return result
+
+        # 1y of daily data for the ticker
+        eod = tiingo.get_eod_history(ticker, period_days=370)
+        if not eod or len(eod) < 20:
+            return result
+
+        # 52-week high / low from adjHigh / adjLow (split-adjusted)
+        highs = [d.get("adjHigh") or d.get("high") for d in eod if d.get("adjHigh") or d.get("high")]
+        lows = [d.get("adjLow") or d.get("low") for d in eod if d.get("adjLow") or d.get("low")]
+
+        if highs:
+            result["fifty_two_week_high"] = round(max(highs), 2)
+        if lows:
+            result["fifty_two_week_low"] = round(min(lows), 2)
+
+        # Beta = cov(stock_returns, spy_returns) / var(spy_returns)
+        closes = [d.get("adjClose") or d.get("close") for d in eod
+                  if d.get("adjClose") or d.get("close")]
+        if len(closes) < 60:
+            return result
+
+        spy_eod = tiingo.get_eod_history("SPY", period_days=370)
+        if not spy_eod or len(spy_eod) < 60:
+            return result
+
+        spy_closes = [d.get("adjClose") or d.get("close") for d in spy_eod
+                      if d.get("adjClose") or d.get("close")]
+
+        # Align by length (both should be ~252 trading days)
+        n = min(len(closes), len(spy_closes))
+        closes = closes[-n:]
+        spy_closes = spy_closes[-n:]
+
+        # Daily returns
+        stock_ret = [(closes[i] / closes[i - 1]) - 1 for i in range(1, n)]
+        spy_ret = [(spy_closes[i] / spy_closes[i - 1]) - 1 for i in range(1, n)]
+
+        m = len(stock_ret)
+        if m < 30:
+            return result
+
+        mean_s = sum(stock_ret) / m
+        mean_b = sum(spy_ret) / m
+        cov = sum((stock_ret[i] - mean_s) * (spy_ret[i] - mean_b) for i in range(m)) / (m - 1)
+        var_b = sum((spy_ret[i] - mean_b) ** 2 for i in range(m)) / (m - 1)
+
+        if var_b > 0:
+            result["beta"] = round(cov / var_b, 2)
+
+    except Exception:
+        logger.debug("Tiingo 52w/beta fallback failed for %s", ticker)
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Peer Discovery
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -338,6 +409,65 @@ def get_screener_data(ticker: str) -> dict | None:
     if not trailing_pe and trailing_eps and current_price and trailing_eps > 0:
         trailing_pe = round(current_price / trailing_eps, 1)
 
+    # ── 4b. Beta & 52-week range (yfinance → Tiingo → yf history) ────
+    beta = yf_info.get("beta")
+    w52_high = yf_info.get("fiftyTwoWeekHigh")
+    w52_low = yf_info.get("fiftyTwoWeekLow")
+
+    # Fallback 1: Tiingo EOD (fast, reliable on prod)
+    if not beta or not w52_high or not w52_low:
+        tiingo_data = _get_52w_and_beta(ticker)
+        if not beta and tiingo_data.get("beta"):
+            beta = tiingo_data["beta"]
+        if not w52_high and tiingo_data.get("fifty_two_week_high"):
+            w52_high = tiingo_data["fifty_two_week_high"]
+        if not w52_low and tiingo_data.get("fifty_two_week_low"):
+            w52_low = tiingo_data["fifty_two_week_low"]
+
+    # Fallback 2: yfinance history download (single ticker, works locally)
+    if not beta or not w52_high or not w52_low:
+        try:
+            import yfinance as yf
+            hist = yf.download(
+                [ticker, "SPY"], period="1y", progress=False, timeout=15,
+            )
+            if hist is not None and not hist.empty:
+                # 52-week range from High/Low columns
+                if not w52_high or not w52_low:
+                    try:
+                        highs = hist["High"][ticker].dropna()
+                        lows = hist["Low"][ticker].dropna()
+                        if len(highs) > 10:
+                            w52_high = round(float(highs.max()), 2)
+                        if len(lows) > 10:
+                            w52_low = round(float(lows.min()), 2)
+                    except Exception:
+                        pass
+                # Beta from daily returns
+                if not beta:
+                    try:
+                        closes = hist["Close"]
+                        if ticker in closes.columns and "SPY" in closes.columns:
+                            stock_c = closes[ticker].dropna()
+                            spy_c = closes["SPY"].dropna()
+                            # Align on shared dates
+                            common = stock_c.index.intersection(spy_c.index)
+                            if len(common) > 60:
+                                sr = stock_c.loc[common].pct_change().dropna()
+                                br = spy_c.loc[common].pct_change().dropna()
+                                common2 = sr.index.intersection(br.index)
+                                sr = sr.loc[common2]
+                                br = br.loc[common2]
+                                if len(sr) > 30:
+                                    cov = sr.cov(br)
+                                    var_b = br.var()
+                                    if var_b > 0:
+                                        beta = round(float(cov / var_b), 2)
+                    except Exception:
+                        pass
+        except Exception:
+            logger.debug("yfinance history fallback failed for %s", ticker)
+
     # ── 5. Assemble response ──────────────────────────────────────────
     return {
         "ticker": ticker,
@@ -347,14 +477,14 @@ def get_screener_data(ticker: str) -> dict | None:
         "current_price": current_price,
         "market_cap": mcap,
         "shares_outstanding": shares_outstanding,
-        "beta": yf_info.get("beta"),
+        "beta": beta,
         "trailing_pe": trailing_pe,
         "forward_pe": forward_pe,
         "trailing_eps": trailing_eps,
         "forward_eps": forward_eps,
         "dividend_yield": yf_info.get("dividendYield"),
-        "fifty_two_week_high": yf_info.get("fiftyTwoWeekHigh"),
-        "fifty_two_week_low": yf_info.get("fiftyTwoWeekLow"),
+        "fifty_two_week_high": w52_high,
+        "fifty_two_week_low": w52_low,
         "ev_ebitda": yf_info.get("enterpriseToEbitda"),
         "financials": {
             "quarterly_fcf": quarterly_fcf_vals,
