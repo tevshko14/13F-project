@@ -259,10 +259,14 @@
     <!-- Main content (hidden until data loads) -->
     <div id="scr-content" class="scr-hidden">
         <!-- Ticker header -->
-        <div style="margin-bottom:0.75rem;">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
+            <img id="scr-logo" src="" alt="" width="32" height="32"
+                 loading="lazy" decoding="async"
+                 style="border-radius:6px;object-fit:contain;display:none;"
+                 onerror="this.style.display='none'">
             <span id="scr-ticker-badge" style="font-size:1.3rem;font-weight:700;color:#0d9488;"></span>
-            <span id="scr-company-name" style="font-size:0.95rem;color:var(--pp-text-muted);margin-left:0.5rem;"></span>
-            <span id="scr-sector-badge" style="font-size:0.72rem;background:var(--pp-surface-alt,var(--pp-surface));border:1px solid var(--pp-border-light);border-radius:5px;padding:0.15em 0.5em;margin-left:0.5rem;color:var(--pp-text-muted);"></span>
+            <span id="scr-company-name" style="font-size:0.95rem;color:var(--pp-text-muted);"></span>
+            <span id="scr-sector-badge" style="font-size:0.72rem;background:var(--pp-surface-alt,var(--pp-surface));border:1px solid var(--pp-border-light);border-radius:5px;padding:0.15em 0.5em;color:var(--pp-text-muted);"></span>
         </div>
 
         <!-- Summary cards -->
@@ -610,8 +614,32 @@
     function populateUI() {
         var d = _data;
         $('scr-ticker-badge').textContent = d.ticker;
-        $('scr-company-name').textContent = d.company_name || '';
-        $('scr-sector-badge').textContent = (d.sector || '') + (d.industry ? ' / ' + d.industry : '');
+
+        // Logo
+        var logoEl = $('scr-logo');
+        logoEl.style.display = 'none';
+        logoEl.src = '/api/logo/' + encodeURIComponent(d.ticker) + '.png';
+        logoEl.onload = function() { logoEl.style.display = ''; };
+        logoEl.onerror = function() { logoEl.style.display = 'none'; };
+
+        // Company name: API → search index fallback
+        var displayName = (d.company_name && d.company_name !== d.ticker) ? d.company_name : '';
+        if (!displayName) {
+            try {
+                var idx = JSON.parse(sessionStorage.getItem('pp_ticker_index') || '{}');
+                var stocks = (idx.data || []).filter(function(s) {
+                    return s.ticker && s.ticker.toUpperCase() === d.ticker.toUpperCase() && s.type !== 'investor';
+                });
+                if (stocks.length > 0 && stocks[0].name) displayName = stocks[0].name;
+            } catch(e) {}
+        }
+        $('scr-company-name').textContent = displayName;
+
+        // Sector badge — hide if empty
+        var sectorText = (d.sector || '') + (d.industry ? ' / ' + d.industry : '');
+        var sectorEl = $('scr-sector-badge');
+        sectorEl.textContent = sectorText;
+        sectorEl.style.display = sectorText ? '' : 'none';
 
         // Summary cards
         var ttmFcf = null;
