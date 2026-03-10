@@ -164,22 +164,52 @@ def _suggest_peers(
     return candidates[:max_suggestions]
 
 
+def _yf_info_direct(ticker: str) -> dict:
+    """Fetch yfinance .info with a fresh session (no shared rate-limit state).
+
+    The shared ``_yf_session`` in market_data can be rate-limited by other
+    parts of the app.  For peer batch calls we use a standalone session so
+    each peer gets a clean slate.
+    """
+    import yfinance as yf
+
+    try:
+        tk = yf.Ticker(ticker)          # default session, no shared state
+        info = tk.info or {}
+    except Exception as exc:
+        logger.debug("_yf_info_direct(%s): %s", ticker, exc)
+        info = {}
+
+    # Overlay Tiingo real-time price (more reliable intraday)
+    try:
+        from filings import tiingo
+        if tiingo.has_tiingo_key():
+            tq = tiingo.get_quote(ticker)
+            if tq and tq.get("last"):
+                info["currentPrice"] = tq["last"]
+                info["regularMarketPrice"] = tq["last"]
+    except Exception:
+        pass
+
+    return info
+
+
 def get_peer_valuation(ticker: str) -> dict | None:
     """Fetch valuation multiples for one peer.
 
-    Uses get_yfinance_info (which already overlays Tiingo prices).
-    Falls back aggressively: returns partial data rather than None
-    so the peer at least appears in the comparison table.
+    Uses a *fresh* yfinance session (``_yf_info_direct``) to avoid being
+    blocked by rate-limits on the shared ``_yf_session`` that other parts
+    of the app use.  The shared session can hang indefinitely when rate-
+    limited, so we skip it entirely for peer calls.
     """
-    from filings.client import get_yfinance_info
-
     ticker = ticker.upper()
 
-    # --- 1. Try yfinance info (includes Tiingo price overlay) -----------
+    # --- 1. Direct yfinance with fresh session (avoids shared rate-limit)
     try:
-        info = get_yfinance_info(ticker)
+        info = _yf_info_direct(ticker)
+        logger.debug("get_peer_valuation(%s): direct yfinance returned %d keys", ticker, len(info))
     except Exception as e:
-        logger.warning("get_peer_valuation(%s): yfinance failed: %s", ticker, e)
+        logger.warning("get_peer_valuation(%s): direct yfinance failed: %s", ticker, e)
         info = {}
     if not info:
         info = {}
@@ -187,7 +217,7 @@ def get_peer_valuation(ticker: str) -> dict | None:
     mcap = info.get("marketCap")
     current_price = info.get("currentPrice") or info.get("regularMarketPrice")
 
-    # --- 2. Tiingo standalone fallback for price -----------------------
+    # --- 3. Tiingo standalone fallback for price -----------------------
     if not current_price:
         try:
             from filings import tiingo
@@ -195,18 +225,16 @@ def get_peer_valuation(ticker: str) -> dict | None:
                 tq = tiingo.get_quote(ticker)
                 if tq and tq.get("last"):
                     current_price = tq["last"]
-                    logger.debug("get_peer_valuation(%s): got price from Tiingo: %s", ticker, current_price)
         except Exception:
             pass
 
-    # --- 3. market_data batch price fallback ---------------------------
+    # --- 4. market_data batch price fallback ---------------------------
     if not current_price:
         try:
             from filings import market_data
             prices = market_data.get_current_prices_batch([ticker])
             if ticker in prices:
                 current_price = prices[ticker]
-                logger.debug("get_peer_valuation(%s): got price from batch: %s", ticker, current_price)
         except Exception:
             pass
 
@@ -214,7 +242,7 @@ def get_peer_valuation(ticker: str) -> dict | None:
         logger.warning("get_peer_valuation(%s): no price from any source, skipping", ticker)
         return None
 
-    # --- 4. Derive name from S&P 500 list if yfinance didn't give one --
+    # --- 5. Derive name from S&P 500 list if yfinance didn't give one --
     name = info.get("longName") or info.get("shortName") or ""
     if not name:
         try:
@@ -228,13 +256,21 @@ def get_peer_valuation(ticker: str) -> dict | None:
     if not name:
         name = ticker
 
-    # --- 5. Compute multiples (best-effort) ----------------------------
+    # --- 6. Compute multiples (best-effort) ----------------------------
     revenue = info.get("totalRevenue") or info.get("revenue")
     ps = round(mcap / revenue, 2) if mcap and revenue and revenue > 0 else None
     trailing_pe = info.get("trailingPE")
     forward_pe = info.get("forwardPE")
     ev_ebitda = info.get("enterpriseToEbitda")
     trailing_eps = info.get("trailingEps")
+
+    # Compute P/E from price + EPS if yfinance didn't provide it
+    if not trailing_pe and trailing_eps and current_price and trailing_eps > 0:
+        trailing_pe = round(current_price / trailing_eps, 1)
+    if not forward_pe:
+        forward_eps = info.get("forwardEps")
+        if forward_eps and current_price and forward_eps > 0:
+            forward_pe = round(current_price / forward_eps, 1)
 
     logger.debug(
         "get_peer_valuation(%s): price=%s mcap=%s pe=%s fpe=%s ev=%s",
