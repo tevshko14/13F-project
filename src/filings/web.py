@@ -5657,16 +5657,82 @@ async def sitemap_xml():
 # Stock Screener — DCF / Monte Carlo / Comps valuation tool
 # ═══════════════════════════════════════════════════════════════════════
 
+_SCREENER_PASSWORD = os.environ.get("SCREENER_PASSWORD", "paperpanda2026")
+
+
+def _screener_authed(request: Request) -> bool:
+    """Check if the screener auth cookie is valid."""
+    import hashlib
+    token = request.cookies.get("scr_auth", "")
+    expected = hashlib.sha256(
+        f"scr:{_SCREENER_PASSWORD}".encode()
+    ).hexdigest()[:32]
+    return token == expected
+
+
+def _screener_auth_cookie_value() -> str:
+    """Generate the cookie value for valid screener auth."""
+    import hashlib
+    return hashlib.sha256(
+        f"scr:{_SCREENER_PASSWORD}".encode()
+    ).hexdigest()[:32]
+
 
 @app.get("/screener", response_class=HTMLResponse)
 async def screener_page(request: Request):
     """Interactive stock valuation screener (DCF, Monte Carlo, Comps)."""
+    if not _screener_authed(request):
+        return templates.TemplateResponse(
+            "screener_gate.html", {"request": request, "error": None}
+        )
     return templates.TemplateResponse("screener.html", {"request": request})
+
+
+@app.post("/screener/auth")
+async def screener_auth(request: Request):
+    """Validate screener password and set auth cookie."""
+    form = await request.form()
+    password = form.get("password", "")
+    if password == _SCREENER_PASSWORD:
+        resp = RedirectResponse("/screener", status_code=303)
+        resp.set_cookie(
+            "scr_auth",
+            _screener_auth_cookie_value(),
+            max_age=60 * 60 * 24 * 30,  # 30 days
+            httponly=True,
+            samesite="lax",
+        )
+        return resp
+    # Wrong password — re-render gate with error
+    return templates.TemplateResponse(
+        "screener_gate.html",
+        {"request": request, "error": "Incorrect password. Please try again."},
+    )
+
+
+@app.get("/api/screener/peers", response_class=JSONResponse)
+async def api_screener_peers(request: Request, tickers: str = ""):
+    """Batch-fetch valuation data for selected peers (parallel)."""
+    if not _screener_authed(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    import asyncio
+    from filings import screener
+
+    raw = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    valid = [t for t in raw if _valid_ticker(t)][:10]
+    if not valid:
+        return JSONResponse([])
+
+    tasks = [_to_heavy(screener.get_peer_valuation, t) for t in valid]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return JSONResponse([r for r in results if not isinstance(r, Exception) and r is not None])
 
 
 @app.get("/api/screener/{ticker}", response_class=JSONResponse)
 async def api_screener_data(request: Request, ticker: str):
     """Return all data needed for client-side valuation calculations."""
+    if not _screener_authed(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
     from filings import screener

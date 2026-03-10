@@ -198,6 +198,92 @@ def _discover_peers(
     return peers
 
 
+def _suggest_peers(
+    ticker: str,
+    yf_info: dict,
+    max_suggestions: int = 8,
+) -> list[dict]:
+    """Return lightweight peer suggestions from S&P 500 (no yfinance calls)."""
+    from filings import market_data
+
+    sector = yf_info.get("sector", "")
+
+    try:
+        constituents = market_data.get_sp500_constituents()
+    except Exception:
+        return []
+
+    # Fallback: look up sector from S&P 500 constituents if yfinance didn't provide it
+    if not sector:
+        for c in constituents:
+            if c.get("ticker", "").upper() == ticker.upper():
+                sector = c.get("sector", "")
+                break
+
+    if not sector:
+        return []
+
+    candidates = [
+        {"ticker": c["ticker"].upper(), "name": c.get("name", ""), "sector": c.get("sector", "")}
+        for c in constituents
+        if c.get("sector", "") == sector
+        and c.get("ticker", "").upper() != ticker.upper()
+    ]
+    logger.debug("_suggest_peers: %d candidates for sector=%r", len(candidates), sector)
+
+    candidates.sort(key=lambda x: x["ticker"])
+    return candidates[:max_suggestions]
+
+
+def get_peer_valuation(ticker: str) -> dict | None:
+    """Fetch valuation multiples for one peer (uses 1h-cached yfinance).
+
+    Falls back to Tiingo for price if yfinance returns empty.
+    """
+    from filings.client import get_yfinance_info
+
+    ticker = ticker.upper()
+    try:
+        info = get_yfinance_info(ticker)
+    except Exception:
+        info = {}
+
+    if not info:
+        info = {}
+
+    mcap = info.get("marketCap")
+    current_price = info.get("currentPrice") or info.get("regularMarketPrice")
+
+    # Tiingo fallback for price
+    if not current_price:
+        try:
+            from filings import tiingo
+            if tiingo.has_tiingo_key():
+                tq = tiingo.get_quote(ticker)
+                if tq and tq.get("last"):
+                    current_price = tq["last"]
+        except Exception:
+            pass
+
+    if not current_price:
+        return None
+
+    revenue = info.get("totalRevenue") or info.get("revenue")
+    ps = round(mcap / revenue, 2) if mcap and revenue and revenue > 0 else None
+
+    return {
+        "ticker": ticker,
+        "name": info.get("longName") or info.get("shortName") or ticker,
+        "current_price": current_price,
+        "market_cap": mcap,
+        "trailing_pe": info.get("trailingPE"),
+        "forward_pe": info.get("forwardPE"),
+        "ev_ebitda": info.get("enterpriseToEbitda"),
+        "price_to_sales": ps,
+        "trailing_eps": info.get("trailingEps"),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Public API
 # ═══════════════════════════════════════════════════════════════════════
@@ -331,6 +417,17 @@ def get_screener_data(ticker: str) -> dict | None:
     # Operating Margin
     operating_margin_vals = _row_values_list(annual_ratios, "Operating Margin")
 
+    # Income Tax & Pre-Tax Income (for effective tax rate)
+    annual_tax_vals = _row_values_list(annual_income, "Income Tax")
+    annual_pretax_vals = _row_values_list(annual_income, "Pre-Tax Income")
+
+    # D&A and SBC from cash flow statement
+    annual_da_vals = _row_values_list(annual_cashflow, "Depreciation & Amortization")
+    annual_sbc_vals = _row_values_list(annual_cashflow, "Stock-Based Compensation")
+
+    # CapEx (already extracted for FCF, but need raw values)
+    annual_capex_vals = _row_values_list(annual_cashflow, "Capital Expenditures")
+
     # Balance sheet items (most recent period)
     def _latest(stmt: dict | None, label: str) -> float | None:
         pairs = _extract_row_values(stmt, label)
@@ -363,12 +460,12 @@ def get_screener_data(ticker: str) -> dict | None:
     except Exception:
         logger.warning("forward estimates failed for %s", ticker)
 
-    # ── 4. Peers ──────────────────────────────────────────────────────
+    # ── 4. Suggested peers (lightweight — no yfinance calls) ─────────
     try:
-        peers = _discover_peers(ticker, yf_info)
+        suggested_peers = _suggest_peers(ticker, yf_info)
     except Exception:
-        logger.warning("peer discovery failed for %s", ticker)
-        peers = []
+        logger.warning("peer suggestion failed for %s", ticker)
+        suggested_peers = []
 
     # Company name fallback from S&P constituents
     company_name = yf_info.get("longName") or yf_info.get("shortName")
@@ -468,6 +565,54 @@ def get_screener_data(ticker: str) -> dict | None:
         except Exception:
             logger.debug("yfinance history fallback failed for %s", ticker)
 
+    # ── 4c. Advanced DCF fields ─────────────────────────────────────
+    # Effective tax rate = Income Tax / Pre-Tax Income, clamped 0–50%
+    effective_tax_rate = 0.21  # default 21%
+    if annual_tax_vals and annual_pretax_vals:
+        for i in range(min(len(annual_tax_vals), len(annual_pretax_vals))):
+            pt = annual_pretax_vals[i]
+            tx = annual_tax_vals[i]
+            if pt and abs(pt) > 0 and tx is not None:
+                rate = abs(tx) / abs(pt)
+                effective_tax_rate = max(0.0, min(0.50, round(rate, 4)))
+                break
+
+    # Latest revenue (base year for projections)
+    latest_revenue = annual_revenue_vals[0] if annual_revenue_vals else None
+
+    # CapEx / Revenue %
+    capex_to_revenue = None
+    if annual_capex_vals and latest_revenue and latest_revenue > 0:
+        raw_capex = abs(annual_capex_vals[0])
+        capex_to_revenue = round(raw_capex / abs(latest_revenue), 4)
+
+    # D&A / Revenue %
+    da_to_revenue = None
+    if annual_da_vals and latest_revenue and latest_revenue > 0:
+        da_to_revenue = round(abs(annual_da_vals[0]) / abs(latest_revenue), 4)
+
+    # NWC / Revenue % = (AR + Inventory - AP) / Revenue
+    nwc_to_revenue = None
+    ar = _latest(annual_balance, "Accounts Receivable")
+    inv = _latest(annual_balance, "Inventory")
+    ap = _latest(annual_balance, "Accounts Payable")
+    if latest_revenue and latest_revenue > 0:
+        nwc_components = []
+        if ar is not None:
+            nwc_components.append(ar)
+        if inv is not None:
+            nwc_components.append(inv)
+        if ap is not None:
+            nwc_components.append(-ap)
+        if nwc_components:
+            nwc = sum(nwc_components)
+            nwc_to_revenue = round(nwc / abs(latest_revenue), 4)
+
+    # SBC / Revenue %
+    sbc_to_revenue = None
+    if annual_sbc_vals and latest_revenue and latest_revenue > 0:
+        sbc_to_revenue = round(abs(annual_sbc_vals[0]) / abs(latest_revenue), 4)
+
     # ── 5. Assemble response ──────────────────────────────────────────
     return {
         "ticker": ticker,
@@ -500,7 +645,14 @@ def get_screener_data(ticker: str) -> dict | None:
             "total_debt": total_debt,
             "total_equity": total_equity,
             "price_to_sales": ps_ratio,
+            "latest_revenue": latest_revenue,
+            "effective_tax_rate": effective_tax_rate,
+            "capex_to_revenue": capex_to_revenue,
+            "da_to_revenue": da_to_revenue,
+            "nwc_to_revenue": nwc_to_revenue,
+            "sbc_to_revenue": sbc_to_revenue,
         },
-        "peers": peers,
+        "peers": [],
+        "suggested_peers": suggested_peers,
         "forward_estimates": fwd_estimates,
     }

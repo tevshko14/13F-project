@@ -172,6 +172,16 @@ _CASHFLOW_CONCEPTS: dict[str, list[str]] = {
         "PaymentsToAcquirePropertyPlantAndEquipment",
         "PaymentsToAcquireProductiveAssets",
     ],
+    "Depreciation & Amortization": [
+        "DepreciationDepletionAndAmortization",
+        "DepreciationAmortizationAndAccretionNet",
+        "DepreciationAndAmortization",
+    ],
+    "Stock-Based Compensation": [
+        "ShareBasedCompensation",
+        "AllocatedShareBasedCompensationExpense",
+        "ShareBasedCompensationExpense",
+    ],
     "Investing Cash Flow": [
         "NetCashProvidedByUsedInInvestingActivities",
     ],

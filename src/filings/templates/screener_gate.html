@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Screener Access — PaperPanda{% endblock %}
+{% block meta_description %}Password-protected stock valuation screener.{% endblock %}
+
+{% block content %}
+<style>
+.scr-gate { max-width: 440px; margin: 4rem auto; padding: 2rem 1.5rem; text-align: center; }
+.scr-gate h1 { font-size: 1.6rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--pp-text); }
+.scr-gate .scr-gate-sub { color: var(--pp-text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+.scr-gate .scr-gate-badge {
+    display: inline-block; padding: 0.3em 0.8em; border-radius: 999px;
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    background: rgba(245,158,11,0.12); color: #f59e0b; margin-bottom: 1rem;
+}
+.scr-gate form { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1rem; }
+.scr-gate input[type="password"] {
+    width: 100%; padding: 0.7em 1em; border-radius: 8px; font-size: 0.95rem;
+    border: 1px solid var(--pp-border-light); background: var(--pp-surface);
+    color: var(--pp-text); outline: none; transition: border-color 0.15s;
+    margin: 0; box-sizing: border-box;
+}
+.scr-gate input[type="password"]:focus { border-color: #0d9488; }
+.scr-gate button[type="submit"] {
+    width: 100%; padding: 0.7em 1.4em; border-radius: 8px; font-size: 0.95rem; font-weight: 600;
+    border: none; background: #0d9488; color: #fff; cursor: pointer; transition: background 0.15s;
+    margin: 0;
+}
+.scr-gate button[type="submit"]:hover { background: #0f766e; }
+.scr-gate .scr-gate-err { color: #ef4444; font-size: 0.82rem; margin-top: 0.5rem; }
+.scr-gate .scr-gate-note {
+    color: var(--pp-text-muted); font-size: 0.78rem; margin-top: 1.5rem;
+    padding-top: 1rem; border-top: 1px solid var(--pp-border-light);
+}
+</style>
+<div class="scr-gate">
+    <span class="scr-gate-badge">Beta Feature</span>
+    <h1>Stock Valuation Screener</h1>
+    <p class="scr-gate-sub">This feature is currently in testing. Enter the access password to continue.</p>
+    <form method="POST" action="/screener/auth">
+        <input type="password" name="password" placeholder="Enter password" autofocus required>
+        <button type="submit">Enter</button>
+    </form>
+    {% if error %}
+    <p class="scr-gate-err">{{ error }}</p>
+    {% endif %}
+    <p class="scr-gate-note">The screener includes DCF, Monte Carlo simulation, and peer comparison models. Contact us for access.</p>
+</div>
+{% endblock %}
