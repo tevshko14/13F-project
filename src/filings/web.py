@@ -5654,6 +5654,30 @@ async def sitemap_xml():
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Stock Screener — DCF / Monte Carlo / Comps valuation tool
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@app.get("/screener", response_class=HTMLResponse)
+async def screener_page(request: Request):
+    """Interactive stock valuation screener (DCF, Monte Carlo, Comps)."""
+    return templates.TemplateResponse("screener.html", {"request": request})
+
+
+@app.get("/api/screener/{ticker}", response_class=JSONResponse)
+async def api_screener_data(request: Request, ticker: str):
+    """Return all data needed for client-side valuation calculations."""
+    if not _valid_ticker(ticker):
+        return PlainTextResponse("Invalid ticker", status_code=400)
+    from filings import screener
+
+    data = await _to_heavy(screener.get_screener_data, ticker)
+    if not data:
+        return JSONResponse({"error": "No data available"}, status_code=404)
+    return JSONResponse(data)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Rate limiting decorators (applied only if slowapi installed)
 # ═══════════════════════════════════════════════════════════════════════
 

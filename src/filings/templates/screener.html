@@ -1,0 +1,1207 @@
+{% extends "base.html" %}
+{% block title %}Stock Valuation Screener — DCF & Monte Carlo | PaperPanda{% endblock %}
+{% block meta_description %}Interactive stock valuation tool with DCF, Monte Carlo simulation, and peer comparison analysis.{% endblock %}
+
+{% block content %}
+<style>
+/* ── Screener Layout ─────────────────────────────────────────────── */
+.scr-shell { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+.scr-hero { text-align: center; margin-bottom: 1.5rem; }
+.scr-hero h1 { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; margin: 0 0 0.25rem; color: var(--pp-text); }
+.scr-hero p { color: var(--pp-text-muted); font-size: 0.95rem; margin: 0; }
+
+/* ── Search ──────────────────────────────────────────────────────── */
+.scr-search-wrap { position: relative; max-width: 500px; margin: 0 auto 1.5rem; }
+.scr-search-input {
+    width: 100%; padding: 0.65rem 1rem 0.65rem 2.5rem;
+    border: 1px solid var(--pp-border); border-radius: 10px;
+    background: var(--pp-surface); color: var(--pp-text);
+    font-size: 0.95rem; outline: none; transition: border-color 0.15s;
+}
+.scr-search-input:focus { border-color: #0d9488; box-shadow: 0 0 0 3px rgba(13,148,136,0.12); }
+.scr-search-icon {
+    position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%);
+    color: var(--pp-text-muted); pointer-events: none;
+}
+.scr-search-results {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    background: var(--pp-surface); border: 1px solid var(--pp-border);
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    max-height: 300px; overflow-y: auto; z-index: 100;
+}
+.scr-search-item {
+    padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.9rem;
+    color: var(--pp-text); border-bottom: 1px solid var(--pp-border-light);
+}
+.scr-search-item:last-child { border-bottom: none; }
+.scr-search-item:hover, .scr-search-item.active { background: rgba(13,148,136,0.08); }
+.scr-search-item strong { color: #0d9488; }
+
+/* ── Loading ─────────────────────────────────────────────────────── */
+.scr-loading { text-align: center; padding: 3rem 0; color: var(--pp-text-muted); }
+.scr-spinner { display: inline-block; width: 28px; height: 28px; border: 3px solid var(--pp-border);
+    border-top-color: #0d9488; border-radius: 50%; animation: scr-spin 0.7s linear infinite; }
+@keyframes scr-spin { to { transform: rotate(360deg); } }
+
+/* ── Summary Cards ───────────────────────────────────────────────── */
+.scr-summary-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.65rem; margin-bottom: 1.25rem;
+}
+.scr-summary-card {
+    background: var(--pp-surface); border: 1px solid var(--pp-border-light);
+    border-radius: 10px; padding: 0.75rem 0.9rem; text-align: center;
+}
+.scr-summary-card .scr-label { font-size: 0.72rem; color: var(--pp-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.15rem; }
+.scr-summary-card .scr-value { font-size: 1.15rem; font-weight: 700; color: var(--pp-text); font-variant-numeric: tabular-nums; }
+
+/* ── Two-column Layout ───────────────────────────────────────────── */
+.scr-layout { display: grid; grid-template-columns: 260px 1fr; gap: 1.25rem; }
+@media (max-width: 768px) { .scr-layout { grid-template-columns: 1fr; } }
+
+/* ── Assumptions Sidebar ─────────────────────────────────────────── */
+.scr-sidebar {
+    background: var(--pp-surface); border: 1px solid var(--pp-border-light);
+    border-radius: 12px; padding: 1rem; position: sticky; top: 1rem;
+    max-height: calc(100vh - 2rem); overflow-y: auto;
+}
+.scr-sidebar h3 { font-size: 0.82rem; font-weight: 600; color: var(--pp-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 0.75rem; }
+.scr-group-title { font-size: 0.72rem; font-weight: 600; color: #0d9488; text-transform: uppercase; letter-spacing: 0.05em; margin: 1rem 0 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--pp-border-light); }
+.scr-group-title:first-of-type { margin-top: 0; padding-top: 0; border-top: none; }
+.scr-slider-label { display: flex; justify-content: space-between; align-items: center; font-size: 0.82rem; color: var(--pp-text); margin-bottom: 0.2rem; }
+.scr-slider-val { font-weight: 600; color: #0d9488; font-variant-numeric: tabular-nums; }
+.scr-slider-row { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.65rem; }
+.scr-slider-row input[type="range"] { flex: 1; accent-color: #0d9488; height: 4px; }
+.scr-num-input {
+    width: 62px; padding: 0.2em 0.4em; font-size: 0.82rem;
+    background: var(--pp-surface-alt, var(--pp-surface)); color: var(--pp-text);
+    border: 1px solid var(--pp-border); border-radius: 6px; text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Main Content ────────────────────────────────────────────────── */
+.scr-main { min-width: 0; }
+
+/* ── Tabs ────────────────────────────────────────────────────────── */
+.scr-tabs { display: flex; gap: 0.25rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.scr-tab {
+    padding: 0.45em 0.9em; border-radius: 8px; border: 1px solid var(--pp-border);
+    background: transparent; color: var(--pp-text-muted); cursor: pointer;
+    font-size: 0.85rem; font-weight: 500; transition: all 0.15s;
+}
+.scr-tab:hover { border-color: rgba(13,148,136,0.3); color: var(--pp-text); }
+.scr-tab.active { background: rgba(13,148,136,0.12); color: #0d9488; border-color: rgba(13,148,136,0.3); font-weight: 600; }
+
+/* ── Chart ───────────────────────────────────────────────────────── */
+.scr-chart-wrap { width: 100%; height: 360px; margin-bottom: 1rem; }
+
+/* ── Valuation Result ────────────────────────────────────────────── */
+.scr-result-box {
+    background: var(--pp-surface); border: 1px solid var(--pp-border-light);
+    border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1rem;
+}
+.scr-result-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+.scr-fair-value { font-size: 1.6rem; font-weight: 700; color: var(--pp-text); font-variant-numeric: tabular-nums; }
+.scr-fair-label { font-size: 0.78rem; color: var(--pp-text-muted); margin-bottom: 0.1rem; }
+.scr-badge {
+    display: inline-block; padding: 0.25em 0.75em; border-radius: 6px;
+    font-weight: 600; font-size: 0.85rem;
+}
+.scr-badge-under { background: rgba(22,163,74,0.12); color: #16a34a; }
+.scr-badge-over { background: rgba(220,38,38,0.12); color: #dc2626; }
+.scr-badge-fair { background: rgba(234,179,8,0.12); color: #ca8a04; }
+.scr-upside { font-size: 0.85rem; color: var(--pp-text-muted); margin-top: 0.25rem; }
+.scr-breakdown { margin-top: 0.75rem; font-size: 0.82rem; color: var(--pp-text-muted); }
+.scr-breakdown dt { display: inline; font-weight: 500; }
+.scr-breakdown dd { display: inline; margin: 0 1rem 0 0.25rem; font-variant-numeric: tabular-nums; }
+
+/* ── Peer Table ──────────────────────────────────────────────────── */
+.scr-peer-section { margin-top: 1.25rem; }
+.scr-peer-section h3 { font-size: 0.95rem; font-weight: 600; color: var(--pp-text); margin: 0 0 0.75rem; }
+.scr-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.scr-peer-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; white-space: nowrap; }
+.scr-peer-table th {
+    text-align: left; padding: 0.5em 0.65em; color: var(--pp-text-muted);
+    border-bottom: 2px solid var(--pp-border); font-weight: 500; font-size: 0.75rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+}
+.scr-peer-table td { padding: 0.5em 0.65em; border-bottom: 1px solid var(--pp-border-light); }
+.scr-peer-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.scr-peer-table .target-row { background: rgba(13,148,136,0.06); font-weight: 600; }
+.scr-peer-table .median-row { border-top: 2px solid var(--pp-border); font-weight: 600; font-style: italic; }
+.scr-discount { color: #16a34a; font-weight: 600; }
+.scr-premium { color: #dc2626; font-weight: 600; }
+
+/* ── Tooltip ─────────────────────────────────────────────────────── */
+.scr-tip { position: relative; cursor: help; border-bottom: 1px dotted var(--pp-text-muted); }
+.scr-tip::after {
+    content: attr(data-tip); position: absolute; bottom: 120%; left: 50%;
+    transform: translateX(-50%); background: rgba(15,23,42,0.92); color: #e2e8f0;
+    padding: 0.35em 0.6em; border-radius: 6px; font-size: 0.72rem;
+    white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 0.15s;
+    z-index: 50;
+}
+.scr-tip:hover::after { opacity: 1; }
+
+/* ── Empty State ─────────────────────────────────────────────────── */
+.scr-empty { text-align: center; padding: 4rem 1rem; color: var(--pp-text-muted); }
+.scr-empty-icon { font-size: 3rem; margin-bottom: 0.5rem; opacity: 0.4; }
+.scr-empty p { font-size: 0.95rem; }
+
+/* ── Error ────────────────────────────────────────────────────────── */
+.scr-error { text-align: center; padding: 2rem; color: #dc2626; font-size: 0.9rem; }
+
+/* ── Misc ─────────────────────────────────────────────────────────── */
+.scr-hidden { display: none !important; }
+</style>
+
+<div class="scr-shell">
+    <!-- Hero -->
+    <div class="scr-hero">
+        <h1>Stock Valuation Screener</h1>
+        <p>DCF, Monte Carlo simulation &amp; peer comparison analysis</p>
+    </div>
+
+    <!-- Search -->
+    <div class="scr-search-wrap">
+        <svg class="scr-search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" class="scr-search-input" id="scr-ticker-search" placeholder="Search ticker (e.g. AAPL, MSFT)..." autocomplete="off" spellcheck="false">
+        <div class="scr-search-results" id="scr-search-results"></div>
+    </div>
+
+    <!-- Loading -->
+    <div class="scr-loading scr-hidden" id="scr-loading">
+        <div class="scr-spinner"></div>
+        <p style="margin-top:0.5rem;">Loading valuation data...</p>
+    </div>
+
+    <!-- Error -->
+    <div class="scr-error scr-hidden" id="scr-error"></div>
+
+    <!-- Empty state -->
+    <div id="scr-empty" class="scr-empty">
+        <div class="scr-empty-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+        </div>
+        <p>Enter a ticker above to begin valuation analysis</p>
+    </div>
+
+    <!-- Main content (hidden until data loads) -->
+    <div id="scr-content" class="scr-hidden">
+        <!-- Ticker header -->
+        <div style="margin-bottom:0.75rem;">
+            <span id="scr-ticker-badge" style="font-size:1.3rem;font-weight:700;color:#0d9488;"></span>
+            <span id="scr-company-name" style="font-size:0.95rem;color:var(--pp-text-muted);margin-left:0.5rem;"></span>
+            <span id="scr-sector-badge" style="font-size:0.72rem;background:var(--pp-surface-alt,var(--pp-surface));border:1px solid var(--pp-border-light);border-radius:5px;padding:0.15em 0.5em;margin-left:0.5rem;color:var(--pp-text-muted);"></span>
+        </div>
+
+        <!-- Summary cards -->
+        <div class="scr-summary-row" id="scr-summary-row"></div>
+
+        <!-- Layout: sidebar + main -->
+        <div class="scr-layout">
+            <!-- Assumptions sidebar -->
+            <div class="scr-sidebar">
+                <h3>Assumptions</h3>
+
+                <!-- DCF assumptions -->
+                <div id="scr-dcf-inputs">
+                    <div class="scr-group-title">DCF Model</div>
+
+                    <label class="scr-slider-label">Revenue Growth (%) <span class="scr-slider-val" id="val-rev-growth">8.0%</span></label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-rev-growth" min="-20" max="50" step="0.5" value="8" oninput="SCR.syncSlider('rev-growth',this.value)">
+                        <input type="number" id="input-rev-growth" min="-20" max="50" step="0.5" value="8" class="scr-num-input" oninput="SCR.syncInput('rev-growth',this.value)">
+                    </div>
+
+                    <label class="scr-slider-label">Operating Margin (%) <span class="scr-slider-val" id="val-op-margin">20.0%</span></label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-op-margin" min="-10" max="60" step="0.5" value="20" oninput="SCR.syncSlider('op-margin',this.value)">
+                        <input type="number" id="input-op-margin" min="-10" max="60" step="0.5" value="20" class="scr-num-input" oninput="SCR.syncInput('op-margin',this.value)">
+                    </div>
+
+                    <label class="scr-slider-label">
+                        <span class="scr-tip" data-tip="Weighted Average Cost of Capital — the discount rate applied to future cash flows">Discount Rate / WACC (%)</span>
+                        <span class="scr-slider-val" id="val-wacc">10.0%</span>
+                    </label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-wacc" min="4" max="20" step="0.25" value="10" oninput="SCR.syncSlider('wacc',this.value)">
+                        <input type="number" id="input-wacc" min="4" max="20" step="0.25" value="10" class="scr-num-input" oninput="SCR.syncInput('wacc',this.value)">
+                    </div>
+
+                    <label class="scr-slider-label">
+                        <span class="scr-tip" data-tip="Long-term growth rate after projection period (typically ~GDP growth)">Terminal Growth (%)</span>
+                        <span class="scr-slider-val" id="val-terminal">2.5%</span>
+                    </label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-terminal" min="0" max="5" step="0.25" value="2.5" oninput="SCR.syncSlider('terminal',this.value)">
+                        <input type="number" id="input-terminal" min="0" max="5" step="0.25" value="2.5" class="scr-num-input" oninput="SCR.syncInput('terminal',this.value)">
+                    </div>
+
+                    <label class="scr-slider-label">Projection Years <span class="scr-slider-val" id="val-proj-years">5</span></label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-proj-years" min="3" max="10" step="1" value="5" oninput="SCR.syncSlider('proj-years',this.value)">
+                        <input type="number" id="input-proj-years" min="3" max="10" step="1" value="5" class="scr-num-input" oninput="SCR.syncInput('proj-years',this.value)">
+                    </div>
+                </div>
+
+                <!-- MC assumptions -->
+                <div id="scr-mc-inputs" class="scr-hidden">
+                    <div class="scr-group-title">Monte Carlo</div>
+
+                    <label class="scr-slider-label">Simulations <span class="scr-slider-val" id="val-mc-sims">5,000</span></label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-mc-sims" min="1000" max="10000" step="1000" value="5000" oninput="SCR.syncSlider('mc-sims',this.value)">
+                        <input type="number" id="input-mc-sims" min="1000" max="10000" step="1000" value="5000" class="scr-num-input" oninput="SCR.syncInput('mc-sims',this.value)">
+                    </div>
+
+                    <label class="scr-slider-label">
+                        <span class="scr-tip" data-tip="Annualized volatility — higher = wider range of outcomes">Volatility / Sigma</span>
+                        <span class="scr-slider-val" id="val-mc-sigma">0.30</span>
+                    </label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-mc-sigma" min="0.05" max="1.0" step="0.01" value="0.30" oninput="SCR.syncSlider('mc-sigma',this.value)">
+                        <input type="number" id="input-mc-sigma" min="0.05" max="1.0" step="0.01" value="0.30" class="scr-num-input" oninput="SCR.syncInput('mc-sigma',this.value)">
+                    </div>
+
+                    <label class="scr-slider-label">
+                        <span class="scr-tip" data-tip="Expected annual drift (return) — e.g. 0.08 = 8% annual growth">Drift / Mu</span>
+                        <span class="scr-slider-val" id="val-mc-mu">0.08</span>
+                    </label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-mc-mu" min="-0.20" max="0.50" step="0.01" value="0.08" oninput="SCR.syncSlider('mc-mu',this.value)">
+                        <input type="number" id="input-mc-mu" min="-0.20" max="0.50" step="0.01" value="0.08" class="scr-num-input" oninput="SCR.syncInput('mc-mu',this.value)">
+                    </div>
+
+                    <label class="scr-slider-label">Projection (Trading Days) <span class="scr-slider-val" id="val-mc-days">252</span></label>
+                    <div class="scr-slider-row">
+                        <input type="range" id="slider-mc-days" min="63" max="756" step="63" value="252" oninput="SCR.syncSlider('mc-days',this.value)">
+                        <input type="number" id="input-mc-days" min="63" max="756" step="63" value="252" class="scr-num-input" oninput="SCR.syncInput('mc-days',this.value)">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main area -->
+            <div class="scr-main">
+                <!-- Tabs -->
+                <div class="scr-tabs">
+                    <button class="scr-tab active" data-tab="dcf" onclick="SCR.switchTab('dcf')">DCF Model</button>
+                    <button class="scr-tab" data-tab="mc" onclick="SCR.switchTab('mc')">Monte Carlo</button>
+                    <button class="scr-tab" data-tab="comps" onclick="SCR.switchTab('comps')">Relative Value</button>
+                </div>
+
+                <!-- Chart container -->
+                <div class="scr-chart-wrap" id="scr-chart"></div>
+
+                <!-- Valuation result -->
+                <div class="scr-result-box" id="scr-result-box">
+                    <div class="scr-result-row">
+                        <div>
+                            <div class="scr-fair-label" id="scr-result-label">Fair Value Estimate</div>
+                            <div class="scr-fair-value" id="scr-fair-value">--</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <span class="scr-badge" id="scr-badge"></span>
+                            <div class="scr-upside" id="scr-upside"></div>
+                        </div>
+                    </div>
+                    <dl class="scr-breakdown" id="scr-breakdown"></dl>
+                </div>
+
+                <!-- Peer table (comps tab only) -->
+                <div class="scr-peer-section scr-hidden" id="scr-peer-section">
+                    <h3>Peer Comparison</h3>
+                    <div class="scr-table-wrap">
+                        <table class="scr-peer-table" id="scr-peer-table">
+                            <thead id="scr-peer-thead"></thead>
+                            <tbody id="scr-peer-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    /* ═══════════════════════════════════════════════════════════════
+       Global state
+       ═══════════════════════════════════════════════════════════════ */
+    var _data = null;       // JSON from /api/screener/{ticker}
+    var _currentTab = 'dcf';
+    var _recalcTimer = null;
+    var _chart = null;      // ECharts instance
+    var _fuseInstance = null;
+    var _searchHighlight = -1;
+
+    /* ═══════════════════════════════════════════════════════════════
+       Helpers
+       ═══════════════════════════════════════════════════════════════ */
+    function $(id) { return document.getElementById(id); }
+    function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function fmtDollar(v) {
+        if (v == null || isNaN(v)) return '--';
+        return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function fmtB(v) {
+        if (v == null || isNaN(v)) return '--';
+        var abs = Math.abs(v);
+        var sign = v < 0 ? '-' : '';
+        if (abs >= 1e12) return sign + '$' + (abs / 1e12).toFixed(2) + 'T';
+        if (abs >= 1e9) return sign + '$' + (abs / 1e9).toFixed(2) + 'B';
+        if (abs >= 1e6) return sign + '$' + (abs / 1e6).toFixed(1) + 'M';
+        if (abs >= 1e3) return sign + '$' + (abs / 1e3).toFixed(1) + 'K';
+        return sign + '$' + abs.toFixed(0);
+    }
+    function fmtPct(v) {
+        if (v == null || isNaN(v)) return '--';
+        return (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
+    }
+    function fmtNum(v, dec) {
+        if (v == null || isNaN(v)) return '--';
+        return v.toLocaleString('en-US', { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 });
+    }
+    function isDark() { return document.documentElement.getAttribute('data-theme') === 'dark'; }
+    function themeColors() {
+        var dark = isDark();
+        return {
+            text: dark ? 'rgba(226,232,240,0.7)' : 'rgba(15,23,42,0.55)',
+            grid: dark ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.07)',
+            tooltip: dark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+            tooltipText: dark ? '#e2e8f0' : '#1e293b',
+            tooltipBorder: dark ? 'rgba(148,163,184,0.2)' : 'rgba(0,0,0,0.08)'
+        };
+    }
+
+    function percentile(sorted, pct) {
+        var idx = (pct / 100) * (sorted.length - 1);
+        var lo = Math.floor(idx), hi = Math.ceil(idx);
+        if (lo === hi) return sorted[lo];
+        return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Slider / Input sync
+       ═══════════════════════════════════════════════════════════════ */
+    function syncSlider(param, val) {
+        $('input-' + param).value = val;
+        _updateValDisplay(param, val);
+        _scheduleRecalc();
+    }
+    function syncInput(param, val) {
+        $('slider-' + param).value = val;
+        _updateValDisplay(param, val);
+        _scheduleRecalc();
+    }
+    function _updateValDisplay(param, val) {
+        var el = $('val-' + param);
+        if (!el) return;
+        if (param === 'mc-sims') { el.textContent = parseInt(val).toLocaleString(); }
+        else if (param === 'mc-sigma' || param === 'mc-mu') { el.textContent = parseFloat(val).toFixed(2); }
+        else if (param === 'proj-years' || param === 'mc-days') { el.textContent = val; }
+        else { el.textContent = parseFloat(val).toFixed(1) + '%'; }
+    }
+    function _scheduleRecalc() {
+        clearTimeout(_recalcTimer);
+        _recalcTimer = setTimeout(function() { recalculate(); }, 80);
+    }
+    function _getVal(param) { return parseFloat($('input-' + param).value) || 0; }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Tab switching
+       ═══════════════════════════════════════════════════════════════ */
+    function switchTab(tab) {
+        _currentTab = tab;
+        document.querySelectorAll('.scr-tab').forEach(function(t) {
+            t.classList.toggle('active', t.getAttribute('data-tab') === tab);
+        });
+        // Show/hide assumption groups
+        $('scr-dcf-inputs').classList.toggle('scr-hidden', tab !== 'dcf');
+        $('scr-mc-inputs').classList.toggle('scr-hidden', tab !== 'mc');
+        // Show/hide peer section
+        $('scr-peer-section').classList.toggle('scr-hidden', tab !== 'comps');
+        recalculate();
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Search / Fuse.js
+       ═══════════════════════════════════════════════════════════════ */
+    function initSearch() {
+        var input = $('scr-ticker-search');
+        var results = $('scr-search-results');
+
+        function _buildFuse(allItems) {
+            // Filter to stocks only (same logic as base.html _initFuse)
+            var stocks = [];
+            for (var i = 0; i < allItems.length; i++) {
+                var t = allItems[i].type;
+                if (t !== 'investor' && t !== 'politician') stocks.push(allItems[i]);
+            }
+            _fuseInstance = new Fuse(stocks, {
+                keys: [{ name: 'ticker', weight: 1.0 }, { name: 'name', weight: 0.5 }],
+                threshold: 0.3, distance: 100, includeScore: true, minMatchCharLength: 1
+            });
+        }
+
+        function loadFuse(cb) {
+            if (_fuseInstance) { cb(); return; }
+            // Try sessionStorage first (base.html caches here)
+            try {
+                var raw = sessionStorage.getItem('pp_ticker_index');
+                if (raw) {
+                    var parsed = JSON.parse(raw);
+                    if (parsed && parsed.ts && (Date.now() - parsed.ts) < 1800000 && parsed.data) {
+                        _buildFuse(parsed.data);
+                        cb(); return;
+                    }
+                }
+            } catch(e) {}
+
+            fetch('/api/ticker-search-index')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    _buildFuse(data);
+                    cb();
+                })
+                .catch(function() {});
+        }
+
+        input.addEventListener('input', function() {
+            var q = this.value.trim();
+            _searchHighlight = -1;
+            if (q.length < 1) { results.style.display = 'none'; return; }
+            loadFuse(function() {
+                var matches = _fuseInstance.search(q, { limit: 8 });
+                if (matches.length === 0) { results.style.display = 'none'; return; }
+                results.innerHTML = matches.map(function(r, i) {
+                    return '<div class="scr-search-item" data-idx="' + i + '" data-ticker="' + escHtml(r.item.ticker) + '">'
+                        + '<strong>' + escHtml(r.item.ticker) + '</strong> &mdash; ' + escHtml(r.item.name) + '</div>';
+                }).join('');
+                results.style.display = 'block';
+
+                results.querySelectorAll('.scr-search-item').forEach(function(el) {
+                    el.addEventListener('click', function() {
+                        var t = this.getAttribute('data-ticker');
+                        input.value = t;
+                        results.style.display = 'none';
+                        loadTicker(t);
+                    });
+                });
+            });
+        });
+
+        // Keyboard nav
+        input.addEventListener('keydown', function(e) {
+            var items = results.querySelectorAll('.scr-search-item');
+            if (!items.length) return;
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                _searchHighlight = Math.min(_searchHighlight + 1, items.length - 1);
+                items.forEach(function(el, i) { el.classList.toggle('active', i === _searchHighlight); });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                _searchHighlight = Math.max(_searchHighlight - 1, 0);
+                items.forEach(function(el, i) { el.classList.toggle('active', i === _searchHighlight); });
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (_searchHighlight >= 0 && items[_searchHighlight]) {
+                    items[_searchHighlight].click();
+                } else if (input.value.trim().length >= 1) {
+                    loadTicker(input.value.trim().toUpperCase());
+                    results.style.display = 'none';
+                }
+            }
+        });
+
+        // Close on blur
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.scr-search-wrap')) results.style.display = 'none';
+        });
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Load Ticker Data
+       ═══════════════════════════════════════════════════════════════ */
+    function loadTicker(ticker) {
+        $('scr-empty').classList.add('scr-hidden');
+        $('scr-content').classList.add('scr-hidden');
+        $('scr-error').classList.add('scr-hidden');
+        $('scr-loading').classList.remove('scr-hidden');
+
+        fetch('/api/screener/' + encodeURIComponent(ticker))
+            .then(function(r) {
+                if (!r.ok) throw new Error('No data available for ' + ticker);
+                return r.json();
+            })
+            .then(function(data) {
+                if (data.error) throw new Error(data.error);
+                _data = data;
+                $('scr-loading').classList.add('scr-hidden');
+                $('scr-content').classList.remove('scr-hidden');
+                populateUI();
+                seedAssumptions();
+                recalculate();
+            })
+            .catch(function(err) {
+                $('scr-loading').classList.add('scr-hidden');
+                $('scr-error').textContent = err.message || 'Failed to load data';
+                $('scr-error').classList.remove('scr-hidden');
+            });
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Populate UI with loaded data
+       ═══════════════════════════════════════════════════════════════ */
+    function populateUI() {
+        var d = _data;
+        $('scr-ticker-badge').textContent = d.ticker;
+        $('scr-company-name').textContent = d.company_name || '';
+        $('scr-sector-badge').textContent = (d.sector || '') + (d.industry ? ' / ' + d.industry : '');
+
+        // Summary cards
+        var ttmFcf = null;
+        var qfcf = d.financials.quarterly_fcf || [];
+        if (qfcf.length >= 4) ttmFcf = qfcf[0] + qfcf[1] + qfcf[2] + qfcf[3];
+        else if (d.financials.annual_fcf && d.financials.annual_fcf.length > 0) ttmFcf = d.financials.annual_fcf[0];
+
+        var cards = [
+            { label: 'Price', value: fmtDollar(d.current_price) },
+            { label: 'Market Cap', value: fmtB(d.market_cap) },
+            { label: 'P/E', value: d.trailing_pe != null ? d.trailing_pe.toFixed(1) + 'x' : '--' },
+            { label: 'TTM FCF', value: fmtB(ttmFcf) },
+            { label: 'Beta', value: d.beta != null ? d.beta.toFixed(2) : '--' },
+            { label: '52W Range', value: (d.fifty_two_week_low != null ? '$' + d.fifty_two_week_low.toFixed(0) : '?') + ' - ' + (d.fifty_two_week_high != null ? '$' + d.fifty_two_week_high.toFixed(0) : '?') },
+        ];
+        $('scr-summary-row').innerHTML = cards.map(function(c) {
+            return '<div class="scr-summary-card"><div class="scr-label">' + c.label + '</div><div class="scr-value">' + c.value + '</div></div>';
+        }).join('');
+
+        // Build peer table if we have peers
+        buildPeerTable();
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Seed Assumptions from data
+       ═══════════════════════════════════════════════════════════════ */
+    function seedAssumptions() {
+        var d = _data;
+        var fin = d.financials;
+
+        // Revenue growth: average of available YoY
+        var rg = fin.revenue_growth_yoy;
+        var avgGrowth = 8;
+        if (rg && rg.length > 0) {
+            var sum = 0; for (var i = 0; i < rg.length; i++) sum += rg[i];
+            avgGrowth = Math.round((sum / rg.length) * 2) / 2; // round to nearest 0.5
+        }
+        _setSlider('rev-growth', Math.max(-20, Math.min(50, avgGrowth)));
+
+        // Operating margin: most recent
+        var om = fin.operating_margin;
+        var margin = 20;
+        if (om && om.length > 0 && om[0] != null) margin = Math.round(om[0] * 2) / 2;
+        _setSlider('op-margin', Math.max(-10, Math.min(60, margin)));
+
+        // WACC: default 10%
+        _setSlider('wacc', 10);
+
+        // Terminal growth: default 2.5%
+        _setSlider('terminal', 2.5);
+
+        // Projection years: 5
+        _setSlider('proj-years', 5);
+
+        // MC: sigma from beta
+        var sigma = 0.30;
+        if (d.beta != null && d.beta > 0) sigma = Math.round(d.beta * 0.20 * 100) / 100;
+        sigma = Math.max(0.05, Math.min(1.0, sigma));
+        _setSlider('mc-sigma', sigma);
+
+        // MC: mu from revenue growth
+        var mu = avgGrowth / 100;
+        mu = Math.max(-0.20, Math.min(0.50, Math.round(mu * 100) / 100));
+        _setSlider('mc-mu', mu);
+
+        _setSlider('mc-sims', 5000);
+        _setSlider('mc-days', 252);
+    }
+
+    function _setSlider(param, val) {
+        $('slider-' + param).value = val;
+        $('input-' + param).value = val;
+        _updateValDisplay(param, val);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Recalculate (debounced entry point)
+       ═══════════════════════════════════════════════════════════════ */
+    function recalculate() {
+        if (!_data) return;
+        if (_currentTab === 'dcf') { runDCF(); }
+        else if (_currentTab === 'mc') { runMC(); }
+        else { runComps(); }
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       DCF Model
+       ═══════════════════════════════════════════════════════════════ */
+    function runDCF() {
+        var d = _data;
+        var fin = d.financials;
+
+        // Get TTM FCF
+        var qfcf = fin.quarterly_fcf || [];
+        var ttmFcf = null;
+        if (qfcf.length >= 4) ttmFcf = qfcf[0] + qfcf[1] + qfcf[2] + qfcf[3];
+        else if (fin.annual_fcf && fin.annual_fcf.length > 0) ttmFcf = fin.annual_fcf[0];
+
+        if (ttmFcf == null || ttmFcf === 0) {
+            showResult('DCF Fair Value', null, 'No FCF data available for DCF calculation');
+            return;
+        }
+
+        var growth = _getVal('rev-growth') / 100;
+        var wacc = _getVal('wacc') / 100;
+        var termGr = _getVal('terminal') / 100;
+        var years = Math.round(_getVal('proj-years'));
+
+        if (termGr >= wacc) {
+            showResult('DCF Fair Value', null, 'Terminal growth must be less than WACC');
+            return;
+        }
+
+        var projFCF = [];
+        var currentFCF = ttmFcf;
+        for (var y = 1; y <= years; y++) {
+            currentFCF = currentFCF * (1 + growth);
+            projFCF.push(currentFCF);
+        }
+
+        // PV of projected FCFs
+        var pvFCFs = 0;
+        var pvYearly = [];
+        for (var i = 0; i < projFCF.length; i++) {
+            var pv = projFCF[i] / Math.pow(1 + wacc, i + 1);
+            pvFCFs += pv;
+            pvYearly.push(pv);
+        }
+
+        // Terminal value (Gordon Growth)
+        var termFCF = projFCF[projFCF.length - 1] * (1 + termGr);
+        var termValue = termFCF / (wacc - termGr);
+        var pvTerminal = termValue / Math.pow(1 + wacc, years);
+
+        var ev = pvFCFs + pvTerminal;
+        var cash = fin.cash_and_equivalents || 0;
+        var debt = fin.total_debt || 0;
+        var equityVal = ev + cash - debt;
+        var shares = d.shares_outstanding;
+        if (!shares || shares <= 0) {
+            showResult('DCF Fair Value', null, 'Shares outstanding data unavailable');
+            buildDCFChart(projFCF, pvYearly, years);
+            return;
+        }
+        var fairValue = equityVal / shares;
+
+        // Show result
+        showResult('DCF Fair Value', fairValue);
+
+        // Breakdown
+        var bd = $('scr-breakdown');
+        bd.innerHTML = '<dt>PV of FCFs:</dt><dd>' + fmtB(pvFCFs) + '</dd>'
+            + '<dt>PV of Terminal:</dt><dd>' + fmtB(pvTerminal) + '</dd>'
+            + '<dt>Enterprise Value:</dt><dd>' + fmtB(ev) + '</dd>'
+            + '<dt>+ Cash:</dt><dd>' + fmtB(cash) + '</dd>'
+            + '<dt>- Debt:</dt><dd>' + fmtB(debt) + '</dd>'
+            + '<dt>Equity Value:</dt><dd>' + fmtB(equityVal) + '</dd>';
+
+        // Build chart
+        buildDCFChart(projFCF, pvYearly, years);
+    }
+
+    function buildDCFChart(projFCF, pvYearly, years) {
+        requireECharts(function() {
+            var c = themeColors();
+            if (_chart) _chart.dispose();
+            _chart = echarts.init($('scr-chart'));
+
+            var cats = [];
+            for (var i = 1; i <= years; i++) cats.push('Year ' + i);
+
+            _chart.setOption({
+                animation: true,
+                backgroundColor: 'transparent',
+                tooltip: { trigger: 'axis', backgroundColor: c.tooltip, borderColor: c.tooltipBorder, textStyle: { color: c.tooltipText },
+                    formatter: function(ps) {
+                        var s = '<strong>' + ps[0].name + '</strong>';
+                        ps.forEach(function(p) { s += '<br>' + p.marker + ' ' + p.seriesName + ': ' + fmtB(p.value); });
+                        return s;
+                    }
+                },
+                legend: { bottom: 0, textStyle: { color: c.text }, itemGap: 20 },
+                grid: { left: 60, right: 20, top: 20, bottom: 40 },
+                xAxis: { type: 'category', data: cats, axisLabel: { color: c.text }, axisLine: { lineStyle: { color: c.grid } } },
+                yAxis: { type: 'value', axisLabel: { color: c.text, formatter: function(v) { return fmtB(v); } }, splitLine: { lineStyle: { color: c.grid } } },
+                series: [
+                    { name: 'Projected FCF', type: 'bar', data: projFCF, itemStyle: { color: '#0d9488', borderRadius: [3,3,0,0] }, barMaxWidth: 45 },
+                    { name: 'Present Value', type: 'line', data: pvYearly, lineStyle: { color: '#7c3aed', width: 2.5 }, itemStyle: { color: '#7c3aed' }, symbol: 'circle', symbolSize: 7, areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: 'rgba(124,58,237,0.15)' }, { offset: 1, color: 'rgba(124,58,237,0)' }] } } }
+                ]
+            });
+
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { if (_chart) _chart.resize(); });
+        });
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Monte Carlo Simulation
+       ═══════════════════════════════════════════════════════════════ */
+    function runMC() {
+        var d = _data;
+        var price = d.current_price;
+        var mu = _getVal('mc-mu');
+        var sigma = _getVal('mc-sigma');
+        var numSims = Math.round(_getVal('mc-sims'));
+        var days = Math.round(_getVal('mc-days'));
+        var dt = 1 / 252;
+
+        // Run simulation — record at weekly intervals
+        var recordInterval = 5;
+        var numSteps = Math.ceil(days / recordInterval) + 1;
+        // For percentile calculation, collect prices at each step
+        var stepPrices = [];
+        for (var s = 0; s < numSteps; s++) stepPrices.push([]);
+
+        var finalPrices = [];
+
+        for (var sim = 0; sim < numSims; sim++) {
+            var p = price;
+            var stepIdx = 0;
+            stepPrices[0].push(p);
+            stepIdx = 1;
+
+            for (var day = 1; day <= days; day++) {
+                // Box-Muller
+                var u1 = Math.random(), u2 = Math.random();
+                var z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+                var drift = (mu - 0.5 * sigma * sigma) * dt;
+                var diffusion = sigma * Math.sqrt(dt) * z;
+                p = p * Math.exp(drift + diffusion);
+
+                if (day % recordInterval === 0 && stepIdx < numSteps) {
+                    stepPrices[stepIdx].push(p);
+                    stepIdx++;
+                }
+            }
+            // Final
+            if (stepIdx < numSteps) stepPrices[stepIdx].push(p);
+            finalPrices.push(p);
+        }
+
+        // Compute percentiles at each step
+        var p10 = [], p25 = [], p50 = [], p75 = [], p90 = [];
+        for (var i = 0; i < numSteps; i++) {
+            var sp = stepPrices[i].slice().sort(function(a, b) { return a - b; });
+            if (sp.length === 0) { p10.push(price); p25.push(price); p50.push(price); p75.push(price); p90.push(price); continue; }
+            p10.push(percentile(sp, 10));
+            p25.push(percentile(sp, 25));
+            p50.push(percentile(sp, 50));
+            p75.push(percentile(sp, 75));
+            p90.push(percentile(sp, 90));
+        }
+
+        finalPrices.sort(function(a, b) { return a - b; });
+        var medianFinal = percentile(finalPrices, 50);
+
+        showResult('Monte Carlo Median (1Y)', medianFinal);
+
+        // Breakdown
+        var bd = $('scr-breakdown');
+        bd.innerHTML = '<dt>10th Pctl:</dt><dd>' + fmtDollar(percentile(finalPrices, 10)) + '</dd>'
+            + '<dt>25th Pctl:</dt><dd>' + fmtDollar(percentile(finalPrices, 25)) + '</dd>'
+            + '<dt>Median:</dt><dd>' + fmtDollar(medianFinal) + '</dd>'
+            + '<dt>75th Pctl:</dt><dd>' + fmtDollar(percentile(finalPrices, 75)) + '</dd>'
+            + '<dt>90th Pctl:</dt><dd>' + fmtDollar(percentile(finalPrices, 90)) + '</dd>'
+            + '<dt>Simulations:</dt><dd>' + numSims.toLocaleString() + '</dd>';
+
+        buildMCChart(p10, p25, p50, p75, p90, numSteps, price);
+    }
+
+    function buildMCChart(p10, p25, p50, p75, p90, numSteps, currentPrice) {
+        requireECharts(function() {
+            var c = themeColors();
+            if (_chart) _chart.dispose();
+            _chart = echarts.init($('scr-chart'));
+
+            var cats = [];
+            for (var i = 0; i < numSteps; i++) {
+                if (i === 0) cats.push('Now');
+                else cats.push('W' + i);
+            }
+
+            _chart.setOption({
+                animation: false,
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis', backgroundColor: c.tooltip, borderColor: c.tooltipBorder,
+                    textStyle: { color: c.tooltipText },
+                    formatter: function(ps) {
+                        var s = '<strong>' + ps[0].name + '</strong>';
+                        // Show median and bands
+                        var m = ps.find(function(p) { return p.seriesName === 'Median'; });
+                        if (m) s += '<br>' + m.marker + ' Median: ' + fmtDollar(m.value);
+                        return s;
+                    }
+                },
+                grid: { left: 60, right: 20, top: 15, bottom: 35 },
+                xAxis: { type: 'category', data: cats, axisLabel: { color: c.text, interval: Math.max(1, Math.floor(numSteps / 8)) }, axisLine: { lineStyle: { color: c.grid } }, boundaryGap: false },
+                yAxis: { type: 'value', axisLabel: { color: c.text, formatter: function(v) { return '$' + v.toFixed(0); } }, splitLine: { lineStyle: { color: c.grid } } },
+                series: [
+                    // Build fan chart using stacked areas
+                    { name: 'p10-base', type: 'line', data: p10, lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 }, stack: 'band', symbol: 'none', silent: true },
+                    { name: '10-25', type: 'line', data: p25.map(function(v, i) { return Math.max(0, v - p10[i]); }), lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(13,148,136,0.08)' }, stack: 'band', symbol: 'none', silent: true },
+                    { name: '25-50', type: 'line', data: p50.map(function(v, i) { return Math.max(0, v - p25[i]); }), lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(13,148,136,0.15)' }, stack: 'band', symbol: 'none', silent: true },
+                    { name: '50-75', type: 'line', data: p75.map(function(v, i) { return Math.max(0, v - p50[i]); }), lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(13,148,136,0.15)' }, stack: 'band', symbol: 'none', silent: true },
+                    { name: '75-90', type: 'line', data: p90.map(function(v, i) { return Math.max(0, v - p75[i]); }), lineStyle: { opacity: 0 }, areaStyle: { color: 'rgba(13,148,136,0.08)' }, stack: 'band', symbol: 'none', silent: true },
+                    // Median line
+                    { name: 'Median', type: 'line', data: p50, lineStyle: { color: '#0d9488', width: 2.5 }, itemStyle: { color: '#0d9488' }, symbol: 'none', z: 10 },
+                    // Current price
+                    { name: 'Current Price', type: 'line', data: p50.map(function() { return currentPrice; }), lineStyle: { color: '#ef4444', width: 1.5, type: 'dashed' }, symbol: 'none', z: 10 }
+                ],
+                legend: { show: false }
+            });
+
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { if (_chart) _chart.resize(); });
+        });
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Relative Valuation / Comps
+       ═══════════════════════════════════════════════════════════════ */
+    function runComps() {
+        var d = _data;
+        var peers = d.peers || [];
+
+        if (peers.length === 0) {
+            showResult('Relative Valuation', null, 'No peer companies available for comparison');
+            $('scr-breakdown').innerHTML = '';
+            buildEmptyFootballField();
+            return;
+        }
+
+        // Compute median peer P/E
+        var peerPEs = peers.map(function(p) { return p.trailing_pe; }).filter(function(v) { return v != null && v > 0; });
+        peerPEs.sort(function(a, b) { return a - b; });
+        var medianPE = peerPEs.length > 0 ? percentile(peerPEs, 50) : null;
+
+        var impliedPrice = null;
+        if (medianPE && d.trailing_eps && d.trailing_eps > 0) {
+            impliedPrice = medianPE * d.trailing_eps;
+        }
+
+        showResult('Comps Implied Price', impliedPrice);
+
+        // Breakdown
+        var bd = $('scr-breakdown');
+        bd.innerHTML = '<dt>Median Peer P/E:</dt><dd>' + (medianPE ? medianPE.toFixed(1) + 'x' : '--') + '</dd>'
+            + '<dt>Target EPS:</dt><dd>' + (d.trailing_eps ? '$' + d.trailing_eps.toFixed(2) : '--') + '</dd>'
+            + '<dt>Implied Price:</dt><dd>' + fmtDollar(impliedPrice) + '</dd>'
+            + '<dt>Peers Found:</dt><dd>' + peers.length + '</dd>';
+
+        // Football field chart
+        buildFootballField(medianPE, peerPEs, impliedPrice);
+    }
+
+    function buildPeerTable() {
+        var d = _data;
+        var peers = d.peers || [];
+
+        $('scr-peer-thead').innerHTML = '<tr>'
+            + '<th>Ticker</th><th>Company</th><th class="num">Mkt Cap</th>'
+            + '<th class="num"><span class="scr-tip" data-tip="Price / Earnings (trailing 12 months)">P/E</span></th>'
+            + '<th class="num"><span class="scr-tip" data-tip="Price / Forward Earnings estimate">Fwd P/E</span></th>'
+            + '<th class="num"><span class="scr-tip" data-tip="Enterprise Value / EBITDA">EV/EBITDA</span></th>'
+            + '<th class="num"><span class="scr-tip" data-tip="Price / Revenue">P/S</span></th>'
+            + '<th class="num">Implied Price</th>'
+            + '</tr>';
+
+        // Compute median PE for implied price
+        var allPEs = peers.map(function(p) { return p.trailing_pe; }).filter(function(v) { return v != null && v > 0; });
+        allPEs.sort(function(a, b) { return a - b; });
+        var medPE = allPEs.length > 0 ? percentile(allPEs, 50) : null;
+        var targetEPS = d.trailing_eps;
+
+        var rows = '';
+
+        // Target row
+        rows += '<tr class="target-row">'
+            + '<td><strong>' + escHtml(d.ticker) + '</strong></td>'
+            + '<td>' + escHtml(d.company_name || '') + '</td>'
+            + '<td class="num">' + fmtB(d.market_cap) + '</td>'
+            + '<td class="num">' + (d.trailing_pe != null ? d.trailing_pe.toFixed(1) + 'x' : '--') + '</td>'
+            + '<td class="num">' + (d.forward_pe != null ? d.forward_pe.toFixed(1) + 'x' : '--') + '</td>'
+            + '<td class="num">' + (d.ev_ebitda != null ? d.ev_ebitda.toFixed(1) + 'x' : '--') + '</td>'
+            + '<td class="num">' + (d.financials.price_to_sales != null ? d.financials.price_to_sales.toFixed(1) + 'x' : '--') + '</td>'
+            + '<td class="num">--</td>'
+            + '</tr>';
+
+        // Peer rows
+        peers.forEach(function(p) {
+            var imp = null;
+            if (medPE && targetEPS && targetEPS > 0) imp = medPE * targetEPS;
+            rows += '<tr>'
+                + '<td><strong>' + escHtml(p.ticker) + '</strong></td>'
+                + '<td>' + escHtml(p.name || '') + '</td>'
+                + '<td class="num">' + fmtB(p.market_cap) + '</td>'
+                + '<td class="num">' + (p.trailing_pe != null ? p.trailing_pe.toFixed(1) + 'x' : '--') + '</td>'
+                + '<td class="num">' + (p.forward_pe != null ? p.forward_pe.toFixed(1) + 'x' : '--') + '</td>'
+                + '<td class="num">' + (p.ev_ebitda != null ? p.ev_ebitda.toFixed(1) + 'x' : '--') + '</td>'
+                + '<td class="num">' + (p.price_to_sales != null ? p.price_to_sales.toFixed(1) + 'x' : '--') + '</td>'
+                + '<td class="num">--</td>'
+                + '</tr>';
+        });
+
+        // Median row
+        if (allPEs.length > 0) {
+            var medFwd = peers.map(function(p) { return p.forward_pe; }).filter(function(v) { return v != null && v > 0; });
+            medFwd.sort(function(a, b) { return a - b; });
+            var medFwdPE = medFwd.length > 0 ? percentile(medFwd, 50) : null;
+
+            var medEV = peers.map(function(p) { return p.ev_ebitda; }).filter(function(v) { return v != null && v > 0; });
+            medEV.sort(function(a, b) { return a - b; });
+            var medEVEB = medEV.length > 0 ? percentile(medEV, 50) : null;
+
+            var medPS = peers.map(function(p) { return p.price_to_sales; }).filter(function(v) { return v != null && v > 0; });
+            medPS.sort(function(a, b) { return a - b; });
+            var medPSv = medPS.length > 0 ? percentile(medPS, 50) : null;
+
+            var impliedFromMedian = (medPE && targetEPS && targetEPS > 0) ? medPE * targetEPS : null;
+            var impliedClass = '';
+            if (impliedFromMedian != null && d.current_price) {
+                impliedClass = impliedFromMedian > d.current_price ? 'scr-discount' : 'scr-premium';
+            }
+
+            rows += '<tr class="median-row">'
+                + '<td colspan="2"><em>Peer Median</em></td>'
+                + '<td class="num">--</td>'
+                + '<td class="num">' + (medPE ? medPE.toFixed(1) + 'x' : '--') + '</td>'
+                + '<td class="num">' + (medFwdPE ? medFwdPE.toFixed(1) + 'x' : '--') + '</td>'
+                + '<td class="num">' + (medEVEB ? medEVEB.toFixed(1) + 'x' : '--') + '</td>'
+                + '<td class="num">' + (medPSv ? medPSv.toFixed(1) + 'x' : '--') + '</td>'
+                + '<td class="num ' + impliedClass + '">' + (impliedFromMedian ? fmtDollar(impliedFromMedian) : '--') + '</td>'
+                + '</tr>';
+        }
+
+        $('scr-peer-tbody').innerHTML = rows;
+    }
+
+    function buildFootballField(medianPE, peerPEs, impliedPrice) {
+        requireECharts(function() {
+            var c = themeColors();
+            if (_chart) _chart.dispose();
+            _chart = echarts.init($('scr-chart'));
+            var d = _data;
+            var price = d.current_price;
+
+            // Build ranges
+            var categories = [];
+            var baseBars = [];
+            var rangeBars = [];
+            var colors = [];
+
+            // Comps range (min-max peer P/E * EPS)
+            if (peerPEs.length > 0 && d.trailing_eps && d.trailing_eps > 0) {
+                var compsLow = peerPEs[0] * d.trailing_eps;
+                var compsHigh = peerPEs[peerPEs.length - 1] * d.trailing_eps;
+                categories.push('Comps Range');
+                baseBars.push(compsLow);
+                rangeBars.push(compsHigh - compsLow);
+                colors.push('#f59e0b');
+            }
+
+            // DCF range (run quick DCF at ±2% growth variance)
+            var ttmFcf = null;
+            var qfcf = d.financials.quarterly_fcf || [];
+            if (qfcf.length >= 4) ttmFcf = qfcf[0] + qfcf[1] + qfcf[2] + qfcf[3];
+            else if (d.financials.annual_fcf && d.financials.annual_fcf.length > 0) ttmFcf = d.financials.annual_fcf[0];
+
+            if (ttmFcf && d.shares_outstanding) {
+                var baseGrowth = _getVal('rev-growth') / 100;
+                var wacc = _getVal('wacc') / 100;
+                var termGr = _getVal('terminal') / 100;
+                var years = Math.round(_getVal('proj-years'));
+                var cash = d.financials.cash_and_equivalents || 0;
+                var debt = d.financials.total_debt || 0;
+                var shares = d.shares_outstanding;
+
+                function quickDCF(gr) {
+                    if (termGr >= wacc) return price;
+                    var fcf = ttmFcf;
+                    var pvSum = 0;
+                    for (var y = 1; y <= years; y++) {
+                        fcf *= (1 + gr);
+                        pvSum += fcf / Math.pow(1 + wacc, y);
+                    }
+                    var tv = (fcf * (1 + termGr)) / (wacc - termGr);
+                    var pvTv = tv / Math.pow(1 + wacc, years);
+                    return (pvSum + pvTv + cash - debt) / shares;
+                }
+
+                var dcfLow = quickDCF(baseGrowth - 0.03);
+                var dcfMid = quickDCF(baseGrowth);
+                var dcfHigh = quickDCF(baseGrowth + 0.03);
+                // Ensure positive range
+                dcfLow = Math.max(0, dcfLow);
+
+                categories.push('DCF Range');
+                baseBars.push(dcfLow);
+                rangeBars.push(Math.max(0, dcfHigh - dcfLow));
+                colors.push('#0d9488');
+            }
+
+            if (categories.length === 0) {
+                buildEmptyFootballField();
+                return;
+            }
+
+            // Find overall min/max for axis
+            var allVals = [price];
+            for (var i = 0; i < baseBars.length; i++) {
+                allVals.push(baseBars[i]);
+                allVals.push(baseBars[i] + rangeBars[i]);
+            }
+            var axMin = Math.max(0, Math.min.apply(null, allVals) * 0.8);
+            var axMax = Math.max.apply(null, allVals) * 1.15;
+
+            _chart.setOption({
+                animation: true,
+                backgroundColor: 'transparent',
+                tooltip: {
+                    trigger: 'axis', axisPointer: { type: 'shadow' },
+                    backgroundColor: c.tooltip, borderColor: c.tooltipBorder,
+                    textStyle: { color: c.tooltipText },
+                    formatter: function(ps) {
+                        var base = ps[0]; var range = ps[1];
+                        if (!range) return '';
+                        var lo = base.value;
+                        var hi = lo + range.value;
+                        return '<strong>' + base.name + '</strong><br>' + fmtDollar(lo) + ' — ' + fmtDollar(hi);
+                    }
+                },
+                grid: { left: 110, right: 40, top: 20, bottom: 30 },
+                xAxis: {
+                    type: 'value', min: axMin, max: axMax,
+                    axisLabel: { color: c.text, formatter: function(v) { return '$' + v.toFixed(0); } },
+                    splitLine: { lineStyle: { color: c.grid } }
+                },
+                yAxis: { type: 'category', data: categories, axisLabel: { color: c.text, fontSize: 12 }, axisLine: { lineStyle: { color: c.grid } } },
+                series: [
+                    // Invisible base
+                    { type: 'bar', stack: 'range', data: baseBars, itemStyle: { color: 'transparent' }, barMaxWidth: 35, silent: true },
+                    // Visible range
+                    {
+                        type: 'bar', stack: 'range', data: rangeBars.map(function(v, i) {
+                            return { value: v, itemStyle: { color: colors[i], borderRadius: 4 } };
+                        }),
+                        barMaxWidth: 35,
+                        label: {
+                            show: true, position: 'inside', color: '#fff', fontSize: 11,
+                            formatter: function(p) {
+                                var lo = baseBars[p.dataIndex];
+                                var hi = lo + p.value;
+                                return '$' + lo.toFixed(0) + ' - $' + hi.toFixed(0);
+                            }
+                        }
+                    },
+                    // Current price marker
+                    {
+                        type: 'scatter', data: [], markLine: {
+                            data: [{ xAxis: price }],
+                            label: { formatter: 'Current: $' + price.toFixed(0), color: c.text, fontSize: 11 },
+                            lineStyle: { color: '#ef4444', type: 'dashed', width: 2 }
+                        }
+                    }
+                ]
+            });
+
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { if (_chart) _chart.resize(); });
+        });
+    }
+
+    function buildEmptyFootballField() {
+        requireECharts(function() {
+            if (_chart) _chart.dispose();
+            _chart = echarts.init($('scr-chart'));
+            _chart.setOption({
+                backgroundColor: 'transparent',
+                title: { text: 'Insufficient data for football field chart', left: 'center', top: 'center', textStyle: { color: 'rgba(148,163,184,0.5)', fontSize: 14 } }
+            });
+        });
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Show Result (valuation badge)
+       ═══════════════════════════════════════════════════════════════ */
+    function showResult(label, fairValue, errorMsg) {
+        $('scr-result-label').textContent = label;
+        if (errorMsg) {
+            $('scr-fair-value').textContent = '--';
+            $('scr-badge').className = 'scr-badge';
+            $('scr-badge').textContent = '';
+            $('scr-upside').textContent = errorMsg;
+            $('scr-breakdown').innerHTML = '';
+            return;
+        }
+        if (fairValue == null || isNaN(fairValue) || fairValue <= 0) {
+            $('scr-fair-value').textContent = '--';
+            $('scr-badge').className = 'scr-badge';
+            $('scr-badge').textContent = '';
+            $('scr-upside').textContent = '';
+            return;
+        }
+        $('scr-fair-value').textContent = fmtDollar(fairValue);
+
+        var price = _data.current_price;
+        var diff = ((fairValue - price) / price) * 100;
+        var badge = $('scr-badge');
+
+        if (diff > 5) {
+            badge.className = 'scr-badge scr-badge-under';
+            badge.textContent = 'UNDERVALUED';
+        } else if (diff < -5) {
+            badge.className = 'scr-badge scr-badge-over';
+            badge.textContent = 'OVERVALUED';
+        } else {
+            badge.className = 'scr-badge scr-badge-fair';
+            badge.textContent = 'FAIRLY VALUED';
+        }
+
+        $('scr-upside').textContent = 'Upside: ' + fmtPct(diff) + ' from current $' + price.toFixed(2);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════
+       Theme change listener
+       ═══════════════════════════════════════════════════════════════ */
+    document.addEventListener('pp-theme-changed', function() {
+        if (_data) recalculate();
+    });
+
+    /* ═══════════════════════════════════════════════════════════════
+       Public API (exposed for inline event handlers)
+       ═══════════════════════════════════════════════════════════════ */
+    window.SCR = {
+        syncSlider: syncSlider,
+        syncInput: syncInput,
+        switchTab: switchTab
+    };
+
+    /* ═══════════════════════════════════════════════════════════════
+       Init
+       ═══════════════════════════════════════════════════════════════ */
+    initSearch();
+
+})();
+</script>
+{% endblock %}
