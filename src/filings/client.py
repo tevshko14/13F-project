@@ -1293,6 +1293,28 @@ def get_yfinance_info(ticker: str) -> dict:
     except Exception:
         info = {}
 
+    # Overlay Tiingo real-time price if available (more reliable than yfinance)
+    try:
+        from filings import tiingo
+
+        if tiingo.has_tiingo_key():
+            tq = tiingo.get_quote(ticker)
+            if tq and tq.get("last"):
+                info["currentPrice"] = tq["last"]
+                info["regularMarketPrice"] = tq["last"]
+                if tq.get("prevClose"):
+                    info["previousClose"] = tq["prevClose"]
+                if tq.get("open"):
+                    info["regularMarketOpen"] = tq["open"]
+                if tq.get("high"):
+                    info["dayHigh"] = tq["high"]
+                if tq.get("low"):
+                    info["dayLow"] = tq["low"]
+                if tq.get("volume"):
+                    info["volume"] = int(tq["volume"])
+    except Exception:
+        pass  # Tiingo overlay is best-effort
+
     with _yf_info_lock:
         # Only cache successful results for the full TTL;
         # cache empty/failed results for just 60s to allow quick retry.

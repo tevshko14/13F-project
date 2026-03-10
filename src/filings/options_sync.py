@@ -121,9 +121,90 @@ def _fetch_one(
 ) -> list[unusual_options.UnusualOption]:
     """Fetch options chains for a single ticker, detect unusual contracts.
 
-    Checks nearest ``_MAX_EXPIRIES`` expiration dates only.
+    Tries Tradier first (if configured) for chains with greeks,
+    falls back to yfinance.  Uses Tiingo → Tradier → yfinance cascade
+    for the underlying stock price.
+
     Returns list of UnusualOption objects (may be empty).
     """
+    # Try Tradier first (better data quality: greeks, reliable)
+    try:
+        from filings import tradier
+
+        if tradier.has_tradier_key():
+            result = _fetch_one_tradier(ticker, company_name, sector)
+            if result is not None:
+                return result
+    except Exception:
+        pass  # fall through to yfinance
+
+    return _fetch_one_yfinance(ticker, company_name, sector)
+
+
+def _fetch_one_tradier(
+    ticker: str,
+    company_name: str,
+    sector: str,
+) -> list[unusual_options.UnusualOption] | None:
+    """Fetch chains from Tradier with greeks.
+
+    Returns list of UnusualOption, or None to signal "fall back to yfinance".
+    """
+    from filings import tradier
+
+    expirations = tradier.get_expirations(ticker)
+    if not expirations:
+        return None  # signal: try yfinance instead
+
+    # Only check nearest N expiries
+    expirations = expirations[:_MAX_EXPIRIES]
+
+    # Get underlying price: Tiingo → Tradier → None
+    underlying = _get_underlying_price(ticker)
+
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    today = date.today()
+    all_unusual: list[unusual_options.UnusualOption] = []
+
+    for exp_str in expirations:
+        chain_data = tradier.get_option_chain(ticker, exp_str, greeks=True)
+        if not chain_data:
+            continue
+
+        dfs = tradier.chain_to_dataframes(chain_data)
+        if dfs is None:
+            continue
+
+        calls_df, puts_df = dfs
+        exp_date = date.fromisoformat(exp_str)
+        dte = (exp_date - today).days
+
+        unusual = unusual_options.detect_unusual(
+            ticker=ticker,
+            company_name=company_name,
+            sector=sector,
+            chain_calls=calls_df,
+            chain_puts=puts_df,
+            underlying_price=underlying,
+            fetched_at=now_iso,
+        )
+
+        # Patch expiry and DTE
+        for u in unusual:
+            u.expiry = exp_str
+            u.dte = max(dte, 0)
+
+        all_unusual.extend(unusual)
+
+    return all_unusual
+
+
+def _fetch_one_yfinance(
+    ticker: str,
+    company_name: str,
+    sector: str,
+) -> list[unusual_options.UnusualOption]:
+    """Original yfinance-based chain fetch (fallback)."""
     import yfinance as yf
 
     try:
@@ -139,11 +220,13 @@ def _fetch_one(
     expirations = expirations[:_MAX_EXPIRIES]
 
     # Get underlying price
-    try:
-        info = t.info or {}
-        underlying = info.get("currentPrice") or info.get("regularMarketPrice")
-    except Exception:
-        underlying = None
+    underlying = _get_underlying_price(ticker)
+    if underlying is None:
+        try:
+            info = t.info or {}
+            underlying = info.get("currentPrice") or info.get("regularMarketPrice")
+        except Exception:
+            underlying = None
 
     # Enrich sector from yfinance if missing
     if not sector:
@@ -169,7 +252,6 @@ def _fetch_one(
         calls_df = chain.calls
         puts_df = chain.puts
 
-        # Detect unusual in each side
         unusual = unusual_options.detect_unusual(
             ticker=ticker,
             company_name=company_name,
@@ -188,6 +270,36 @@ def _fetch_one(
         all_unusual.extend(unusual)
 
     return all_unusual
+
+
+def _get_underlying_price(ticker: str) -> float | None:
+    """Get underlying stock price: Tiingo → Tradier → None.
+
+    Shared by both Tradier and yfinance fetch paths.
+    """
+    # Try Tiingo first (most reliable for real-time prices)
+    try:
+        from filings import tiingo
+
+        if tiingo.has_tiingo_key():
+            price = tiingo.get_price(ticker)
+            if price:
+                return price
+    except Exception:
+        pass
+
+    # Try Tradier quote
+    try:
+        from filings import tradier
+
+        if tradier.has_tradier_key():
+            quote = tradier.get_quote(ticker)
+            if quote and quote.get("last"):
+                return float(quote["last"])
+    except Exception:
+        pass
+
+    return None
 
 
 # ── Batch orchestration ─────────────────────────────────────────────────────
@@ -264,6 +376,41 @@ def sync_unusual_options() -> dict:
             ["No unusual options found" if not failed else f"{failed} tickers failed"],
         )
         return {"watchlist": len(watchlist), "unusual": 0, "upserted": 0, "failed": failed}
+
+    # ── Phase 1B: OI delta computation ──────────────────────────────────
+    today_str = date.today().isoformat()
+    contract_symbols = [u.contract_symbol for u in all_unusual if u.contract_symbol]
+    prev_oi = supabase_cache.get_previous_oi_snapshots(contract_symbols, today_str)
+
+    for u in all_unusual:
+        if u.contract_symbol in prev_oi:
+            oi_prev = prev_oi[u.contract_symbol]
+            u.oi_prev = oi_prev
+            u.oi_delta = u.open_interest - oi_prev
+            if oi_prev > 0:
+                u.oi_delta_pct = round(
+                    ((u.open_interest - oi_prev) / oi_prev) * 100, 1
+                )
+            # New positioning: OI grew by ≥50 % and volume is high
+            u.is_new_positioning = (
+                u.oi_delta_pct is not None
+                and u.oi_delta_pct >= 50.0
+                and u.volume >= 500
+            )
+
+    # Snapshot today's OI for tomorrow's delta computation
+    oi_snapshot_rows = [
+        {
+            "contract_symbol": u.contract_symbol,
+            "scan_date": today_str,
+            "open_interest": u.open_interest,
+        }
+        for u in all_unusual
+        if u.contract_symbol
+    ]
+    if oi_snapshot_rows:
+        snapped = supabase_cache.upsert_oi_snapshots(oi_snapshot_rows)
+        logger.info("Snapshotted %d OI records for delta tracking", snapped)
 
     # Upsert to Supabase
     rows = [u.to_db_row() for u in all_unusual]

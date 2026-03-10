@@ -55,7 +55,7 @@
             "name": "What does unusual options activity mean?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "Unusual options activity occurs when the traded volume on an options contract exceeds 5 times its open interest, signaling that large institutional investors may be making significant directional bets. PaperPanda's options screener scans the S&P 500 and top superinvestor holdings during market hours, flagging contracts with high volume-to-open-interest ratios and estimating total premium spent."
+                "text": "Unusual options activity occurs when the traded volume on an options contract exceeds 5 times its open interest, signaling that large institutional investors may be making significant directional bets. PaperPanda's advanced options screener scans the S&P 500 and top superinvestor holdings during market hours, applying a $100K premium floor to filter noise, tracking open interest changes day-over-day, scoring contracts by moneyness (ITM/ATM/OTM) and near-expiry urgency, detecting multi-contract clusters on the same ticker, and displaying greeks (delta, gamma, theta, vega) when available from Tradier."
             }
         },
         {
@@ -71,7 +71,7 @@
             "name": "Where does PaperPanda get its data?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "PaperPanda sources data from SEC EDGAR for 13F filings and Form 4 insider trades, the STOCK Act for congressional disclosures, Yahoo Finance for real-time market data and options chains, FRED (Federal Reserve Economic Data) for macroeconomic indicators, and Reddit for retail sentiment analysis. All data comes from public, authoritative sources."
+                "text": "PaperPanda sources data from SEC EDGAR for 13F filings and Form 4 insider trades, the STOCK Act for congressional disclosures, Tiingo for real-time IEX stock prices, Tradier for options chains with ORATS greeks, Yahoo Finance as a market data fallback, FRED (Federal Reserve Economic Data) for macroeconomic indicators, and Reddit for retail sentiment analysis. All data comes from public, authoritative sources."
             }
         }
     ]

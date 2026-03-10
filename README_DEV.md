@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-01 (Congress trading: daily sync cron, health staleness detection, historical backfill to 2023, notifications integration, pie chart UX fixes, momentum dark mode contrast)
+> Last updated: 2026-03-09 (Options screener upgrade: premium floor, OI delta tracking, urgency weighting, moneyness scoring, cluster detection, greek display; Tiingo integration for real-time IEX prices; Tradier integration for options chains with ORATS greeks)
 
 ---
 
@@ -40,7 +40,8 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | Charts        | Chart.js v4 (bar charts) + ECharts v5 (heatmap treemap) |
 | Search        | Fuse.js v7 (client-side fuzzy search, CDN) |
 | SEC data      | `edgartools` library (wraps EDGAR API) |
-| Market data   | `yfinance` + NASDAQ Trader (~8K listings) + Wikipedia (sectors) |
+| Market data   | Tiingo IEX (real-time, primary) + `yfinance` (fallback) + NASDAQ Trader (~8K listings) + Wikipedia (sectors) |
+| Options data  | Tradier (ORATS greeks, primary) + `yfinance` (fallback) |
 | Analyst data  | `yfinance` (free) + `finnhub-python` (free tier, optional key) |
 | Sentiment     | CNN Fear & Greed, Finnhub, ApeWisdom, Alpha Vantage |
 | Vitals        | People Data Labs, Glassdoor (RapidAPI), Apple iTunes Search |
@@ -223,6 +224,11 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── market_data.py                # S&P 500 heatmap, most-added, ticker search (~8K NYSE/NASDAQ listings)
     ├── company_filings.py            # SEC filing links for stock pages
     ├── aum_data.py                   # Capital Deployed: AUM (Form ADV), XBRL cash, deployment ratios, leaderboard builder
+    ├── unusual_options.py             # Unusual options detection: UnusualOption dataclass, detect_unusual(), premium floor ($100K), OI delta tracking, urgency weighting, moneyness scoring, cluster detection, greek extraction
+    ├── options_sync.py               # Cron worker: scan S&P 500 + superinvestor holdings for unusual options activity (every 30 min, market hours)
+    ├── convergence.py                # Convergence Engine: cross-signal analysis (options + insider + congress + short interest + 13F) with urgency/OTM/cluster boosts
+    ├── tiingo.py                     # Tiingo REST client: real-time IEX quotes, batch quotes (100/call), EOD history, S&P 500 close matrix; 5-min/1-hr caches
+    ├── tradier.py                    # Tradier REST client: options chains with ORATS greeks (delta, gamma, theta, vega), expiration dates, stock quotes; DataFrame adapter for detect_unusual()
     ├── insider_trading.py            # Form 4 insider transaction data (4-tier: L1→Supabase→scrape→stale) + display helpers (quarterly groups, insider cards, chart data, title resolution via SEC XML)
     ├── insider_sync.py               # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
     ├── congress_trading.py           # STOCK Act: Capitol Trades scraper (with date cutoff) + 6 display prep functions (chamber viz, trending, consensus, momentum, activity)
@@ -276,6 +282,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── congress_activity.html  # Congress activity feed (HTMX lazy-loaded, filter buttons)
             ├── congress_trending.html  # Homepage "Trending with Congress" bar chart (HTMX lazy-loaded)
             ├── stock_congress.html     # Per-ticker Congress trading subtab (HTMX lazy-loaded)
+            ├── options_feed.html       # Unusual options activity table: OI Δ (green/red), Moneyness badges (5 color variants), Delta, urgency
+            ├── options_clusters.html   # Clustered unusual options cards: ticker, direction, contract count, premium, vol/OI, urgency
             └── data_error.html         # Reusable error partial (rate limit CTA, generic fallback, HTMX-aware)
 ```
 
@@ -797,11 +805,13 @@ Runs as a fire-and-forget background task on every app startup (`asyncio.to_thre
 keeping the Supabase free-tier row limit from being exceeded.
 
 ```
-Table           Retention    Cutoff column
-insider_trades  6 months     filing_date
-youtube_events  30 days      updated_at
-sync_logs       30 days      started_at
-api_cache       expired      expires_at  (only rows where expires_at < now())
+Table                       Retention    Cutoff column
+insider_trades              6 months     filing_date
+youtube_events              30 days      updated_at
+sync_logs                   30 days      started_at
+unusual_options_activity    7 days       fetched_at
+options_oi_snapshots        7 days       scan_date
+api_cache                   expired      expires_at  (only rows where expires_at < now())
 ```
 
 Returns a `{table: rows_deleted}` dict logged at INFO level. Safe to call when
@@ -815,7 +825,7 @@ cache pattern as `analysts.py`.
 | Function | Data Source | TTL | Purpose |
 |---|---|---|---|
 | `get_sp500_constituents()` | Wikipedia (pd.read_html) | 24h | Ticker + sector list (~500 items) |
-| `get_sp500_market_data()` | yfinance bulk download (5d) | 30min | Daily % change for all S&P 500 tickers |
+| `get_sp500_market_data()` | Tiingo EOD (primary) + yfinance (fallback) | 30min | Daily % change for all S&P 500 tickers |
 | `build_heatmap_data()` | Pure computation | — | ECharts treemap format with colors + gold borders |
 | `build_most_added_table()` | Cache (fund_data changes) | 30min | Top 25 stocks by superinvestor add count |
 | `get_52_week_range_bulk()` | yfinance bulk download (1y) | 30min | 52-week high/low/current for enrichment |
@@ -1155,7 +1165,100 @@ Notifications (on congress page cache refresh, every 15 min):
 - `member_id` route parameter validated against `^[A-Za-z0-9_-]{1,40}$` regex
 - Jinja2 autoescaping active on all templates (no `| safe` usage)
 
-### 5.16 Performance Optimizations
+### 5.16 Unusual Options Activity (`unusual_options.py` + `options_sync.py` + `convergence.py`)
+
+Advanced options screener scanning S&P 500 + top superinvestor holdings during market hours.
+
+**Architecture:**
+- `unusual_options.py` — Detection engine: `UnusualOption` dataclass, `detect_unusual()`, cluster detection, feed enrichment
+- `options_sync.py` — Cron worker: build ticker watchlist → batch fetch chains → detect → upsert to Supabase
+- `convergence.py` — Cross-signal analysis incorporating urgency, OTM bias, and cluster boosts
+- `tiingo.py` — Primary price source for underlying stock prices (IEX real-time)
+- `tradier.py` — Primary options chain source with ORATS greeks; DataFrame adapter for seamless `detect_unusual()` integration
+
+**Data source cascade:**
+```
+Underlying prices: Tiingo IEX → Tradier quote → yfinance (fallback)
+Options chains:    Tradier (greeks) → yfinance (no greeks, fallback)
+```
+
+**Detection criteria (all must pass):**
+1. Volume ≥ 5× open interest
+2. Estimated premium ≥ $100K (`OPTIONS_MIN_PREMIUM` env var, default 100000)
+3. Valid contract data (non-zero volume and OI)
+
+**Scoring dimensions:**
+| Dimension | Computation | Range |
+|---|---|---|
+| Urgency | 2.0× for 0-DTE, sliding 1.0–2.0× for ≤7 DTE, 1.0× otherwise | 1.0–2.0 |
+| Moneyness | strike/underlying for calls, underlying/strike for puts | 0.8×–1.5× |
+| Cluster boost | 1.15× for 2 contracts, 1.30× for 3+ contracts on same ticker | 1.0–1.3 |
+
+**OI delta tracking:**
+- `options_oi_snapshots` table stores daily OI per contract
+- On each scan, previous day's OI is looked up and delta computed
+- New positioning flagged when OI grows ≥50% with volume ≥500
+
+**Env vars:**
+| Variable | Default | Description |
+|---|---|---|
+| `TIINGO_API_KEY` | — | Tiingo API key for real-time IEX prices |
+| `TRADIER_API_KEY` | — | Tradier API key for options chains with greeks |
+| `TRADIER_SANDBOX` | `true` | `true` for sandbox.tradier.com, `false` for production |
+| `OPTIONS_MIN_PREMIUM` | `100000` | Minimum estimated premium filter ($) |
+
+**Cron worker (`options_sync.py`, Railway cron every 30 min):**
+1. Check market hours (9:30 AM – 4:30 PM ET, weekdays only)
+2. Build ticker watchlist: S&P 500 constituents + top 50 superinvestor holdings
+3. Batch fetch chains (5 concurrent, 2s between batches for rate limiting)
+4. Detect unusual contracts per ticker
+5. Compute OI deltas from previous snapshots
+6. Upsert to `unusual_options_activity` table
+7. Run cluster detection and cache results
+8. Emit notifications for notable trades (≥$500K premium or ≥20× vol/OI)
+
+### 5.17 Tiingo Module (`tiingo.py`)
+
+Real-time IEX stock prices and EOD historical data via Tiingo API ($10/mo).
+
+| Function | TTL | Description |
+|---|---|---|
+| `get_quote(ticker)` | 5 min | Single IEX real-time quote |
+| `get_quotes_batch(tickers)` | 5 min | Batch IEX quotes (up to 100 per call) |
+| `get_price(ticker)` | 5 min | Convenience wrapper returning `last` price |
+| `get_eod_history(ticker, start, end)` | 1 hr | EOD OHLCV data |
+| `get_close_df_for_sp500(tickers)` | 1 hr | Batch historical closes for heatmap (chunks of 50) |
+
+**Integration points:**
+- `market_data._ensure_close_df()` — Tiingo-first for S&P 500 close matrix
+- `client.get_yfinance_info()` — Tiingo overlay for real-time price fields
+- `options_sync._get_underlying_price()` — Tiingo-first for underlying prices
+- `web.lifespan()` — Tiingo warm-check on startup
+
+### 5.18 Tradier Module (`tradier.py`)
+
+Options chains with ORATS greeks via Tradier API (free sandbox, production with brokerage).
+
+| Function | TTL | Description |
+|---|---|---|
+| `get_expirations(ticker)` | 1 hr | Available option expiration dates |
+| `get_option_chain(ticker, exp, greeks)` | 5 min | Full chain with ORATS greeks |
+| `get_quote(ticker)` | 5 min | Stock quote (fallback for underlying) |
+| `chain_to_dataframes(chain)` | — | **Critical adapter**: converts Tradier response to yfinance DataFrame column names |
+
+**DataFrame adapter (`chain_to_dataframes`):**
+Maps Tradier field names to yfinance equivalents so `detect_unusual()` works unchanged:
+- `symbol` → `contractSymbol`
+- `open_interest` → `openInterest`
+- `last` → `lastPrice`
+- `greeks.mid_iv` → `impliedVolatility`
+- `greeks.delta/gamma/theta/vega` → `delta/gamma/theta/vega`
+
+**Sandbox/production toggle:** Zero code changes needed — just swap env vars:
+- `TRADIER_API_KEY` → production token
+- `TRADIER_SANDBOX` → `false`
+
+### 5.19 Performance Optimizations
 
 **Problem:** With 84 superinvestors, synchronous file I/O was blocking the async event loop.
 Per-fund TTL now skips fresh funds during background refresh, reducing API calls significantly.
@@ -1220,6 +1323,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/api/stock/{ticker}/congress` | `stock_congress_api` | Supabase | `partials/stock_congress.html` |
 | GET | `/api/congress-activity` | `congress_activity_api` | Congress page cache | `partials/congress_activity.html` |
 | GET | `/api/congress-trending` | `congress_trending_api` | Congress page cache | `partials/congress_trending.html` |
+| GET | `/api/options/clusters` | `options_clusters_api` | Unusual options cache | `partials/options_clusters.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**
@@ -1348,6 +1452,9 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   │     └── Sortable table: AUM, 13F equity, deployment bars, cash estimates, sources
   ├── insider_trading.html (global insider trades screener)
   │     └── lazy-loads partials/insider_trades.html via fetch(/api/insider-trades)
+  ├── options page (/options): unusual options activity screener
+  │     ├── partials/options_feed.html — main table with OI Δ, Moneyness, Delta columns
+  │     └── partials/options_clusters.html — clustered unusual options cards (via /api/options/clusters)
   ├── congress.html (URL: /congress, sub-tabs: Congress | Holdings | Activity)
   │     ├── Congress tab: ECharts scatter dot viz for Senate + House (state labels, party colors)
   │     ├── Holdings tab: Trending bar chart, Consensus Leaders, Momentum, All Holdings table
@@ -1676,6 +1783,11 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Health endpoint staleness detection: `/health/detail` includes congress sync status, consecutive error tracking
 - [x] Pie chart UX: centered layout with side legend, 480x480 canvas, transparent borders, outside-slice labels (politician + fund charts)
 - [x] Momentum chart dark mode: improved label contrast, Unicode strikethrough on legend toggle
+- [x] Unusual Options Activity screener: premium floor ($100K), OI delta tracking, near-expiry urgency, moneyness scoring, cluster detection, greek display
+- [x] Tiingo integration: real-time IEX quotes, batch quotes, EOD history, S&P 500 close matrix (primary price source, yfinance fallback)
+- [x] Tradier integration: options chains with ORATS greeks (delta, gamma, theta, vega), sandbox/production toggle, DataFrame adapter for detect_unusual()
+- [x] Convergence Engine: urgency × OTM × cluster boosts in signal strength scoring
+- [x] Options sync cron worker: scans S&P 500 + superinvestor holdings every 30 min during market hours
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
@@ -1749,13 +1861,12 @@ they don't get re-introduced.
 
 > **When context drifts, re-read this file.**
 >
-> This file documents the system as of 2026-03-01 (Notification bell system:
-> Supabase-backed, 3 sources (13F/YouTube/Reddit), HTMX bell + dropdown + toast +
-> history page, 48h retention, 15s server cache, SQL pagination; Capital Deployed
-> feature, AUM/deployment ratio leaderboard, XBRL cash, Form ADV integration,
-> comprehensive tooltips, dark mode, TradingView/Stripe theme sync, Supabase
-> startup timeout, automatic retention cleanup, background refresh, vitals
-> persistence, Panda Fund support page, Stripe embed, homepage widget).
+> This file documents the system as of 2026-03-09 (Options screener upgrade:
+> premium floor, OI delta tracking, urgency weighting, moneyness scoring, cluster
+> detection, greek display; Tiingo integration for real-time IEX prices; Tradier
+> integration for options chains with ORATS greeks; Convergence Engine signal
+> boosts; plus all prior features: notification bell, Capital Deployed, dark mode,
+> Panda Fund, Congress trading, insider trading, Supabase caching).
 > If told "Context is drifting," the first action should be to re-read
 > `/Users/Tevis_1/13F-project/README_DEV.md` and reconcile any discrepancies
 > with the actual code.

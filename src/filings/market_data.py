@@ -300,10 +300,38 @@ def _ensure_close_df():
     except Exception as e:
         logger.debug("Supabase close_df warm-load failed: %s", e)
 
-    # ── Phase 2: Download from yfinance (slow, but authoritative) ──
+    # ── Phase 2a: Try Tiingo (fast, reliable, $10/mo) ──
     constituents = get_sp500_constituents()
     tickers = [c["ticker"] for c in constituents]
 
+    try:
+        from filings import tiingo
+
+        if tiingo.has_tiingo_key():
+            tiingo_df = tiingo.get_close_df_for_sp500(tickers, period_days=30)
+            if tiingo_df is not None and not tiingo_df.empty:
+                logger.info(
+                    "Loaded close_df from Tiingo: %d rows x %d tickers",
+                    len(tiingo_df), len(tiingo_df.columns),
+                )
+                with _lock:
+                    _close_df_cache = (time.time(), tiingo_df)
+
+                # Write back to Supabase for next cold start
+                try:
+                    serialized = _df_to_dict(tiingo_df)
+                    supabase_cache.set_cached(
+                        "market:close_df", "market_data", serialized,
+                        ttl_seconds=_CLOSE_DF_TTL,
+                    )
+                except Exception:
+                    pass
+
+                return tiingo_df
+    except Exception as e:
+        logger.debug("Tiingo close_df failed, falling back to yfinance: %s", e)
+
+    # ── Phase 2b: Download from yfinance (slow, but authoritative) ──
     try:
         import yfinance as yf
 

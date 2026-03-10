@@ -136,6 +136,29 @@
         font-weight: 600;
     }
 
+    /* ── OI Delta ── */
+    .options-oi-delta-pos { color: #2e7d32; font-weight: 600; }
+    .options-oi-delta-neg { color: #c62828; font-weight: 600; }
+    .options-oi-delta-zero { color: rgba(15, 23, 42, 0.4); }
+
+    /* ── Moneyness badge ── */
+    .options-moneyness {
+        display: inline-block;
+        font-size: 0.70em;
+        font-weight: 600;
+        padding: 2px 6px;
+        border-radius: 4px;
+        letter-spacing: 0.02em;
+    }
+    .options-moneyness-otm   { background: rgba(245, 158, 11, 0.12); color: #b45309; }
+    .options-moneyness-dotm  { background: rgba(220, 38, 38, 0.10); color: #dc2626; }
+    .options-moneyness-itm   { background: rgba(22, 163, 74, 0.10); color: #16a34a; }
+    .options-moneyness-ditm  { background: rgba(22, 163, 74, 0.18); color: #15803d; }
+    .options-moneyness-atm   { background: rgba(15, 23, 42, 0.06); color: #64748b; }
+
+    /* ── Delta (greek) ── */
+    .options-delta { font-weight: 600; font-size: 0.82em; }
+
     /* ── Empty state ── */
     .options-empty {
         text-align: center;
@@ -188,6 +211,13 @@
     :root[data-theme="dark"] .options-empty {
         color: rgba(226, 232, 240, 0.5);
     }
+    :root[data-theme="dark"] .options-oi-delta-zero {
+        color: rgba(226, 232, 240, 0.35);
+    }
+    :root[data-theme="dark"] .options-moneyness-atm {
+        background: rgba(226, 232, 240, 0.08);
+        color: #94a3b8;
+    }
 
     /* ── Responsive ── */
     @media (max-width: 767px) {
@@ -237,6 +267,7 @@
                         Volume <span class="options-sort-arrow">&#9650;</span>
                     </th>
                     <th class="text-right">OI</th>
+                    <th class="text-right">OI Δ</th>
                     <th class="text-right" hx-get="/api/options/feed?sort=vol_oi" hx-target="#options-feed" hx-swap="innerHTML">
                         Vol/OI <span class="options-sort-arrow">&#9650;</span>
                     </th>
@@ -244,6 +275,8 @@
                         Premium <span class="options-sort-arrow">&#9650;</span>
                     </th>
                     <th class="text-right">IV</th>
+                    <th>Moneyness</th>
+                    <th class="text-right">Delta</th>
                     <th>Sentiment</th>
                 </tr>
             </thead>
@@ -265,9 +298,38 @@
                     <td class="text-right">{{ row.dte }}</td>
                     <td class="text-right">{{ "{:,}".format(row.volume) }}</td>
                     <td class="text-right">{{ "{:,}".format(row.open_interest) }}</td>
+                    <td class="text-right">
+                        {% if row.oi_delta_fmt != '—' %}
+                            {% if row.oi_delta and row.oi_delta > 0 %}
+                                <span class="options-oi-delta-pos">{{ row.oi_delta_fmt }}</span>
+                            {% elif row.oi_delta and row.oi_delta < 0 %}
+                                <span class="options-oi-delta-neg">{{ row.oi_delta_fmt }}</span>
+                            {% else %}
+                                <span class="options-oi-delta-zero">{{ row.oi_delta_fmt }}</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="options-oi-delta-zero">—</span>
+                        {% endif %}
+                    </td>
                     <td class="text-right"><span class="options-vol-oi">{{ row.vol_oi_fmt }}</span></td>
                     <td class="text-right"><span class="options-premium">{{ row.premium_fmt }}</span></td>
                     <td class="text-right">{{ row.iv_fmt }}</td>
+                    <td>
+                        {% if row.moneyness_label == 'Deep OTM' %}
+                            <span class="options-moneyness options-moneyness-dotm">Deep OTM</span>
+                        {% elif row.moneyness_label == 'OTM' %}
+                            <span class="options-moneyness options-moneyness-otm">OTM</span>
+                        {% elif row.moneyness_label == 'ATM' %}
+                            <span class="options-moneyness options-moneyness-atm">ATM</span>
+                        {% elif row.moneyness_label == 'ITM' %}
+                            <span class="options-moneyness options-moneyness-itm">ITM</span>
+                        {% elif row.moneyness_label == 'Deep ITM' %}
+                            <span class="options-moneyness options-moneyness-ditm">Deep ITM</span>
+                        {% else %}
+                            <span class="options-moneyness options-moneyness-atm">—</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-right"><span class="options-delta">{{ row.delta_fmt }}</span></td>
                     <td>
                         {% if row.sentiment == 'bullish' %}
                             <span class="options-sentiment-badge options-sentiment-bullish">Bullish</span>

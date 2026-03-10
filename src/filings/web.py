@@ -894,6 +894,13 @@ async def _prefetch_market_data(app: FastAPI):
     except Exception as e:
         logger.warning("Supabase warm-load failed: %s", e)
 
+    # ── Phase 1b: Tiingo warm-check (instant) ──
+    try:
+        from filings import tiingo
+        await asyncio.to_thread(tiingo.warm_from_supabase)
+    except Exception:
+        pass
+
     # ── Phase 2: yfinance refresh (slow, runs regardless) ──
     try:
         await asyncio.gather(
@@ -2832,6 +2839,18 @@ async def options_convergence_api(
             "signal_count": len(results),
             "min_signals": min_signals,
         },
+    )
+
+
+@app.get("/api/options/clusters", response_class=HTMLResponse)
+async def options_clusters_api(request: Request, limit: int = 25):
+    """HTMX partial: clustered unusual options activity."""
+    from filings import unusual_options
+
+    clusters = await asyncio.to_thread(unusual_options.get_options_clusters, limit)
+    return templates.TemplateResponse(
+        "partials/options_clusters.html",
+        {"request": request, "clusters": clusters},
     )
 
 
@@ -5417,14 +5436,24 @@ async def llms_txt():
         "- [Insider Trading](https://paperpanda.io/insider-trading): Real-time SEC Form 4 filings showing insider purchases and sales across public companies\n"
         "- [Congress Trading](https://paperpanda.io/congress): STOCK Act disclosures tracking what 201 House and Senate members are buying and selling\n"
         "- [Retail Sentiment](https://paperpanda.io/retail): Reddit sentiment, trending tickers, market fear and greed index, and finance YouTuber schedules\n"
-        "- [Options Screener](https://paperpanda.io/options): Unusual options activity where traded volume exceeds 5x open interest, with convergence engine\n"
+        "- [Options Screener](https://paperpanda.io/options): Advanced unusual options scanner with premium filtering, OI delta tracking, moneyness scoring, urgency weighting, cluster detection, and convergence engine\n"
         "- [Alternative Signals](https://paperpanda.io/alternative-signals): Short interest, analyst ratings, earnings calendar, and economic events from FRED\n"
+        "- [Macro Dashboard](https://paperpanda.io/macro): Federal Reserve economic indicators, GDP, CPI, unemployment, and interest rates from FRED\n"
         "- [FAQ](https://paperpanda.io/faq): Frequently asked questions about PaperPanda, 13F filings, insider trading, congressional trading, and more\n"
         "\n"
         "## Data & Features\n"
         "- [Stock Lookup](https://paperpanda.io/stock/AAPL): Per-ticker pages with superinvestor ownership, congressional trades, analyst forecasts, and sentiment\n"
         "- [Grand Portfolio](https://paperpanda.io/funds): Aggregated superinvestor consensus — most-held and most-added stocks across all tracked funds\n"
-        "- [Macro Dashboard](https://paperpanda.io/macro): Federal Reserve economic indicators, GDP, CPI, unemployment, and interest rates from FRED\n"
+        "- [Options Clusters](https://paperpanda.io/api/options/clusters): Grouped unusual activity showing tickers with multiple flagged contracts, direction, and strength\n"
+        "\n"
+        "## Options Scanner Features\n"
+        "- Premium floor filter: only surfaces contracts with $100K+ estimated premium to eliminate noise\n"
+        "- OI delta tracking: compares today's open interest to previous day, flags new positioning (50%+ OI growth)\n"
+        "- Near-expiry urgency: weights 0-DTE and weekly contracts higher (up to 2x boost)\n"
+        "- Moneyness scoring: labels contracts as Deep ITM, ITM, ATM, OTM, or Deep OTM with conviction multipliers\n"
+        "- Cluster detection: groups 2+ unusual contracts on the same ticker, labels strong clusters (3+ contracts)\n"
+        "- Greeks: delta, gamma, theta, vega displayed when available from Tradier options data\n"
+        "- Convergence engine: cross-references options with insider buys, congress trades, short interest, and 13F adds\n"
         "\n"
         "## Key Facts\n"
         "- Tracks 84 superinvestor funds via SEC EDGAR 13F filings, updated quarterly\n"
@@ -5432,7 +5461,7 @@ async def llms_txt():
         "- Monitors over 1,000 stocks with real-time insider trading from SEC Form 4\n"
         "- Unusual options scanner covers S&P 500 plus top superinvestor holdings\n"
         "- Convergence engine cross-references 5 signal types: options, insider buys, congress trades, short interest, and 13F adds\n"
-        "- Data sourced from SEC EDGAR, Yahoo Finance, FRED, and Reddit\n"
+        "- Data sourced from SEC EDGAR, Tiingo, Tradier, Yahoo Finance, FRED, and Reddit\n"
         "- Free and open-source project\n"
         "\n"
         "## Contact\n"

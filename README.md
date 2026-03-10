@@ -46,6 +46,21 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 - **Stripe Donations** - One-time (Buy Button) and recurring (Pricing Table) support via embedded Stripe OOTB components
 - **YouTube & Feedback CTAs** - Links to @funofinvesting and feedback form
 
+### Unusual Options Activity (`/options`)
+- **Advanced Options Screener** - Scans S&P 500 + top superinvestor holdings during market hours for unusual volume (≥5× open interest ratio)
+- **$100K Premium Floor** - Filters out noise by requiring minimum $100K estimated premium per contract (configurable via `OPTIONS_MIN_PREMIUM`)
+- **OI Delta Tracking** - Day-over-day open interest change with percentage, flagging new positioning (≥50% OI growth + high volume)
+- **Moneyness Scoring** - Labels contracts as Deep ITM / ITM / ATM / OTM / Deep OTM with conviction multipliers
+- **Near-Expiry Urgency** - Weights 0-DTE contracts at 2× and ≤7 DTE on a sliding scale for time-sensitive bets
+- **Cluster Detection** - Groups multiple unusual contracts on the same ticker, flags "strong" clusters (3+ contracts) with aggregated premium
+- **Greeks Display** - Delta, gamma, theta, vega from Tradier's ORATS feed (when available)
+- **Data Sources** - Tradier (primary, real greeks) → yfinance (fallback); Tiingo → Tradier → yfinance cascade for underlying prices
+
+### Convergence Engine
+- **Cross-Signal Analysis** - Identifies stocks where multiple bullish/bearish signals fire simultaneously
+- **5 Signal Sources** - Unusual options activity, insider purchases, congressional buys, short interest data, and superinvestor 13F additions
+- **Weighted Conviction Score** - Ranks results by combining signal strength with urgency, OTM bias, and cluster boosts
+
 ### Search
 - **Fuzzy Ticker Search** - Fuse.js-powered autocomplete with ~8,000 NYSE/NASDAQ listings, weighted by superinvestor holdings and S&P 500 membership
 - **Fund Manager Search** - Search SEC EDGAR for any institutional investor by name
@@ -92,7 +107,8 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 | Search | Fuse.js v7 (weighted fuzzy search) |
 | CLI Output | Rich |
 | SEC Data | `edgartools` (wraps EDGAR API) |
-| Market Data | `yfinance` + NASDAQ Trader (all US listings) |
+| Market Data | Tiingo IEX (real-time, primary) + `yfinance` (fallback) + NASDAQ Trader (all US listings) |
+| Options Data | Tradier (ORATS greeks, primary) + `yfinance` (fallback) |
 | Analyst Data | `yfinance` (free) + `finnhub-python` (optional) |
 | Sentiment | CNN, Finnhub, ApeWisdom, Alpha Vantage |
 | Search Interest | Google Trends (pytrends) |
@@ -142,6 +158,10 @@ railway up
 | `SUPABASE_URL` | No | Free tier | Supabase project URL (persistent cache) |
 | `SUPABASE_SERVICE_KEY` | No | Free tier | Supabase service role JWT |
 | `SUPABASE_DB_PASSWORD` | No | Free tier | Supabase DB password (auto-migration) |
+| `TIINGO_API_KEY` | No | $10/mo | Real-time IEX stock prices + EOD history (Tiingo) |
+| `TRADIER_API_KEY` | No | Free (sandbox) | Options chains with ORATS greeks (Tradier) |
+| `TRADIER_SANDBOX` | No | - | `true` (default) for sandbox, `false` for production |
+| `OPTIONS_MIN_PREMIUM` | No | - | Minimum premium floor for unusual options (default: `100000`) |
 | `CACHE_DIR` | No | - | Cache directory (default: `~/.13f-cache/`) |
 | `POSTHOG_API_KEY` | No | Free tier | Product analytics |
 | `STRIPE_PUBLISHABLE_KEY` | No | - | Stripe publishable key (for donation embeds) |
@@ -156,6 +176,7 @@ railway up
 > **Note:** The App Store ratings feature requires no API key (Apple's public iTunes API).
 > Without Supabase env vars, the app works identically using disk-only cache.
 > Without Stripe env vars, the support page shows "coming soon" placeholders gracefully.
+> Without Tiingo/Tradier keys, the app falls back to yfinance for market data and options chains.
 
 ## Project Structure
 
@@ -170,6 +191,11 @@ src/filings/
 ├── vitals.py           # Alternative data (Glassdoor, PDL, App Store) + Supabase persistence
 ├── cache.py            # Cache layer (3-tier: in-memory → Supabase → disk)
 ├── supabase_cache.py   # Supabase L2 persistent cache (survives deploys)
+├── unusual_options.py  # Unusual options activity detection (premium floor, OI delta, urgency, moneyness, clusters)
+├── options_sync.py     # Cron worker: scan options chains → detect unusual activity → upsert to Supabase (every 30 min)
+├── convergence.py      # Convergence Engine: cross-signal analysis (options + insider + congress + short interest + 13F)
+├── tiingo.py           # Tiingo REST client (real-time IEX quotes, batch quotes, EOD history)
+├── tradier.py          # Tradier REST client (options chains with ORATS greeks, DataFrame adapter)
 ├── insider_trading.py  # Form 4 insider transaction data (Supabase-first + scrape fallback)
 ├── insider_sync.py     # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
 ├── congress_trading.py # STOCK Act: Capitol Trades scraper + display prep (chamber viz, trending, consensus, momentum, activity)
@@ -210,6 +236,8 @@ src/filings/
         ├── stock_insider_trades.html # Insider trades (per-ticker)
         ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded)
         ├── compare_content.html     # Compare quarters (lazy-loaded)
+        ├── options_feed.html        # Unusual options activity table (OI delta, moneyness, greeks)
+        ├── options_clusters.html    # Clustered unusual options cards (multi-contract tickers)
         └── data_error.html          # Reusable error partial (rate limits, HTMX-aware)
 ```
 
@@ -219,6 +247,7 @@ src/filings/
 |---------|---------|----------|---------|
 | 13F Sync | `filings-sync` | Every 12h | Refresh stale superinvestor 13F holdings from SEC EDGAR |
 | Insider Sync | `filings-insider-sync` | Every 30min | Scrape OpenInsider → upsert to Supabase |
+| Options Sync | `filings-options-sync` | Every 30min (market hours) | Scan S&P 500 + superinvestor holdings for unusual options activity |
 | YouTube Sync | `filings-youtube-sync` | Periodic | Sync YouTube events + create notifications |
 | Congress Sync | `python scripts/sync_congress_trades.py` | Every 24h | Incremental scrape of Capitol Trades → Supabase |
 
@@ -274,7 +303,9 @@ Per-ticker data merges hot table → OpenInsider scrape → cold table, deduplic
 | `congress_trades` | ~35K STOCK Act disclosures (cold, write-once) | No TTL (append-only) |
 | `congress_trades_prices` | Forward return data (+30/90/180/365d) | No TTL (refreshed as windows close) |
 | `congress_sync_log` | Daily sync job health tracking | 90 days |
-| `notifications` | 13F, YouTube, Reddit, Congress trade alerts | 48 hours |
+| `unusual_options_activity` | Unusual options contracts (dedicated table, vol ≥ 5× OI) | 7 days (auto-cleanup) |
+| `options_oi_snapshots` | Daily OI snapshots for delta tracking | 7 days (auto-cleanup) |
+| `notifications` | 13F, YouTube, Reddit, Congress, unusual options trade alerts | 48 hours |
 
 ### TTL by data type
 
@@ -303,6 +334,8 @@ On every deploy, the app runs a background cleanup to stay within the Supabase f
 | `youtube_events` | 30 days |
 | `sync_logs` | 30 days |
 | `congress_sync_log` | 90 days |
+| `unusual_options_activity` | 7 days |
+| `options_oi_snapshots` | 7 days |
 | `notifications` | 48 hours |
 | `api_cache` | Expired entries only (by `expires_at`) |
 | `congress_trades` | Permanent (cold, write-once) |

@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import threading
 import time
-from dataclasses import asdict, dataclass
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 
 from filings import supabase_cache
@@ -28,14 +30,17 @@ logger = logging.getLogger(__name__)
 _VOL_OI_THRESHOLD = 5       # minimum volume / open_interest ratio
 _MIN_OI = 10                # ignore contracts with tiny open interest
 _MIN_VOLUME = 50            # ignore contracts with negligible volume
+_MIN_PREMIUM = int(os.environ.get("OPTIONS_MIN_PREMIUM", "100000"))  # $100K floor
 _FEED_TTL = 300             # 5 min L1 cache for the feed
 _HEATMAP_TTL = 300          # 5 min L1 cache for heatmap data
+_CLUSTER_TTL = 300          # 5 min L1 cache for cluster data
 
 # ── In-memory L1 cache ──────────────────────────────────────────────────────
 
 _lock = threading.Lock()
 _feed_cache: dict[str, tuple[float, list[dict]]] = {}
 _heatmap_cache: tuple[float, list[dict]] | None = None
+_cluster_cache: tuple[float, list[dict]] | None = None
 
 
 # ── Data model ──────────────────────────────────────────────────────────────
@@ -65,6 +70,26 @@ class UnusualOption:
     sentiment: str              # "bullish" or "bearish"
     scan_date: str              # ISO date (YYYY-MM-DD)
     fetched_at: str             # ISO datetime
+
+    # ── Phase 1B: OI delta tracking ──
+    oi_prev: int | None = None
+    oi_delta: int | None = None
+    oi_delta_pct: float | None = None
+    is_new_positioning: bool = False
+
+    # ── Phase 1C: Near-expiry urgency ──
+    urgency_score: float = 1.0
+
+    # ── Phase 1D: Moneyness / OTM bias ──
+    moneyness: float | None = None
+    moneyness_label: str = ""
+    otm_score: float = 1.0
+
+    # ── Phase 3: Greeks (populated by Tradier, None from yfinance) ──
+    delta: float | None = None
+    gamma: float | None = None
+    theta: float | None = None
+    vega: float | None = None
 
     def to_db_row(self) -> dict:
         """Convert to a dict suitable for Supabase upsert."""
@@ -124,6 +149,10 @@ def detect_unusual(
             mid = (bid + ask) / 2 if bid is not None and ask is not None else (last or 0)
             premium = round(vol * mid * 100, 2)
 
+            # Phase 1A: Premium floor — skip low-dollar noise
+            if premium < _MIN_PREMIUM:
+                continue
+
             # Sentiment: call → bullish, put → bearish
             sentiment = "bullish" if option_type == "call" else "bearish"
 
@@ -141,6 +170,47 @@ def detect_unusual(
                     dte = (exp_date - today).days
                 except (ValueError, TypeError):
                     pass
+            dte = max(dte, 0)
+
+            # Phase 1C: Near-expiry urgency weighting
+            if dte == 0:
+                urgency = 2.0
+            elif dte <= 7:
+                urgency = 1.0 + (1.0 - dte / 7.0)
+            else:
+                urgency = 1.0
+
+            # Phase 1D: Moneyness / OTM bias scoring
+            moneyness_val: float | None = None
+            moneyness_label = ""
+            otm_score = 1.0
+            if underlying_price and underlying_price > 0 and strike > 0:
+                if option_type == "call":
+                    moneyness_val = round(strike / underlying_price, 4)
+                else:
+                    moneyness_val = round(underlying_price / strike, 4)
+
+                if moneyness_val < 0.95:
+                    moneyness_label = "Deep ITM"
+                    otm_score = 0.8
+                elif moneyness_val < 1.0:
+                    moneyness_label = "ITM"
+                    otm_score = 1.0
+                elif moneyness_val < 1.02:
+                    moneyness_label = "ATM"
+                    otm_score = 1.0
+                elif moneyness_val < 1.10:
+                    moneyness_label = "OTM"
+                    otm_score = 1.25
+                else:
+                    moneyness_label = "Deep OTM"
+                    otm_score = 1.5
+
+            # Phase 3: Extract greeks if present in DataFrame (Tradier provides them)
+            opt_delta = _safe_float(row.get("delta"))
+            opt_gamma = _safe_float(row.get("gamma"))
+            opt_theta = _safe_float(row.get("theta"))
+            opt_vega = _safe_float(row.get("vega"))
 
             results.append(
                 UnusualOption(
@@ -151,7 +221,7 @@ def detect_unusual(
                     option_type=option_type,
                     strike=strike,
                     expiry=expiry_str,
-                    dte=max(dte, 0),
+                    dte=dte,
                     volume=vol,
                     open_interest=oi,
                     vol_oi_ratio=ratio,
@@ -164,6 +234,14 @@ def detect_unusual(
                     sentiment=sentiment,
                     scan_date=today.isoformat(),
                     fetched_at=fetched_at,
+                    urgency_score=round(urgency, 2),
+                    moneyness=moneyness_val,
+                    moneyness_label=moneyness_label,
+                    otm_score=round(otm_score, 2),
+                    delta=opt_delta,
+                    gamma=opt_gamma,
+                    theta=opt_theta,
+                    vega=opt_vega,
                 )
             )
 
@@ -213,6 +291,19 @@ def get_unusual_options_feed(
         row["vol_oi_fmt"] = f"{row.get('vol_oi_ratio', 0):.1f}x"
         row["iv_fmt"] = _fmt_iv(row.get("implied_vol"))
         row["strike_fmt"] = _fmt_strike(row.get("strike"))
+        # OI delta formatting
+        oi_d = row.get("oi_delta")
+        if oi_d is not None:
+            sign = "+" if int(oi_d) > 0 else ""
+            row["oi_delta_fmt"] = f"{sign}{int(oi_d):,}"
+        else:
+            row["oi_delta_fmt"] = "—"
+        # Moneyness label (already stored, just ensure presence)
+        row.setdefault("moneyness_label", "")
+        row.setdefault("urgency_score", 1.0)
+        # Delta (greek) formatting
+        d = row.get("delta")
+        row["delta_fmt"] = f"{float(d):.2f}" if d is not None else "—"
 
     with _lock:
         _feed_cache[cache_key] = (time.time(), data)
@@ -324,12 +415,116 @@ def get_ticker_options_activity(ticker: str, limit: int = 20) -> list[dict]:
     return get_unusual_options_feed(ticker=ticker, sort_by="premium", limit=limit)
 
 
+def get_options_clusters(limit: int = 25) -> list[dict]:
+    """Detect clustered unusual activity — multiple contracts on the same ticker.
+
+    Groups today's unusual contracts by ticker, aggregates premium, determines
+    cluster direction, and flags clusters with 3+ contracts as "strong".
+
+    Returns a list of cluster dicts sorted by total premium descending.
+    """
+    global _cluster_cache
+
+    # L1 cache
+    with _lock:
+        if _cluster_cache is not None:
+            ts, data = _cluster_cache
+            if time.time() - ts < _CLUSTER_TTL:
+                return data[:limit]
+
+    feed = supabase_cache.get_unusual_options_feed(limit=500)
+    clusters = detect_clusters(feed)
+
+    with _lock:
+        _cluster_cache = (time.time(), clusters)
+
+    return clusters[:limit]
+
+
+def detect_clusters(feed: list[dict]) -> list[dict]:
+    """Group unusual contracts by ticker into clusters.
+
+    Args:
+        feed: List of row dicts from the unusual options feed.
+
+    Returns:
+        List of cluster dicts sorted by total_premium descending::
+
+            {
+                "ticker": "AAPL",
+                "company_name": "Apple Inc.",
+                "sector": "Information Technology",
+                "contract_count": 4,
+                "bullish_count": 3,
+                "bearish_count": 1,
+                "total_premium": 5_200_000.0,
+                "bullish_premium": 4_800_000.0,
+                "bearish_premium": 400_000.0,
+                "direction": "bullish",
+                "strength": "strong",      # "strong" if 3+ contracts
+                "max_vol_oi": 42.5,
+                "avg_urgency": 1.7,
+                "contracts": [...]         # individual contract rows
+            }
+    """
+    if not feed:
+        return []
+
+    by_ticker: dict[str, list[dict]] = defaultdict(list)
+    for row in feed:
+        tk = row.get("ticker", "")
+        if tk:
+            by_ticker[tk].append(row)
+
+    clusters = []
+    for ticker, rows in by_ticker.items():
+        if len(rows) < 2:
+            continue  # need at least 2 contracts to form a cluster
+
+        bullish = [r for r in rows if r.get("sentiment") == "bullish"]
+        bearish = [r for r in rows if r.get("sentiment") == "bearish"]
+        bull_prem = sum(float(r.get("premium_est") or 0) for r in bullish)
+        bear_prem = sum(float(r.get("premium_est") or 0) for r in bearish)
+        total_prem = bull_prem + bear_prem
+        max_ratio = max((float(r.get("vol_oi_ratio") or 0) for r in rows), default=0)
+        avg_urgency = sum(float(r.get("urgency_score") or 1.0) for r in rows) / len(rows)
+
+        if bull_prem > bear_prem * 1.2:
+            direction = "bullish"
+        elif bear_prem > bull_prem * 1.2:
+            direction = "bearish"
+        else:
+            direction = "mixed"
+
+        clusters.append({
+            "ticker": ticker,
+            "company_name": rows[0].get("company_name", ""),
+            "sector": rows[0].get("sector", ""),
+            "contract_count": len(rows),
+            "bullish_count": len(bullish),
+            "bearish_count": len(bearish),
+            "total_premium": round(total_prem, 2),
+            "total_premium_fmt": _fmt_premium(total_prem),
+            "bullish_premium": round(bull_prem, 2),
+            "bearish_premium": round(bear_prem, 2),
+            "direction": direction,
+            "strength": "strong" if len(rows) >= 3 else "moderate",
+            "max_vol_oi": round(max_ratio, 2),
+            "avg_urgency": round(avg_urgency, 2),
+            "contracts": rows,
+        })
+
+    clusters.sort(key=lambda c: -c["total_premium"])
+    return clusters
+
+
 def invalidate_cache() -> None:
     """Clear all L1 caches — call after a sync cycle completes."""
-    global _heatmap_cache
+    global _heatmap_cache, _cluster_cache
     with _lock:
         _feed_cache.clear()
         _heatmap_cache = None
+        _cluster_cache = None
 
 
 # ── Formatting helpers ──────────────────────────────────────────────────────

@@ -84,6 +84,25 @@ def _extract_options_signals() -> dict[str, list[SignalDetail]]:
         # Strength: normalise vol/OI ratio (5× baseline, 50× = max)
         strength = min(max_ratio / 50.0, 1.0)
 
+        # Phase 1C: Boost by max urgency score across contracts
+        max_urgency = max(
+            (float(r.get("urgency_score") or 1.0) for r in rows), default=1.0
+        )
+        strength = min(strength * max_urgency, 1.0)
+
+        # Phase 1D: Boost by max OTM score (Deep OTM bets are more directional)
+        max_otm = max(
+            (float(r.get("otm_score") or 1.0) for r in rows), default=1.0
+        )
+        strength = min(strength * max_otm, 1.0)
+
+        # Phase 1E: Cluster boost — multiple contracts on same ticker
+        n_contracts = len(rows)
+        if n_contracts >= 3:
+            strength = min(strength * 1.30, 1.0)   # 30% boost for strong clusters
+        elif n_contracts >= 2:
+            strength = min(strength * 1.15, 1.0)   # 15% boost for moderate clusters
+
         if total_premium >= 1e6:
             prem_fmt = f"${total_premium / 1e6:.1f}M premium"
         else:
@@ -93,14 +112,16 @@ def _extract_options_signals() -> dict[str, list[SignalDetail]]:
         result[ticker] = [SignalDetail(
             signal_type="options",
             direction=direction,
-            strength=strength,
+            strength=round(strength, 3),
             summary=summary,
             detail={
-                "contract_count": len(rows),
+                "contract_count": n_contracts,
                 "total_premium": total_premium,
                 "max_vol_oi": max_ratio,
                 "bullish_count": len(bullish),
                 "bearish_count": len(bearish),
+                "max_urgency": max_urgency,
+                "max_otm_score": max_otm,
                 "company_name": rows[0].get("company_name", ""),
                 "sector": rows[0].get("sector", ""),
             },
