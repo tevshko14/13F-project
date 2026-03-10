@@ -79,6 +79,13 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 - **Insider Trading** - Full insider trade history with quarterly groups, insider cards with hover tooltips, buy/sell timeline chart, per-insider filter, and SEC-resolved officer titles (CEO, CFO, etc.)
 - **Congress** - Congressional stock trading activity (STOCK Act disclosures)
 
+### Stock Valuation Screener (`/screener`) — Beta
+- **Password-Protected** - Cookie-based access gate for beta testers (30-day session)
+- **DCF Model** - Interactive discounted cash flow with 10 adjustable assumption sliders (revenue growth, operating margin, WACC, terminal growth, tax rate, capex %, D&A %, NWC %, dilution, margin of safety) + growth fade toggle
+- **Monte Carlo Simulation** - 10,000-iteration probability analysis with ECharts histogram + percentile table
+- **Relative Value** - User-controlled peer comparison: S&P 500 sector-matched suggestions as chip tags, inline Fuse.js ticker search, batch parallel fetching on Compare click. Table + bar chart of P/E, EV/EBITDA, P/S multiples
+- **Assumptions Sidebar** - Collapsible panel with all model inputs, peer selector, and football field valuation range chart
+
 ### Investor Pages
 - **Holdings Tab** - Full portfolio with activity badges and percentage allocations
 - **Compare Quarters** - Side-by-side quarterly diff with new buys, adds, reduces, and sells

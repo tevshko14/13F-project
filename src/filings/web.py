@@ -5658,24 +5658,15 @@ async def sitemap_xml():
 # ═══════════════════════════════════════════════════════════════════════
 
 _SCREENER_PASSWORD = os.environ.get("SCREENER_PASSWORD", "paperpanda2026")
+import hashlib as _hashlib
+_SCREENER_AUTH_TOKEN = _hashlib.sha256(
+    f"scr:{_SCREENER_PASSWORD}".encode()
+).hexdigest()[:32]
 
 
 def _screener_authed(request: Request) -> bool:
     """Check if the screener auth cookie is valid."""
-    import hashlib
-    token = request.cookies.get("scr_auth", "")
-    expected = hashlib.sha256(
-        f"scr:{_SCREENER_PASSWORD}".encode()
-    ).hexdigest()[:32]
-    return token == expected
-
-
-def _screener_auth_cookie_value() -> str:
-    """Generate the cookie value for valid screener auth."""
-    import hashlib
-    return hashlib.sha256(
-        f"scr:{_SCREENER_PASSWORD}".encode()
-    ).hexdigest()[:32]
+    return request.cookies.get("scr_auth", "") == _SCREENER_AUTH_TOKEN
 
 
 @app.get("/screener", response_class=HTMLResponse)
@@ -5697,7 +5688,7 @@ async def screener_auth(request: Request):
         resp = RedirectResponse("/screener", status_code=303)
         resp.set_cookie(
             "scr_auth",
-            _screener_auth_cookie_value(),
+            _SCREENER_AUTH_TOKEN,
             max_age=60 * 60 * 24 * 30,  # 30 days
             httponly=True,
             samesite="lax",

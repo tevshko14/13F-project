@@ -411,7 +411,7 @@
         <!-- Ticker header -->
         <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;">
             <img id="scr-logo" src="" alt="" width="32" height="32"
-                 loading="lazy" decoding="async"
+                 decoding="async"
                  style="border-radius:6px;object-fit:contain;display:none;"
                  onerror="this.style.display='none'">
             <span id="scr-ticker-badge" style="font-size:1.3rem;font-weight:700;color:#0d9488;"></span>
@@ -693,6 +693,8 @@
     var _chart = null;      // ECharts instance
     var _selectedPeers = []; // [{ticker, name}]
     var _peerFuse = null;    // Fuse.js instance for peer search
+    var _peerFuseRaw = null; // raw sessionStorage string (identity cache)
+    var _parsedTickerItems = null; // parsed & filtered ticker items (reused)
     var _peerDebounce = null;
     var _ddHighlight = -1;   // dropdown keyboard nav index
 
@@ -700,7 +702,7 @@
        Helpers
        ═══════════════════════════════════════════════════════════════ */
     function $(id) { return document.getElementById(id); }
-    function escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    var escHtml = window.escHtml || function(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
     function fmtDollar(v) {
         if (v == null || isNaN(v)) return '--';
         return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -830,7 +832,10 @@
             // Strip non-stock results whenever the dropdown updates
             var resultsEl = document.getElementById('ticker-search-results');
             if (resultsEl) {
+                var _stripMutating = false;
                 new MutationObserver(function() {
+                    if (_stripMutating) return;
+                    _stripMutating = true;
                     var cats = resultsEl.querySelectorAll('.ts-category');
                     cats.forEach(function(cat) {
                         if (cat.textContent.trim() !== 'Stocks') {
@@ -847,6 +852,7 @@
                     if (!resultsEl.querySelector('.ts-item')) {
                         resultsEl.style.display = 'none';
                     }
+                    _stripMutating = false;
                 }).observe(resultsEl, { childList: true });
             }
         }
@@ -898,23 +904,23 @@
         var d = _data;
         $('scr-ticker-badge').textContent = d.ticker;
 
-        // Logo
+        // Logo — set handlers BEFORE src, and use eager loading
         var logoEl = $('scr-logo');
-        logoEl.style.display = 'none';
-        logoEl.src = '/api/logo/' + encodeURIComponent(d.ticker) + '.png';
         logoEl.onload = function() { logoEl.style.display = ''; };
         logoEl.onerror = function() { logoEl.style.display = 'none'; };
+        logoEl.style.display = 'none';
+        logoEl.src = '/api/logo/' + encodeURIComponent(d.ticker) + '.png';
 
-        // Company name: API → search index fallback
+        // Company name: API → cached search index fallback
         var displayName = (d.company_name && d.company_name !== d.ticker) ? d.company_name : '';
-        if (!displayName) {
-            try {
-                var idx = JSON.parse(sessionStorage.getItem('pp_ticker_index') || '{}');
-                var stocks = (idx.data || []).filter(function(s) {
-                    return s.ticker && s.ticker.toUpperCase() === d.ticker.toUpperCase() && s.type !== 'investor';
-                });
-                if (stocks.length > 0 && stocks[0].name) displayName = stocks[0].name;
-            } catch(e) {}
+        if (!displayName && _parsedTickerItems) {
+            for (var si = 0; si < _parsedTickerItems.length; si++) {
+                var s = _parsedTickerItems[si];
+                if (s.ticker && s.ticker.toUpperCase() === d.ticker.toUpperCase() && s.name) {
+                    displayName = s.name;
+                    break;
+                }
+            }
         }
         $('scr-company-name').textContent = displayName;
 
@@ -1062,6 +1068,33 @@
 
     function onAdvChange() { _scheduleRecalc(); }
 
+    /** Read all DCF slider values + resolve base revenue. Returns null if insufficient data. */
+    function _getDCFParams() {
+        var fin = _data.financials;
+        var baseRevenue = fin.latest_revenue;
+        if (!baseRevenue && fin.annual_revenue && fin.annual_revenue.length > 0) {
+            baseRevenue = fin.annual_revenue[0];
+        }
+        if (!baseRevenue || baseRevenue <= 0) return null;
+        return {
+            baseRevenue: baseRevenue,
+            growth:   _getVal('rev-growth') / 100,
+            opMargin: _getVal('op-margin') / 100,
+            wacc:     _getVal('wacc') / 100,
+            termGr:   _getVal('terminal') / 100,
+            years:    Math.round(_getVal('proj-years')),
+            taxRate:  _getVal('tax-rate') / 100,
+            capexPct: _getVal('capex-pct') / 100,
+            daPct:    _getVal('da-pct') / 100,
+            nwcPct:   _getVal('nwc-pct') / 100,
+            dilution: _getVal('dilution') / 100,
+            mos:      _getVal('margin-safety') / 100,
+            fade:     $('chk-growth-fade').checked,
+            cash:     fin.cash_and_equivalents || 0,
+            debt:     fin.total_debt || 0,
+        };
+    }
+
     function _runWaterfall(baseRevenue, growth, opMargin, wacc, termGr, years, taxRate, capexPct, daPct, nwcPct, fade) {
         // Returns { revenues, ebits, nopats, das, capexs, dwcs, ufcfs, pvUfcfs, pvSum, pvTerminal, ev }
         var revenues = [], ebits = [], nopats = [], das = [], capexs = [], dwcs = [], ufcfs = [], pvUfcfs = [];
@@ -1106,55 +1139,33 @@
 
     function runDCF() {
         var d = _data;
-        var fin = d.financials;
-
-        // Base revenue: from API or fallback to annual revenue
-        var baseRevenue = fin.latest_revenue;
-        if (!baseRevenue && fin.annual_revenue && fin.annual_revenue.length > 0) {
-            baseRevenue = fin.annual_revenue[0];
-        }
-
-        if (!baseRevenue || baseRevenue <= 0) {
+        var p = _getDCFParams();
+        if (!p) {
             showResult('DCF Fair Value', null, 'No revenue data available for DCF calculation');
             return;
         }
 
-        var growth = _getVal('rev-growth') / 100;
-        var opMargin = _getVal('op-margin') / 100;
-        var wacc = _getVal('wacc') / 100;
-        var termGr = _getVal('terminal') / 100;
-        var years = Math.round(_getVal('proj-years'));
-        var taxRate = _getVal('tax-rate') / 100;
-        var capexPct = _getVal('capex-pct') / 100;
-        var daPct = _getVal('da-pct') / 100;
-        var nwcPct = _getVal('nwc-pct') / 100;
-        var dilution = _getVal('dilution') / 100;
-        var mos = _getVal('margin-safety') / 100;
-        var fade = $('chk-growth-fade').checked;
-
-        if (termGr >= wacc) {
+        if (p.termGr >= p.wacc) {
             showResult('DCF Fair Value', null, 'Terminal growth must be less than WACC');
             return;
         }
 
-        var w = _runWaterfall(baseRevenue, growth, opMargin, wacc, termGr, years, taxRate, capexPct, daPct, nwcPct, fade);
+        var w = _runWaterfall(p.baseRevenue, p.growth, p.opMargin, p.wacc, p.termGr, p.years, p.taxRate, p.capexPct, p.daPct, p.nwcPct, p.fade);
 
-        var cash = fin.cash_and_equivalents || 0;
-        var debt = fin.total_debt || 0;
-        var equityVal = w.ev + cash - debt;
+        var equityVal = w.ev + p.cash - p.debt;
         var shares = d.shares_outstanding;
         if (!shares || shares <= 0) {
             showResult('DCF Fair Value', null, 'Shares outstanding data unavailable');
-            buildDCFChart(w.revenues, w.ufcfs, w.pvUfcfs, years);
+            buildDCFChart(w.revenues, w.ufcfs, w.pvUfcfs, p.years);
             return;
         }
 
         // Adjust for dilution
-        var adjShares = shares * Math.pow(1 + dilution, years);
+        var adjShares = shares * Math.pow(1 + p.dilution, p.years);
         var fairValue = equityVal / adjShares;
 
         // Apply margin of safety
-        fairValue = fairValue * (1 - mos);
+        fairValue = fairValue * (1 - p.mos);
 
         // Show result
         showResult('DCF Fair Value', fairValue);
@@ -1168,27 +1179,27 @@
             _bdOp('='),
             _bdItem('Ent. Value', fmtB(w.ev), true),
             _bdOp('+'),
-            _bdItem('Cash', fmtB(cash)),
+            _bdItem('Cash', fmtB(p.cash)),
             _bdOp('−'),
-            _bdItem('Debt', fmtB(debt)),
+            _bdItem('Debt', fmtB(p.debt)),
             _bdOp('='),
             _bdItem('Equity Value', fmtB(equityVal), true),
         ];
-        if (dilution > 0) {
+        if (p.dilution > 0) {
             items.push(_bdOp('÷'));
             items.push(_bdItem('Adj. Shares', fmtNum(adjShares / 1e9, 2) + 'B'));
         }
-        if (mos > 0) {
-            items.push(_bdItem('Safety', '−' + (mos * 100).toFixed(0) + '%'));
+        if (p.mos > 0) {
+            items.push(_bdItem('Safety', '−' + (p.mos * 100).toFixed(0) + '%'));
         }
         bd.innerHTML = items.join('');
 
         // Build chart
-        buildDCFChart(w.revenues, w.ufcfs, w.pvUfcfs, years);
+        buildDCFChart(w.revenues, w.ufcfs, w.pvUfcfs, p.years);
 
         // Build waterfall table (only when advanced is open)
         if (_advOpen) {
-            buildWaterfallTable(w, years, baseRevenue);
+            buildWaterfallTable(w, p.years, p.baseRevenue);
         }
     }
 
@@ -1531,46 +1542,22 @@
                 colors.push('#f59e0b');
             }
 
-            // DCF range (run quick DCF at ±2% growth variance)
-            var ttmFcf = null;
-            var qfcf = d.financials.quarterly_fcf || [];
-            if (qfcf.length >= 4) ttmFcf = qfcf[0] + qfcf[1] + qfcf[2] + qfcf[3];
-            else if (d.financials.annual_fcf && d.financials.annual_fcf.length > 0) ttmFcf = d.financials.annual_fcf[0];
-
-            // Use revenue-first waterfall for DCF range
-            var baseRevenue = d.financials.latest_revenue;
-            if (!baseRevenue && d.financials.annual_revenue && d.financials.annual_revenue.length > 0) {
-                baseRevenue = d.financials.annual_revenue[0];
-            }
-
-            if (baseRevenue && baseRevenue > 0 && d.shares_outstanding) {
-                var baseGrowth = _getVal('rev-growth') / 100;
-                var wacc = _getVal('wacc') / 100;
-                var termGr = _getVal('terminal') / 100;
-                var years = Math.round(_getVal('proj-years'));
-                var opMargin = _getVal('op-margin') / 100;
-                var taxRate = _getVal('tax-rate') / 100;
-                var capexPct = _getVal('capex-pct') / 100;
-                var daPct = _getVal('da-pct') / 100;
-                var nwcPct = _getVal('nwc-pct') / 100;
-                var dilution = _getVal('dilution') / 100;
-                var mos = _getVal('margin-safety') / 100;
-                var fade = $('chk-growth-fade').checked;
-                var cash = d.financials.cash_and_equivalents || 0;
-                var debt = d.financials.total_debt || 0;
+            // DCF range (run quick DCF at ±3% growth variance)
+            var fp = _getDCFParams();
+            if (fp && d.shares_outstanding) {
                 var shares = d.shares_outstanding;
 
                 function quickDCF(gr) {
-                    if (termGr >= wacc) return price;
-                    var w = _runWaterfall(baseRevenue, gr, opMargin, wacc, termGr, years, taxRate, capexPct, daPct, nwcPct, fade);
-                    var eqVal = w.ev + cash - debt;
-                    var adjShares = shares * Math.pow(1 + dilution, years);
-                    return (eqVal / adjShares) * (1 - mos);
+                    if (fp.termGr >= fp.wacc) return price;
+                    var w = _runWaterfall(fp.baseRevenue, gr, fp.opMargin, fp.wacc, fp.termGr, fp.years, fp.taxRate, fp.capexPct, fp.daPct, fp.nwcPct, fp.fade);
+                    var eqVal = w.ev + fp.cash - fp.debt;
+                    var adjShares = shares * Math.pow(1 + fp.dilution, fp.years);
+                    return (eqVal / adjShares) * (1 - fp.mos);
                 }
 
-                var dcfLow = quickDCF(baseGrowth - 0.03);
-                var dcfMid = quickDCF(baseGrowth);
-                var dcfHigh = quickDCF(baseGrowth + 0.03);
+                var dcfLow = quickDCF(fp.growth - 0.03);
+                var dcfMid = quickDCF(fp.growth);
+                var dcfHigh = quickDCF(fp.growth + 0.03);
                 // Ensure positive range
                 dcfLow = Math.max(0, dcfLow);
 
@@ -1711,12 +1698,16 @@
        Peer Selection — chip tags, inline search, compare button
        ═══════════════════════════════════════════════════════════════ */
     function _initPeerSearch() {
+        var raw = sessionStorage.getItem('pp_ticker_index');
+        if (raw === _peerFuseRaw && _peerFuse) return; // already built from same data
+        _peerFuseRaw = raw;
         _peerFuse = null;
+        _parsedTickerItems = null;
         try {
-            var raw = sessionStorage.getItem('pp_ticker_index');
             if (!raw) return;
             var idx = JSON.parse(raw);
             var items = (idx.data || []).filter(function(s) { return s.type !== 'investor' && s.type !== 'politician'; });
+            _parsedTickerItems = items;
             if (items.length === 0) return;
             if (typeof Fuse !== 'undefined') {
                 _peerFuse = new Fuse(items, { keys: ['ticker', 'name'], threshold: 0.35, distance: 60, minMatchCharLength: 1 });

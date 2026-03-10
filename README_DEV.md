@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-10 (Financials tab with SEC XBRL data + full history backfill; politician age + bio redesign; Supabase client race condition fix for headshot/logo loading)
+> Last updated: 2026-03-10 (Stock Valuation Screener with DCF/Monte Carlo/Relative Value + user-controlled peer selection + password gate)
 
 ---
 
@@ -236,6 +236,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── congress_trading.py           # STOCK Act: Capitol Trades scraper (with date cutoff) + 6 display prep functions (chamber viz, trending, consensus, momentum, activity)
     ├── fundamentals.py               # SEC XBRL CompanyFacts: income/balance/cashflow/ratios with 52 GAAP concepts, 2-tier cache (L1+L2), full history backfill support
     ├── cold_storage.py               # Supabase Storage (S3-compatible) cold archive: upload/download JSON blobs, delete protection for fundamentals/
+    ├── screener.py                   # Stock Valuation Screener: DCF model, Monte Carlo simulation, peer suggestions/valuation, financial data aggregation (3-tier price fallback)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -256,6 +257,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── investor.html             # Individual fund page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
         ├── stock.html                # Stock detail (8 tabs: Overview, Ownership, Analysts, Signals, Vitals, Filings, Insider, Congress)
+        ├── screener.html              # Stock Valuation Screener: DCF, Monte Carlo, Relative Value tabs + assumptions sidebar with user-controlled peer selector (Fuse.js search, chip tags)
+        ├── screener_gate.html        # Password gate for screener (beta feature, cookie-based auth)
         ├── support.html              # Panda Fund: progress bar, Stripe Buy Button + Pricing Table, cost breakdown, funding history chart
         ├── deployment.html           # Capital Deployed standalone page (/deployment)
         ├── notifications.html        # Notification history page
@@ -1331,6 +1334,10 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/api/financials/{ticker}` | `api_financials` | SEC XBRL (L1+L2 cache) | `partials/financials.html` |
 | GET | `/api/financials/{ticker}/history` | `api_financials_history` | Cold storage (full history) | `partials/financials.html` |
 | GET | `/api/options/clusters` | `options_clusters_api` | Unusual options cache | `partials/options_clusters.html` |
+| GET | `/screener` | `screener_page` | Cookie auth gate → screener | `screener_gate.html` or `screener.html` |
+| POST | `/screener/auth` | `screener_auth` | Password check → set `scr_auth` cookie (30d) | Redirect → `/screener` or `screener_gate.html` |
+| GET | `/api/screener/{ticker}` | `api_screener` | yfinance + SEC XBRL + Tiingo (parallel) | JSON response |
+| GET | `/api/screener/peers` | `api_screener_peers` | yfinance + Tiingo + market_data (parallel batch) | JSON response |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**
@@ -1799,6 +1806,8 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Fundamentals historical backfill: S&P 500 + NASDAQ cold storage archive (back to 2007), merge-only writes, 3-layer delete protection
 - [x] Politician profiles: age display from congress-legislators GitHub dataset, cleaner bio section with subtle party badge
 - [x] Supabase client race condition fix: `_initialised` flag moved after `_client` assignment (headshots + logos now load on startup)
+- [x] Stock Valuation Screener: DCF model (10 sliders + growth fade), Monte Carlo simulation (10K iterations, ECharts histogram), Relative Value (user-controlled peer selector with S&P 500 suggestions, Fuse.js search, chip tags, parallel batch fetch)
+- [x] Screener password gate: cookie-based auth (`scr_auth`, SHA-256, 30-day, `SCREENER_PASSWORD` env var), beta feature badge
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
