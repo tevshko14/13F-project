@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-11 (Macro dashboard: glassmorphism design, NASDAQ 100 toggle fix, password gate, sidebar nav link, revenue estimate backfill)
+> Last updated: 2026-03-11 (CBOE volatility/IV Rank, FRED/Treasury/FX/WSB API integrations, Earnings tab consolidation, options heatmap→IV Rank swap, OpenFIGI CUSIP resolver)
 
 ---
 
@@ -237,6 +237,12 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── fundamentals.py               # SEC XBRL CompanyFacts: income/balance/cashflow/ratios with 52 GAAP concepts, 2-tier cache (L1+L2), full history backfill support
     ├── cold_storage.py               # Supabase Storage (S3-compatible) cold archive: upload/download JSON blobs, delete protection for fundamentals/
     ├── screener.py                   # Stock Valuation Screener: DCF model, Monte Carlo simulation, peer suggestions/valuation, financial data aggregation (3-tier price fallback)
+    ├── cboe_data.py                  # CBOE volatility data: Put/Call ratios (CBOE CSV→yfinance fallback), VIX term structure, SKEW index, IV Rank batch computation
+    ├── fred_data.py                  # FRED (Federal Reserve) economic data: GDP, CPI, unemployment, fed funds rate, 10Y yield, yield spread (requires FRED_API_KEY)
+    ├── treasury_data.py              # US Treasury data: daily yield curve (treasury.gov CSV), national debt (Fiscal Data API), free/no key
+    ├── wsb_sentiment.py              # Reddit/WSB sentiment: top mentioned tickers via ApeWisdom API, per-ticker sentiment lookup, free/no key
+    ├── openfigi.py                   # OpenFIGI CUSIP→ticker resolution: batch mapping (100/request), 7-day cache, free tier (no key for basic)
+    ├── frankfurter.py                # FX rates: 12 major currencies vs USD, 30-day sparklines, Frankfurter API (ECB rates), free/no key/no rate limits
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -1344,6 +1350,12 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/api/macro/breadth` | `macro_breadth_api` | market_breadth (yfinance) | `partials/market_breadth.html` |
 | GET | `/api/macro/calendar` | `macro_calendar_api` | earnings_scorecard calendar | `partials/earnings_calendar_macro.html` |
 | GET | `/api/macro/economic` | `macro_economic_api` | fred_calendar (FRED API) | `partials/economic_dashboard.html` |
+| GET | `/api/macro/volatility` | `macro_volatility_api` | cboe_data (P/C, VIX, SKEW) | `partials/macro_volatility.html` |
+| GET | `/api/macro/fred` | `macro_fred_api` | fred_data (GDP, CPI, rates) | `partials/macro_economic.html` |
+| GET | `/api/macro/treasury` | `macro_treasury_api` | treasury_data (yield curve, debt) | `partials/macro_treasury.html` |
+| GET | `/api/macro/fx` | `macro_fx_api` | frankfurter (FX rates) | `partials/macro_fx.html` |
+| GET | `/api/options/ivrank` | `options_ivrank_api` | cboe_data (IV rank batch) | `partials/options_ivrank.html` |
+| GET | `/api/stock/{ticker}/wsb` | `stock_wsb_api` | wsb_sentiment (ApeWisdom) | `partials/stock_wsb_sentiment.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**

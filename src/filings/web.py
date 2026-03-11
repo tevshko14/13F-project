@@ -2950,6 +2950,30 @@ async def options_clusters_api(request: Request, limit: int = 25):
     )
 
 
+@app.get("/api/options/ivrank", response_class=HTMLResponse)
+async def options_ivrank_api(request: Request):
+    """HTMX partial: IV Rank table for most-active options tickers + market P/C ratios."""
+    from filings import cboe_data
+
+    ivrank_data, putcall_equity, putcall_index = await asyncio.gather(
+        _to_heavy(cboe_data.get_iv_rank_batch),
+        _to_heavy(cboe_data.get_put_call_ratio, "equity"),
+        _to_heavy(cboe_data.get_put_call_ratio, "index"),
+    )
+
+    return templates.TemplateResponse(
+        "partials/options_ivrank.html",
+        {
+            "request": request,
+            "ivrank_data": ivrank_data or [],
+            "putcall_equity": (putcall_equity or [])[-20:],
+            "putcall_index": (putcall_index or [])[-20:],
+            "putcall_equity_json": json_module.dumps((putcall_equity or [])[-60:]),
+            "putcall_index_json": json_module.dumps((putcall_index or [])[-60:]),
+        },
+    )
+
+
 @app.get("/api/stock/{ticker}/options", response_class=HTMLResponse)
 async def stock_options_api(request: Request, ticker: str):
     """HTMX partial: unusual options activity for a specific stock."""
@@ -4030,6 +4054,122 @@ async def macro_economic_api(
     return templates.TemplateResponse(
         "partials/economic_dashboard.html",
         {"request": request, "data": data},
+    )
+
+
+@app.get("/api/macro/volatility", response_class=HTMLResponse)
+async def macro_volatility_api(
+    request: Request,
+    type: str = "total",
+):
+    """HTMX endpoint — returns volatility dashboard partial (P/C ratio, VIX term structure, SKEW)."""
+    if not _screener_authed(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from filings import cboe_data
+
+    if type not in ("total", "index", "equity"):
+        type = "total"
+
+    putcall, vix_term, skew = await asyncio.gather(
+        _to_heavy(cboe_data.get_put_call_ratio, type),
+        _to_heavy(cboe_data.get_vix_term_structure),
+        _to_heavy(cboe_data.get_skew_index),
+    )
+
+    return templates.TemplateResponse(
+        "partials/macro_volatility.html",
+        {
+            "request": request,
+            "putcall": putcall or [],
+            "putcall_json": json_module.dumps(putcall or []),
+            "vix_term": vix_term or {},
+            "vix_term_json": json_module.dumps(vix_term or {}),
+            "skew": skew or [],
+            "skew_json": json_module.dumps(skew or []),
+            "ratio_type": type,
+        },
+    )
+
+
+# ─── FRED Economic Indicators ───────────────────────────────────────
+@app.get("/api/macro/fred", response_class=HTMLResponse)
+async def macro_fred_api(request: Request):
+    """HTMX endpoint — FRED economic indicators (GDP, CPI, unemployment, rates)."""
+    if not _screener_authed(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from filings import fred_data
+
+    data = await _to_heavy(fred_data.get_dashboard_data)
+    return templates.TemplateResponse(
+        "partials/macro_economic.html",
+        {
+            "request": request,
+            "indicators": data or {},
+            "indicators_json": json_module.dumps(data or {}, default=str),
+        },
+    )
+
+
+# ─── Treasury Yield Curve ───────────────────────────────────────────
+@app.get("/api/macro/treasury", response_class=HTMLResponse)
+async def macro_treasury_api(request: Request):
+    """HTMX endpoint — Treasury yield curve + national debt."""
+    if not _screener_authed(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from filings import treasury_data
+
+    data = await _to_heavy(treasury_data.get_treasury_dashboard)
+    return templates.TemplateResponse(
+        "partials/macro_treasury.html",
+        {
+            "request": request,
+            "yield_curve": (data or {}).get("yield_curve") or {},
+            "yield_curve_json": json_module.dumps((data or {}).get("yield_curve") or {}, default=str),
+            "debt": (data or {}).get("debt") or {},
+            "debt_json": json_module.dumps((data or {}).get("debt") or {}, default=str),
+        },
+    )
+
+
+# ─── FX Rates ───────────────────────────────────────────────────────
+@app.get("/api/macro/fx", response_class=HTMLResponse)
+async def macro_fx_api(request: Request):
+    """HTMX endpoint — FX rates dashboard."""
+    if not _screener_authed(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from filings import frankfurter
+
+    data = await _to_heavy(frankfurter.get_fx_dashboard)
+    return templates.TemplateResponse(
+        "partials/macro_fx.html",
+        {
+            "request": request,
+            "fx_data": data or {},
+            "fx_json": json_module.dumps(data or {}, default=str),
+        },
+    )
+
+
+# ─── WSB Sentiment (per-ticker) ─────────────────────────────────────
+@app.get("/api/stock/{ticker}/wsb", response_class=HTMLResponse)
+async def stock_wsb_api(request: Request, ticker: str):
+    """HTMX endpoint — WSB sentiment badge for a stock."""
+    if not _valid_ticker(ticker):
+        return HTMLResponse("")
+    from filings import wsb_sentiment
+
+    data = await _to_heavy(wsb_sentiment.get_ticker_sentiment, ticker.upper())
+    return templates.TemplateResponse(
+        "partials/stock_wsb_sentiment.html",
+        {
+            "request": request,
+            "ticker": ticker.upper(),
+            "wsb": data,  # None if ticker not in WSB top 50
+        },
     )
 
 

@@ -152,6 +152,10 @@
     /* ── Panel + Controls ── */
     .macro-panel { display: none; }
     .macro-panel.active { display: block; }
+    .earn-sub { display: none; }
+    .earn-sub.active { display: block; }
+    .mt-sub { display: none; }
+    .mt-sub.active { display: block; }
     .macro-controls {
         display: flex; align-items: center; flex-wrap: wrap;
         gap: 1em; margin-bottom: 1.5em;
@@ -204,31 +208,59 @@
 {# ── Top-level tabs ── #}
 <div class="macro-nav-shell" role="tablist">
     <ul class="macro-nav-list">
-        <li><button class="macro-tab active" id="tab-earnings" data-macro-tab="earnings" role="tab" aria-selected="true" aria-controls="macro-panel-earnings">Earnings Scorecard</button></li>
+        <li><button class="macro-tab active" id="tab-earnings" data-macro-tab="earnings" role="tab" aria-selected="true" aria-controls="macro-panel-earnings">Earnings</button></li>
         <li><button class="macro-tab" id="tab-breadth" data-macro-tab="breadth" role="tab" aria-selected="false" aria-controls="macro-panel-breadth">Market Performance</button></li>
-        <li><button class="macro-tab" id="tab-calendar" data-macro-tab="calendar" role="tab" aria-selected="false" aria-controls="macro-panel-calendar">Earnings Calendar</button></li>
         <li><button class="macro-tab" id="tab-economic" data-macro-tab="economic" role="tab" aria-selected="false" aria-controls="macro-panel-economic">Events Calendar</button></li>
         <li><button class="macro-tab" id="tab-trends" data-macro-tab="trends" role="tab" aria-selected="false" aria-controls="macro-panel-trends">Macro Trends</button></li>
+        <li><button class="macro-tab" id="tab-volatility" data-macro-tab="volatility" role="tab" aria-selected="false" aria-controls="macro-panel-volatility">Volatility</button></li>
     </ul>
 </div>
 
-{# ═══ Panel: Earnings Scorecard ═══ #}
+{# ═══ Panel: Earnings (Scorecard + Calendar) ═══ #}
 <div class="macro-panel active" id="macro-panel-earnings" role="tabpanel" aria-labelledby="tab-earnings">
-    <div class="macro-controls">
-        <h2>Earnings Scorecard</h2>
-        <div class="pp-pill-nav" id="es-index-nav" style="margin-bottom: 0;">
-            {% for key, label in indices.items() %}
-            <button class="pp-pill-btn {% if key == current_index %}active{% endif %}"
-                    data-key="{{ key }}" onclick="esChangeIndex('{{ key }}')">{{ label }}</button>
-            {% endfor %}
+    {# ── Sub-tab pills: Scorecard | Calendar ── #}
+    <div class="macro-controls" style="margin-bottom: 0.6rem;">
+        <h2>Earnings</h2>
+        <div class="pp-pill-nav" id="earn-subtab-nav" style="margin-bottom: 0;">
+            <button class="pp-pill-btn active" data-key="scorecard" onclick="earnSwitchSub('scorecard')">Scorecard</button>
+            <button class="pp-pill-btn" data-key="calendar" onclick="earnSwitchSub('calendar')">Calendar</button>
         </div>
     </div>
-    <div id="es-content"
-         hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
-         hx-trigger="load"
-         hx-swap="innerHTML">
-        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-            <span aria-busy="true">Loading earnings scorecard…</span>
+
+    {# ── Scorecard sub-panel ── #}
+    <div id="earn-sub-scorecard" class="earn-sub active">
+        <div class="macro-controls" style="margin-top: 0.4rem;">
+            <div class="pp-pill-nav" id="es-index-nav" style="margin-bottom: 0;">
+                {% for key, label in indices.items() %}
+                <button class="pp-pill-btn {% if key == current_index %}active{% endif %}"
+                        data-key="{{ key }}" onclick="esChangeIndex('{{ key }}')">{{ label }}</button>
+                {% endfor %}
+            </div>
+        </div>
+        <div id="es-content"
+             hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+            <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+                <span aria-busy="true">Loading earnings scorecard…</span>
+            </div>
+        </div>
+    </div>
+
+    {# ── Calendar sub-panel ── #}
+    <div id="earn-sub-calendar" class="earn-sub">
+        <div class="macro-controls" style="margin-top: 0.4rem;">
+            <div class="pp-pill-nav" id="ec-period-nav" style="margin-bottom: 0;">
+                {% for key, label in calendar_periods.items() %}
+                <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
+                        data-key="{{ key }}" onclick="ecChangePeriod('{{ key }}')">{{ label }}</button>
+                {% endfor %}
+            </div>
+        </div>
+        <div id="ec-content">
+            <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+                <span aria-busy="true">Loading earnings calendar…</span>
+            </div>
         </div>
     </div>
 </div>
@@ -253,24 +285,6 @@
     <div id="mb-content">
         <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
             <span aria-busy="true">Loading market performance…</span>
-        </div>
-    </div>
-</div>
-
-{# ═══ Panel: Earnings Calendar ═══ #}
-<div class="macro-panel" id="macro-panel-calendar" role="tabpanel" aria-labelledby="tab-calendar">
-    <div class="macro-controls">
-        <h2>Earnings Calendar</h2>
-        <div class="pp-pill-nav" id="ec-period-nav" style="margin-bottom: 0;">
-            {% for key, label in calendar_periods.items() %}
-            <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
-                    data-key="{{ key }}" onclick="ecChangePeriod('{{ key }}')">{{ label }}</button>
-            {% endfor %}
-        </div>
-    </div>
-    <div id="ec-content">
-        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-            <span aria-busy="true">Loading earnings calendar…</span>
         </div>
     </div>
 </div>
@@ -305,37 +319,87 @@
     </div>
 </div>
 
-{# ═══ Panel: Macro Trends (Google Trends Sentiment) ═══ #}
+{# ═══ Panel: Macro Trends (subtabs: Sentiment | Economic | Treasury | FX) ═══ #}
 <div class="macro-panel" id="macro-panel-trends" role="tabpanel" aria-labelledby="tab-trends">
-    <h2 style="margin: 0 0 0.5em;">Macro Sentiment Trends</h2>
-    <p style="font-size: 0.85em; color: var(--pp-text-muted); margin-bottom: 1.2em;">
-        Search interest for market-moving macro keywords over the last 3 months.
-        Rising interest in "recession" or "stock market crash" often precedes volatility.
-    </p>
-    <div class="gt-macro-grid">
-        {% for cat_name, keywords in macro_categories.items() %}
-        <div class="gt-macro-card">
-            <h4>{{ cat_name }}</h4>
-            <div class="gt-macro-keywords">
-                {% for kw in keywords %}
-                <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
-                {% endfor %}
-            </div>
-            <div style="margin-top: 0.8em;">
-                <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
-                     hx-trigger="revealed"
-                     hx-swap="innerHTML">
-                    <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
-                        <div class="gt-loading-spinner"></div>
+    <div class="macro-controls" style="margin-bottom: 0.6rem;">
+        <h2>Macro Trends</h2>
+        <div class="pp-pill-nav" id="mt-subtab-nav" style="margin-bottom: 0;">
+            <button class="pp-pill-btn active" data-key="sentiment" onclick="mtSwitchSub('sentiment')">Sentiment</button>
+            <button class="pp-pill-btn" data-key="economic" onclick="mtSwitchSub('economic')">Economic</button>
+            <button class="pp-pill-btn" data-key="treasury" onclick="mtSwitchSub('treasury')">Treasury</button>
+            <button class="pp-pill-btn" data-key="fx" onclick="mtSwitchSub('fx')">FX Rates</button>
+        </div>
+    </div>
+
+    {# ── Sentiment sub-panel (Google Trends — existing) ── #}
+    <div id="mt-sub-sentiment" class="mt-sub active">
+        <p style="font-size: 0.85em; color: var(--pp-text-muted); margin-bottom: 1.2em;">
+            Search interest for market-moving macro keywords over the last 3 months.
+            Rising interest in "recession" or "stock market crash" often precedes volatility.
+        </p>
+        <div class="gt-macro-grid">
+            {% for cat_name, keywords in macro_categories.items() %}
+            <div class="gt-macro-card">
+                <h4>{{ cat_name }}</h4>
+                <div class="gt-macro-keywords">
+                    {% for kw in keywords %}
+                    <span class="gt-pill" style="margin: 0.15em 0;">{{ kw }}</span>
+                    {% endfor %}
+                </div>
+                <div style="margin-top: 0.8em;">
+                    <div hx-get="/api/google-trends/macro?category={{ cat_name | urlencode }}"
+                         hx-trigger="revealed"
+                         hx-swap="innerHTML">
+                        <div class="gt-chart-container" style="height: 140px; display: flex; align-items: center; justify-content: center;">
+                            <div class="gt-loading-spinner"></div>
+                        </div>
                     </div>
                 </div>
             </div>
+            {% endfor %}
         </div>
-        {% endfor %}
+        <p style="font-size: 0.78em; color: var(--pp-text-muted); margin-top: 0.8em; padding-top: 0.5em; border-top: 1px solid var(--pp-overlay-5);">
+            Data from Google Trends (relative search interest 0-100). Updated daily.
+        </p>
     </div>
-    <p style="font-size: 0.78em; color: var(--pp-text-muted); margin-top: 0.8em; padding-top: 0.5em; border-top: 1px solid var(--pp-overlay-5);">
-        Data from Google Trends (relative search interest 0-100). Updated daily.
-    </p>
+
+    {# ── Economic sub-panel (FRED) ── #}
+    <div id="mt-sub-economic" class="mt-sub">
+        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+            <span aria-busy="true">Loading economic indicators…</span>
+        </div>
+    </div>
+
+    {# ── Treasury sub-panel ── #}
+    <div id="mt-sub-treasury" class="mt-sub">
+        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+            <span aria-busy="true">Loading Treasury data…</span>
+        </div>
+    </div>
+
+    {# ── FX Rates sub-panel ── #}
+    <div id="mt-sub-fx" class="mt-sub">
+        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+            <span aria-busy="true">Loading FX rates…</span>
+        </div>
+    </div>
+</div>
+
+{# ═══ Panel: Volatility ═══ #}
+<div class="macro-panel" id="macro-panel-volatility" role="tabpanel" aria-labelledby="tab-volatility">
+    <div class="macro-controls">
+        <h2>Volatility & Options Sentiment</h2>
+        <div class="pp-pill-nav" id="vol-type-nav" style="margin-bottom: 0;">
+            <button class="pp-pill-btn active" data-key="total" onclick="volChangeType('total')">Total</button>
+            <button class="pp-pill-btn" data-key="index" onclick="volChangeType('index')">Index</button>
+            <button class="pp-pill-btn" data-key="equity" onclick="volChangeType('equity')">Equity</button>
+        </div>
+    </div>
+    <div id="vol-content">
+        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+            <span aria-busy="true">Loading volatility data…</span>
+        </div>
+    </div>
 </div>
 
 <style>
@@ -364,6 +428,7 @@
     var mbLoaded = false;
     var ecLoaded = false;
     var edLoaded = false;
+    var volLoaded = false;
     document.querySelectorAll('.macro-tab').forEach(function(tab) {
         tab.addEventListener('click', function() {
             document.querySelectorAll('.macro-tab').forEach(function(t) {
@@ -381,18 +446,32 @@
                 mbLoaded = true;
                 mbReload();
             }
-            /* Lazy-load Earnings Calendar on first tab click */
-            if (tab.dataset.macroTab === 'calendar' && !ecLoaded) {
-                ecLoaded = true;
-                ecReload();
-            }
             /* Lazy-load Events Calendar on first tab click */
             if (tab.dataset.macroTab === 'economic' && !edLoaded) {
                 edLoaded = true;
                 edReload();
             }
+            /* Lazy-load Volatility on first tab click */
+            if (tab.dataset.macroTab === 'volatility' && !volLoaded) {
+                volLoaded = true;
+                volReload();
+            }
         });
     });
+
+    /* ── Earnings sub-tab switching (Scorecard ↔ Calendar) ── */
+    window.earnSwitchSub = function(sub) {
+        document.querySelectorAll('.earn-sub').forEach(function(p) { p.classList.remove('active'); });
+        var target = document.getElementById('earn-sub-' + sub);
+        if (target) target.classList.add('active');
+        activatePill('earn-subtab-nav', sub);
+
+        /* Lazy-load Calendar on first switch */
+        if (sub === 'calendar' && !ecLoaded) {
+            ecLoaded = true;
+            ecReload();
+        }
+    };
 
     /* ── Shared pill-nav toggle (uses data-key, no text matching) ── */
     function activatePill(navId, key) {
@@ -489,6 +568,42 @@
         edCurrentCountry = c;
         activatePill('ed-country-nav', c);
         edReload();
+    };
+
+    /* ── Macro Trends sub-tab switching ── */
+    var mtEconLoaded = false;
+    var mtTreasuryLoaded = false;
+    var mtFxLoaded = false;
+
+    window.mtSwitchSub = function(sub) {
+        document.querySelectorAll('.mt-sub').forEach(function(p) { p.classList.remove('active'); });
+        var target = document.getElementById('mt-sub-' + sub);
+        if (target) target.classList.add('active');
+        activatePill('mt-subtab-nav', sub);
+
+        if (sub === 'economic' && !mtEconLoaded) {
+            mtEconLoaded = true;
+            htmx.ajax('GET', '/api/macro/fred', '#mt-sub-economic');
+        }
+        if (sub === 'treasury' && !mtTreasuryLoaded) {
+            mtTreasuryLoaded = true;
+            htmx.ajax('GET', '/api/macro/treasury', '#mt-sub-treasury');
+        }
+        if (sub === 'fx' && !mtFxLoaded) {
+            mtFxLoaded = true;
+            htmx.ajax('GET', '/api/macro/fx', '#mt-sub-fx');
+        }
+    };
+
+    /* ── Volatility controls ── */
+    var volCurrentType = 'total';
+    function volReload() {
+        htmx.ajax('GET', '/api/macro/volatility?type=' + volCurrentType, '#vol-content');
+    }
+    window.volChangeType = function(t) {
+        volCurrentType = t;
+        activatePill('vol-type-nav', t);
+        volReload();
     };
 
     // Sync EC controls (period pill visibility) after each calendar partial swap

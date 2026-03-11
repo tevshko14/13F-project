@@ -1,0 +1,107 @@
+{# FRED Economic Indicators — loaded via /api/macro/economic #}
+<style>
+.fred-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.1em; }
+.fred-card {
+    border: 1px solid var(--pp-glass-border, rgba(255,255,255,0.3));
+    border-radius: 16px; padding: 1.2em 1.4em;
+    background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.6));
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 8px 22px rgba(15,23,42,0.06);
+}
+:root[data-theme="dark"] .fred-card {
+    background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.65));
+    box-shadow: 0 8px 22px rgba(2,6,23,0.35);
+}
+.fred-card-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5em; }
+.fred-card-title { font-size: 0.9em; font-weight: 700; color: var(--macro-ink, #0f172a); }
+.fred-card-value { font-size: 1.6em; font-weight: 700; letter-spacing: -0.02em; }
+.fred-card-change { font-size: 0.82em; font-weight: 600; margin-left: 0.4em; }
+.fred-card-change.up { color: #16a34a; }
+.fred-card-change.down { color: #ef4444; }
+.fred-card-unit { font-size: 0.75em; color: var(--pp-text-muted, rgba(15,23,42,0.55)); font-weight: 500; }
+.fred-chart { width: 100%; height: 140px; margin-top: 0.6em; }
+.fred-empty { text-align: center; padding: 3em; color: var(--pp-text-muted); }
+.fred-note { font-size: 0.75em; color: var(--pp-text-muted); margin-top: 1em; padding-top: 0.5em; border-top: 1px solid var(--pp-overlay-5, rgba(0,0,0,0.05)); }
+</style>
+
+{% if indicators %}
+<div class="fred-grid">
+    {% for sid, ind in indicators.items() %}
+    <div class="fred-card">
+        <div class="fred-card-header">
+            <span class="fred-card-title">{{ ind.name }}</span>
+            <span class="fred-card-unit">{{ ind.unit }} · {{ ind.freq }}</span>
+        </div>
+        <div>
+            <span class="fred-card-value" style="color: {{ ind.color }};">
+                {% if ind.unit == '%' %}{{ "%.2f"|format(ind.latest.value) }}%{% elif ind.unit == 'Billions $' %}${{ "%.1f"|format(ind.latest.value) }}B{% else %}{{ "%.2f"|format(ind.latest.value) }}{% endif %}
+            </span>
+            {% if ind.change is not none %}
+            <span class="fred-card-change {{ 'up' if ind.change >= 0 else 'down' }}">
+                {{ '+' if ind.change >= 0 else '' }}{{ "%.2f"|format(ind.change) }}
+            </span>
+            {% endif %}
+        </div>
+        <div class="fred-chart" id="fred-chart-{{ sid }}"></div>
+    </div>
+    {% endfor %}
+</div>
+
+<p class="fred-note">
+    Data from <a href="https://fred.stlouisfed.org/" target="_blank" rel="noopener">FRED (Federal Reserve Bank of St. Louis)</a>.
+    Updated {{ indicators.values()|first|attr('freq') if indicators else 'periodically' }}.
+</p>
+
+<script>
+(function() {
+    var data = {{ indicators_json|safe }};
+    requireECharts(function(err) {
+        if (err) return;
+        Object.keys(data).forEach(function(sid) {
+            var ind = data[sid];
+            var el = document.getElementById('fred-chart-' + sid);
+            if (!el || !ind.data || !ind.data.length) return;
+
+            var chart = echarts.init(el);
+            var dates = ind.data.map(function(d) { return d.date; });
+            var vals = ind.data.map(function(d) { return d.value; });
+
+            var seriesType = ind.chart || 'line';
+            var series = {
+                type: seriesType === 'area' ? 'line' : seriesType,
+                data: vals,
+                smooth: seriesType !== 'bar',
+                symbol: 'none',
+                lineStyle: seriesType !== 'bar' ? { width: 2, color: ind.color } : undefined,
+                itemStyle: { color: ind.color },
+                areaStyle: seriesType === 'area' ? { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                    { offset: 0, color: ind.color + '44' },
+                    { offset: 1, color: ind.color + '08' }
+                ]) } : undefined,
+            };
+
+            chart.setOption({
+                grid: { left: 0, right: 0, top: 8, bottom: 0, containLabel: false },
+                xAxis: { type: 'category', data: dates, show: false },
+                yAxis: { type: 'value', show: false, scale: true },
+                tooltip: {
+                    trigger: 'axis',
+                    formatter: function(params) {
+                        var p = params[0];
+                        return '<b>' + p.name + '</b><br/>' + ind.name + ': <b>' + p.value + '</b> ' + ind.unit;
+                    }
+                },
+                series: [series]
+            });
+
+            window._ppRegisterResize && window._ppRegisterResize(function() { chart.resize(); });
+        });
+    });
+})();
+</script>
+{% else %}
+<div class="fred-empty">
+    <p>Economic indicator data is unavailable.</p>
+    <p style="font-size: 0.85em;">Ensure FRED_API_KEY is configured. Get a free key at <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank">fred.stlouisfed.org</a>.</p>
+</div>
+{% endif %}

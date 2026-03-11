@@ -795,6 +795,13 @@
         <div id="pp-ohlcv-chart" style="width: 100%; height: calc(100% - 2em);"></div>
     </div>
 
+    {# WSB Sentiment Badge — lazy loaded #}
+    <div id="wsb-sentiment-container"
+         hx-get="/api/stock/{{ stock_info.ticker }}/wsb"
+         hx-trigger="load"
+         hx-swap="innerHTML"
+         style="margin-top: 0.5em;"></div>
+
     <h4 style="margin-top: 0.5em;">Latest News</h4>
     <div id="ticker-news-container">
         <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading news...</p>

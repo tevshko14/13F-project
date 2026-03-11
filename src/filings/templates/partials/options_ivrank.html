@@ -1,0 +1,281 @@
+{# Options IV Rank — HTMX partial: market P/C ratio stats + IV Rank table (no extends) #}
+<style>
+    .ivr-wrap {
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        animation: ivrFadeIn 0.35s ease-out;
+    }
+
+    /* ── Mini stat cards (P/C ratios) ── */
+    .ivr-stats {
+        display: flex; gap: 0.8rem; margin-bottom: 1rem; flex-wrap: wrap;
+    }
+    .ivr-stat-card {
+        flex: 1; min-width: 160px;
+        border-radius: 14px; padding: 1rem 1.2rem;
+        border: 1px solid rgba(15,23,42,0.08);
+        background: linear-gradient(165deg, rgba(255,255,255,0.9), rgba(255,255,255,0.72));
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+    }
+    .ivr-stat-label {
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+        font-weight: 600; color: rgba(15,23,42,0.5); margin-bottom: 0.2rem;
+    }
+    .ivr-stat-value {
+        font-size: 1.6rem; font-weight: 700; line-height: 1.15;
+        color: var(--options-ink, #0f172a);
+    }
+    .ivr-stat-sub {
+        font-size: 0.75rem; color: rgba(15,23,42,0.5); margin-top: 0.15rem;
+    }
+
+    /* ── Table card ── */
+    .ivr-table-card {
+        border-radius: 18px; overflow: hidden;
+        border: 1px solid rgba(15,23,42,0.08);
+        background: linear-gradient(165deg, rgba(255,255,255,0.9), rgba(255,255,255,0.72));
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 34px rgba(15,23,42,0.1);
+        padding: 1rem;
+    }
+    .ivr-table-header {
+        display: flex; align-items: center; gap: 0.6rem;
+        margin-bottom: 0.8rem;
+    }
+    .ivr-table-title {
+        font-weight: 700; font-size: 1rem; margin: 0;
+        color: var(--options-ink, #0f172a);
+    }
+    .ivr-table-subtitle {
+        font-size: 0.8rem; font-weight: 500;
+        color: rgba(15,23,42,0.55);
+    }
+
+    /* ── Table ── */
+    .ivr-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .ivr-table {
+        width: 100%; border-collapse: collapse;
+        font-size: 0.84rem;
+    }
+    .ivr-table thead th {
+        text-align: left; padding: 0.6rem 0.7rem;
+        font-size: 0.72rem; text-transform: uppercase;
+        letter-spacing: 0.05em; font-weight: 700;
+        color: rgba(15,23,42,0.5);
+        border-bottom: 2px solid rgba(15,23,42,0.08);
+        cursor: pointer; user-select: none; white-space: nowrap;
+    }
+    .ivr-table thead th:hover { color: #0d9488; }
+    .ivr-table tbody td {
+        padding: 0.55rem 0.7rem;
+        border-bottom: 1px solid rgba(15,23,42,0.05);
+        white-space: nowrap;
+    }
+    .ivr-table tbody tr:hover { background: rgba(13,148,136,0.04); }
+    .ivr-ticker-link {
+        font-weight: 700; color: #0d9488; text-decoration: none;
+    }
+    .ivr-ticker-link:hover { text-decoration: underline; }
+    .ivr-company {
+        font-size: 0.78rem; color: rgba(15,23,42,0.55);
+        max-width: 180px; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* ── IV Rank bar ── */
+    .ivr-bar-wrap {
+        width: 80px; height: 8px; border-radius: 4px;
+        background: rgba(15,23,42,0.06); overflow: hidden;
+        display: inline-block; vertical-align: middle; margin-right: 0.4rem;
+    }
+    .ivr-bar {
+        height: 100%; border-radius: 4px;
+        transition: width 0.4s ease;
+    }
+    .ivr-bar-low { background: linear-gradient(90deg, #10b981, #34d399); }
+    .ivr-bar-mid { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+    .ivr-bar-high { background: linear-gradient(90deg, #ef4444, #f87171); }
+
+    .ivr-rank-val { font-weight: 700; }
+    .ivr-rank-low { color: #059669; }
+    .ivr-rank-mid { color: #d97706; }
+    .ivr-rank-high { color: #dc2626; }
+
+    .ivr-empty {
+        text-align: center; padding: 2.5rem 1rem;
+        color: rgba(15,23,42,0.5); font-size: 0.92rem;
+    }
+
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .ivr-stat-card {
+        border-color: rgba(148,163,184,0.2);
+        background: linear-gradient(165deg, rgba(15,23,42,0.9), rgba(15,23,42,0.72));
+        box-shadow: 0 8px 20px rgba(2,6,23,0.35);
+    }
+    :root[data-theme="dark"] .ivr-stat-label { color: rgba(226,232,240,0.5); }
+    :root[data-theme="dark"] .ivr-stat-sub { color: rgba(226,232,240,0.5); }
+    :root[data-theme="dark"] .ivr-table-card {
+        border-color: rgba(148,163,184,0.2);
+        background: linear-gradient(165deg, rgba(15,23,42,0.9), rgba(15,23,42,0.72));
+        box-shadow: 0 20px 36px rgba(2,6,23,0.46);
+    }
+    :root[data-theme="dark"] .ivr-table-subtitle { color: rgba(226,232,240,0.55); }
+    :root[data-theme="dark"] .ivr-table thead th {
+        color: rgba(226,232,240,0.5);
+        border-bottom-color: rgba(148,163,184,0.15);
+    }
+    :root[data-theme="dark"] .ivr-table tbody td {
+        border-bottom-color: rgba(148,163,184,0.08);
+    }
+    :root[data-theme="dark"] .ivr-table tbody tr:hover {
+        background: rgba(45,212,191,0.06);
+    }
+    :root[data-theme="dark"] .ivr-company { color: rgba(226,232,240,0.55); }
+    :root[data-theme="dark"] .ivr-bar-wrap { background: rgba(226,232,240,0.1); }
+    :root[data-theme="dark"] .ivr-empty { color: rgba(226,232,240,0.5); }
+    :root[data-theme="dark"] .ivr-rank-low { color: #34d399; }
+    :root[data-theme="dark"] .ivr-rank-mid { color: #fbbf24; }
+    :root[data-theme="dark"] .ivr-rank-high { color: #f87171; }
+
+    @keyframes ivrFadeIn {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+</style>
+
+<div class="ivr-wrap">
+
+    {# ── Market P/C Ratio Stats ── #}
+    <div class="ivr-stats">
+        <div class="ivr-stat-card">
+            <div class="ivr-stat-label">Equity Put/Call</div>
+            {% if putcall_equity %}
+            <div class="ivr-stat-value">{{ "%.2f" | format(putcall_equity[-1].ratio) }}</div>
+            <div class="ivr-stat-sub">{{ putcall_equity[-1].date }}</div>
+            {% else %}
+            <div class="ivr-stat-value">—</div>
+            {% endif %}
+        </div>
+        <div class="ivr-stat-card">
+            <div class="ivr-stat-label">Index Put/Call</div>
+            {% if putcall_index %}
+            <div class="ivr-stat-value">{{ "%.2f" | format(putcall_index[-1].ratio) }}</div>
+            <div class="ivr-stat-sub">{{ putcall_index[-1].date }}</div>
+            {% else %}
+            <div class="ivr-stat-value">—</div>
+            {% endif %}
+        </div>
+        <div class="ivr-stat-card">
+            <div class="ivr-stat-label">Tickers Scanned</div>
+            <div class="ivr-stat-value">{{ ivrank_data | length }}</div>
+            <div class="ivr-stat-sub">Most active by options volume</div>
+        </div>
+    </div>
+
+    {# ── IV Rank Table ── #}
+    <div class="ivr-table-card">
+        <div class="ivr-table-header">
+            <h3 class="ivr-table-title">Implied Volatility Rank</h3>
+            <span class="ivr-table-subtitle">Top {{ ivrank_data | length }} most-active tickers</span>
+        </div>
+
+        {% if ivrank_data %}
+        <div class="ivr-table-wrap">
+            <table class="ivr-table" id="ivr-rank-table">
+                <thead>
+                    <tr>
+                        <th data-sort="ticker">Ticker</th>
+                        <th data-sort="company">Company</th>
+                        <th data-sort="current_iv" data-type="num">Current IV</th>
+                        <th data-sort="iv_rank" data-type="num">IV Rank</th>
+                        <th data-sort="iv_52w_high" data-type="num">52W High</th>
+                        <th data-sort="iv_52w_low" data-type="num">52W Low</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in ivrank_data %}
+                    <tr>
+                        <td><a href="/stock/{{ row.ticker }}" class="ivr-ticker-link">{{ row.ticker }}</a></td>
+                        <td><span class="ivr-company">{{ row.company }}</span></td>
+                        <td>{{ "%.1f" | format(row.current_iv) }}%</td>
+                        <td>
+                            {% set rank = row.iv_rank %}
+                            {% if rank < 30 %}
+                                {% set bar_cls = 'ivr-bar-low' %}
+                                {% set rank_cls = 'ivr-rank-low' %}
+                            {% elif rank < 70 %}
+                                {% set bar_cls = 'ivr-bar-mid' %}
+                                {% set rank_cls = 'ivr-rank-mid' %}
+                            {% else %}
+                                {% set bar_cls = 'ivr-bar-high' %}
+                                {% set rank_cls = 'ivr-rank-high' %}
+                            {% endif %}
+                            <span class="ivr-bar-wrap"><span class="ivr-bar {{ bar_cls }}" style="width:{{ rank }}%"></span></span>
+                            <span class="ivr-rank-val {{ rank_cls }}">{{ "%.0f" | format(rank) }}%</span>
+                        </td>
+                        <td>{{ "%.1f" | format(row.iv_52w_high) }}%</td>
+                        <td>{{ "%.1f" | format(row.iv_52w_low) }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="ivr-empty">
+            No IV rank data available. This requires active options data — check back during market hours.
+        </div>
+        {% endif %}
+    </div>
+
+    <p style="font-size:0.72rem; color:var(--pp-text-muted); margin:0.8rem 0 0; padding-top:0.5rem; border-top:1px solid var(--pp-overlay-5);">
+        IV Rank = (Current IV − 52W Low) / (52W High − 52W Low).
+        <span style="color:#059669;">Green &lt; 30%</span> = cheap premium (buy strategies),
+        <span style="color:#dc2626;">Red &gt; 70%</span> = expensive premium (sell strategies).
+        Put/Call data from CBOE.
+    </p>
+</div>
+
+<script>
+(function() {
+    /* ── Client-side sortable table ── */
+    var table = document.getElementById('ivr-rank-table');
+    if (!table) return;
+    var headers = table.querySelectorAll('thead th[data-sort]');
+    var sortState = { col: 'iv_rank', asc: false };
+
+    headers.forEach(function(th) {
+        th.addEventListener('click', function() {
+            var col = th.dataset.sort;
+            var isNum = th.dataset.type === 'num';
+            if (sortState.col === col) {
+                sortState.asc = !sortState.asc;
+            } else {
+                sortState.col = col;
+                sortState.asc = isNum ? false : true;
+            }
+
+            var tbody = table.querySelector('tbody');
+            var rows = Array.from(tbody.querySelectorAll('tr'));
+            var colIdx = Array.from(th.parentElement.children).indexOf(th);
+
+            rows.sort(function(a, b) {
+                var aVal = a.children[colIdx].textContent.trim().replace('%', '');
+                var bVal = b.children[colIdx].textContent.trim().replace('%', '');
+                if (isNum) {
+                    aVal = parseFloat(aVal) || 0;
+                    bVal = parseFloat(bVal) || 0;
+                    return sortState.asc ? aVal - bVal : bVal - aVal;
+                }
+                return sortState.asc
+                    ? aVal.localeCompare(bVal)
+                    : bVal.localeCompare(aVal);
+            });
+
+            rows.forEach(function(r) { tbody.appendChild(r); });
+
+            /* Update header indicators */
+            headers.forEach(function(h) { h.style.color = ''; });
+            th.style.color = '#0d9488';
+        });
+    });
+})();
+</script>

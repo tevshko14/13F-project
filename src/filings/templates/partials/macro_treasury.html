@@ -1,0 +1,142 @@
+{# Treasury Yield Curve + National Debt — loaded via /api/macro/treasury #}
+<style>
+.treas-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1em; }
+@media (max-width: 768px) { .treas-grid { grid-template-columns: 1fr; } }
+.treas-card {
+    border: 1px solid var(--pp-glass-border, rgba(255,255,255,0.3));
+    border-radius: 16px; padding: 1.4em;
+    background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.6));
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 8px 22px rgba(15,23,42,0.06);
+}
+:root[data-theme="dark"] .treas-card {
+    background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.65));
+    box-shadow: 0 8px 22px rgba(2,6,23,0.35);
+}
+.treas-card-full { grid-column: 1 / -1; }
+.treas-card h3 { font-size: 1em; font-weight: 700; margin: 0 0 0.3em; }
+.treas-badge {
+    display: inline-block; padding: 0.22em 0.7em; border-radius: 999px;
+    font-size: 0.75em; font-weight: 700; margin-left: 0.5em;
+}
+.treas-badge.inverted { background: rgba(239,68,68,0.15); color: #ef4444; }
+.treas-badge.normal { background: rgba(22,163,74,0.15); color: #16a34a; }
+.treas-chart { width: 100%; height: 260px; }
+.treas-debt-val { font-size: 2em; font-weight: 700; color: #ef4444; letter-spacing: -0.02em; }
+.treas-debt-label { font-size: 0.82em; color: var(--pp-text-muted); }
+.treas-debt-chart { width: 100%; height: 180px; margin-top: 0.6em; }
+.treas-table { width: 100%; border-collapse: collapse; margin-top: 0.8em; font-size: 0.85em; }
+.treas-table th, .treas-table td { padding: 0.5em 0.8em; text-align: right; border-bottom: 1px solid var(--pp-overlay-5, rgba(0,0,0,0.05)); }
+.treas-table th { font-weight: 700; color: var(--pp-text-muted); text-transform: uppercase; font-size: 0.78em; letter-spacing: 0.06em; }
+.treas-table th:first-child, .treas-table td:first-child { text-align: left; }
+.treas-empty { text-align: center; padding: 3em; color: var(--pp-text-muted); }
+.treas-note { font-size: 0.75em; color: var(--pp-text-muted); margin-top: 1em; padding-top: 0.5em; border-top: 1px solid var(--pp-overlay-5); }
+</style>
+
+{% if yield_curve and yield_curve.curve %}
+<div class="treas-grid">
+    {# Yield Curve Chart #}
+    <div class="treas-card treas-card-full">
+        <h3>Treasury Yield Curve
+            {% if yield_curve.inverted %}
+            <span class="treas-badge inverted">⚠ Inverted</span>
+            {% else %}
+            <span class="treas-badge normal">Normal</span>
+            {% endif %}
+            <span style="font-size: 0.75em; font-weight: 400; color: var(--pp-text-muted); margin-left: 0.5em;">{{ yield_curve.date }}</span>
+        </h3>
+        <div class="treas-chart" id="treas-yield-chart"></div>
+
+        <table class="treas-table">
+            <thead><tr><th>Maturity</th>{% for pt in yield_curve.curve %}<th>{{ pt.maturity }}</th>{% endfor %}</tr></thead>
+            <tbody><tr><td>Yield</td>{% for pt in yield_curve.curve %}<td>{{ "%.2f"|format(pt.yield) }}%</td>{% endfor %}</tr></tbody>
+        </table>
+    </div>
+
+    {# National Debt #}
+    {% if debt and debt.latest_trillions %}
+    <div class="treas-card treas-card-full">
+        <h3>National Debt</h3>
+        <div class="treas-debt-val">${{ debt.latest_trillions }}T</div>
+        <div class="treas-debt-label">Total public debt outstanding · {{ debt.latest.date if debt.latest else '' }}</div>
+        <div class="treas-debt-chart" id="treas-debt-chart"></div>
+    </div>
+    {% endif %}
+</div>
+
+<p class="treas-note">
+    Data from <a href="https://fiscaldata.treasury.gov/" target="_blank" rel="noopener">U.S. Treasury Fiscal Data</a>. Free, no API key required.
+</p>
+
+<script>
+(function() {
+    var yc = {{ yield_curve_json|safe }};
+    var debtData = {{ debt_json|safe }};
+
+    requireECharts(function(err) {
+        if (err) return;
+
+        /* Yield Curve */
+        if (yc && yc.curve && yc.curve.length) {
+            var el = document.getElementById('treas-yield-chart');
+            if (el) {
+                var chart = echarts.init(el);
+                var mats = yc.curve.map(function(p) { return p.maturity; });
+                var yields = yc.curve.map(function(p) { return p['yield']; });
+
+                chart.setOption({
+                    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+                    xAxis: { type: 'category', data: mats, axisLabel: { fontSize: 11 } },
+                    yAxis: { type: 'value', axisLabel: { formatter: '{value}%', fontSize: 11 }, scale: true },
+                    tooltip: { trigger: 'axis', formatter: function(p) { return p[0].name + ': <b>' + p[0].value + '%</b>'; } },
+                    series: [{
+                        type: 'line',
+                        data: yields,
+                        smooth: true,
+                        symbol: 'circle',
+                        symbolSize: 8,
+                        lineStyle: { width: 3, color: '#3b82f6' },
+                        itemStyle: { color: '#3b82f6' },
+                        areaStyle: {
+                            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                { offset: 0, color: 'rgba(59,130,246,0.25)' },
+                                { offset: 1, color: 'rgba(59,130,246,0.02)' }
+                            ])
+                        }
+                    }]
+                });
+                window._ppRegisterResize && window._ppRegisterResize(function() { chart.resize(); });
+            }
+        }
+
+        /* Debt Chart */
+        if (debtData && debtData.data && debtData.data.length) {
+            var el2 = document.getElementById('treas-debt-chart');
+            if (el2) {
+                var chart2 = echarts.init(el2);
+                var dates = debtData.data.map(function(d) { return d.date; });
+                var vals = debtData.data.map(function(d) { return (d.debt / 1e12).toFixed(2); });
+
+                chart2.setOption({
+                    grid: { left: 60, right: 20, top: 10, bottom: 30 },
+                    xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10 } },
+                    yAxis: { type: 'value', axisLabel: { formatter: '${value}T', fontSize: 11 } },
+                    tooltip: { trigger: 'axis', formatter: function(p) { return p[0].name + '<br/>Debt: <b>$' + p[0].value + 'T</b>'; } },
+                    series: [{
+                        type: 'bar',
+                        data: vals,
+                        itemStyle: { color: '#ef4444', borderRadius: [4, 4, 0, 0] }
+                    }]
+                });
+                window._ppRegisterResize && window._ppRegisterResize(function() { chart2.resize(); });
+            }
+        }
+    });
+})();
+</script>
+{% else %}
+<div class="treas-empty">
+    <p>Treasury yield curve data is currently unavailable.</p>
+    <p style="font-size: 0.85em;">Data is fetched from the U.S. Treasury — it may take a moment to load.</p>
+</div>
+{% endif %}

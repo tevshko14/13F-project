@@ -1,0 +1,40 @@
+{# WSB Sentiment Badge — loaded via /api/stock/{ticker}/wsb #}
+{% if wsb %}
+<style>
+.wsb-card {
+    display: inline-flex; align-items: center; gap: 0.8em;
+    border: 1px solid var(--pp-glass-border, rgba(255,255,255,0.3));
+    border-radius: 14px; padding: 0.7em 1.1em;
+    background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.6));
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+    font-size: 0.88em; margin-bottom: 0.8em;
+}
+:root[data-theme="dark"] .wsb-card {
+    background: linear-gradient(165deg, rgba(15,23,42,0.85), rgba(15,23,42,0.6));
+    box-shadow: 0 4px 12px rgba(2,6,23,0.3);
+}
+.wsb-logo { font-size: 1.4em; }
+.wsb-label { font-weight: 700; font-size: 0.78em; text-transform: uppercase; letter-spacing: 0.08em; color: var(--pp-text-muted, rgba(15,23,42,0.55)); }
+.wsb-sentiment { font-weight: 700; font-size: 1.05em; }
+.wsb-sentiment.bullish { color: #16a34a; }
+.wsb-sentiment.bearish { color: #ef4444; }
+.wsb-sentiment.neutral { color: #f59e0b; }
+.wsb-meta { font-size: 0.78em; color: var(--pp-text-muted); }
+.wsb-rank { font-weight: 600; }
+</style>
+<div class="wsb-card" title="Reddit/WSB mention data from ApeWisdom">
+    <span class="wsb-logo">🦍</span>
+    <div>
+        <div class="wsb-label">Reddit Buzz</div>
+        <div class="wsb-sentiment {{ wsb.sentiment|lower }}">
+            {% if wsb.sentiment == 'Bullish' %}🟢{% elif wsb.sentiment == 'Bearish' %}🔴{% else %}🟡{% endif %}
+            {{ wsb.sentiment }}
+        </div>
+    </div>
+    <div style="border-left: 1px solid var(--pp-overlay-10, rgba(0,0,0,0.1)); padding-left: 0.8em;">
+        <div class="wsb-meta"><span class="wsb-rank">#{{ wsb.rank }}</span> trending</div>
+        <div class="wsb-meta">{{ wsb.mentions }} mentions · {{ wsb.upvotes }} upvotes</div>
+    </div>
+</div>
+{% endif %}

@@ -67,14 +67,14 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
                     Options Flow
                 </button>
-                <button class="options-view-tab" data-view="heatmap" onclick="switchOptionsView(this, 'heatmap')">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-                    Heatmap
+                <button class="options-view-tab" data-view="ivrank" onclick="switchOptionsView(this, 'ivrank')">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+                    IV Rank
+                    <span class="options-view-badge">NEW</span>
                 </button>
                 <button class="options-view-tab" data-view="convergence" onclick="switchOptionsView(this, 'convergence')">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4"/><path d="M12 19v4"/><path d="M4.22 4.22l2.83 2.83"/><path d="M16.95 16.95l2.83 2.83"/><path d="M1 12h4"/><path d="M19 12h4"/><path d="M4.22 19.78l2.83-2.83"/><path d="M16.95 7.05l2.83-2.83"/></svg>
                     Convergence Engine
-                    <span class="options-view-badge">NEW</span>
                 </button>
             </div>
 
@@ -154,28 +154,27 @@
 
             </div>
 
-            {# ── Heatmap panel ── #}
-            <div data-view-panel="heatmap" class="options-view-panel" style="display:none;">
-
-                {# ── Heatmap section ── #}
+            {# ── IV Rank panel ── #}
+            <div data-view-panel="ivrank" class="options-view-panel" style="display:none;">
                 {% if request.state.user %}
-                <div id="options-heatmap"
-                     hx-get="/api/options/heatmap"
-                     hx-trigger="load"
-                     hx-target="#options-heatmap"
-                     hx-swap="innerHTML"
-                     hx-indicator="#options-heatmap-spinner">
-                    <div id="options-heatmap-spinner" class="options-loading htmx-indicator">
+                <div id="ivrank-content">
+                    <div class="options-loading">
                         <span class="options-spinner" aria-hidden="true"></span>
-                        Loading sector heatmap...
+                        Click the tab to load IV Rank data...
                     </div>
                 </div>
                 {% else %}
-                <div id="options-heatmap" class="options-placeholder-heatmap">
-                    <div class="options-ph-heatmap-block"></div>
+                <div id="ivrank-content" class="options-placeholder-feed">
+                    {% for i in range(8) %}
+                    <div class="options-placeholder-row">
+                        <div class="options-ph-cell options-ph-w3"></div>
+                        <div class="options-ph-cell options-ph-w5"></div>
+                        <div class="options-ph-cell options-ph-w4"></div>
+                        <div class="options-ph-cell options-ph-w2"></div>
+                    </div>
+                    {% endfor %}
                 </div>
                 {% endif %}
-
             </div>
 
             {# ── Convergence panel ── #}
@@ -197,7 +196,6 @@
                         </select>
                     </div>
                 </div>
-                {# Use the same auth conditional as the feed/heatmap #}
                 {% if request.state.user %}
                 <div id="convergence-results">
                     <div class="options-loading">
@@ -269,6 +267,11 @@
         if (view === 'convergence' && !window._convergenceLoaded) {
             window._convergenceLoaded = true;
             triggerConvergence();
+        }
+        // Lazy-load IV Rank on first switch
+        if (view === 'ivrank' && !window._ivrankLoaded) {
+            window._ivrankLoaded = true;
+            htmx.ajax('GET', '/api/options/ivrank', {target: '#ivrank-content', swap: 'innerHTML'});
         }
     };
 

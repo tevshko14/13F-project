@@ -1,0 +1,126 @@
+{# FX Rates Dashboard — loaded via /api/macro/fx #}
+<style>
+.fx-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1em; }
+@media (max-width: 768px) { .fx-grid { grid-template-columns: 1fr; } }
+.fx-card {
+    border: 1px solid var(--pp-glass-border, rgba(255,255,255,0.3));
+    border-radius: 16px; padding: 1.4em;
+    background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.6));
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 8px 22px rgba(15,23,42,0.06);
+}
+:root[data-theme="dark"] .fx-card {
+    background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.65));
+    box-shadow: 0 8px 22px rgba(2,6,23,0.35);
+}
+.fx-card-full { grid-column: 1 / -1; }
+.fx-card h3 { font-size: 1em; font-weight: 700; margin: 0 0 0.6em; }
+.fx-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+.fx-table th, .fx-table td {
+    padding: 0.6em 0.8em; border-bottom: 1px solid var(--pp-overlay-5, rgba(0,0,0,0.05));
+}
+.fx-table th {
+    font-weight: 700; text-transform: uppercase; font-size: 0.76em;
+    letter-spacing: 0.06em; color: var(--pp-text-muted);
+}
+.fx-table td:first-child { font-weight: 600; }
+.fx-table td.rate-col { font-family: "Space Grotesk", monospace; font-weight: 600; }
+.fx-flag { width: 20px; height: 14px; border-radius: 2px; vertical-align: middle; margin-right: 0.5em; }
+.fx-chart { width: 100%; height: 220px; }
+.fx-date { font-size: 0.75em; color: var(--pp-text-muted); margin-top: 0.4em; }
+.fx-empty { text-align: center; padding: 3em; color: var(--pp-text-muted); }
+.fx-note { font-size: 0.75em; color: var(--pp-text-muted); margin-top: 1em; padding-top: 0.5em; border-top: 1px solid var(--pp-overlay-5); }
+</style>
+
+{% if fx_data and fx_data.latest and fx_data.latest.rates %}
+<div class="fx-grid">
+    {# Rates Table #}
+    <div class="fx-card fx-card-full">
+        <h3>Exchange Rates <span style="font-size: 0.75em; font-weight: 400; color: var(--pp-text-muted);">Base: USD · {{ fx_data.latest.date }}</span></h3>
+        <div style="overflow-x: auto;">
+        <table class="fx-table">
+            <thead>
+                <tr>
+                    <th style="text-align: left;">Currency</th>
+                    <th>Code</th>
+                    <th>1 USD =</th>
+                    <th>1 Unit = USD</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rate in fx_data.latest.rates %}
+                <tr>
+                    <td>{{ rate.name }}</td>
+                    <td style="text-align: center; font-weight: 700;">{{ rate.code }}</td>
+                    <td class="rate-col" style="text-align: right;">{{ "%.4f"|format(rate.rate) }}</td>
+                    <td class="rate-col" style="text-align: right;">{{ "%.4f"|format(rate.inverse) if rate.inverse else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </div>
+
+    {# Sparkline Charts for Major Pairs #}
+    {% if fx_data.sparklines %}
+    {% for code, ts in fx_data.sparklines.items() %}
+    <div class="fx-card">
+        <h3>USD/{{ code }} <span style="font-size: 0.78em; font-weight: 400; color: var(--pp-text-muted);">30 days</span></h3>
+        <div class="fx-chart" id="fx-chart-{{ code }}"></div>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+
+<p class="fx-note">
+    Data from <a href="https://www.frankfurter.app/" target="_blank" rel="noopener">Frankfurter</a> (European Central Bank reference rates). Free, no API key, no rate limits.
+</p>
+
+<script>
+(function() {
+    var fxData = {{ fx_json|safe }};
+    if (!fxData || !fxData.sparklines) return;
+
+    var colors = { EUR: '#3b82f6', GBP: '#8b5cf6', JPY: '#ef4444', CNY: '#f59e0b' };
+
+    requireECharts(function(err) {
+        if (err) return;
+        Object.keys(fxData.sparklines).forEach(function(code) {
+            var ts = fxData.sparklines[code];
+            var el = document.getElementById('fx-chart-' + code);
+            if (!el || !ts || !ts.length) return;
+
+            var chart = echarts.init(el);
+            var dates = ts.map(function(d) { return d.date; });
+            var rates = ts.map(function(d) { return d.rate; });
+            var c = colors[code] || '#0d9488';
+
+            chart.setOption({
+                grid: { left: 55, right: 15, top: 10, bottom: 25 },
+                xAxis: { type: 'category', data: dates, axisLabel: { fontSize: 10, rotate: 30 } },
+                yAxis: { type: 'value', scale: true, axisLabel: { fontSize: 10 } },
+                tooltip: { trigger: 'axis', formatter: function(p) { return p[0].name + '<br/>USD/' + code + ': <b>' + p[0].value + '</b>'; } },
+                series: [{
+                    type: 'line',
+                    data: rates,
+                    smooth: true,
+                    symbol: 'none',
+                    lineStyle: { width: 2.5, color: c },
+                    areaStyle: {
+                        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                            { offset: 0, color: c + '30' },
+                            { offset: 1, color: c + '05' }
+                        ])
+                    }
+                }]
+            });
+            window._ppRegisterResize && window._ppRegisterResize(function() { chart.resize(); });
+        });
+    });
+})();
+</script>
+{% else %}
+<div class="fx-empty">
+    <p>FX rate data is currently unavailable.</p>
+</div>
+{% endif %}

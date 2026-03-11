@@ -1,0 +1,369 @@
+{# Macro Volatility — HTMX partial with Put/Call Ratio, VIX Term Structure, SKEW charts (no extends) #}
+<style>
+    .vol-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+    .vol-grid-full { grid-column: 1 / -1; }
+    @media (max-width: 768px) {
+        .vol-grid { grid-template-columns: 1fr; }
+    }
+
+    .vol-card {
+        border-radius: 18px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        background: linear-gradient(165deg, rgba(255,255,255,0.9), rgba(255,255,255,0.72));
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 34px rgba(15,23,42,0.1);
+        overflow: hidden; padding: 1.2rem;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        animation: volFadeIn 0.35s ease-out;
+    }
+    .vol-card-header {
+        display: flex; align-items: baseline; gap: 0.6rem;
+        margin-bottom: 0.4rem;
+    }
+    .vol-card-title {
+        font-weight: 700; font-size: 1rem;
+        color: var(--macro-ink, #0f172a); margin: 0;
+    }
+    .vol-card-subtitle {
+        font-size: 0.8rem; font-weight: 500;
+        color: rgba(15,23,42,0.55);
+    }
+    .vol-stat-row {
+        display: flex; gap: 1rem; margin-bottom: 0.8rem; flex-wrap: wrap;
+    }
+    .vol-stat {
+        display: flex; flex-direction: column; gap: 0.1rem;
+    }
+    .vol-stat-label {
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+        font-weight: 600; color: rgba(15,23,42,0.5);
+    }
+    .vol-stat-value {
+        font-size: 1.5rem; font-weight: 700; line-height: 1.15;
+        color: var(--macro-ink, #0f172a);
+    }
+    .vol-badge {
+        display: inline-block; padding: 0.2em 0.7em; border-radius: 999px;
+        font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em;
+    }
+    .vol-badge-contango { background: rgba(16,185,129,0.14); color: #059669; }
+    .vol-badge-backwardation { background: rgba(239,68,68,0.14); color: #dc2626; }
+    .vol-badge-bullish { background: rgba(16,185,129,0.14); color: #059669; }
+    .vol-badge-bearish { background: rgba(239,68,68,0.14); color: #dc2626; }
+    .vol-badge-neutral { background: rgba(245,158,11,0.14); color: #d97706; }
+    .vol-chart { width: 100%; height: 280px; }
+    .vol-chart-sm { height: 220px; }
+    .vol-empty {
+        text-align: center; padding: 2.5rem 1rem;
+        color: rgba(15,23,42,0.5); font-size: 0.92rem;
+    }
+
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .vol-card {
+        border-color: rgba(148,163,184,0.2);
+        background: linear-gradient(165deg, rgba(15,23,42,0.9), rgba(15,23,42,0.72));
+        box-shadow: 0 20px 36px rgba(2,6,23,0.46);
+    }
+    :root[data-theme="dark"] .vol-card-subtitle { color: rgba(226,232,240,0.55); }
+    :root[data-theme="dark"] .vol-stat-label { color: rgba(226,232,240,0.5); }
+    :root[data-theme="dark"] .vol-empty { color: rgba(226,232,240,0.5); }
+    :root[data-theme="dark"] .vol-badge-contango { background: rgba(16,185,129,0.2); color: #34d399; }
+    :root[data-theme="dark"] .vol-badge-backwardation { background: rgba(239,68,68,0.2); color: #f87171; }
+
+    @keyframes volFadeIn {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+    }
+</style>
+
+<div class="vol-grid">
+
+    {# ── Put/Call Ratio ── #}
+    <div class="vol-card">
+        <div class="vol-card-header">
+            <h3 class="vol-card-title">Put/Call Ratio</h3>
+            <span class="vol-card-subtitle">{{ ratio_type | title }} · 1 Year</span>
+        </div>
+        {% if putcall %}
+        {% set latest = putcall[-1] %}
+        <div class="vol-stat-row">
+            <div class="vol-stat">
+                <span class="vol-stat-label">Current</span>
+                <span class="vol-stat-value">{{ "%.2f" | format(latest.ratio) }}</span>
+            </div>
+            <div class="vol-stat">
+                <span class="vol-stat-label">Signal</span>
+                {% if latest.ratio > 1.0 %}
+                <span class="vol-badge vol-badge-bearish">Bearish</span>
+                {% elif latest.ratio < 0.7 %}
+                <span class="vol-badge vol-badge-bullish">Bullish</span>
+                {% else %}
+                <span class="vol-badge vol-badge-neutral">Neutral</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="vol-chart" id="vol-pc-chart"></div>
+        {% else %}
+        <div class="vol-empty">Put/Call ratio data unavailable</div>
+        {% endif %}
+    </div>
+
+    {# ── VIX Term Structure ── #}
+    <div class="vol-card">
+        <div class="vol-card-header">
+            <h3 class="vol-card-title">VIX Term Structure</h3>
+            {% if vix_term.state %}
+            <span class="vol-badge vol-badge-{{ vix_term.state }}">{{ vix_term.state | title }}</span>
+            {% endif %}
+        </div>
+        {% if vix_term.tenors %}
+        <div class="vol-stat-row">
+            <div class="vol-stat">
+                <span class="vol-stat-label">VIX Spot</span>
+                <span class="vol-stat-value">{{ vix_term.spot or '—' }}</span>
+            </div>
+            {% for t in vix_term.tenors %}
+            {% if t.label != '1M (VIX)' %}
+            <div class="vol-stat">
+                <span class="vol-stat-label">{{ t.label }}</span>
+                <span class="vol-stat-value" style="font-size:1.1rem;">{{ t.value }}</span>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+        <div class="vol-chart vol-chart-sm" id="vol-vix-chart"></div>
+        {% else %}
+        <div class="vol-empty">VIX term structure data unavailable</div>
+        {% endif %}
+    </div>
+
+    {# ── SKEW Index ── #}
+    <div class="vol-card vol-grid-full">
+        <div class="vol-card-header">
+            <h3 class="vol-card-title">CBOE SKEW Index</h3>
+            <span class="vol-card-subtitle">Tail Risk Indicator · 1 Year</span>
+        </div>
+        {% if skew %}
+        {% set latest_skew = skew[-1] %}
+        <div class="vol-stat-row">
+            <div class="vol-stat">
+                <span class="vol-stat-label">Current</span>
+                <span class="vol-stat-value">{{ "%.1f" | format(latest_skew.value) }}</span>
+            </div>
+            <div class="vol-stat">
+                <span class="vol-stat-label">Signal</span>
+                {% if latest_skew.value > 150 %}
+                <span class="vol-badge vol-badge-bearish">Elevated Tail Risk</span>
+                {% elif latest_skew.value < 115 %}
+                <span class="vol-badge vol-badge-bullish">Low Tail Risk</span>
+                {% else %}
+                <span class="vol-badge vol-badge-neutral">Normal</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="vol-chart" id="vol-skew-chart"></div>
+        {% else %}
+        <div class="vol-empty">SKEW index data unavailable</div>
+        {% endif %}
+    </div>
+
+</div>
+
+<p style="font-size:0.75rem; color:var(--pp-text-muted); margin:0; padding-top:0.5rem; border-top:1px solid var(--pp-overlay-5);">
+    Put/Call Ratio from CBOE. VIX data from Yahoo Finance. SKEW from CBOE via Yahoo Finance.
+    <span style="margin-left:0.5rem;">
+        P/C &gt; 1.0 = bearish (more puts), P/C &lt; 0.7 = bullish (more calls).
+        SKEW &gt; 150 = elevated tail risk, SKEW 100-130 = normal.
+    </span>
+</p>
+
+<script>
+(function() {
+    var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    var txtColor = isDark ? 'rgba(226,232,240,0.8)' : 'rgba(15,23,42,0.65)';
+    var gridColor = isDark ? 'rgba(148,163,184,0.12)' : 'rgba(15,23,42,0.06)';
+    var tealColor = '#0d9488';
+    var tealArea = isDark ? 'rgba(13,148,136,0.18)' : 'rgba(13,148,136,0.12)';
+
+    function initCharts() {
+        if (typeof echarts === 'undefined') return;
+
+        /* ── Put/Call Ratio Chart ── */
+        var pcData = {{ putcall_json | safe }};
+        var pcEl = document.getElementById('vol-pc-chart');
+        if (pcEl && pcData.length > 0) {
+            var pcChart = echarts.init(pcEl);
+            pcChart.setOption({
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: isDark ? '#1e293b' : '#fff',
+                    borderColor: isDark ? '#334155' : '#e2e8f0',
+                    textStyle: { color: isDark ? '#e2e8f0' : '#0f172a', fontSize: 12 },
+                    formatter: function(p) {
+                        var d = p[0];
+                        return '<b>' + d.name + '</b><br/>P/C Ratio: <b>' + d.value.toFixed(3) + '</b>';
+                    }
+                },
+                grid: { left: 50, right: 16, top: 12, bottom: 30 },
+                xAxis: {
+                    type: 'category',
+                    data: pcData.map(function(d) { return d.date; }),
+                    axisLabel: { color: txtColor, fontSize: 10, interval: Math.floor(pcData.length / 6) },
+                    axisLine: { lineStyle: { color: gridColor } },
+                    axisTick: { show: false }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: { color: txtColor, fontSize: 10 },
+                    splitLine: { lineStyle: { color: gridColor } }
+                },
+                series: [{
+                    type: 'line',
+                    data: pcData.map(function(d) { return d.ratio; }),
+                    smooth: true,
+                    symbol: 'none',
+                    lineStyle: { color: tealColor, width: 2 },
+                    areaStyle: { color: tealArea },
+                    markLine: {
+                        silent: true,
+                        symbol: 'none',
+                        lineStyle: { color: '#ef4444', type: 'dashed', width: 1 },
+                        data: [{ yAxis: 1.0, label: { formatter: '1.0', color: '#ef4444', fontSize: 10 } }]
+                    }
+                }]
+            });
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { pcChart.resize(); });
+        }
+
+        /* ── VIX Term Structure Chart ── */
+        var vixData = {{ vix_term_json | safe }};
+        var vixEl = document.getElementById('vol-vix-chart');
+        if (vixEl && vixData.tenors && vixData.tenors.length > 0) {
+            var vixChart = echarts.init(vixEl);
+            var labels = vixData.tenors.map(function(t) { return t.label; });
+            var values = vixData.tenors.map(function(t) { return t.value; });
+            var barColors = values.map(function(v, i) {
+                if (i === 0) return tealColor;
+                return v > values[i - 1] ? '#10b981' : '#f59e0b';
+            });
+            vixChart.setOption({
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: isDark ? '#1e293b' : '#fff',
+                    borderColor: isDark ? '#334155' : '#e2e8f0',
+                    textStyle: { color: isDark ? '#e2e8f0' : '#0f172a', fontSize: 12 }
+                },
+                grid: { left: 50, right: 16, top: 12, bottom: 30 },
+                xAxis: {
+                    type: 'category',
+                    data: labels,
+                    axisLabel: { color: txtColor, fontSize: 11, fontWeight: 600 },
+                    axisLine: { lineStyle: { color: gridColor } },
+                    axisTick: { show: false }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: { color: txtColor, fontSize: 10 },
+                    splitLine: { lineStyle: { color: gridColor } }
+                },
+                series: [{
+                    type: 'bar',
+                    data: values.map(function(v, i) {
+                        return { value: v, itemStyle: { color: barColors[i], borderRadius: [6, 6, 0, 0] } };
+                    }),
+                    barWidth: '50%',
+                    label: {
+                        show: true, position: 'top',
+                        color: txtColor, fontSize: 11, fontWeight: 700,
+                        formatter: function(p) { return p.value.toFixed(1); }
+                    }
+                }]
+            });
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { vixChart.resize(); });
+        }
+
+        /* ── SKEW Index Chart ── */
+        var skewData = {{ skew_json | safe }};
+        var skewEl = document.getElementById('vol-skew-chart');
+        if (skewEl && skewData.length > 0) {
+            var skewChart = echarts.init(skewEl);
+            skewChart.setOption({
+                tooltip: {
+                    trigger: 'axis',
+                    backgroundColor: isDark ? '#1e293b' : '#fff',
+                    borderColor: isDark ? '#334155' : '#e2e8f0',
+                    textStyle: { color: isDark ? '#e2e8f0' : '#0f172a', fontSize: 12 },
+                    formatter: function(p) {
+                        var d = p[0];
+                        return '<b>' + d.name + '</b><br/>SKEW: <b>' + d.value.toFixed(1) + '</b>';
+                    }
+                },
+                grid: { left: 50, right: 16, top: 12, bottom: 30 },
+                xAxis: {
+                    type: 'category',
+                    data: skewData.map(function(d) { return d.date; }),
+                    axisLabel: { color: txtColor, fontSize: 10, interval: Math.floor(skewData.length / 6) },
+                    axisLine: { lineStyle: { color: gridColor } },
+                    axisTick: { show: false }
+                },
+                yAxis: {
+                    type: 'value',
+                    axisLabel: { color: txtColor, fontSize: 10 },
+                    splitLine: { lineStyle: { color: gridColor } }
+                },
+                series: [{
+                    type: 'line',
+                    data: skewData.map(function(d) { return d.value; }),
+                    smooth: true,
+                    symbol: 'none',
+                    lineStyle: { color: '#8b5cf6', width: 2 },
+                    areaStyle: {
+                        color: isDark ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.1)'
+                    },
+                    markArea: {
+                        silent: true,
+                        itemStyle: { color: isDark ? 'rgba(16,185,129,0.06)' : 'rgba(16,185,129,0.05)' },
+                        data: [[{ yAxis: 100 }, { yAxis: 130 }]]
+                    },
+                    markLine: {
+                        silent: true, symbol: 'none',
+                        lineStyle: { color: '#ef4444', type: 'dashed', width: 1 },
+                        data: [{ yAxis: 150, label: { formatter: '150', color: '#ef4444', fontSize: 10 } }]
+                    }
+                }]
+            });
+            if (window._ppRegisterResize) window._ppRegisterResize(function() { skewChart.resize(); });
+        }
+    }
+
+    /* Load ECharts then init */
+    if (window.requireECharts) {
+        window.requireECharts(function(err) {
+            if (!err) initCharts();
+        });
+    } else if (typeof echarts !== 'undefined') {
+        initCharts();
+    }
+
+    /* Re-init on theme change */
+    window.addEventListener('pp-theme-changed', function() {
+        var pcEl = document.getElementById('vol-pc-chart');
+        var vixEl = document.getElementById('vol-vix-chart');
+        var skewEl = document.getElementById('vol-skew-chart');
+        [pcEl, vixEl, skewEl].forEach(function(el) {
+            if (el) { var c = echarts.getInstanceByDom(el); if (c) c.dispose(); }
+        });
+        isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        txtColor = isDark ? 'rgba(226,232,240,0.8)' : 'rgba(15,23,42,0.65)';
+        gridColor = isDark ? 'rgba(148,163,184,0.12)' : 'rgba(15,23,42,0.06)';
+        tealArea = isDark ? 'rgba(13,148,136,0.18)' : 'rgba(13,148,136,0.12)';
+        initCharts();
+    });
+})();
+</script>
