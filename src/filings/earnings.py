@@ -350,8 +350,9 @@ def _finnhub_revenue_for_ticker(ticker: str) -> dict[str, dict] | None:
 
 
 def _load_finnhub_bulk_calendar() -> dict[str, dict[str, dict]] | None:
-    """Fetch Finnhub ``/calendar/earnings`` for last 7 weeks (bulk, no symbol filter).
+    """Fetch Finnhub ``/calendar/earnings`` for last 10 weeks (bulk, no symbol filter).
 
+    Fetches week-by-week to avoid the 1500-result API limit.
     Returns ``{symbol: {date_str: {"revenue": val, "revenueEstimated": val}}}``.
     """
     key = os.environ.get("FINNHUB_API_KEY", "").strip()
@@ -359,43 +360,52 @@ def _load_finnhub_bulk_calendar() -> dict[str, dict[str, dict]] | None:
         return None
 
     end = datetime.now()
-    start = end - timedelta(weeks=7)
+    start = end - timedelta(weeks=10)
 
     try:
-        r = httpx.get(
-            "https://finnhub.io/api/v1/calendar/earnings",
-            params={
-                "from": start.strftime("%Y-%m-%d"),
-                "to": end.strftime("%Y-%m-%d"),
-                "token": key,
-            },
-            timeout=20,
-        )
-        r.raise_for_status()
-        data = r.json()
-
-        entries = data.get("earningsCalendar", [])
-        if not entries:
-            logger.info("Finnhub bulk calendar returned 0 entries")
-            return None
-
         result: dict[str, dict[str, dict]] = {}
-        for item in entries:
-            sym = item.get("symbol", "")
-            d = item.get("date")
-            rev = item.get("revenueActual")
-            rev_est = item.get("revenueEstimate")
-            if sym and d and (rev is not None or rev_est is not None):
-                result.setdefault(sym, {})[d] = {
-                    "revenue": rev,
-                    "revenueEstimated": rev_est,
-                }
+        total_entries = 0
+        current = start
+
+        while current < end:
+            week_end = min(current + timedelta(days=6), end)
+            r = httpx.get(
+                "https://finnhub.io/api/v1/calendar/earnings",
+                params={
+                    "from": current.strftime("%Y-%m-%d"),
+                    "to": week_end.strftime("%Y-%m-%d"),
+                    "token": key,
+                },
+                timeout=20,
+            )
+            r.raise_for_status()
+            entries = r.json().get("earningsCalendar", [])
+            total_entries += len(entries)
+
+            for item in entries:
+                sym = item.get("symbol", "")
+                d = item.get("date")
+                rev = item.get("revenueActual")
+                rev_est = item.get("revenueEstimate")
+                if sym and d and (rev is not None or rev_est is not None):
+                    result.setdefault(sym, {})[d] = {
+                        "revenue": rev,
+                        "revenueEstimated": rev_est,
+                    }
+
+            current = week_end + timedelta(days=1)
+            if current < end:
+                time.sleep(0.3)  # respect Finnhub rate limits
+
+        if not result:
+            logger.info("Finnhub bulk calendar returned 0 entries with revenue")
+            return None
 
         logger.info(
             "Finnhub bulk calendar: %d entries, %d symbols with revenue",
-            len(entries), len(result),
+            total_entries, len(result),
         )
-        return result if result else None
+        return result
 
     except Exception:
         logger.warning("Finnhub bulk calendar fetch failed", exc_info=True)

@@ -5,6 +5,11 @@
 {% block og_description %}Earnings scorecard, market performance, and macro-level market indicators.{% endblock %}
 {% block twitter_title %}Macro Indicators | PaperPanda{% endblock %}
 {% block twitter_description %}Earnings scorecard, market performance, and macro-level market indicators.{% endblock %}
+{% block extra_head_scripts %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{% endblock %}
 {% block json_ld_extra %}
 <script type="application/ld+json">
 {
@@ -18,50 +23,199 @@
 </script>
 {% endblock %}
 {% block content %}
-<hgroup>
+<section class="macro-shell">
+<div class="macro-aurora macro-aurora-one" aria-hidden="true"></div>
+<div class="macro-aurora macro-aurora-two" aria-hidden="true"></div>
+
+<header class="macro-hero">
+    <p class="macro-kicker">PaperPanda Macro Dashboard</p>
     <h1>Macro</h1>
     <p>High-level market indicators and earnings season performance</p>
-</hgroup>
+</header>
 
 <style>
-    .macro-tabs {
-        display: flex; gap: 0;
-        border-bottom: 2px solid var(--pp-overlay-8, var(--pp-border));
-        margin-bottom: 1.5em; overflow-x: auto;
+    main.container {
+        max-width: 1280px !important;
+        width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
     }
+
+    /* ── Shell & Aurora ── */
+    .macro-shell {
+        --macro-ink: #0f172a;
+        position: relative; isolation: isolate;
+        font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+        padding-bottom: 2rem;
+    }
+    .macro-aurora {
+        position: absolute; border-radius: 999px;
+        filter: blur(56px); opacity: 0.56;
+        pointer-events: none; z-index: -1;
+    }
+    .macro-aurora-one {
+        width: min(40vw, 520px); height: min(34vw, 440px);
+        top: -90px; left: -90px;
+        background: radial-gradient(circle at 30% 35%, rgba(45, 212, 191, 0.36), rgba(13, 148, 136, 0.08) 72%);
+    }
+    .macro-aurora-two {
+        width: min(34vw, 430px); height: min(30vw, 390px);
+        top: 40px; right: -80px;
+        background: radial-gradient(circle at 60% 40%, rgba(251, 146, 60, 0.22), rgba(194, 65, 12, 0.08) 72%);
+    }
+
+    /* ── Hero Card ── */
+    .macro-hero {
+        text-align: center;
+        margin: 0 auto 1rem; max-width: 1180px;
+        border-radius: 24px; padding: 2.2rem 2rem 1.8rem;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background:
+            linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+    }
+    .macro-kicker {
+        margin: 0 0 0.45rem; text-transform: uppercase;
+        letter-spacing: 0.16em; font-size: 0.72rem;
+        font-weight: 700; color: rgba(15, 23, 42, 0.62);
+    }
+    .macro-hero h1 {
+        margin: 0; font-size: clamp(1.8rem, 4.2vw, 3.15rem);
+        letter-spacing: -0.03em; line-height: 1.05;
+        color: var(--macro-ink);
+        font-family: "Fraunces", Georgia, serif;
+    }
+    .macro-hero > p:last-child {
+        margin: 0.85rem auto 0; max-width: 740px;
+        font-size: 1rem; color: rgba(15, 23, 42, 0.72);
+    }
+
+    /* ── Glass Tab Nav Shell ── */
+    .macro-nav-shell {
+        max-width: 1180px; margin: 0 auto 1.5rem;
+        padding: 0.5rem; border-radius: 16px;
+        border: 1px solid rgba(13, 148, 136, 0.2);
+        background: rgba(255, 255, 255, 0.62);
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    }
+    .macro-nav-list {
+        list-style: none; display: flex; gap: 0.42rem;
+        padding: 0 0 0 0.5rem; margin: 0;
+        overflow-x: auto; -webkit-overflow-scrolling: touch;
+    }
+    .macro-nav-list li { list-style: none; margin: 0; padding: 0; }
     .macro-tab {
-        padding: 0.7em 1.3em; font-size: 0.9em; font-weight: 600;
-        color: var(--pp-sub-text, var(--pp-text-muted)); cursor: pointer;
-        border-bottom: 2px solid transparent; margin-bottom: -2px;
-        white-space: nowrap; transition: color 0.15s, border-color 0.15s;
-        background: none; border-top: none; border-left: none; border-right: none;
+        border: 1px solid transparent; border-radius: 999px;
+        padding: 0.5rem 1rem; margin: 0;
+        background: transparent; font-size: 0.85rem;
+        font-weight: 700; white-space: nowrap;
+        color: rgba(15, 23, 42, 0.62);
+        cursor: pointer; transition: all 0.16s ease;
     }
-    .macro-tab:hover { color: var(--pp-text); }
+    .macro-tab:hover {
+        color: var(--macro-ink);
+        border-color: rgba(13, 148, 136, 0.24);
+        background: rgba(13, 148, 136, 0.08);
+    }
     .macro-tab.active {
-        color: var(--pp-accent, #ef4444);
-        border-bottom-color: var(--pp-accent, #ef4444);
+        color: #fff; border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
     }
+
+    /* ── Pill Buttons (index / period toggles) ── */
+    .pp-pill-nav {
+        display: flex; gap: 0.38rem; flex-wrap: wrap;
+        padding: 0; margin-bottom: 0;
+    }
+    .pp-pill-btn {
+        border: 1.5px solid rgba(13, 148, 136, 0.22);
+        border-radius: 999px; padding: 0.36rem 0.9rem;
+        font-size: 0.81rem; font-weight: 600;
+        background: transparent; color: rgba(15, 23, 42, 0.55);
+        cursor: pointer; transition: all 0.16s ease;
+        white-space: nowrap; margin: 0;
+    }
+    .pp-pill-btn:hover {
+        border-color: rgba(13, 148, 136, 0.5);
+        color: #0d9488; background: rgba(13, 148, 136, 0.07);
+    }
+    .pp-pill-btn.active {
+        border-color: #0f766e;
+        background: linear-gradient(120deg, #0f766e, #0d9488);
+        color: #fff; box-shadow: 0 4px 10px rgba(13, 148, 136, 0.22);
+    }
+
+    /* ── Panel + Controls ── */
     .macro-panel { display: none; }
     .macro-panel.active { display: block; }
     .macro-controls {
         display: flex; align-items: center; flex-wrap: wrap;
         gap: 1em; margin-bottom: 1.5em;
     }
+    .macro-controls h2 {
+        margin: 0; font-size: 1.05em; font-weight: 700;
+        white-space: nowrap; color: var(--macro-ink);
+        letter-spacing: -0.01em;
+    }
+
+    /* ── Dark Mode ── */
+    :root[data-theme="dark"] .macro-shell { --macro-ink: #e2e8f0; }
+    :root[data-theme="dark"] .macro-hero {
+        border-color: rgba(148, 163, 184, 0.22);
+        background:
+            linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+            radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
+            radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
+    }
+    :root[data-theme="dark"] .macro-kicker,
+    :root[data-theme="dark"] .macro-hero > p:last-child { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] .macro-nav-shell {
+        border-color: rgba(45, 212, 191, 0.2);
+        background: rgba(15, 23, 42, 0.72);
+    }
+    :root[data-theme="dark"] .macro-tab { color: rgba(226, 232, 240, 0.72); }
+    :root[data-theme="dark"] .macro-tab:hover {
+        color: #e2e8f0;
+        background: rgba(45, 212, 191, 0.12);
+        border-color: rgba(45, 212, 191, 0.26);
+    }
+    :root[data-theme="dark"] .pp-pill-btn {
+        color: rgba(226, 232, 240, 0.62);
+        border-color: rgba(45, 212, 191, 0.2);
+    }
+    :root[data-theme="dark"] .pp-pill-btn:hover {
+        color: #2dd4bf;
+        background: rgba(45, 212, 191, 0.1);
+        border-color: rgba(45, 212, 191, 0.4);
+    }
+
+    /* ── Reduced Motion ── */
+    @media (prefers-reduced-motion: reduce) {
+        .macro-hero, .macro-tab, .pp-pill-btn {
+            animation: none !important; transition: none !important;
+        }
+    }
 </style>
 
 {# ── Top-level tabs ── #}
-<div class="macro-tabs" role="tablist">
-    <button class="macro-tab active" id="tab-earnings" data-macro-tab="earnings" role="tab" aria-selected="true" aria-controls="macro-panel-earnings">Earnings Scorecard</button>
-    <button class="macro-tab" id="tab-breadth" data-macro-tab="breadth" role="tab" aria-selected="false" aria-controls="macro-panel-breadth">Market Performance</button>
-    <button class="macro-tab" id="tab-calendar" data-macro-tab="calendar" role="tab" aria-selected="false" aria-controls="macro-panel-calendar">Earnings Calendar</button>
-    <button class="macro-tab" id="tab-economic" data-macro-tab="economic" role="tab" aria-selected="false" aria-controls="macro-panel-economic">Events Calendar</button>
-    <button class="macro-tab" id="tab-trends" data-macro-tab="trends" role="tab" aria-selected="false" aria-controls="macro-panel-trends">Macro Trends</button>
+<div class="macro-nav-shell" role="tablist">
+    <ul class="macro-nav-list">
+        <li><button class="macro-tab active" id="tab-earnings" data-macro-tab="earnings" role="tab" aria-selected="true" aria-controls="macro-panel-earnings">Earnings Scorecard</button></li>
+        <li><button class="macro-tab" id="tab-breadth" data-macro-tab="breadth" role="tab" aria-selected="false" aria-controls="macro-panel-breadth">Market Performance</button></li>
+        <li><button class="macro-tab" id="tab-calendar" data-macro-tab="calendar" role="tab" aria-selected="false" aria-controls="macro-panel-calendar">Earnings Calendar</button></li>
+        <li><button class="macro-tab" id="tab-economic" data-macro-tab="economic" role="tab" aria-selected="false" aria-controls="macro-panel-economic">Events Calendar</button></li>
+        <li><button class="macro-tab" id="tab-trends" data-macro-tab="trends" role="tab" aria-selected="false" aria-controls="macro-panel-trends">Macro Trends</button></li>
+    </ul>
 </div>
 
 {# ═══ Panel: Earnings Scorecard ═══ #}
 <div class="macro-panel active" id="macro-panel-earnings" role="tabpanel" aria-labelledby="tab-earnings">
     <div class="macro-controls">
-        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Earnings Scorecard</h2>
+        <h2>Earnings Scorecard</h2>
         <div class="pp-pill-nav" id="es-index-nav" style="margin-bottom: 0;">
             {% for key, label in indices.items() %}
             <button class="pp-pill-btn {% if key == current_index %}active{% endif %}"
@@ -70,7 +224,7 @@
         </div>
     </div>
     <div id="es-content"
-         hx-get="/api/macro/scorecard?key={{ macro_key }}&index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
+         hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
          hx-trigger="load"
          hx-swap="innerHTML">
         <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
@@ -82,7 +236,7 @@
 {# ═══ Panel: Market Performance ═══ #}
 <div class="macro-panel" id="macro-panel-breadth" role="tabpanel" aria-labelledby="tab-breadth">
     <div class="macro-controls">
-        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Market Performance</h2>
+        <h2>Market Performance</h2>
         <div class="pp-pill-nav" id="mb-index-nav" style="margin-bottom: 0;">
             {% for key, label in breadth_indices.items() %}
             <button class="pp-pill-btn {% if key == 'sp500' %}active{% endif %}"
@@ -106,7 +260,7 @@
 {# ═══ Panel: Earnings Calendar ═══ #}
 <div class="macro-panel" id="macro-panel-calendar" role="tabpanel" aria-labelledby="tab-calendar">
     <div class="macro-controls">
-        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Earnings Calendar</h2>
+        <h2>Earnings Calendar</h2>
         <div class="pp-pill-nav" id="ec-period-nav" style="margin-bottom: 0;">
             {% for key, label in calendar_periods.items() %}
             <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
@@ -124,7 +278,7 @@
 {# ═══ Panel: Events Calendar (Economic Calendar) ═══ #}
 <div class="macro-panel" id="macro-panel-economic" role="tabpanel" aria-labelledby="tab-economic">
     <div class="macro-controls">
-        <h2 style="margin: 0; font-size: 1.1em; white-space: nowrap;">Events Calendar</h2>
+        <h2>Events Calendar</h2>
         <div class="pp-pill-nav" id="ed-period-nav" style="margin-bottom: 0;">
             {% for key, label in economic_periods.items() %}
             <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
@@ -153,7 +307,7 @@
 
 {# ═══ Panel: Macro Trends (Google Trends Sentiment) ═══ #}
 <div class="macro-panel" id="macro-panel-trends" role="tabpanel" aria-labelledby="tab-trends">
-    <h2 style="margin: 0 0 0.5em; font-size: 1.1em;">Macro Sentiment Trends</h2>
+    <h2 style="margin: 0 0 0.5em;">Macro Sentiment Trends</h2>
     <p style="font-size: 0.85em; color: var(--pp-text-muted); margin-bottom: 1.2em;">
         Search interest for market-moving macro keywords over the last 3 months.
         Rising interest in "recession" or "stock market crash" often precedes volatility.
@@ -186,7 +340,16 @@
 
 <style>
     .gt-macro-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1em; }
-    .gt-macro-card { border: 1px solid var(--pp-overlay-8); border-radius: 10px; padding: 1.2em; background: var(--pp-surface); }
+    .gt-macro-card {
+        border: 1px solid var(--pp-glass-border); border-radius: 14px; padding: 1.2em;
+        background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.66));
+        backdrop-filter: blur(var(--pp-glass-blur)); -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+        box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+    }
+    :root[data-theme="dark"] .gt-macro-card {
+        background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.68));
+        box-shadow: 0 8px 20px rgba(2,6,23,0.35);
+    }
     .gt-macro-card h4 { font-size: 0.95em; font-weight: 700; margin: 0 0 0.3em 0; }
     .gt-macro-keywords { font-size: 0.78em; color: var(--pp-text-muted); line-height: 1.5; }
     .gt-pill { display: inline-block; padding: 0.25em 0.7em; border-radius: 14px; font-size: 0.78em; font-weight: 500; background: var(--pp-tag-bg, #f0f0f0); color: var(--pp-tag-text, #555); }
@@ -240,8 +403,6 @@
 
     /* ── Earnings Scorecard controls ── */
     var esCurrentIndex = '{{ current_index }}';
-    var macroKey = '{{ macro_key }}';
-
     window.esChangeIndex = function(idx) {
         esCurrentIndex = idx;
         activatePill('es-index-nav', idx);
@@ -251,7 +412,7 @@
     window.esReload = function() {
         var quarter = document.getElementById('es-quarter').value;
         var sector = document.getElementById('es-sector').value;
-        var url = '/api/macro/scorecard?key=' + macroKey + '&index=' + esCurrentIndex + '&quarter=' + encodeURIComponent(quarter);
+        var url = '/api/macro/scorecard?index=' + esCurrentIndex + '&quarter=' + encodeURIComponent(quarter);
         if (sector) url += '&sector=' + encodeURIComponent(sector);
         htmx.ajax('GET', url, '#es-content');
     };
@@ -261,7 +422,7 @@
     var mbCurrentPeriod = '1d';
 
     function mbReload() {
-        htmx.ajax('GET', '/api/macro/breadth?key=' + macroKey + '&index=' + mbCurrentIndex + '&period=' + mbCurrentPeriod, '#mb-content');
+        htmx.ajax('GET', '/api/macro/breadth?index=' + mbCurrentIndex + '&period=' + mbCurrentPeriod, '#mb-content');
     }
 
     window.mbChangeIndex = function(idx) {
@@ -291,7 +452,7 @@
     function ecReload() {
         // Grid modes always load period=all for client-side week/month navigation
         var period = window.ecGridState.view !== 'list' ? 'all' : ecCurrentPeriod;
-        htmx.ajax('GET', '/api/macro/calendar?key=' + macroKey + '&period=' + period, '#ec-content');
+        htmx.ajax('GET', '/api/macro/calendar?period=' + period, '#ec-content');
     }
     window.ecReloadCalendar = ecReload;  // exported for partial to trigger reload on view switch
 
@@ -307,8 +468,7 @@
     var edCurrentCountry = 'us';
 
     function edReload() {
-        htmx.ajax('GET', '/api/macro/economic?key=' + macroKey
-            + '&period=' + edCurrentPeriod
+        htmx.ajax('GET', '/api/macro/economic?period=' + edCurrentPeriod
             + '&impact=' + edCurrentImpact
             + '&country=' + edCurrentCountry, '#ed-content');
     }
@@ -339,4 +499,5 @@
     });
 })();
 </script>
+</section>
 {% endblock %}

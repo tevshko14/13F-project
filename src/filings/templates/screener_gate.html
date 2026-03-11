@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Screener Access — PaperPanda{% endblock %}
-{% block meta_description %}Password-protected stock valuation screener.{% endblock %}
+{% block title %}{{ gate_title|default('Stock Valuation Screener') }} Access — PaperPanda{% endblock %}
+{% block meta_description %}Password-protected {{ gate_title|default('feature') }}.{% endblock %}
 
 {% block content %}
 <style>
@@ -34,15 +34,15 @@
 </style>
 <div class="scr-gate">
     <span class="scr-gate-badge">Beta Feature</span>
-    <h1>Stock Valuation Screener</h1>
+    <h1>{{ gate_title|default('Stock Valuation Screener') }}</h1>
     <p class="scr-gate-sub">This feature is currently in testing. Enter the access password to continue.</p>
-    <form method="POST" action="/screener/auth">
+    <form method="POST" action="{{ gate_action|default('/screener/auth') }}">
         <input type="password" name="password" placeholder="Enter password" autofocus required>
         <button type="submit">Enter</button>
     </form>
     {% if error %}
     <p class="scr-gate-err">{{ error }}</p>
     {% endif %}
-    <p class="scr-gate-note">The screener includes DCF, Monte Carlo simulation, and peer comparison models. Contact us for access.</p>
+    <p class="scr-gate-note">{{ gate_note|default('The screener includes DCF, Monte Carlo simulation, and peer comparison models. Contact us for access.') }}</p>
 </div>
 {% endblock %}

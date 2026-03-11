@@ -5,12 +5,21 @@
         gap: 1em; margin-bottom: 2em;
     }
     .es-metric-card {
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 12px; padding: 1.2em;
+        border-radius: 14px; padding: 1.2em;
         text-align: center;
-        box-shadow: var(--pp-card-shadow-sm);
+        border: 1px solid var(--pp-glass-border);
+        background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.66));
+        backdrop-filter: blur(var(--pp-glass-blur));
+        -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+        box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
+    .es-metric-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(15,23,42,0.12); }
+    :root[data-theme="dark"] .es-metric-card {
+        background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.68));
+        box-shadow: 0 8px 20px rgba(2,6,23,0.35);
+    }
+    :root[data-theme="dark"] .es-metric-card:hover { box-shadow: 0 12px 28px rgba(2,6,23,0.5); }
     .es-metric-card .metric-value {
         font-size: 2em; font-weight: 700; line-height: 1.1;
         color: var(--pp-text);
@@ -36,10 +45,16 @@
         gap: 1.5em; margin-bottom: 2em;
     }
     .es-chart-card {
-        background: var(--pp-surface);
-        border: 1px solid var(--pp-border);
-        border-radius: 12px; padding: 1.2em;
-        box-shadow: var(--pp-card-shadow-sm);
+        border-radius: 14px; padding: 1.2em;
+        border: 1px solid var(--pp-glass-border);
+        background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.66));
+        backdrop-filter: blur(var(--pp-glass-blur));
+        -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+        box-shadow: 0 12px 28px rgba(15,23,42,0.08);
+    }
+    :root[data-theme="dark"] .es-chart-card {
+        background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.68));
+        box-shadow: 0 12px 28px rgba(2,6,23,0.4);
     }
     .es-chart-card h3 {
         font-size: 0.95em; margin: 0 0 0.8em; color: var(--pp-text);
@@ -50,6 +65,7 @@
     .es-table-header {
         display: flex; justify-content: space-between;
         align-items: center; padding: 1em 1.2em 0.8em; flex-wrap: wrap; gap: 0.8em;
+        border-bottom: 1px solid var(--pp-glass-border);
     }
     .es-table-header h3 { font-size: 0.95em; margin: 0; white-space: nowrap; }
     .es-table-controls {
@@ -59,9 +75,14 @@
     .es-table-controls select,
     .es-table-controls .es-search {
         padding: 0.4em 0.7em; font-size: 0.82em;
-        border-radius: 8px; border: 1px solid var(--pp-border);
-        background: var(--pp-surface); color: var(--pp-text);
+        border-radius: 8px; border: 1px solid var(--pp-glass-border);
+        background: rgba(255,255,255,0.5); color: var(--pp-text);
+        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
         width: auto; height: 34px; box-sizing: border-box;
+    }
+    :root[data-theme="dark"] .es-table-controls select,
+    :root[data-theme="dark"] .es-table-controls .es-search {
+        background: rgba(15,23,42,0.6);
     }
     .es-table-controls .es-search { width: 9em; }
     #es-results-table td.es-beat { color: #22c55e; font-weight: 600; }
@@ -73,7 +94,7 @@
     .es-ticker-link {
         color: var(--pp-text); font-weight: 600; text-decoration: none;
     }
-    .es-ticker-link:hover { color: #ef4444; }
+    .es-ticker-link:hover { color: #0d9488; }
     /* Higher specificity to override .pp-table tbody td { white-space: normal } */
     #es-results-table td.es-name {
         color: var(--pp-text-muted); font-size: 0.9em;
@@ -95,7 +116,7 @@
     }
 
     /* Compact cell padding so 8 columns fit without scrolling */
-    #es-results-table thead th { padding: 10px 8px; }
+    #es-results-table thead th { padding: 10px 8px; text-transform: uppercase; font-size: 0.78em; letter-spacing: 0.04em; }
     #es-results-table tbody td { padding: 10px 8px; }
     #es-results-table th { cursor: pointer; user-select: none; }
     #es-results-table th:hover { color: var(--pp-text); }
@@ -136,7 +157,7 @@
     <div class="es-metric-card">
         <div class="metric-value">{{ m.rev_beat_rate }}%</div>
         <div class="metric-label">Revenue Beat Rate</div>
-        <div class="metric-detail">{{ m.rev_beats }} of {{ m.total }}</div>
+        <div class="metric-detail">{{ m.rev_beats }} of {{ m.rev_total }}</div>
     </div>
     <div class="es-metric-card">
         <div class="metric-value">{{ m.dual_beats }}<span class="metric-total"> / {{ m.total }}</span></div>

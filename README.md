@@ -86,6 +86,14 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 - **Relative Value** - User-controlled peer comparison: S&P 500 sector-matched suggestions as chip tags, inline Fuse.js ticker search, batch parallel fetching on Compare click. Table + bar chart of P/E, EV/EBITDA, P/S multiples
 - **Assumptions Sidebar** - Collapsible panel with all model inputs, peer selector, and football field valuation range chart
 
+### Macro Dashboard (`/macro`) — Beta
+- **Password-Protected** - Shares screener's cookie-based auth gate (30-day session)
+- **Earnings Scorecard** - S&P 500 / NASDAQ 100 toggle, quarterly EPS & revenue beat rates, dual-beat tracking, per-company results table with sorting & search
+- **Market Performance** - Market breadth indicators with index and period toggles
+- **Earnings Calendar** - Upcoming earnings dates with list and grid views
+- **Events Calendar** - Economic calendar (FRED data) with impact and country filters
+- **Macro Trends** - Google Trends sentiment for market-moving keywords (recession, inflation, etc.)
+
 ### Investor Pages
 - **Holdings Tab** - Full portfolio with activity badges and percentage allocations
 - **Compare Quarters** - Side-by-side quarterly diff with new buys, adds, reduces, and sells

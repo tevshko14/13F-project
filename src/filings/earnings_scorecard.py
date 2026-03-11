@@ -175,10 +175,10 @@ def _build_company_lookup(index: str) -> dict[str, dict]:
     try:
         from filings import market_data
 
-        if index == "sp500":
-            rows = market_data.get_sp500_constituents()
+        if index == "nasdaq":
+            rows = market_data.get_nasdaq100_constituents()
         else:
-            rows = market_data.get_sp500_constituents()  # fallback
+            rows = market_data.get_sp500_constituents()
         return {
             r["ticker"]: {"name": r.get("name", ""), "sector": r.get("sector", "")}
             for r in rows
@@ -392,6 +392,8 @@ def _compute_metrics(results: list[dict]) -> dict:
     eps_misses = sum(1 for r in results if r["eps_beat"] is False)
     rev_beats = sum(1 for r in results if r["rev_beat"] is True)
     rev_misses = sum(1 for r in results if r["rev_beat"] is False)
+    # Only count companies that have revenue data for the revenue denominator
+    rev_total = sum(1 for r in results if r["rev_beat"] is not None)
     dual_beats = sum(
         1 for r in results
         if r["eps_beat"] is True and r["rev_beat"] is True
@@ -407,8 +409,9 @@ def _compute_metrics(results: list[dict]) -> dict:
         "eps_beat_rate": round(eps_beats / total * 100, 1),
         "rev_beats": rev_beats,
         "rev_misses": rev_misses,
-        "rev_inline": total - rev_beats - rev_misses,
-        "rev_beat_rate": round(rev_beats / total * 100, 1),
+        "rev_total": rev_total,
+        "rev_inline": rev_total - rev_beats - rev_misses,
+        "rev_beat_rate": round(rev_beats / rev_total * 100, 1) if rev_total > 0 else 0,
         "dual_beats": dual_beats,
         "avg_price_change": round(sum(prices) / len(prices), 2) if prices else 0,
         "avg_eps_surprise": round(sum(eps_surp) / len(eps_surp), 2) if eps_surp else 0,

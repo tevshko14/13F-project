@@ -3720,6 +3720,8 @@ async def gt_trending_api(request: Request):
 @app.get("/api/google-trends/macro", response_class=HTMLResponse)
 async def gt_macro_api(request: Request, category: str = ""):
     """Fetch macro trend chart for a category."""
+    if not _screener_authed(request):
+        return PlainTextResponse("Unauthorized", status_code=401)
     cat = category if category in google_trends.MACRO_CATEGORIES else None
     trend_data = await _to_heavy(google_trends.fetch_macro_trends, cat)
     # Use validated cat (not raw category) for chart ID to prevent XSS
@@ -3795,14 +3797,6 @@ async def alt_signals_short_interest(request: Request):
 
 # --- Macro Earnings Scorecard ---
 
-_MACRO_KEY = os.environ.get("MACRO_PAGE_KEY", "panda2026")
-
-
-def _check_macro_key(request: Request) -> bool:
-    """Return True if the request carries a valid macro page key."""
-    return request.query_params.get("key") == _MACRO_KEY
-
-
 @app.get("/macro", response_class=HTMLResponse)
 async def macro_page(
     request: Request,
@@ -3811,11 +3805,16 @@ async def macro_page(
     sector: str = "",
 ):
     """Macro page — aggregated earnings-season dashboard + market breadth."""
-    if not _check_macro_key(request):
+    if not _screener_authed(request):
         return templates.TemplateResponse(
-            "under_construction.html",
-            {"request": request},
-            status_code=200,
+            "screener_gate.html",
+            {
+                "request": request,
+                "error": None,
+                "gate_title": "Macro Dashboard",
+                "gate_action": "/macro/auth",
+                "gate_note": "The macro dashboard includes earnings scorecards, market breadth, economic calendars, and trend analysis. Contact us for access.",
+            },
         )
 
     from filings import earnings_scorecard
@@ -3834,7 +3833,6 @@ async def macro_page(
         "macro.html",
         {
             "request": request,
-            "macro_key": _MACRO_KEY,
             "indices": earnings_scorecard.INDEX_CHOICES,
             "current_index": index,
             "quarters": quarters,
@@ -3852,6 +3850,33 @@ async def macro_page(
     )
 
 
+@app.post("/macro/auth")
+async def macro_auth(request: Request):
+    """Validate password and set auth cookie for macro page."""
+    form = await request.form()
+    password = form.get("password", "")
+    if password == _SCREENER_PASSWORD:
+        resp = RedirectResponse("/macro", status_code=303)
+        resp.set_cookie(
+            "scr_auth",
+            _SCREENER_AUTH_TOKEN,
+            max_age=60 * 60 * 24 * 30,
+            httponly=True,
+            samesite="lax",
+        )
+        return resp
+    return templates.TemplateResponse(
+        "screener_gate.html",
+        {
+            "request": request,
+            "error": "Incorrect password. Please try again.",
+            "gate_title": "Macro Dashboard",
+            "gate_action": "/macro/auth",
+            "gate_note": "The macro dashboard includes earnings scorecards, market breadth, economic calendars, and trend analysis. Contact us for access.",
+        },
+    )
+
+
 @app.get("/api/macro/scorecard", response_class=HTMLResponse)
 async def macro_scorecard_api(
     request: Request,
@@ -3860,8 +3885,8 @@ async def macro_scorecard_api(
     sector: str = "",
 ):
     """HTMX endpoint — returns the earnings scorecard partial."""
-    if not _check_macro_key(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if not _screener_authed(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     from filings import earnings_scorecard
 
@@ -3899,8 +3924,8 @@ async def macro_breadth_api(
     period: str = "1d",
 ):
     """HTMX endpoint — returns the market breadth partial."""
-    if not _check_macro_key(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if not _screener_authed(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     from filings import market_breadth
 
@@ -3935,8 +3960,8 @@ async def macro_calendar_api(
     period: str = "this_week",
 ):
     """HTMX endpoint — returns the earnings calendar partial."""
-    if not _check_macro_key(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if not _screener_authed(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     from filings import earnings_scorecard
 
@@ -3985,8 +4010,8 @@ async def macro_economic_api(
     impact: str = "all",
 ):
     """HTMX endpoint — returns the economic dashboard partial."""
-    if not _check_macro_key(request):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if not _screener_authed(request):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     from filings import fred_calendar
 

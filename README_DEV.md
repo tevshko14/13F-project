@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-10 (Stock Valuation Screener with DCF/Monte Carlo/Relative Value + user-controlled peer selection + password gate)
+> Last updated: 2026-03-11 (Macro dashboard: glassmorphism design, NASDAQ 100 toggle fix, password gate, sidebar nav link, revenue estimate backfill)
 
 ---
 
@@ -223,7 +223,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
     ├── sentiment.py                  # Market sentiment (CNN, Finnhub, ApeWisdom, Alpha Vantage)
     ├── vitals.py                     # Alternative data (Glassdoor, People Data Labs, App Store)
-    ├── market_data.py                # S&P 500 heatmap, most-added, ticker search (~8K NYSE/NASDAQ listings)
+    ├── market_data.py                # S&P 500 heatmap, most-added, ticker search (~8K NYSE/NASDAQ listings), NASDAQ 100 constituents (Wikipedia)
     ├── company_filings.py            # SEC filing links for stock pages
     ├── aum_data.py                   # Capital Deployed: AUM (Form ADV), XBRL cash, deployment ratios, leaderboard builder
     ├── unusual_options.py             # Unusual options detection: UnusualOption dataclass, detect_unusual(), premium floor ($100K), OI delta tracking, urgency weighting, moneyness scoring, cluster detection, greek extraction
@@ -1338,6 +1338,12 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | POST | `/screener/auth` | `screener_auth` | Password check → set `scr_auth` cookie (30d) | Redirect → `/screener` or `screener_gate.html` |
 | GET | `/api/screener/{ticker}` | `api_screener` | yfinance + SEC XBRL + Tiingo (parallel) | JSON response |
 | GET | `/api/screener/peers` | `api_screener_peers` | yfinance + Tiingo + market_data (parallel batch) | JSON response |
+| GET | `/macro` | `macro_page` | Cookie auth gate → macro dashboard | `screener_gate.html` or `macro.html` |
+| POST | `/macro/auth` | `macro_auth` | Password check → set `scr_auth` cookie (30d) | Redirect → `/macro` or `screener_gate.html` |
+| GET | `/api/macro/scorecard` | `macro_scorecard_api` | earnings_scorecard (L1+L2 cache) | `partials/earnings_scorecard.html` |
+| GET | `/api/macro/breadth` | `macro_breadth_api` | market_breadth (yfinance) | `partials/market_breadth.html` |
+| GET | `/api/macro/calendar` | `macro_calendar_api` | earnings_scorecard calendar | `partials/earnings_calendar_macro.html` |
+| GET | `/api/macro/economic` | `macro_economic_api` | fred_calendar (FRED API) | `partials/economic_dashboard.html` |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**
@@ -1808,6 +1814,12 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Supabase client race condition fix: `_initialised` flag moved after `_client` assignment (headshots + logos now load on startup)
 - [x] Stock Valuation Screener: DCF model (10 sliders + growth fade), Monte Carlo simulation (10K iterations, ECharts histogram), Relative Value (user-controlled peer selector with S&P 500 suggestions, Fuse.js search, chip tags, parallel batch fetch)
 - [x] Screener password gate: cookie-based auth (`scr_auth`, SHA-256, 30-day, `SCREENER_PASSWORD` env var), beta feature badge
+- [x] Macro Dashboard: glassmorphism hero + glass nav shell, teal pill toggles, Fraunces serif fonts, aurora blobs, dark mode support
+- [x] Macro password gate: reuses screener's `scr_auth` cookie, parameterized `screener_gate.html` template
+- [x] NASDAQ 100 toggle fix: `_build_company_lookup()` was calling `get_sp500_constituents()` for both indices; added `get_nasdaq100_constituents()` (Wikipedia scrape, 24h cache)
+- [x] Revenue estimate backfill: scraped historical revenue estimates for Q1-Q4 2025 (~5500 rows), coverage 0% → 92-95%
+- [x] Finnhub bulk calendar: week-by-week fetching to avoid 1500-result API limit, expanded from 7 → 10 weeks
+- [x] Sidebar nav: added Macro link under Tools group (pie-chart icon)
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)

@@ -2,13 +2,65 @@
 {% block title %}Stock Valuation Screener — DCF & Monte Carlo | PaperPanda{% endblock %}
 {% block meta_description %}Interactive stock valuation tool with DCF, Monte Carlo simulation, and peer comparison analysis.{% endblock %}
 
+{% block extra_head_scripts %}
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
+{% endblock %}
+
 {% block content %}
 <style>
 /* ── Screener Layout ─────────────────────────────────────────────── */
 .scr-shell { max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
-.scr-hero { text-align: center; margin-bottom: 1.5rem; }
-.scr-hero h1 { font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; margin: 0 0 0.25rem; color: var(--pp-text); }
-.scr-hero p { color: var(--pp-text-muted); font-size: 0.95rem; margin: 0; }
+.scr-hero {
+    text-align: center;
+    margin: 0 auto 1.5rem;
+    max-width: 1060px;
+    border-radius: 24px;
+    padding: 1.5rem 1.1rem 1.15rem;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    background:
+        linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+        radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.16), transparent 48%),
+        radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.12), transparent 45%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.12);
+}
+.scr-kicker {
+    margin: 0 0 0.45rem;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: rgba(15, 23, 42, 0.62);
+}
+.scr-hero h1 {
+    margin: 0;
+    font-size: clamp(1.8rem, 4.2vw, 3.15rem);
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    color: #0f172a;
+    font-family: "Fraunces", Georgia, serif;
+}
+.scr-hero p {
+    margin: 0.85rem auto 0;
+    max-width: 740px;
+    font-size: 1rem;
+    color: rgba(15, 23, 42, 0.72);
+}
+:root[data-theme="dark"] .scr-hero {
+    border-color: rgba(148, 163, 184, 0.22);
+    background:
+        linear-gradient(130deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.66)),
+        radial-gradient(circle at 8% 12%, rgba(45, 212, 191, 0.14), transparent 48%),
+        radial-gradient(circle at 90% 15%, rgba(251, 146, 60, 0.1), transparent 45%);
+}
+:root[data-theme="dark"] .scr-kicker,
+:root[data-theme="dark"] .scr-hero p {
+    color: rgba(226, 232, 240, 0.72);
+}
+:root[data-theme="dark"] .scr-hero h1 {
+    color: var(--pp-text);
+}
 
 /* ── Search ──────────────────────────────────────────────────────── */
 .scr-search-wrap {
@@ -49,9 +101,20 @@
     gap: 0.65rem; margin-bottom: 1.25rem;
 }
 .scr-summary-card {
-    background: var(--pp-surface); border: 1px solid var(--pp-border-light);
-    border-radius: 10px; padding: 0.75rem 0.9rem; text-align: center;
+    border-radius: 14px; padding: 0.75rem 0.9rem; text-align: center;
+    border: 1px solid var(--pp-glass-border);
+    background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.66));
+    backdrop-filter: blur(var(--pp-glass-blur));
+    -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+    box-shadow: 0 8px 20px rgba(15,23,42,0.06);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
+.scr-summary-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(15,23,42,0.12); }
+:root[data-theme="dark"] .scr-summary-card {
+    background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.68));
+    box-shadow: 0 8px 20px rgba(2,6,23,0.35);
+}
+:root[data-theme="dark"] .scr-summary-card:hover { box-shadow: 0 12px 28px rgba(2,6,23,0.5); }
 .scr-summary-card .scr-label { font-size: 0.72rem; color: var(--pp-text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.15rem; }
 .scr-summary-card .scr-value { font-size: 1.15rem; font-weight: 700; color: var(--pp-text); font-variant-numeric: tabular-nums; }
 
@@ -61,10 +124,18 @@
 
 /* ── Assumptions Sidebar ─────────────────────────────────────────── */
 .scr-sidebar {
-    background: var(--pp-surface); border: 1px solid var(--pp-border-light);
-    border-radius: 12px; padding: 0.75rem 0.85rem;
+    border-radius: 16px; padding: 0.75rem 0.85rem;
     align-self: start; position: sticky; top: 1rem;
     max-height: calc(100vh - 2rem); overflow-y: auto;
+    border: 1px solid var(--pp-glass-border);
+    background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.66));
+    backdrop-filter: blur(var(--pp-glass-blur));
+    -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+    box-shadow: 0 12px 28px rgba(15,23,42,0.08);
+}
+:root[data-theme="dark"] .scr-sidebar {
+    background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.68));
+    box-shadow: 0 12px 28px rgba(2,6,23,0.4);
 }
 .scr-sidebar h3 {
     font-size: 0.68rem; font-weight: 700; color: var(--pp-text-muted);
@@ -170,8 +241,16 @@
 
 /* ── Valuation Result ────────────────────────────────────────────── */
 .scr-result-box {
-    background: var(--pp-surface); border: 1px solid var(--pp-border-light);
-    border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1rem;
+    border-radius: 14px; padding: 1rem 1.25rem; margin-bottom: 1rem;
+    border: 1px solid var(--pp-glass-border);
+    background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.66));
+    backdrop-filter: blur(var(--pp-glass-blur));
+    -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+    box-shadow: 0 12px 28px rgba(15,23,42,0.08);
+}
+:root[data-theme="dark"] .scr-result-box {
+    background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.68));
+    box-shadow: 0 12px 28px rgba(2,6,23,0.4);
 }
 .scr-result-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
 .scr-fair-value { font-size: 1.6rem; font-weight: 700; color: var(--pp-text); font-variant-numeric: tabular-nums; }
@@ -302,9 +381,38 @@
 .scr-tip:hover::after { opacity: 1; }
 
 /* ── Empty State ─────────────────────────────────────────────────── */
-.scr-empty { text-align: center; padding: 4rem 1rem; color: var(--pp-text-muted); }
-.scr-empty-icon { font-size: 3rem; margin-bottom: 0.5rem; opacity: 0.4; }
-.scr-empty p { font-size: 0.95rem; }
+.scr-empty { padding: 2rem 1rem 3rem; max-width: 720px; margin: 0 auto; }
+.scr-quick-label { text-align: center; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; color: var(--pp-text-muted); margin: 0 0 0.75rem; }
+.scr-quick-picks { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.5rem; margin-bottom: 2.5rem; }
+.scr-quick-pick {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.45rem 0.9rem; border-radius: 10px; cursor: pointer;
+    font-size: 0.85rem; font-weight: 600; border: 1px solid var(--pp-border);
+    background: var(--pp-surface); color: var(--pp-text);
+    transition: all 0.15s ease;
+}
+.scr-quick-pick:hover { border-color: #0d9488; background: rgba(13, 148, 136, 0.08); color: #0d9488; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(13, 148, 136, 0.12); }
+.scr-quick-pick img { width: 18px; height: 18px; border-radius: 4px; }
+.scr-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.scr-feat-card {
+    text-align: center; padding: 1.25rem 1rem; border-radius: 16px;
+    border: 1px solid var(--pp-glass-border);
+    background: linear-gradient(160deg, rgba(255,255,255,0.85), rgba(255,255,255,0.66));
+    backdrop-filter: blur(var(--pp-glass-blur));
+    -webkit-backdrop-filter: blur(var(--pp-glass-blur));
+    box-shadow: 0 12px 28px rgba(15,23,42,0.08);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.scr-feat-card:hover { transform: translateY(-3px); box-shadow: 0 18px 36px rgba(15,23,42,0.14); }
+:root[data-theme="dark"] .scr-feat-card {
+    background: linear-gradient(165deg, rgba(15,23,42,0.88), rgba(15,23,42,0.68));
+    box-shadow: 0 12px 28px rgba(2,6,23,0.4);
+}
+:root[data-theme="dark"] .scr-feat-card:hover { box-shadow: 0 18px 36px rgba(2,6,23,0.55); }
+.scr-feat-icon { font-size: 1.5rem; margin-bottom: 0.5rem; }
+.scr-feat-card h3 { font-size: 0.88rem; font-weight: 700; margin: 0 0 0.35rem; color: var(--pp-text); }
+.scr-feat-card p { font-size: 0.78rem; color: var(--pp-text-muted); margin: 0; line-height: 1.45; }
+@media (max-width: 600px) { .scr-features { grid-template-columns: 1fr; } }
 
 /* ── Error ────────────────────────────────────────────────────────── */
 .scr-error { text-align: center; padding: 2rem; color: #dc2626; font-size: 0.9rem; }
@@ -378,10 +486,11 @@
 
 <div class="scr-shell">
     <!-- Hero -->
-    <div class="scr-hero">
+    <header class="scr-hero">
+        <p class="scr-kicker">PaperPanda Valuation Lab</p>
         <h1>Stock Valuation Screener</h1>
         <p>DCF, Monte Carlo simulation &amp; peer comparison analysis</p>
-    </div>
+    </header>
 
     <!-- Search — reuses global ticker-search from base.html -->
     <div class="scr-search-wrap">
@@ -400,10 +509,35 @@
 
     <!-- Empty state -->
     <div id="scr-empty" class="scr-empty">
-        <div class="scr-empty-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.4"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+        <p class="scr-quick-label">Quick start</p>
+        <div class="scr-quick-picks">
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('AAPL')"><img src="/api/logo/AAPL.png" alt="" onerror="this.style.display='none'"> AAPL</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('MSFT')"><img src="/api/logo/MSFT.png" alt="" onerror="this.style.display='none'"> MSFT</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('GOOGL')"><img src="/api/logo/GOOGL.png" alt="" onerror="this.style.display='none'"> GOOGL</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('AMZN')"><img src="/api/logo/AMZN.png" alt="" onerror="this.style.display='none'"> AMZN</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('NVDA')"><img src="/api/logo/NVDA.png" alt="" onerror="this.style.display='none'"> NVDA</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('TSLA')"><img src="/api/logo/TSLA.png" alt="" onerror="this.style.display='none'"> TSLA</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('META')"><img src="/api/logo/META.png" alt="" onerror="this.style.display='none'"> META</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('JPM')"><img src="/api/logo/JPM.png" alt="" onerror="this.style.display='none'"> JPM</div>
         </div>
-        <p>Enter a ticker above to begin valuation analysis</p>
+
+        <div class="scr-features">
+            <div class="scr-feat-card">
+                <div class="scr-feat-icon">&#x1F4C9;</div>
+                <h3>DCF Model</h3>
+                <p>10 adjustable assumptions with real-time waterfall projections and growth fade modeling</p>
+            </div>
+            <div class="scr-feat-card">
+                <div class="scr-feat-icon">&#x1F3B2;</div>
+                <h3>Monte Carlo</h3>
+                <p>10,000 simulations with probability distribution and percentile confidence bands</p>
+            </div>
+            <div class="scr-feat-card">
+                <div class="scr-feat-icon">&#x1F4CA;</div>
+                <h3>Relative Value</h3>
+                <p>Custom peer selection with sector-matched suggestions and median multiple comps</p>
+            </div>
+        </div>
     </div>
 
     <!-- Main content (hidden until data loads) -->
@@ -1572,14 +1706,17 @@
                 return;
             }
 
-            // Find overall min/max for axis
+            // Find overall min/max for axis — ensure bars are never smushed
             var allVals = [price];
             for (var i = 0; i < baseBars.length; i++) {
                 allVals.push(baseBars[i]);
                 allVals.push(baseBars[i] + rangeBars[i]);
             }
-            var axMin = Math.max(0, Math.min.apply(null, allVals) * 0.8);
-            var axMax = Math.max.apply(null, allVals) * 1.15;
+            var rawMin = Math.min.apply(null, allVals);
+            var rawMax = Math.max.apply(null, allVals);
+            var span = rawMax - rawMin || rawMax * 0.5;
+            var axMin = Math.max(0, rawMin - span * 0.15);
+            var axMax = rawMax + span * 0.15;
 
             _chart.setOption({
                 animation: true,
@@ -1898,7 +2035,8 @@
         addPeer: addPeer,
         peerSearchFilter: peerSearchFilter,
         peerSearchKeydown: peerSearchKeydown,
-        comparePeers: comparePeers
+        comparePeers: comparePeers,
+        loadTicker: loadTicker
     };
 
     /* ═══════════════════════════════════════════════════════════════

@@ -241,6 +241,81 @@ def get_sp500_constituents() -> list[dict]:
     return _FALLBACK_SP500
 
 
+# ── NASDAQ 100 constituents ──────────────────────────────────────────
+
+_nasdaq100_cache: tuple[float, list[dict]] | None = None
+
+
+def get_nasdaq100_constituents() -> list[dict]:
+    """Fetch NASDAQ 100 constituents with sectors from Wikipedia.
+
+    Returns list of dicts: [{"ticker", "name", "sector"}, ...]
+    Uses 24-hour in-memory cache. Falls back to filtering SP500 on failure.
+    """
+    global _nasdaq100_cache
+
+    with _lock:
+        if _nasdaq100_cache is not None:
+            ts, data = _nasdaq100_cache
+            if time.time() - ts < _CONSTITUENTS_TTL:
+                return data
+
+    try:
+        import pandas as pd
+
+        tables = pd.read_html(
+            "https://en.wikipedia.org/wiki/Nasdaq-100",
+            storage_options={
+                "timeout": 10,
+                "User-Agent": "PaperPanda/1.0 (market data; contact@paperpanda.io)",
+            },
+        )
+        # The constituents table has columns: Company, Ticker, GICS Sector, GICS Sub-Industry
+        df = None
+        for t in tables:
+            cols = [c.lower() for c in t.columns]
+            if "ticker" in cols or "symbol" in cols:
+                df = t
+                break
+        if df is None:
+            raise ValueError("No table with Ticker/Symbol column found")
+
+        constituents = []
+        for _, row in df.iterrows():
+            ticker = str(
+                row.get("Ticker", row.get("Symbol", ""))
+            ).strip()
+            ticker = ticker.replace(".", "-")
+            name = str(row.get("Company", row.get("Security", ""))).strip()
+            sector = str(
+                row.get("GICS Sector", row.get("Sector", ""))
+            ).strip()
+            if ticker and name:
+                constituents.append(
+                    {"ticker": ticker, "name": name, "sector": sector}
+                )
+
+        if len(constituents) > 80:
+            logger.info(
+                "Fetched %d NASDAQ 100 constituents from Wikipedia",
+                len(constituents),
+            )
+            with _lock:
+                _nasdaq100_cache = (time.time(), constituents)
+            return constituents
+
+    except Exception as e:
+        logger.warning("Wikipedia NASDAQ 100 fetch failed: %s — using SP500 overlap", e)
+
+    # Fallback: return the top-100 tech-heavy names from SP500
+    sp = get_sp500_constituents()
+    tech_sectors = {"Information Technology", "Communication Services", "Consumer Discretionary"}
+    fallback = [c for c in sp if c.get("sector") in tech_sectors][:100]
+    with _lock:
+        _nasdaq100_cache = (time.time(), fallback)
+    return fallback
+
+
 # ── Market Data (daily % change) ──────────────────────────────────────
 
 
