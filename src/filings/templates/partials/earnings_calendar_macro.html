@@ -87,6 +87,35 @@
         background: var(--pp-surface); color: var(--pp-text);
     }
     .ec-search:focus { outline: none; border-color: var(--pp-accent, #ef4444); }
+    /* ── Date tab navigation (like fund quarterly tabs) ── */
+    .ec-date-tabs {
+        list-style: none; display: flex; gap: 0; padding: 0;
+        margin: 0 0 0 0;
+        border-bottom: 2px solid var(--pp-overlay-10, rgba(0,0,0,0.06));
+        overflow-x: auto; -webkit-overflow-scrolling: touch;
+    }
+    .ec-date-tab {
+        background: none; border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.6em 1.1em 0.5em;
+        font-size: 0.82em; font-weight: 600;
+        color: var(--pp-text-muted);
+        cursor: pointer; white-space: nowrap;
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .ec-date-tab:hover { color: var(--pp-text-secondary, var(--pp-text)); }
+    .ec-date-tab.active {
+        color: #0d9488;
+        border-bottom-color: #0d9488;
+    }
+    .ec-date-tab-count {
+        display: block; font-weight: 400; font-size: 0.8em;
+        color: var(--pp-text-muted); margin-top: 1px;
+    }
+    .ec-date-panel, .ec-reported-panel { display: none; }
+    .ec-date-panel.active, .ec-reported-panel.active { display: block; }
+    .ec-reported-tabs { margin-top: 0.5em; }
+
     .ec-mock-banner {
         padding: 0.6em 1em; background: rgba(245,158,11,0.12); color: #92400e;
         border-radius: 8px; font-size: 0.82em; margin-bottom: 1em; text-align: center;
@@ -383,62 +412,75 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
 {# ── Grid container (JS renders here) ── #}
 <div class="ecg-scroll"><div id="ecg-container"></div></div>
 
-{# ── List view (original content, wrapped) ── #}
+{# ── List view (date tabs — like fund quarterly tabs) ── #}
 <div id="ec-list-view">
-    {# Search #}
     {% if data.upcoming %}
+    {# ── Search bar ── #}
     <div class="ec-search-wrap">
         <input type="text" class="ec-search" id="ec-table-search"
                placeholder="Search ticker or company…"
                oninput="ecFilterTable(this.value)">
     </div>
-    {% endif %}
 
-    {# Calendar Table (grouped by date) #}
-    {% if data.upcoming %}
-        {% for day in data.upcoming %}
-        <div class="ec-date-group" data-ec-day>
-            <div class="ec-date-header">{{ day.date_label }}</div>
-            <div class="pp-table-wrap">
-                <table class="pp-table ec-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 100px;">Time</th>
-                            <th style="width: 80px;">Ticker</th>
-                            <th class="ec-col-name">Company</th>
-                            <th style="text-align:right;">EPS Est.</th>
-                            <th class="ec-col-rev" style="text-align:right;">Rev Est.</th>
-                            <th style="width: 40px;"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for e in day.entries %}
-                        <tr data-ec-row>
-                            <td><span class="ec-hour-badge ec-hour-{{ e.hour }}">{{ e.hour_label }}</span></td>
-                            <td>
-                                {% if e.has_page %}
-                                <a href="/stock/{{ e.symbol }}" class="ec-ticker-link">{{ e.symbol }}</a>
-                                {% else %}
-                                <span class="ec-ticker-link">{{ e.symbol }}</span>
-                                {% endif %}
-                            </td>
-                            <td class="ec-col-name ec-name" title="{{ e.name }}">{{ e.name }}</td>
-                            <td style="text-align:right;">
-                                {% if e.epsEstimate is not none %}${{ "%.2f"|format(e.epsEstimate) }}{% else %}&mdash;{% endif %}
-                            </td>
-                            <td class="ec-col-rev" style="text-align:right;">{{ e.revenueEstimate_fmt or '&mdash;' }}</td>
-                            <td>
-                                {% if e.is_superinvestor %}
-                                <span class="ec-si-badge" title="Held by: {{ e.si_names|join(', ') }}">SI</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+    {# ── Date tab navigation ── #}
+    <nav>
+        <ul class="ec-date-tabs">
+            {% for day in data.upcoming %}
+            <li>
+                <button class="ec-date-tab{% if loop.first %} active{% endif %}"
+                        onclick="ecSwitchDateTab({{ loop.index0 }})"
+                        data-date-idx="{{ loop.index0 }}">
+                    {{ day.date_label }}
+                    <span class="ec-date-tab-count">{{ day.entries|length }} compan{{ "ies" if day.entries|length != 1 else "y" }}</span>
+                </button>
+            </li>
+            {% endfor %}
+        </ul>
+    </nav>
+
+    {# ── Date tab panels ── #}
+    {% for day in data.upcoming %}
+    <div class="ec-date-panel{% if loop.first %} active{% endif %}" data-date-idx="{{ loop.index0 }}" data-ec-day>
+        <div class="pp-table-wrap">
+            <table class="pp-table ec-table">
+                <thead>
+                    <tr>
+                        <th style="width: 100px;">Time</th>
+                        <th style="width: 80px;">Ticker</th>
+                        <th class="ec-col-name">Company</th>
+                        <th style="text-align:right;">EPS Est.</th>
+                        <th class="ec-col-rev" style="text-align:right;">Rev Est.</th>
+                        <th style="width: 40px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for e in day.entries %}
+                    <tr data-ec-row>
+                        <td><span class="ec-hour-badge ec-hour-{{ e.hour }}">{{ e.hour_label }}</span></td>
+                        <td>
+                            {% if e.has_page %}
+                            <a href="/stock/{{ e.symbol }}" class="ec-ticker-link">{{ e.symbol }}</a>
+                            {% else %}
+                            <span class="ec-ticker-link">{{ e.symbol }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="ec-col-name ec-name" title="{{ e.name }}">{{ e.name }}</td>
+                        <td style="text-align:right;">
+                            {% if e.epsEstimate is not none %}${{ "%.2f"|format(e.epsEstimate) }}{% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="ec-col-rev" style="text-align:right;">{{ e.revenueEstimate_fmt or '&mdash;' }}</td>
+                        <td>
+                            {% if e.is_superinvestor %}
+                            <span class="ec-si-badge" title="Held by: {{ e.si_names|join(', ') }}">SI</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-        {% endfor %}
+    </div>
+    {% endfor %}
     {% else %}
     <div class="ec-empty">
         No upcoming earnings found for {{ data.index }} ({{ data.period_label }}).
@@ -446,52 +488,77 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
     {% endif %}
 </div>{# /ec-list-view #}
 
-{# ── Just Reported (collapsible, always visible regardless of view) ── #}
+{# ── Just Reported (date tabs) ── #}
 {% if data.just_reported %}
-<details class="ec-just-reported">
+{% set ns = namespace(reported_dates=[]) %}
+{% for r in data.just_reported %}
+    {% if r.date not in ns.reported_dates %}
+        {% set ns.reported_dates = ns.reported_dates + [r.date] %}
+    {% endif %}
+{% endfor %}
+<details class="ec-just-reported" open>
     <summary>Just Reported ({{ data.just_reported|length }})</summary>
-    <div class="pp-table-wrap">
-        <table class="pp-table ec-table">
-            <thead>
-                <tr>
-                    <th>Ticker</th>
-                    <th class="ec-col-name">Company</th>
-                    <th>Date</th>
-                    <th style="text-align:right;">EPS Act.</th>
-                    <th style="text-align:right;">EPS Est.</th>
-                    <th class="ec-col-rev" style="text-align:right;">Rev Act.</th>
-                    <th class="ec-col-rev" style="text-align:right;">Rev Est.</th>
-                    <th style="width: 40px;"></th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for r in data.just_reported %}
-                <tr>
-                    <td><a href="/stock/{{ r.symbol }}" class="ec-ticker-link">{{ r.symbol }}</a></td>
-                    <td class="ec-col-name ec-name" title="{{ r.name }}">{{ r.name }}</td>
-                    <td style="white-space:nowrap;">{{ r.date | format_short_date }}</td>
-                    <td style="text-align:right;" class="{% if r.eps_beat == true %}ec-beat{% elif r.eps_beat == false %}ec-miss{% endif %}">
-                        {% if r.epsActual is not none %}${{ "%.2f"|format(r.epsActual) }}{% else %}&mdash;{% endif %}
-                    </td>
-                    <td style="text-align:right; color:var(--pp-text-muted);">
-                        {% if r.epsEstimate is not none %}${{ "%.2f"|format(r.epsEstimate) }}{% else %}&mdash;{% endif %}
-                    </td>
-                    <td class="ec-col-rev {% if r.rev_beat == true %}ec-beat{% elif r.rev_beat == false %}ec-miss{% endif %}" style="text-align:right;">
-                        {{ r.revenueActual_fmt or '&mdash;' }}
-                    </td>
-                    <td class="ec-col-rev" style="text-align:right; color:var(--pp-text-muted);">
-                        {{ r.revenueEstimate_fmt or '&mdash;' }}
-                    </td>
-                    <td>
-                        {% if r.is_superinvestor %}
-                        <span class="ec-si-badge" title="Held by: {{ r.si_names|join(', ') }}">SI</span>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+
+    {# ── Reported date tabs ── #}
+    <nav>
+        <ul class="ec-date-tabs ec-reported-tabs">
+            {% for d in ns.reported_dates %}
+            <li>
+                <button class="ec-date-tab{% if loop.first %} active{% endif %}"
+                        onclick="ecSwitchReportedTab({{ loop.index0 }})"
+                        data-rep-idx="{{ loop.index0 }}">
+                    {{ d | format_short_date }}
+                    <span class="ec-date-tab-count">{{ data.just_reported|selectattr("date", "equalto", d)|list|length }}</span>
+                </button>
+            </li>
+            {% endfor %}
+        </ul>
+    </nav>
+
+    {% for d in ns.reported_dates %}
+    <div class="ec-reported-panel{% if loop.first %} active{% endif %}" data-rep-idx="{{ loop.index0 }}">
+        <div class="pp-table-wrap">
+            <table class="pp-table ec-table">
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th class="ec-col-name">Company</th>
+                        <th style="text-align:right;">EPS Act.</th>
+                        <th style="text-align:right;">EPS Est.</th>
+                        <th class="ec-col-rev" style="text-align:right;">Rev Act.</th>
+                        <th class="ec-col-rev" style="text-align:right;">Rev Est.</th>
+                        <th style="width: 40px;"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in data.just_reported if r.date == d %}
+                    <tr>
+                        <td><a href="/stock/{{ r.symbol }}" class="ec-ticker-link">{{ r.symbol }}</a></td>
+                        <td class="ec-col-name ec-name" title="{{ r.name }}">{{ r.name }}</td>
+                        <td style="text-align:right;" class="{% if r.eps_beat == true %}ec-beat{% elif r.eps_beat == false %}ec-miss{% endif %}">
+                            {% if r.epsActual is not none %}${{ "%.2f"|format(r.epsActual) }}{% else %}&mdash;{% endif %}
+                        </td>
+                        <td style="text-align:right; color:var(--pp-text-muted);">
+                            {% if r.epsEstimate is not none %}${{ "%.2f"|format(r.epsEstimate) }}{% else %}&mdash;{% endif %}
+                        </td>
+                        <td class="ec-col-rev {% if r.rev_beat == true %}ec-beat{% elif r.rev_beat == false %}ec-miss{% endif %}" style="text-align:right;">
+                            {{ r.revenueActual_fmt or '&mdash;' }}
+                        </td>
+                        <td class="ec-col-rev" style="text-align:right; color:var(--pp-text-muted);">
+                            {{ r.revenueEstimate_fmt or '&mdash;' }}
+                        </td>
+                        <td>
+                            {% if r.is_superinvestor %}
+                            <span class="ec-si-badge" title="Held by: {{ r.si_names|join(', ') }}">SI</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
+    {% endfor %}
 </details>
 {% endif %}
 
@@ -575,6 +642,7 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
                 _dateMap[date][e.hour === 'amc' || e.hour === 'dmh' ? 'amc' : 'bmo'].push(e);
             });
         });
+        // Entries already sorted by revenue estimate desc from server
         return _dateMap;
     }
 
@@ -939,16 +1007,36 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
     }
 
     /* ============================================================
-       CLIENT-SIDE LIST SEARCH (existing behaviour)
+       DATE TAB SWITCHING (upcoming + reported)
+    ============================================================ */
+    window.ecSwitchDateTab = function (idx) {
+        document.querySelectorAll('.ec-date-tab:not([data-rep-idx])').forEach(function (btn) {
+            btn.classList.toggle('active', parseInt(btn.dataset.dateIdx) === idx);
+        });
+        document.querySelectorAll('.ec-date-panel').forEach(function (panel) {
+            panel.classList.toggle('active', parseInt(panel.dataset.dateIdx) === idx);
+        });
+    };
+
+    window.ecSwitchReportedTab = function (idx) {
+        document.querySelectorAll('[data-rep-idx].ec-date-tab').forEach(function (btn) {
+            btn.classList.toggle('active', parseInt(btn.dataset.repIdx) === idx);
+        });
+        document.querySelectorAll('.ec-reported-panel').forEach(function (panel) {
+            panel.classList.toggle('active', parseInt(panel.dataset.repIdx) === idx);
+        });
+    };
+
+    /* ============================================================
+       CLIENT-SIDE LIST SEARCH
     ============================================================ */
     window.ecFilterTable = function (query) {
         query = query.toLowerCase();
-        document.querySelectorAll('[data-ec-row]').forEach(function (row) {
+        // Filter rows in the active panel only
+        var activePanel = document.querySelector('.ec-date-panel.active');
+        if (!activePanel) return;
+        activePanel.querySelectorAll('[data-ec-row]').forEach(function (row) {
             row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
-        });
-        document.querySelectorAll('[data-ec-day]').forEach(function (group) {
-            var vis = group.querySelectorAll('[data-ec-row]:not([style*="display: none"])');
-            group.style.display = vis.length > 0 || !query ? '' : 'none';
         });
     };
 

@@ -252,7 +252,7 @@
         <div class="macro-controls" style="margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
             <div class="pp-pill-nav" id="ec-index-nav" style="margin-bottom: 0;">
                 {% for key, label in indices.items() %}
-                <button class="pp-pill-btn {% if key == 'sp500' %}active{% endif %}"
+                <button class="pp-pill-btn {% if key == 'all' %}active{% endif %}"
                         data-key="{{ key }}" onclick="ecChangeIndex('{{ key }}')">{{ label }}</button>
                 {% endfor %}
             </div>
@@ -525,7 +525,7 @@
 
     /* ── Earnings Calendar controls ── */
     var ecCurrentPeriod = 'this_week';
-    var ecCurrentIndex = 'sp500';
+    var ecCurrentIndex = 'all';
 
     // Grid view state — persisted across HTMX partial swaps
     window.ecGridState = window.ecGridState || { view: 'week', weekOffset: 0, monthOffset: 0 };

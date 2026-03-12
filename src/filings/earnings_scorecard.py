@@ -1042,16 +1042,20 @@ def fetch_earnings_calendar(
             label = dt.strftime("%A, %B %d")  # "Monday, March 10"
         except ValueError:
             label = d
-        # Sort entries within a day: BMO first, then DMH, then AMC
-        order = {"bmo": 0, "dmh": 1, "amc": 2}
+        # Sort entries within a day: by revenue estimate descending (market cap proxy)
+        # Large-cap companies (higher revenue) appear first
         entries = sorted(
             upcoming_by_date[d],
-            key=lambda e: (order.get(e["hour"], 3), e["symbol"]),
+            key=lambda e: (e.get("revenueEstimate") or 0),
+            reverse=True,
         )
         upcoming.append({"date": d, "date_label": label, "entries": entries})
 
-    # Sort just_reported by date descending (most recent first)
-    just_reported.sort(key=lambda e: e["date"], reverse=True)
+    # Sort just_reported by date descending, then by revenue estimate descending
+    just_reported.sort(
+        key=lambda e: (e["date"], e.get("revenueActual") or e.get("revenueEstimate") or 0),
+        reverse=True,
+    )
 
     # Cap just_reported for "all" mode (can be huge)
     max_reported = 50 if index == "all" else 25

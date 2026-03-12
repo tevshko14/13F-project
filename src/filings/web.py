@@ -3980,7 +3980,7 @@ async def macro_breadth_api(
 @app.get("/api/macro/calendar", response_class=HTMLResponse)
 async def macro_calendar_api(
     request: Request,
-    index: str = "sp500",
+    index: str = "all",
     period: str = "this_week",
 ):
     """HTMX endpoint — returns the earnings calendar partial."""
@@ -3990,7 +3990,7 @@ async def macro_calendar_api(
     from filings import earnings_scorecard
 
     if index not in earnings_scorecard.INDEX_CHOICES:
-        index = "sp500"
+        index = "all"
     if period not in earnings_scorecard.CALENDAR_PERIODS:
         period = "this_week"
 
