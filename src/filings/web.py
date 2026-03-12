@@ -5005,7 +5005,7 @@ async def api_activity_feed(
                 cache_key=sb_cache_key,
                 category="activity_feed",
                 data=serialized,
-                ttl_seconds=1800,
+                ttl_seconds=3600,
             )
         except Exception as e:
             logger.debug("Activity feed cache write failed: %s", e)
@@ -5101,9 +5101,15 @@ _MEGA_CAP_NAMES = {
 }
 
 
+_overview_html_cache: tuple[float, bytes] | None = None
+_OVERVIEW_HTML_TTL = 300  # 5 minutes
+
+
 @app.get("/api/market-overview", response_class=HTMLResponse)
 async def market_overview_api(request: Request):
     """Lazy-loaded custom Market Overview widget."""
+    global _overview_html_cache
+
     if not getattr(app.state, "market_data_ready", False):
         return HTMLResponse(
             '<div hx-get="/api/market-overview" hx-trigger="load delay:5s" '
@@ -5111,6 +5117,12 @@ async def market_overview_api(request: Request):
             '<article><p aria-busy="true"><span class="spinner"></span> '
             "Loading market data...</p></article></div>"
         )
+
+    # Return cached HTML if fresh (avoids re-fetching + re-rendering)
+    if _overview_html_cache is not None:
+        ts, cached_body = _overview_html_cache
+        if time_module.time() - ts < _OVERVIEW_HTML_TTL:
+            return Response(content=cached_body, media_type="text/html")
 
     # Fetch all data concurrently
     idx_task = _to_heavy(market_data.get_index_market_data)
@@ -5179,7 +5191,7 @@ async def market_overview_api(request: Request):
         "commodities": commodities,
     }
 
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         "partials/market_overview.html",
         {
             "request": request,
@@ -5187,6 +5199,14 @@ async def market_overview_api(request: Request):
             "has_data": bool(indices or mega_caps or commodities),
         },
     )
+
+    # Cache rendered HTML for subsequent requests
+    try:
+        _overview_html_cache = (time_module.time(), resp.body)
+    except Exception:
+        pass
+
+    return resp
 
 
 @app.get("/api/market-overview-chart/{symbol:path}", response_class=JSONResponse)
@@ -5869,14 +5889,35 @@ async def api_screener_peers(request: Request, tickers: str = ""):
 
 @app.get("/api/screener/{ticker}", response_class=JSONResponse)
 async def api_screener_data(request: Request, ticker: str):
-    """Return all data needed for client-side valuation calculations."""
+    """Return all data needed for client-side valuation calculations.
+
+    Fetches yfinance info, SEC fundamentals, and forward estimates in
+    parallel via asyncio.gather, then assembles the result on the heavy pool.
+    """
     if not request.state.user:
         return JSONResponse({"error": "Unauthorized"}, status_code=401)
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
     from filings import screener
 
-    data = await _to_heavy(screener.get_screener_data, ticker)
+    ticker = ticker.upper()
+
+    # Run all 3 independent data fetches in parallel
+    yf_info, fund_data, fwd_estimates = await asyncio.gather(
+        _to_heavy(screener.fetch_yf_info, ticker),
+        _to_heavy(screener.fetch_fundamentals, ticker),
+        _to_heavy(screener.fetch_forward_estimates, ticker),
+    )
+
+    if not yf_info.get("_resolved_price"):
+        return JSONResponse({"error": "No data available"}, status_code=404)
+
+    # Assembly + 52w/beta fallbacks — run on heavy pool to avoid
+    # blocking the event loop
+    data = await _to_heavy(
+        screener.assemble_screener_data,
+        ticker, yf_info, fund_data, fwd_estimates,
+    )
     if not data:
         return JSONResponse({"error": "No data available"}, status_code=404)
     return JSONResponse(data)

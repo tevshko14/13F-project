@@ -1,12 +1,50 @@
 {% extends "base.html" %}
-{% block title %}PaperPanda — Track Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
-{% block meta_description %}PaperPanda tracks superinvestor 13F filings, insider trading, analyst ratings, and market news — all in one place. See what Buffett, Ackman, Burry, and 80+ top investors are buying and selling.{% endblock %}
-{% block og_title %}PaperPanda — Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
-{% block og_description %}Free superinvestor 13F portfolio tracker. See what Buffett, Ackman, Burry, and 80+ top investors are buying and selling.{% endblock %}
-{% block twitter_title %}PaperPanda — Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
-{% block twitter_description %}Free superinvestor 13F portfolio tracker. See what Buffett, Ackman, Burry & 80+ top investors are buying.{% endblock %}
+{% block title %}PaperPanda — Free Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard{% endblock %}
+{% block meta_description %}PaperPanda is a free 13F portfolio tracker that monitors superinvestor holdings, insider trading (SEC Form 4), congressional stock trades, S&P 500 heatmaps, and analyst ratings. Track what Warren Buffett, Bill Ackman, Michael Burry, and 80+ hedge fund managers are buying and selling in real time.{% endblock %}
+{% block og_title %}PaperPanda — Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard{% endblock %}
+{% block og_description %}Free superinvestor 13F portfolio tracker. Monitor hedge fund holdings, insider trades, congressional stock activity, and market sentiment — all in one dashboard.{% endblock %}
+{% block twitter_title %}PaperPanda — Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard{% endblock %}
+{% block twitter_description %}Free 13F portfolio tracker. See what Buffett, Ackman, Burry & 80+ hedge fund managers are buying and selling.{% endblock %}
 {% block canonical_url %}https://paperpanda.io/{% endblock %}
 {% block og_url %}https://paperpanda.io/{% endblock %}
+{% block json_ld_extra %}
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": "https://paperpanda.io/#webpage",
+    "url": "https://paperpanda.io/",
+    "name": "PaperPanda — Free Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard",
+    "description": "Free 13F portfolio tracker that monitors superinvestor holdings, insider trading, congressional stock trades, S&P 500 heatmaps, and analyst ratings. Track what Warren Buffett, Bill Ackman, Michael Burry, and 80+ hedge fund managers are buying and selling.",
+    "isPartOf": { "@id": "https://paperpanda.io/#website" },
+    "about": [
+        { "@type": "Thing", "name": "13F filings", "description": "Quarterly SEC filings disclosing institutional investment manager equity holdings" },
+        { "@type": "Thing", "name": "Superinvestor portfolios", "description": "Portfolio holdings of top hedge fund managers and institutional investors" },
+        { "@type": "Thing", "name": "Insider trading", "description": "SEC Form 4 filings showing corporate insider buying and selling activity" },
+        { "@type": "Thing", "name": "Congressional stock trading", "description": "STOCK Act disclosures from U.S. House and Senate members" },
+        { "@type": "Thing", "name": "Hedge fund holdings", "description": "Equity positions held by hedge funds as disclosed in SEC 13F filings" },
+        { "@type": "Thing", "name": "S&P 500", "description": "Market-capitalization-weighted index of 500 leading U.S. publicly traded companies" },
+        { "@type": "Thing", "name": "Earnings calendar", "description": "Schedule of upcoming quarterly earnings reports with EPS and revenue estimates" },
+        { "@type": "Thing", "name": "Analyst ratings", "description": "Wall Street consensus buy, hold, and sell recommendations" },
+        { "@type": "Thing", "name": "Unusual options activity", "description": "Large or unusual options trades that may signal institutional positioning" },
+        { "@type": "Thing", "name": "Short interest", "description": "Total shares sold short as a percentage of float" },
+        { "@type": "Thing", "name": "Market sentiment", "description": "Aggregate investor sentiment from retail and institutional indicators" },
+        { "@type": "Thing", "name": "SEC EDGAR", "description": "Electronic Data Gathering, Analysis, and Retrieval system for SEC filings" }
+    ],
+    "mentions": [
+        { "@type": "Person", "name": "Warren Buffett", "jobTitle": "Chairman & CEO", "worksFor": { "@type": "Organization", "name": "Berkshire Hathaway" } },
+        { "@type": "Person", "name": "Bill Ackman", "jobTitle": "CEO", "worksFor": { "@type": "Organization", "name": "Pershing Square Capital Management" } },
+        { "@type": "Person", "name": "Michael Burry", "jobTitle": "Founder", "worksFor": { "@type": "Organization", "name": "Scion Asset Management" } },
+        { "@type": "Person", "name": "Ray Dalio", "jobTitle": "Founder", "worksFor": { "@type": "Organization", "name": "Bridgewater Associates" } },
+        { "@type": "Person", "name": "David Tepper", "jobTitle": "Founder", "worksFor": { "@type": "Organization", "name": "Appaloosa Management" } },
+        { "@type": "Person", "name": "Seth Klarman", "jobTitle": "CEO", "worksFor": { "@type": "Organization", "name": "Baupost Group" } }
+    ],
+    "publisher": { "@id": "https://paperpanda.io/#organization" },
+    "inLanguage": "en-US",
+    "isAccessibleForFree": true
+}
+</script>
+{% endblock %}
 {% block extra_head_scripts %}
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,7 +60,7 @@
         <p class="hero-kicker">PaperPanda Intelligence</p>
         <h1 class="hero-title">A sharper market dashboard for modern investors.</h1>
         <p class="hero-copy">
-            Track superinvestor portfolios, insider trades, analyst ratings, and market news in one real-time workspace.
+            Real-time insider trades, congressional stock activity, S&amp;P 500 heatmaps, analyst ratings, and market sentiment — all in one free dashboard.
         </p>
 
         <div class="hero-search-wrapper">

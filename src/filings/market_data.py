@@ -1098,6 +1098,22 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
             if time.time() - ts < _52W_TTL:
                 return {t: data[t] for t in tickers if t in data}
 
+    # ── L2: Try Supabase (fast, survives redeploys) ──
+    try:
+        from filings import supabase_cache
+
+        cached, is_fresh = supabase_cache.get_cached_with_stale("market:52w_range")
+        if cached and isinstance(cached, dict) and len(cached) > 50:
+            logger.info(
+                "Warm-loaded 52w_range from Supabase (%d tickers, %s)",
+                len(cached), "fresh" if is_fresh else "stale",
+            )
+            with _lock:
+                _52w_cache = (time.time(), cached)
+            return {t: cached[t] for t in tickers if t in cached}
+    except Exception as e:
+        logger.debug("Supabase 52w_range warm-load failed: %s", e)
+
     try:
         import yfinance as yf
 
@@ -1150,6 +1166,18 @@ def get_52_week_range_bulk(tickers: list[str]) -> dict:
 
         with _lock:
             _52w_cache = (time.time(), result)
+
+        # ── Write back to Supabase L2 ──
+        try:
+            from filings import supabase_cache
+
+            supabase_cache.set_cached(
+                "market:52w_range", "market_data", result,
+                ttl_seconds=_52W_TTL,
+            )
+        except Exception:
+            logger.debug("Supabase 52w_range write-back failed")
+
         return {t: result[t] for t in tickers if t in result}
 
     except Exception as e:
@@ -1259,6 +1287,19 @@ def build_heatmap_data(
             if time.time() - ts < _HEATMAP_BUILT_TTL:
                 return data
 
+    # ── L2: Try Supabase (survives redeploys) ──
+    try:
+        from filings import supabase_cache
+
+        sb_cached, is_fresh = supabase_cache.get_cached_with_stale(f"heatmap:built:{period}")
+        if sb_cached and isinstance(sb_cached, list) and len(sb_cached) > 3:
+            logger.info("Warm-loaded heatmap:%s from Supabase (%d sectors, %s)", period, len(sb_cached), "fresh" if is_fresh else "stale")
+            with _lock:
+                _heatmap_built_cache[period] = (time.time(), sb_cached)
+            return sb_cached
+    except Exception:
+        pass
+
     sectors: dict[str, list[dict]] = {}
 
     for c in constituents:
@@ -1301,6 +1342,17 @@ def build_heatmap_data(
 
     with _lock:
         _heatmap_built_cache[period] = (time.time(), result)
+
+    # ── Write back to Supabase L2 ──
+    try:
+        from filings import supabase_cache
+
+        supabase_cache.set_cached(
+            f"heatmap:built:{period}", "market_data", result,
+            ttl_seconds=_HEATMAP_BUILT_TTL,
+        )
+    except Exception:
+        pass
 
     return result
 

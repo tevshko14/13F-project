@@ -259,6 +259,34 @@ def _get_raw_data(
             if cached and time.time() - cached[0] < _TTL:
                 return cached[1]
 
+        # ── L2: Try Supabase (fast, survives redeploys) ──
+        try:
+            from filings import supabase_cache
+
+            sb_key = f"breadth:{cache_key}"
+            sb_cached, is_fresh = supabase_cache.get_cached_with_stale(sb_key)
+            if sb_cached and isinstance(sb_cached, dict) and sb_cached.get("close"):
+                close_df = pd.DataFrame(sb_cached["close"])
+                close_df.index = pd.to_datetime(close_df.index)
+                vol_df = pd.DataFrame(sb_cached["volume"]) if sb_cached.get("volume") else None
+                if vol_df is not None:
+                    vol_df.index = pd.to_datetime(vol_df.index)
+                constituents = sb_cached.get("constituents", [])
+                idx_prices = None
+                if sb_cached.get("idx_prices"):
+                    idx_prices = pd.Series(sb_cached["idx_prices"])
+                    idx_prices.index = pd.to_datetime(idx_prices.index)
+                result = (close_df, vol_df, constituents, idx_prices)
+                logger.info(
+                    "Warm-loaded breadth %s from Supabase (%d rows, %s)",
+                    cache_key, len(close_df), "fresh" if is_fresh else "stale",
+                )
+                with _lock:
+                    _cache[cache_key] = (time.time(), result)
+                return result
+        except Exception as e:
+            logger.debug("Supabase breadth warm-load failed: %s", e)
+
         constituents = _get_constituents(index)
         if not constituents:
             result = (None, None, [], None)
@@ -280,6 +308,22 @@ def _get_raw_data(
 
         with _lock:
             _cache[cache_key] = (time.time(), result)
+
+        # ── Write back to Supabase L2 ──
+        try:
+            from filings import supabase_cache
+
+            serialized = {
+                "close": close_df.to_dict() if close_df is not None else None,
+                "volume": vol_df.to_dict() if vol_df is not None else None,
+                "constituents": constituents,
+                "idx_prices": idx_prices.to_dict() if idx_prices is not None else None,
+            }
+            sb_key = f"breadth:{cache_key}"
+            supabase_cache.set_cached(sb_key, "market_breadth", serialized, ttl_seconds=_TTL)
+        except Exception:
+            logger.debug("Supabase breadth write-back failed for %s", cache_key)
+
         return result
 
 

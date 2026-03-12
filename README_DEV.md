@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-11 (Screener auth: password gate → Clerk sign-in, data module cache fixes, cboe_data simplification)
+> Last updated: 2026-03-12 (Cold-start optimization: L2 caching for breadth/52w/heatmap, screener parallelization, market overview HTML cache, SEO schema)
 
 ---
 
@@ -1831,6 +1831,8 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Revenue estimate backfill: scraped historical revenue estimates for Q1-Q4 2025 (~5500 rows), coverage 0% → 92-95%
 - [x] Finnhub bulk calendar: week-by-week fetching to avoid 1500-result API limit, expanded from 7 → 10 weeks
 - [x] Sidebar nav: added Macro link under Tools group (pie-chart icon)
+- [x] Cold-start optimization: L2 Supabase caching for breadth, 52w range, heatmap data; screener parallelization (3-way asyncio.gather); market overview HTML cache (5-min TTL); activity feed TTL extended to 1h
+- [x] Homepage SEO: enriched meta tags, JSON-LD WebPage schema with `about[]` + `mentions[]`, expanded Organization `knowsAbout` (28 entities)
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)

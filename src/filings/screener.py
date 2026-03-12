@@ -313,17 +313,10 @@ def get_peer_valuation(ticker: str) -> dict | None:
 # Public API
 # ═══════════════════════════════════════════════════════════════════════
 
-def get_screener_data(ticker: str) -> dict | None:
-    """Aggregate all data needed for DCF / Monte Carlo / Comps.
-
-    Returns a JSON-serialisable dict or None if the ticker has no data.
-    """
+def fetch_yf_info(ticker: str) -> dict:
+    """Fetch yfinance info with price fallbacks. Used by both sync and async paths."""
     from filings.client import get_yfinance_info
-    from filings import fundamentals, earnings
 
-    ticker = ticker.upper()
-
-    # ── 1. yfinance info ──────────────────────────────────────────────
     try:
         yf_info = get_yfinance_info(ticker)
     except Exception:
@@ -369,6 +362,50 @@ def get_screener_data(ticker: str) -> dict | None:
         except Exception:
             pass
 
+    yf_info["_resolved_price"] = current_price
+    return yf_info
+
+
+def fetch_fundamentals(ticker: str) -> dict | None:
+    """Fetch SEC XBRL fundamentals. Used by both sync and async paths."""
+    from filings import fundamentals
+
+    try:
+        return fundamentals.get_fundamentals(ticker)
+    except Exception:
+        logger.warning("fundamentals failed for %s", ticker)
+        return None
+
+
+def fetch_forward_estimates(ticker: str) -> dict:
+    """Fetch forward estimates. Used by both sync and async paths."""
+    from filings import earnings
+
+    try:
+        fwd = earnings.get_forward_estimates(ticker)
+        if fwd:
+            return fwd
+    except Exception:
+        logger.warning("forward estimates failed for %s", ticker)
+    return {"eps": [], "revenue": []}
+
+
+def assemble_screener_data(
+    ticker: str,
+    yf_info: dict,
+    fund_data: dict | None,
+    fwd_estimates: dict,
+) -> dict | None:
+    """Assemble screener data from pre-fetched sources.
+
+    Mostly CPU-only, but includes fallback network calls for 52-week
+    range and beta when yfinance info lacks those fields.
+    Designed to be called after fetching yf_info, fund_data, and
+    fwd_estimates in parallel.
+    """
+    from filings import fundamentals
+
+    current_price = yf_info.get("_resolved_price")
     if not current_price:
         return None  # can't do valuation without a price
 
@@ -377,14 +414,7 @@ def get_screener_data(ticker: str) -> dict | None:
     if not shares_outstanding and yf_info.get("marketCap") and current_price:
         shares_outstanding = int(yf_info["marketCap"] / current_price)
 
-    # ── 2. Fundamentals (SEC XBRL) ────────────────────────────────────
-    try:
-        fund_data = fundamentals.get_fundamentals(ticker)
-    except Exception:
-        logger.warning("fundamentals failed for %s", ticker)
-        fund_data = None
-
-    # Fallback: shares outstanding from SEC XBRL (in-memory cache from fundamentals)
+    # Shares outstanding fallback from SEC XBRL
     if not shares_outstanding and fund_data:
         try:
             xbrl = fundamentals._fetch_xbrl_facts(ticker)
@@ -400,7 +430,6 @@ def get_screener_data(ticker: str) -> dict | None:
                     shares_data = units.get("shares", [])
                     if not shares_data:
                         continue
-                    # Get the most recent 10-K or 10-Q filing value
                     best = None
                     for entry in shares_data:
                         form = entry.get("form", "")
@@ -450,7 +479,7 @@ def get_screener_data(ticker: str) -> dict | None:
     annual_da_vals = _row_values_list(annual_cashflow, "Depreciation & Amortization")
     annual_sbc_vals = _row_values_list(annual_cashflow, "Stock-Based Compensation")
 
-    # CapEx (already extracted for FCF, but need raw values)
+    # CapEx
     annual_capex_vals = _row_values_list(annual_cashflow, "Capital Expenditures")
 
     # Balance sheet items (most recent period)
@@ -466,7 +495,7 @@ def get_screener_data(ticker: str) -> dict | None:
         total_debt = (lt_debt or 0) + (st_debt or 0)
     total_equity = _latest(annual_balance, "Total Equity")
 
-    # Market cap fallback: shares_outstanding × current_price
+    # Market cap fallback
     mcap = yf_info.get("marketCap")
     if not mcap and shares_outstanding and current_price:
         mcap = int(shares_outstanding * current_price)
@@ -476,16 +505,7 @@ def get_screener_data(ticker: str) -> dict | None:
     if mcap and annual_revenue_vals and annual_revenue_vals[0] and annual_revenue_vals[0] > 0:
         ps_ratio = round(mcap / annual_revenue_vals[0], 2)
 
-    # ── 3. Forward estimates ──────────────────────────────────────────
-    fwd_estimates: dict[str, Any] = {"eps": [], "revenue": []}
-    try:
-        fwd = earnings.get_forward_estimates(ticker)
-        if fwd:
-            fwd_estimates = fwd
-    except Exception:
-        logger.warning("forward estimates failed for %s", ticker)
-
-    # ── 4. Suggested peers (lightweight — no yfinance calls) ─────────
+    # Suggested peers (lightweight — no yfinance calls)
     try:
         suggested_peers = _suggest_peers(ticker, yf_info)
     except Exception:
@@ -531,7 +551,7 @@ def get_screener_data(ticker: str) -> dict | None:
     if not trailing_pe and trailing_eps and current_price and trailing_eps > 0:
         trailing_pe = round(current_price / trailing_eps, 1)
 
-    # ── 4b. Beta & 52-week range (yfinance → Tiingo → yf history) ────
+    # Beta & 52-week range (yfinance → Tiingo → yf history)
     beta = yf_info.get("beta")
     w52_high = yf_info.get("fiftyTwoWeekHigh")
     w52_low = yf_info.get("fiftyTwoWeekLow")
@@ -554,7 +574,6 @@ def get_screener_data(ticker: str) -> dict | None:
                 [ticker, "SPY"], period="1y", progress=False, timeout=15,
             )
             if hist is not None and not hist.empty:
-                # 52-week range from High/Low columns
                 if not w52_high or not w52_low:
                     try:
                         highs = hist["High"][ticker].dropna()
@@ -565,14 +584,12 @@ def get_screener_data(ticker: str) -> dict | None:
                             w52_low = round(float(lows.min()), 2)
                     except Exception:
                         pass
-                # Beta from daily returns
                 if not beta:
                     try:
                         closes = hist["Close"]
                         if ticker in closes.columns and "SPY" in closes.columns:
                             stock_c = closes[ticker].dropna()
                             spy_c = closes["SPY"].dropna()
-                            # Align on shared dates
                             common = stock_c.index.intersection(spy_c.index)
                             if len(common) > 60:
                                 sr = stock_c.loc[common].pct_change().dropna()
@@ -590,7 +607,6 @@ def get_screener_data(ticker: str) -> dict | None:
         except Exception:
             logger.debug("yfinance history fallback failed for %s", ticker)
 
-    # ── 4c. Advanced DCF fields ─────────────────────────────────────
     # Effective tax rate = Income Tax / Pre-Tax Income, clamped 0–50%
     effective_tax_rate = 0.21  # default 21%
     if annual_tax_vals and annual_pretax_vals:
@@ -602,21 +618,17 @@ def get_screener_data(ticker: str) -> dict | None:
                 effective_tax_rate = max(0.0, min(0.50, round(rate, 4)))
                 break
 
-    # Latest revenue (base year for projections)
     latest_revenue = annual_revenue_vals[0] if annual_revenue_vals else None
 
-    # CapEx / Revenue %
     capex_to_revenue = None
     if annual_capex_vals and latest_revenue and latest_revenue > 0:
         raw_capex = abs(annual_capex_vals[0])
         capex_to_revenue = round(raw_capex / abs(latest_revenue), 4)
 
-    # D&A / Revenue %
     da_to_revenue = None
     if annual_da_vals and latest_revenue and latest_revenue > 0:
         da_to_revenue = round(abs(annual_da_vals[0]) / abs(latest_revenue), 4)
 
-    # NWC / Revenue % = (AR + Inventory - AP) / Revenue
     nwc_to_revenue = None
     ar = _latest(annual_balance, "Accounts Receivable")
     inv = _latest(annual_balance, "Inventory")
@@ -633,12 +645,10 @@ def get_screener_data(ticker: str) -> dict | None:
             nwc = sum(nwc_components)
             nwc_to_revenue = round(nwc / abs(latest_revenue), 4)
 
-    # SBC / Revenue %
     sbc_to_revenue = None
     if annual_sbc_vals and latest_revenue and latest_revenue > 0:
         sbc_to_revenue = round(abs(annual_sbc_vals[0]) / abs(latest_revenue), 4)
 
-    # ── 5. Assemble response ──────────────────────────────────────────
     return {
         "ticker": ticker,
         "company_name": company_name or ticker,
@@ -681,3 +691,23 @@ def get_screener_data(ticker: str) -> dict | None:
         "suggested_peers": suggested_peers,
         "forward_estimates": fwd_estimates,
     }
+
+
+def get_screener_data(ticker: str) -> dict | None:
+    """Aggregate all data needed for DCF / Monte Carlo / Comps.
+
+    Returns a JSON-serialisable dict or None if the ticker has no data.
+    Sync wrapper — for parallel fetching, use the individual fetch helpers
+    with assemble_screener_data() from web.py.
+    """
+    ticker = ticker.upper()
+
+    yf_info = fetch_yf_info(ticker)
+    if not yf_info.get("_resolved_price"):
+        return None
+
+    # Sequential fetches (for backward compat; web.py uses parallel path)
+    fund_data = fetch_fundamentals(ticker)
+    fwd_estimates = fetch_forward_estimates(ticker)
+
+    return assemble_screener_data(ticker, yf_info, fund_data, fwd_estimates)
