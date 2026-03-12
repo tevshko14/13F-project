@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-11 (CBOE volatility/IV Rank, FRED/Treasury/FX/WSB API integrations, Earnings tab consolidation, options heatmap→IV Rank swap, OpenFIGI CUSIP resolver)
+> Last updated: 2026-03-11 (Screener auth: password gate → Clerk sign-in, data module cache fixes, cboe_data simplification)
 
 ---
 
@@ -263,8 +263,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── investor.html             # Individual fund page (tabbed: Holdings + Compare Quarters)
         ├── activity.html             # Cross-fund activity feed (top 100)
         ├── stock.html                # Stock detail (8 tabs: Overview, Ownership, Analysts, Signals, Vitals, Filings, Insider, Congress)
-        ├── screener.html              # Stock Valuation Screener: DCF, Monte Carlo, Relative Value tabs + assumptions sidebar with user-controlled peer selector (Fuse.js search, chip tags)
-        ├── screener_gate.html        # Password gate for screener (beta feature, cookie-based auth)
+        ├── screener.html              # Stock Valuation Screener: DCF, Monte Carlo, Relative Value tabs + assumptions sidebar with user-controlled peer selector (Fuse.js search, chip tags). Clerk auth gate (blur overlay + sign-in card, same pattern as options page)
+        ├── screener_gate.html        # Legacy password gate (still used by /macro page)
         ├── support.html              # Panda Fund: progress bar, Stripe Buy Button + Pricing Table, cost breakdown, funding history chart
         ├── deployment.html           # Capital Deployed standalone page (/deployment)
         ├── notifications.html        # Notification history page
@@ -1340,8 +1340,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/api/financials/{ticker}` | `api_financials` | SEC XBRL (L1+L2 cache) | `partials/financials.html` |
 | GET | `/api/financials/{ticker}/history` | `api_financials_history` | Cold storage (full history) | `partials/financials.html` |
 | GET | `/api/options/clusters` | `options_clusters_api` | Unusual options cache | `partials/options_clusters.html` |
-| GET | `/screener` | `screener_page` | Cookie auth gate → screener | `screener_gate.html` or `screener.html` |
-| POST | `/screener/auth` | `screener_auth` | Password check → set `scr_auth` cookie (30d) | Redirect → `/screener` or `screener_gate.html` |
+| GET | `/screener` | `screener_page` | Clerk auth gate (client-side blur overlay) | `screener.html` |
 | GET | `/api/screener/{ticker}` | `api_screener` | yfinance + SEC XBRL + Tiingo (parallel) | JSON response |
 | GET | `/api/screener/peers` | `api_screener_peers` | yfinance + Tiingo + market_data (parallel batch) | JSON response |
 | GET | `/macro` | `macro_page` | Cookie auth gate → macro dashboard | `screener_gate.html` or `macro.html` |

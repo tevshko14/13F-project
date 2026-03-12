@@ -57,7 +57,7 @@ def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
         if result:
             try:
                 from filings import supabase_cache
-                supabase_cache.set_cached(cache_key, result, ttl_hours=24)
+                supabase_cache.set_cached(cache_key, "treasury", result, 3600 * 24)
             except Exception:
                 pass
             with _lock:

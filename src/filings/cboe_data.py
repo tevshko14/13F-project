@@ -23,26 +23,25 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# ── In-memory L1 cache ──────────────────────────────────────────────────────
+# ── In-memory L1 cache (single keyed dict) ──────────────────────────────────
 _lock = threading.Lock()
+_cache: dict[str, tuple[float, any]] = {}
 
-_putcall_cache: dict[str, tuple[float, list[dict]]] = {}  # keyed by ratio_type
-_PUTCALL_TTL = 3600  # 1 hour
+# L1 TTLs (seconds)
+_TTLS = {
+    "putcall": 3600,    # 1 hour
+    "vix_term": 1800,   # 30 min
+    "skew": 3600,       # 1 hour
+    "ivrank": 1800,     # 30 min
+}
 
-_vix_term_cache: tuple[float, dict] | None = None
-_VIX_TERM_TTL = 1800  # 30 min
-
-_skew_cache: tuple[float, list[dict]] | None = None
-_SKEW_TTL = 3600  # 1 hour
-
-_ivrank_cache: tuple[float, list[dict]] | None = None
-_IVRANK_TTL = 1800  # 30 min
-
-# ── L2 Supabase cache TTLs (seconds) ────────────────────────────────────────
-_L2_PUTCALL_TTL = 86400   # 24 hours
-_L2_VIX_TERM_TTL = 21600  # 6 hours
-_L2_SKEW_TTL = 86400      # 24 hours
-_L2_IVRANK_TTL = 21600    # 6 hours
+# L2 Supabase cache TTLs (seconds)
+_L2_TTLS = {
+    "putcall": 86400,   # 24 hours
+    "vix_term": 21600,  # 6 hours
+    "skew": 86400,      # 24 hours
+    "ivrank": 21600,    # 6 hours
+}
 
 # ── CBOE CDN URLs ────────────────────────────────────────────────────────────
 # Note: CBOE stopped updating these CSVs in Oct 2019. For current data,
@@ -73,6 +72,45 @@ def _make_yf_session():
 _yf_session = _make_yf_session()
 
 
+def _cached_or_fetch(cache_key: str, fetcher, kind: str = "putcall"):
+    """Generic L1 → L2 → fetcher pattern for all CBOE data."""
+    l1_ttl = _TTLS.get(kind, 3600)
+    l2_ttl = _L2_TTLS.get(kind, 86400)
+
+    # L1
+    with _lock:
+        cached = _cache.get(cache_key)
+        if cached and time.time() - cached[0] < l1_ttl:
+            return cached[1]
+
+    # L2
+    try:
+        from filings import supabase_cache
+        l2 = supabase_cache.get_cached(cache_key)
+        if l2:
+            with _lock:
+                _cache[cache_key] = (time.time(), l2)
+            return l2
+    except Exception:
+        pass
+
+    # L3: live fetch
+    try:
+        result = fetcher()
+        if result:
+            try:
+                from filings import supabase_cache
+                supabase_cache.set_cached(cache_key, "cboe", result, l2_ttl)
+            except Exception:
+                pass
+            with _lock:
+                _cache[cache_key] = (time.time(), result)
+        return result
+    except Exception as exc:
+        logger.warning("CBOE fetch failed for %s: %s", cache_key, exc)
+        return None
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # PUT / CALL RATIO
 # ═════════════════════════════════════════════════════════════════════════════
@@ -90,33 +128,11 @@ def get_put_call_ratio(ratio_type: str = "total") -> list[dict]:
     if ratio_type not in ("index", "equity", "total"):
         ratio_type = "total"
 
-    # L1 check
-    with _lock:
-        cached = _putcall_cache.get(ratio_type)
-        if cached and time.time() - cached[0] < _PUTCALL_TTL:
-            return cached[1]
-
-    # L2 check
-    from filings import supabase_cache
-    l2_key = f"cboe:putcall:{ratio_type}"
-    l2_data = supabase_cache.get_cached(l2_key)
-    if l2_data and isinstance(l2_data, list) and len(l2_data) > 0:
-        with _lock:
-            _putcall_cache[ratio_type] = (time.time(), l2_data)
-        return l2_data
-
-    # L3: fetch from CBOE CDN
-    result = _fetch_putcall_from_cboe(ratio_type)
-
-    if result:
-        with _lock:
-            _putcall_cache[ratio_type] = (time.time(), result)
-        try:
-            supabase_cache.set_cached(l2_key, "cboe", result, _L2_PUTCALL_TTL)
-        except Exception:
-            pass
-
-    return result
+    return _cached_or_fetch(
+        f"cboe:putcall:{ratio_type}",
+        lambda: _fetch_putcall_from_cboe(ratio_type),
+        "putcall",
+    ) or []
 
 
 def _fetch_putcall_from_cboe(ratio_type: str) -> list[dict]:
@@ -245,25 +261,6 @@ def _parse_cboe_csv(raw: str, source: str) -> list[dict]:
     return result[-252:]
 
 
-def _merge_total_putcall(index_data: list[dict], equity_data: list[dict]) -> list[dict]:
-    """Merge index + equity data into a total average P/C ratio."""
-    equity_map = {d["date"]: d for d in equity_data}
-    result = []
-    for idx_row in index_data:
-        eq_row = equity_map.get(idx_row["date"])
-        if eq_row:
-            avg_ratio = round((idx_row["ratio"] + eq_row["ratio"]) / 2, 4)
-            total_calls = (idx_row.get("call_vol") or 0) + (eq_row.get("call_vol") or 0)
-            total_puts = (idx_row.get("put_vol") or 0) + (eq_row.get("put_vol") or 0)
-            result.append({
-                "date": idx_row["date"],
-                "ratio": avg_ratio,
-                "call_vol": total_calls or None,
-                "put_vol": total_puts or None,
-            })
-    result.sort(key=lambda x: x["date"])
-    return result[-252:]
-
 
 def _parse_date(s: str) -> datetime | None:
     """Try multiple date formats."""
@@ -298,34 +295,7 @@ def get_vix_term_structure() -> dict:
             "updated": "2026-03-11 14:30"
         }
     """
-    global _vix_term_cache
-
-    # L1 check
-    with _lock:
-        if _vix_term_cache and time.time() - _vix_term_cache[0] < _VIX_TERM_TTL:
-            return _vix_term_cache[1]
-
-    # L2 check
-    from filings import supabase_cache
-    l2_key = "cboe:vix_term"
-    l2_data = supabase_cache.get_cached(l2_key)
-    if l2_data and isinstance(l2_data, dict) and l2_data.get("tenors"):
-        with _lock:
-            _vix_term_cache = (time.time(), l2_data)
-        return l2_data
-
-    # L3: fetch from yfinance
-    result = _fetch_vix_term_structure()
-
-    if result and result.get("tenors"):
-        with _lock:
-            _vix_term_cache = (time.time(), result)
-        try:
-            supabase_cache.set_cached(l2_key, "cboe", result, _L2_VIX_TERM_TTL)
-        except Exception:
-            pass
-
-    return result
+    return _cached_or_fetch("cboe:vix_term", _fetch_vix_term_structure, "vix_term") or {}
 
 
 def _fetch_vix_term_structure() -> dict:
@@ -383,34 +353,7 @@ def get_skew_index() -> list[dict]:
     Returns:
         List of dicts: [{date, value}, ...] sorted chronologically.
     """
-    global _skew_cache
-
-    # L1 check
-    with _lock:
-        if _skew_cache and time.time() - _skew_cache[0] < _SKEW_TTL:
-            return _skew_cache[1]
-
-    # L2 check
-    from filings import supabase_cache
-    l2_key = "cboe:skew"
-    l2_data = supabase_cache.get_cached(l2_key)
-    if l2_data and isinstance(l2_data, list) and len(l2_data) > 0:
-        with _lock:
-            _skew_cache = (time.time(), l2_data)
-        return l2_data
-
-    # L3: fetch from yfinance
-    result = _fetch_skew_from_yfinance()
-
-    if result:
-        with _lock:
-            _skew_cache = (time.time(), result)
-        try:
-            supabase_cache.set_cached(l2_key, "cboe", result, _L2_SKEW_TTL)
-        except Exception:
-            pass
-
-    return result
+    return _cached_or_fetch("cboe:skew", _fetch_skew_from_yfinance, "skew") or []
 
 
 def _fetch_skew_from_yfinance() -> list[dict]:
@@ -461,34 +404,7 @@ def get_iv_rank_batch() -> list[dict]:
         List of dicts sorted by IV Rank descending:
         [{ticker, company, current_iv, iv_rank, iv_52w_high, iv_52w_low}, ...]
     """
-    global _ivrank_cache
-
-    # L1 check
-    with _lock:
-        if _ivrank_cache and time.time() - _ivrank_cache[0] < _IVRANK_TTL:
-            return _ivrank_cache[1]
-
-    # L2 check
-    from filings import supabase_cache
-    l2_key = "cboe:ivrank_batch"
-    l2_data = supabase_cache.get_cached(l2_key)
-    if l2_data and isinstance(l2_data, list) and len(l2_data) > 0:
-        with _lock:
-            _ivrank_cache = (time.time(), l2_data)
-        return l2_data
-
-    # L3: compute from live data
-    result = _compute_iv_rank_batch()
-
-    if result:
-        with _lock:
-            _ivrank_cache = (time.time(), result)
-        try:
-            supabase_cache.set_cached(l2_key, "cboe", result, _L2_IVRANK_TTL)
-        except Exception:
-            pass
-
-    return result
+    return _cached_or_fetch("cboe:ivrank_batch", _compute_iv_rank_batch, "ivrank") or []
 
 
 def _get_active_tickers() -> list[dict]:

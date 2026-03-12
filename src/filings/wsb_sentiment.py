@@ -22,6 +22,39 @@ _cache: dict[str, tuple[float, any]] = {}
 _TTL = 3600  # 1 hour — sentiment changes fast
 
 
+def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
+    """Generic L1 → L2 → fetcher pattern."""
+    with _lock:
+        cached = _cache.get(cache_key)
+        if cached and time.time() - cached[0] < ttl:
+            return cached[1]
+
+    try:
+        from filings import supabase_cache
+        l2 = supabase_cache.get_cached(cache_key)
+        if l2:
+            with _lock:
+                _cache[cache_key] = (time.time(), l2)
+            return l2
+    except Exception:
+        pass
+
+    try:
+        result = fetcher()
+        if result:
+            try:
+                from filings import supabase_cache
+                supabase_cache.set_cached(cache_key, "wsb", result, 3600 * 2)
+            except Exception:
+                pass
+            with _lock:
+                _cache[cache_key] = (time.time(), result)
+        return result
+    except Exception as exc:
+        logger.warning("WSB fetch failed for %s: %s", cache_key, exc)
+        return None
+
+
 def _fetch_wsb_top() -> list[dict]:
     """Fetch top Reddit-mentioned tickers from ApeWisdom API."""
     try:
@@ -73,37 +106,7 @@ def _fetch_wsb_top() -> list[dict]:
 
 def get_wsb_top() -> list[dict]:
     """Get top WSB tickers with mentions (cached)."""
-    cache_key = "wsb:top"
-
-    # L1
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < _TTL:
-            return cached[1]
-
-    # L2
-    try:
-        from filings import supabase_cache
-        l2 = supabase_cache.get_cached(cache_key)
-        if l2 and isinstance(l2, list) and len(l2) > 0:
-            with _lock:
-                _cache[cache_key] = (time.time(), l2)
-            return l2
-    except Exception:
-        pass
-
-    # L3: live
-    result = _fetch_wsb_top()
-    if result:
-        try:
-            from filings import supabase_cache
-            supabase_cache.set_cached(cache_key, result, ttl_hours=2)
-        except Exception:
-            pass
-        with _lock:
-            _cache[cache_key] = (time.time(), result)
-
-    return result
+    return _cached_or_fetch("wsb:top", _fetch_wsb_top) or []
 
 
 def get_ticker_sentiment(ticker: str) -> dict | None:

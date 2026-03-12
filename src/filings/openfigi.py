@@ -108,7 +108,7 @@ def resolve_cusips(cusips: list[str]) -> dict[str, dict]:
                     # L2 cache
                     try:
                         from filings import supabase_cache
-                        supabase_cache.set_cached(f"figi:{cusip}", mapped, ttl_hours=168)  # 7 days
+                        supabase_cache.set_cached(f"figi:{cusip}", "openfigi", mapped, 3600 * 168)  # 7 days
                     except Exception:
                         pass
                 else:
