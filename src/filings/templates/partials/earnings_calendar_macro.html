@@ -412,17 +412,20 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
 {# ── Grid container (JS renders here) ── #}
 <div class="ecg-scroll"><div id="ecg-container"></div></div>
 
-{# ── List view (date tabs — like fund quarterly tabs) ── #}
+{# ── Search bar (list view only) ── #}
 <div id="ec-list-view">
     {% if data.upcoming %}
-    {# ── Search bar ── #}
     <div class="ec-search-wrap">
         <input type="text" class="ec-search" id="ec-table-search"
                placeholder="Search ticker or company…"
                oninput="ecFilterTable(this.value)">
     </div>
+    {% endif %}
+</div>
 
-    {# ── Date tab navigation ── #}
+{# ── Date tabs + panels (always visible below grid or list) ── #}
+{% if data.upcoming %}
+<div id="ec-date-section">
     <nav>
         <ul class="ec-date-tabs">
             {% for day in data.upcoming %}
@@ -438,7 +441,6 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
         </ul>
     </nav>
 
-    {# ── Date tab panels ── #}
     {% for day in data.upcoming %}
     <div class="ec-date-panel{% if loop.first %} active{% endif %}" data-date-idx="{{ loop.index0 }}" data-ec-day>
         <div class="pp-table-wrap">
@@ -481,12 +483,12 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
         </div>
     </div>
     {% endfor %}
-    {% else %}
-    <div class="ec-empty">
-        No upcoming earnings found for {{ data.index }} ({{ data.period_label }}).
-    </div>
-    {% endif %}
-</div>{# /ec-list-view #}
+</div>
+{% else %}
+<div class="ec-empty">
+    No upcoming earnings found for {{ data.index }} ({{ data.period_label }}).
+</div>
+{% endif %}
 
 {# ── Just Reported (date tabs) ── #}
 {% if data.just_reported %}
@@ -814,7 +816,6 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
         var container  = document.getElementById('ecg-container');
         var nav        = document.getElementById('ecg-nav');
         var listView   = document.getElementById('ec-list-view');
-        var searchWrap = document.querySelector('.ec-search-wrap');
 
         // Force list view on narrow screens
         if (window.innerWidth < 768 && _s.view !== 'list') {
@@ -824,13 +825,11 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
         if (_s.view === 'list') {
             container.style.display = 'none';
             nav.style.display       = 'none';
-            if (listView)   listView.style.display   = '';
-            if (searchWrap) searchWrap.style.display = '';
+            if (listView) listView.style.display = '';
         } else {
             container.style.display = '';
             nav.style.display       = 'flex';
-            if (listView)   listView.style.display   = 'none';
-            if (searchWrap) searchWrap.style.display = 'none';
+            if (listView) listView.style.display = 'none';
             if (_s.view === 'week')  _renderWeek();
             if (_s.view === 'month') _renderMonth();
         }
