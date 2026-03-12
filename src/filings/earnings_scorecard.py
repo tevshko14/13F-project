@@ -34,6 +34,7 @@ _TIMEOUT = 15
 INDEX_CHOICES = {
     "sp500": "S&P 500",
     "nasdaq": "NASDAQ 100",
+    "all": "All Stocks",
 }
 
 SECTORS = [
@@ -954,18 +955,21 @@ def fetch_earnings_calendar(
             return result
         return _build_empty_calendar(index, period)
 
-    # ── Filter by index constituents ─────────────────────────────
-    company_info = _build_company_lookup(index)
-    if not company_info:
-        return _build_empty_calendar(index, period)
-
-    # Normalize: Finnhub uses "." (e.g. BRK.B), our lookup uses "-"
-    norm_lookup: dict[str, str] = {}  # finnhub_sym -> our_sym
-    for sym in company_info:
-        norm_lookup[sym] = sym
-        dot_ver = sym.replace("-", ".")
-        if dot_ver != sym:
-            norm_lookup[dot_ver] = sym
+    # ── Filter by index constituents (unless "all") ────────────
+    if index == "all":
+        company_info = None
+        norm_lookup = None
+    else:
+        company_info = _build_company_lookup(index)
+        if not company_info:
+            return _build_empty_calendar(index, period)
+        # Normalize: Finnhub uses "." (e.g. BRK.B), our lookup uses "-"
+        norm_lookup = {}
+        for sym in company_info:
+            norm_lookup[sym] = sym
+            dot_ver = sym.replace("-", ".")
+            if dot_ver != sym:
+                norm_lookup[dot_ver] = sym
 
     # ── Date boundaries ──────────────────────────────────────────
     start_str, end_str = _calendar_date_range(period)
@@ -977,12 +981,19 @@ def fetch_earnings_calendar(
 
     for item in raw:
         finnhub_sym = item["symbol"]
-        our_sym = norm_lookup.get(finnhub_sym)
-        if our_sym is None:
-            continue
+
+        if norm_lookup is not None:
+            # Index-filtered mode
+            our_sym = norm_lookup.get(finnhub_sym)
+            if our_sym is None:
+                continue
+            info = company_info.get(our_sym, {})
+        else:
+            # All-stocks mode — use Finnhub symbol directly
+            our_sym = finnhub_sym.replace(".", "-")  # normalize to our format
+            info = {"name": item.get("name") or our_sym, "sector": ""}
 
         d = item["date"]
-        info = company_info.get(our_sym, {})
         is_si = our_sym in si_tickers
 
         entry = {
@@ -1042,6 +1053,9 @@ def fetch_earnings_calendar(
     # Sort just_reported by date descending (most recent first)
     just_reported.sort(key=lambda e: e["date"], reverse=True)
 
+    # Cap just_reported for "all" mode (can be huge)
+    max_reported = 50 if index == "all" else 25
+
     # ── Summary metrics ──────────────────────────────────────────
     all_upcoming = [e for day in upcoming for e in day["entries"]]
     metrics = {
@@ -1058,7 +1072,7 @@ def fetch_earnings_calendar(
 
     result = {
         "upcoming": upcoming,
-        "just_reported": just_reported[:25],  # Cap to last 25
+        "just_reported": just_reported[:max_reported],
         "metrics": metrics,
         "index": INDEX_CHOICES.get(index, index),
         "index_key": index,

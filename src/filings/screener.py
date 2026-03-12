@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import logging
 import math
+import threading
+import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -164,6 +166,12 @@ def _suggest_peers(
     return candidates[:max_suggestions]
 
 
+# ── Peer valuation L1 cache (avoids re-fetching on every Compare click) ──
+_peer_lock = threading.Lock()
+_peer_cache: dict[str, tuple[float, dict]] = {}
+_PEER_TTL = 3600  # 1 hour
+
+
 def _yf_info_direct(ticker: str) -> dict:
     """Fetch yfinance .info with a fresh session (no shared rate-limit state).
 
@@ -199,10 +207,18 @@ def get_peer_valuation(ticker: str) -> dict | None:
 
     Uses a *fresh* yfinance session (``_yf_info_direct``) to avoid being
     blocked by rate-limits on the shared ``_yf_session`` that other parts
-    of the app use.  The shared session can hang indefinitely when rate-
-    limited, so we skip it entirely for peer calls.
+    of the app use.
+
+    Returns a dict with best-effort data (never None — always returns at
+    least the ticker so the row appears in the table even if data is sparse).
     """
     ticker = ticker.upper()
+
+    # ── L1 cache check ───────────────────────────────────────────────
+    with _peer_lock:
+        cached = _peer_cache.get(ticker)
+        if cached and time.time() - cached[0] < _PEER_TTL:
+            return cached[1]
 
     # --- 1. Direct yfinance with fresh session (avoids shared rate-limit)
     try:
@@ -217,7 +233,7 @@ def get_peer_valuation(ticker: str) -> dict | None:
     mcap = info.get("marketCap")
     current_price = info.get("currentPrice") or info.get("regularMarketPrice")
 
-    # --- 3. Tiingo standalone fallback for price -----------------------
+    # --- 2. Tiingo standalone fallback for price -----------------------
     if not current_price:
         try:
             from filings import tiingo
@@ -228,7 +244,7 @@ def get_peer_valuation(ticker: str) -> dict | None:
         except Exception:
             pass
 
-    # --- 4. market_data batch price fallback ---------------------------
+    # --- 3. market_data batch price fallback ---------------------------
     if not current_price:
         try:
             from filings import market_data
@@ -238,11 +254,7 @@ def get_peer_valuation(ticker: str) -> dict | None:
         except Exception:
             pass
 
-    if not current_price:
-        logger.warning("get_peer_valuation(%s): no price from any source, skipping", ticker)
-        return None
-
-    # --- 5. Derive name from S&P 500 list if yfinance didn't give one --
+    # --- 4. Derive name from S&P 500 list if yfinance didn't give one --
     name = info.get("longName") or info.get("shortName") or ""
     if not name:
         try:
@@ -256,7 +268,7 @@ def get_peer_valuation(ticker: str) -> dict | None:
     if not name:
         name = ticker
 
-    # --- 6. Compute multiples (best-effort) ----------------------------
+    # --- 5. Compute multiples (best-effort) ----------------------------
     revenue = info.get("totalRevenue") or info.get("revenue")
     ps = round(mcap / revenue, 2) if mcap and revenue and revenue > 0 else None
     trailing_pe = info.get("trailingPE")
@@ -277,7 +289,7 @@ def get_peer_valuation(ticker: str) -> dict | None:
         ticker, current_price, mcap, trailing_pe, forward_pe, ev_ebitda,
     )
 
-    return {
+    result = {
         "ticker": ticker,
         "name": name,
         "current_price": current_price,
@@ -288,6 +300,13 @@ def get_peer_valuation(ticker: str) -> dict | None:
         "price_to_sales": ps,
         "trailing_eps": trailing_eps,
     }
+
+    # Only cache if we got meaningful data (at least a price)
+    if current_price:
+        with _peer_lock:
+            _peer_cache[ticker] = (time.time(), result)
+
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════
