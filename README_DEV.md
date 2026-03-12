@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-12 (Cold-start optimization: L2 caching for breadth/52w/heatmap, screener parallelization, market overview HTML cache, SEO schema)
+> Last updated: 2026-03-12 (Earnings stock reaction enrichment via Tiingo EOD, sidebar nav: Options moved to Tools)
 
 ---
 
@@ -1833,6 +1833,8 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Sidebar nav: added Macro link under Tools group (pie-chart icon)
 - [x] Cold-start optimization: L2 Supabase caching for breadth, 52w range, heatmap data; screener parallelization (3-way asyncio.gather); market overview HTML cache (5-min TTL); activity feed TTL extended to 1h
 - [x] Homepage SEO: enriched meta tags, JSON-LD WebPage schema with `about[]` + `mentions[]`, expanded Organization `knowsAbout` (28 entities)
+- [x] Earnings scorecard: stock reaction enrichment via Tiingo EOD (close-to-close % change around report date, 8-worker parallel fetch, cached in scorecard_cache)
+- [x] Sidebar nav: moved Options from Signals → Tools group, removed PRO badge
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)

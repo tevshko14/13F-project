@@ -203,6 +203,109 @@ def _resolve_quarter(quarter: str | None) -> tuple[str, str, str]:
     return f"Q{q} {now.year}", start, end
 
 
+def _fetch_eod_around_date(
+    ticker: str, report_date: str,
+) -> float | None:
+    """Fetch Tiingo EOD data around an earnings date, return % price change.
+
+    Computes close-to-close change: report-date close vs prior-day close.
+    This captures both BMO (gap at open → close vs prior) and AMC reactions
+    (since the report-date close already reflects same-day moves).
+    """
+    from filings.tiingo import _tiingo_get, has_tiingo_key
+
+    if not has_tiingo_key():
+        return None
+    try:
+        dt = datetime.strptime(report_date, "%Y-%m-%d")
+        start = (dt - timedelta(days=5)).strftime("%Y-%m-%d")
+        end = (dt + timedelta(days=3)).strftime("%Y-%m-%d")
+
+        url = (
+            f"https://api.tiingo.com/tiingo/daily/{ticker}/prices"
+            f"?startDate={start}&endDate={end}"
+        )
+        eod = _tiingo_get(url)
+        if not eod or not isinstance(eod, list) or len(eod) < 2:
+            return None
+
+        # Build date→close map
+        by_date: dict[str, float] = {}
+        for bar in eod:
+            d = (bar.get("date") or "")[:10]
+            close = bar.get("adjClose") or bar.get("close")
+            if d and close:
+                by_date[d] = float(close)
+
+        sorted_dates = sorted(by_date.keys())
+
+        # Find report date (or nearest prior trading day)
+        report_idx = None
+        for i, d in enumerate(sorted_dates):
+            if d == report_date:
+                report_idx = i
+                break
+            if d > report_date:
+                report_idx = i - 1 if i > 0 else None
+                break
+        if report_idx is None:
+            report_idx = len(sorted_dates) - 1
+
+        if report_idx < 1:
+            return None
+
+        close_before = by_date[sorted_dates[report_idx - 1]]
+        close_after = by_date[sorted_dates[report_idx]]
+        if close_before > 0:
+            return round(((close_after - close_before) / close_before) * 100, 2)
+    except Exception:
+        logger.debug("Price reaction fetch failed for %s on %s", ticker, report_date)
+    return None
+
+
+def _enrich_price_changes(results: list[dict]) -> list[dict]:
+    """Populate ``price_change`` for each earnings result using Tiingo EOD.
+
+    Runs Tiingo calls in parallel (8 workers). Gracefully skips tickers
+    where price data is unavailable.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Collect tickers that need enrichment
+    to_fetch: dict[str, str] = {}  # {symbol: date}
+    for r in results:
+        sym = r.get("symbol", "")
+        dt = r.get("date", "")
+        if sym and dt and r.get("price_change") is None:
+            to_fetch[sym] = dt
+
+    if not to_fetch:
+        return results
+
+    reactions: dict[str, float | None] = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {
+            pool.submit(_fetch_eod_around_date, tk, dt): tk
+            for tk, dt in to_fetch.items()
+        }
+        for future in as_completed(futures):
+            tk = futures[future]
+            try:
+                reactions[tk] = future.result()
+            except Exception:
+                reactions[tk] = None
+
+    enriched = 0
+    for r in results:
+        sym = r.get("symbol", "")
+        if sym in reactions and reactions[sym] is not None:
+            r["price_change"] = reactions[sym]
+            enriched += 1
+
+    logger.info("Enriched %d/%d results with price reactions", enriched, len(to_fetch))
+    return results
+
+
 def _fetch_scorecard(
     index: str, quarter: str | None, sector: str | None,
 ) -> dict:
@@ -222,6 +325,9 @@ def _fetch_scorecard(
         if not _api_key():
             return _build_mock_data(quarter, index, sector)
         return _build_empty_data(quarter, index, sector)
+
+    # ── Enrich with stock price reactions ─────────────────────
+    results = _enrich_price_changes(results)
 
     results.sort(key=lambda r: r["date"] or "", reverse=True)
     metrics = _compute_metrics(results)
@@ -438,6 +544,8 @@ def _trend_from_db(
             if r.get("eps_actual") is None:
                 continue
             result.append({
+                "symbol": ticker,
+                "date": str(r.get("report_date", "")),
                 "eps_beat": r.get("beat_eps"),
                 "rev_beat": r.get("beat_revenue"),
                 "eps_surprise_pct": _safe_float(r.get("eps_surprise_pct")),
@@ -457,6 +565,8 @@ def _trend_from_fmp(start: str, end: str) -> list[dict] | None:
 
     rows = [
         {
+            "symbol": s.get("symbol", ""),
+            "date": s.get("date", ""),
             "eps_beat": (
                 s.get("eps", 0) > s.get("epsEstimated", 0)
                 if s.get("eps") is not None
@@ -527,6 +637,7 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
 
         if q_rows is not None:
             has_real_data = True
+            q_rows = _enrich_price_changes(q_rows)
             m = _compute_metrics(q_rows)
             trend.append({
                 "quarter": q_label,
