@@ -3864,11 +3864,27 @@ async def retail_page(request: Request, view: str = "sentiment"):
     if view not in ("sentiment", "leaderboard", "calendar"):
         view = "sentiment"
 
+    # Fetch all three data sources independently — any failure returns None,
+    # never blocks the page.  10-second overall timeout prevents Railway kill.
+    async def _safe_fetch(coro, label: str):
+        try:
+            return await asyncio.wait_for(coro, timeout=10)
+        except asyncio.TimeoutError:
+            logger.warning("/retail: %s timed out (10s)", label)
+            return None
+        except Exception:
+            logger.warning("/retail: %s failed", label, exc_info=True)
+            return None
+
     fear_greed, apewisdom, high_impact_events = await asyncio.gather(
-        _to_heavy(sentiment._get_cnn_fear_greed),
-        _to_heavy(sentiment._get_apewisdom_all),
-        asyncio.to_thread(youtube.get_high_impact_events, 9),
+        _safe_fetch(_to_heavy(sentiment._get_cnn_fear_greed), "cnn_fear_greed"),
+        _safe_fetch(_to_heavy(sentiment._get_apewisdom_all), "apewisdom"),
+        _safe_fetch(asyncio.to_thread(youtube.get_high_impact_events, 9), "youtube"),
     )
+
+    # Normalise: apewisdom returns list or None
+    if not apewisdom:
+        apewisdom = []
 
     # Compute summary stats from ApeWisdom data
     top_stocks = apewisdom[:5] if apewisdom else []
@@ -3896,20 +3912,28 @@ async def retail_page(request: Request, view: str = "sentiment"):
             "biggest_mover": biggest_mover,
             "youtubers": _FINANCE_YOUTUBERS,
             "has_guru_data": has_guru_data,
-            "high_impact_events": high_impact_events,
+            "high_impact_events": high_impact_events or [],
         },
     )
 
 
 @app.get("/api/retail/leaderboard", response_class=HTMLResponse)
 async def retail_leaderboard_api(request: Request):
-    all_data, fear_greed = await asyncio.gather(
-        _to_heavy(sentiment._get_apewisdom_all),
-        _to_heavy(sentiment._get_cnn_fear_greed),
-    )
+    try:
+        all_data, fear_greed = await asyncio.wait_for(
+            asyncio.gather(
+                _to_heavy(sentiment._get_apewisdom_all),
+                _to_heavy(sentiment._get_cnn_fear_greed),
+            ),
+            timeout=10,
+        )
+    except (asyncio.TimeoutError, Exception):
+        logger.warning("/api/retail/leaderboard: data fetch failed", exc_info=True)
+        all_data, fear_greed = [], None
+
     ownership_map = _get_ownership_map()
     enriched = sentiment.build_retail_leaderboard_data(
-        all_data, ownership_map, fear_greed
+        all_data or [], ownership_map, fear_greed
     )
     return templates.TemplateResponse(
         "partials/retail_leaderboard_v2.html",
@@ -3925,13 +3949,21 @@ async def retail_leaderboard_api(request: Request):
 @app.get("/api/retail/leaderboard-data")
 async def retail_leaderboard_data(request: Request):
     """Enriched leaderboard JSON for treemap, bubble chart, and guru toggle."""
-    all_data, fear_greed = await asyncio.gather(
-        _to_heavy(sentiment._get_apewisdom_all),
-        _to_heavy(sentiment._get_cnn_fear_greed),
-    )
+    try:
+        all_data, fear_greed = await asyncio.wait_for(
+            asyncio.gather(
+                _to_heavy(sentiment._get_apewisdom_all),
+                _to_heavy(sentiment._get_cnn_fear_greed),
+            ),
+            timeout=10,
+        )
+    except (asyncio.TimeoutError, Exception):
+        logger.warning("/api/retail/leaderboard-data: data fetch failed", exc_info=True)
+        all_data, fear_greed = [], None
+
     ownership_map = _get_ownership_map()
     result = sentiment.build_retail_leaderboard_data(
-        all_data, ownership_map, fear_greed
+        all_data or [], ownership_map, fear_greed
     )
     return JSONResponse(content=result)
 
