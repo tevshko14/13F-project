@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Alternative Signals — Google Trends, Search Interest & More | PaperPanda{% endblock %}
 {% block meta_description %}Explore alternative market signals — Google Trends search interest, trending searches linked to tickers, macro sentiment keywords, and more.{% endblock %}
 {% block og_title %}Alternative Signals | PaperPanda{% endblock %}
@@ -176,7 +177,7 @@
 {# ═══ Panel: Short Interest Leaderboard ═══ #}
 <div class="alt-panel active" id="panel-short-interest">
     <div hx-get="/api/alt-signals/short-interest" hx-trigger="load" hx-swap="innerHTML">
-        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+        {{ skeleton_rows(8) }}
     </div>
     <div class="gt-footer" style="margin-top: 1.5em;">
         Short interest reported by FINRA twice monthly. Data sourced from Yahoo Finance,
@@ -247,7 +248,7 @@
             <div hx-get="/api/google-trends/trending"
                  hx-trigger="revealed"
                  hx-swap="innerHTML">
-                <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+                {{ skeleton_rows(5) }}
             </div>
         </div>
     </div>

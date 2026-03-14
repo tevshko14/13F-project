@@ -2608,13 +2608,16 @@
             var isJson = opts.json || false;
             var render = opts.render || null;
             var attempt = 0;
+            var _activeController = null;
 
             // Show skeleton
             el.innerHTML = skeleton;
 
             function doFetch() {
+                // Abort any previous in-flight request
+                if (_activeController) { try { _activeController.abort(); } catch(e) {} }
                 attempt++;
-                var controller = new AbortController();
+                var controller = _activeController = new AbortController();
                 var timer = setTimeout(function() { controller.abort(); }, timeout);
 
                 fetch(url, { signal: controller.signal })
@@ -2624,18 +2627,20 @@
                         return isJson ? resp.json() : resp.text();
                     })
                     .then(function(data) {
+                        _activeController = null;
                         if (render) {
                             render(data, el);
                         } else {
                             el.innerHTML = data;
                             _activateScripts(el);
                         }
-                        if (window.initSortableTables) window.initSortableTables();
+                        if (window.initSortableTables) window.initSortableTables(el);
                     })
                     .catch(function() {
                         clearTimeout(timer);
+                        _activeController = null;
                         if (attempt < maxRetries) {
-                            doFetch();
+                            setTimeout(doFetch, 1000 * attempt);
                         } else {
                             el.innerHTML = _errorHtml(errorMsg, url, opts);
                         }
@@ -2655,13 +2660,11 @@
         }
 
         function _errorHtml(msg, url, opts) {
-            // Encode opts as a data attribute for retry
             var retryId = 'pp-retry-' + Math.random().toString(36).substr(2, 6);
-            // Store opts reference for retry
             window['_ppRetryOpts_' + retryId] = opts;
             return '<div class="pp-section-error">' +
                 '<span>' + msg + '.</span>' +
-                '<button onclick="var o=window[\'_ppRetryOpts_' + retryId + '\'];if(o){o.retries=1;ppLoadSection(o);}">Retry</button>' +
+                '<button onclick="var k=\'_ppRetryOpts_' + retryId + '\',o=window[k];if(o){delete window[k];o.retries=1;ppLoadSection(o);}">Retry</button>' +
                 '</div>';
         }
 
@@ -2673,48 +2676,24 @@
             });
         }
 
-        /* ── HTMX global error handling: swap in error UI on failed requests ── */
-        document.addEventListener('htmx:responseError', function(evt) {
-            var target = evt.detail.target || (evt.detail.elt && evt.detail.elt);
+        /* ── HTMX global error handling ── */
+        function _htmxErrorSwap(evt, msg) {
+            var target = evt.detail.target || evt.detail.elt;
             if (!target) return;
-            var url = evt.detail.pathInfo ? evt.detail.pathInfo.requestPath : '';
+            var url = (evt.detail.pathInfo && evt.detail.pathInfo.requestPath) ||
+                      (target.getAttribute && (target.getAttribute('hx-get') || target.getAttribute('hx-post'))) || '';
             target.innerHTML = '<div class="pp-section-error">' +
-                '<span>Unable to load data.</span>' +
+                '<span>' + msg + '</span>' +
                 '<button onclick="htmx.ajax(\'GET\',\'' + url.replace(/'/g, "\\'") + '\',{target:this.closest(\'[hx-get],[hx-post]\') || this.parentNode.parentNode, swap:\'innerHTML\'})">Retry</button>' +
                 '</div>';
-        });
+        }
+        document.addEventListener('htmx:responseError', function(evt) { _htmxErrorSwap(evt, 'Unable to load data.'); });
+        document.addEventListener('htmx:sendError', function(evt) { _htmxErrorSwap(evt, 'Unable to load data.'); });
+        document.addEventListener('htmx:timeout', function(evt) { _htmxErrorSwap(evt, 'Request timed out.'); });
 
         /* ── HTMX timeout: 10s per request ── */
         document.addEventListener('htmx:configRequest', function(evt) {
             evt.detail.timeout = 10000;
-        });
-
-        /* ── HTMX swap error (network failure, timeout) ── */
-        document.addEventListener('htmx:sendError', function(evt) {
-            var target = evt.detail.target || evt.detail.elt;
-            if (!target) return;
-            var url = '';
-            if (target.getAttribute) {
-                url = target.getAttribute('hx-get') || target.getAttribute('hx-post') || '';
-            }
-            target.innerHTML = '<div class="pp-section-error">' +
-                '<span>Unable to load data.</span>' +
-                '<button onclick="htmx.ajax(\'GET\',\'' + url.replace(/'/g, "\\'") + '\',{target:this.closest(\'[hx-get],[hx-post]\') || this.parentNode.parentNode, swap:\'innerHTML\'})">Retry</button>' +
-                '</div>';
-        });
-
-        /* Also handle htmx:timeout */
-        document.addEventListener('htmx:timeout', function(evt) {
-            var target = evt.detail.target || evt.detail.elt;
-            if (!target) return;
-            var url = '';
-            if (target.getAttribute) {
-                url = target.getAttribute('hx-get') || target.getAttribute('hx-post') || '';
-            }
-            target.innerHTML = '<div class="pp-section-error">' +
-                '<span>Request timed out.</span>' +
-                '<button onclick="htmx.ajax(\'GET\',\'' + url.replace(/'/g, "\\'") + '\',{target:this.closest(\'[hx-get],[hx-post]\') || this.parentNode.parentNode, swap:\'innerHTML\'})">Retry</button>' +
-                '</div>';
         });
     })();
     </script>

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Insider Trading Screener — SEC Form 4 Filings | PaperPanda{% endblock %}
 {% block meta_description %}Track real-time SEC Form 4 insider buys and sells across all public companies. See which executives, directors, and major shareholders are trading their own stock.{% endblock %}
 {% block og_title %}Insider Trading Screener — SEC Form 4 Filings | PaperPanda{% endblock %}
@@ -124,7 +125,7 @@
     {% if trades %}
     {% include "partials/insider_trades.html" %}
     {% else %}
-    <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+    {{ skeleton_rows(8) }}
     {% endif %}
 </div>
 
@@ -509,10 +510,11 @@
                 }
                 document.getElementById('insider-trades-content').innerHTML =
                     '<div class="pp-section-error"><span>Unable to load insider trades.</span>' +
-                    '<button onclick="retried={}; loadTrades(\'' + filter + '\')">Retry</button></div>';
+                    '<button onclick="_retryInsiderTab(\'' + filter + '\')">Retry</button></div>';
             });
     }
 
+    window._retryInsiderTab = function(filter) { retried = {}; loadTrades(filter); };
     window.switchInsiderTab = loadTrades;
 
     /* ── Date period switching ── */

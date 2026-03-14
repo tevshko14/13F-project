@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}PaperPanda — Track Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
 {% block meta_description %}PaperPanda tracks superinvestor 13F filings, insider trading, analyst ratings, and market news — all in one place. See what Buffett, Ackman, Burry, and 80+ top investors are buying and selling.{% endblock %}
 {% block og_title %}PaperPanda — Superinvestor Portfolios, Insider Trading & Market News{% endblock %}
@@ -98,7 +99,7 @@
 
 {# ── Scrolling Ticker Tape (lazy-loaded) ── #}
 <div id="ticker-tape-wrap" style="margin: 1.5em 0 2em 0;"
-     hx-get="/api/ticker-tape" hx-trigger="load" hx-swap="innerHTML" hx-timeout="10000">
+     hx-get="/api/ticker-tape" hx-trigger="load" hx-swap="innerHTML">
     <div style="display:flex;gap:1em;justify-content:center;padding:0.5em 0;">
         <div class="pp-skeleton" style="width:80px;height:16px;"></div>
         <div class="pp-skeleton" style="width:60px;height:16px;"></div>
@@ -118,13 +119,8 @@
         <div class="bento-card-header">
             <h3 class="bento-card-title">Market Overview</h3>
         </div>
-        <div class="bento-card-body" hx-get="/api/market-overview" hx-trigger="load" hx-swap="innerHTML" hx-timeout="10000">
-            <div style="padding:1em;display:grid;grid-template-columns:1fr 1fr;gap:0.6em;">
-                <div class="pp-skeleton pp-skeleton-card"></div>
-                <div class="pp-skeleton pp-skeleton-card"></div>
-                <div class="pp-skeleton pp-skeleton-card"></div>
-                <div class="pp-skeleton pp-skeleton-card"></div>
-            </div>
+        <div class="bento-card-body" hx-get="/api/market-overview" hx-trigger="load" hx-swap="innerHTML">
+            {{ skeleton_cards(4) }}
         </div>
     </div>
 
@@ -133,14 +129,8 @@
         <div class="bento-card-header">
             <h3 class="bento-card-title">Market News</h3>
         </div>
-        <div class="bento-card-body bento-card-body-flex" hx-get="/api/market-news" hx-trigger="load delay:0.5s" hx-swap="innerHTML" hx-timeout="10000">
-            <div style="padding:1em;">
-                <div class="pp-skeleton pp-skeleton-row"></div>
-                <div class="pp-skeleton pp-skeleton-row"></div>
-                <div class="pp-skeleton pp-skeleton-row"></div>
-                <div class="pp-skeleton pp-skeleton-row"></div>
-                <div class="pp-skeleton pp-skeleton-row"></div>
-            </div>
+        <div class="bento-card-body bento-card-body-flex" hx-get="/api/market-news" hx-trigger="load delay:0.5s" hx-swap="innerHTML">
+            <div style="padding:1em;">{{ skeleton_rows(5) }}</div>
         </div>
     </div>
 
@@ -157,8 +147,8 @@
                         onclick="switchHeatmapPeriod('1M', this)">1M</button>
             </div>
         </div>
-        <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML" hx-timeout="10000">
-            <div class="pp-skeleton pp-skeleton-chart" style="margin:1em;height:300px;"></div>
+        <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML">
+            <div style="margin:1em;">{{ skeleton_chart('300px') }}</div>
         </div>
     </div>
 
@@ -167,21 +157,15 @@
         <div class="bento-card-header">
             <h3 class="bento-card-title">Retail Sentiment</h3>
         </div>
-        <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load delay:1.5s" hx-swap="innerHTML" hx-timeout="10000">
-            <div style="padding:1em;">
-                <div class="pp-skeleton pp-skeleton-chart" style="height:150px;"></div>
-            </div>
+        <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
+            <div style="padding:1em;">{{ skeleton_chart('150px') }}</div>
         </div>
     </div>
 
     {# ── Card 5: Trending with Smart Money (12 cols) ── #}
     <div class="glass-card bento-trending">
-        <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load delay:1.5s" hx-swap="innerHTML" hx-timeout="10000">
-            <div style="padding:1em;">
-                <div class="pp-skeleton pp-skeleton-row"></div>
-                <div class="pp-skeleton pp-skeleton-row"></div>
-                <div class="pp-skeleton pp-skeleton-row"></div>
-            </div>
+        <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
+            <div style="padding:1em;">{{ skeleton_rows(3) }}</div>
         </div>
     </div>
 
