@@ -161,6 +161,100 @@ Tests are designed to run without heavy dependencies (edgar, yfinance, supabase)
 
 ---
 
+### 8. Fix fund portfolio values wrong by 1000x (`PENDING_COMMIT`)
+
+**Problem:** Several fund portfolio values were displayed wrong by ~1,000x. AKO Capital showed $6.5M instead of ~$6.5B. Baupost showed $5.2M instead of ~$5.2B. This was a credibility-destroying bug for a financial data product.
+
+**Root Cause:** SEC 13F filings report all dollar values in **thousands**. The `edgartools` library returns these raw values without conversion (its own docstring says "Total value of holdings in thousands of dollars"). Our `client.py` was doing `int(tf.total_value)` and `int(row.Value)` without applying a x1000 multiplier. This affected **every single fund**.
+
+**Fix (4 parts):**
+
+#### Part A — `client.py`: Apply x1000 multiplier at all ingestion points
+
+Added `_SEC_13F_VALUE_MULTIPLIER = 1000` constant and applied it at all 11 points where values are read from the `edgartools` library:
+
+| Function | Lines fixed |
+|----------|-----------|
+| `get_holdings()` | `total_value`, `row.Value` |
+| `_compare_two_filings()` | `curr_value`, `prev_value` |
+| `compare_quarters()` | `tf_current.total_value`, `tf_previous.total_value` |
+| `get_fund_summary()` | `tf.total_value`, `row.Value` (top_holdings), `row.Value` (all_holdings) |
+| `get_enriched_holdings()` | `tf.total_value`, `row.Value` |
+
+The fix is at the **ingestion boundary only** — all downstream code (cache, templates, grand portfolio, activity feed, deployment page) reads from the already-corrected values.
+
+#### Part B — Template display formatting
+
+Updated value display in 3 templates to use human-readable B/M/K suffixes:
+- `grand_portfolio.html` — `/funds` page table
+- `index.html` — homepage table
+- `investor.html` — individual fund page header
+
+Example: `$6,568,399,000` → `$6.6B`
+
+#### Part C — Post-ingestion validation
+
+Added `_validate_fund_values()` to `client.py` — called at the end of `get_fund_summary()`. Logs a WARNING if:
+- A fund with 20+ holdings has total value under $10M (likely missing multiplier)
+- Average value per holding is under $500K for funds with 5+ holdings
+
+This prevents the bug from silently recurring.
+
+#### Part D — Stale data indicator
+
+Added a "stale" label in the Period column for funds whose `report_period` is before 2024-06-01. Appears on both `/funds` and homepage tables with a tooltip: "This fund's data may be stale — last filing is over a year old."
+
+Affected funds:
+- Leon Cooperman / Omega Advisors (last filing: Dec 2018)
+- Guy Spier / Aquamarine Capital (last filing: Jun 2022)
+- David Einhorn / Greenlight Capital (last filing: Dec 2023)
+
+**Re-processing requirement:** After deploying this fix, the sync worker must re-ingest all 84 funds so the cached values in Supabase get the corrected x1000 values. Until re-ingestion, existing cached data will still show 1000x-low values.
+
+---
+
+### 9. Test suite for x1000 fix (`PENDING_COMMIT`)
+
+Added `tests/test_13f_value_multiplier.py` — 9 test cases.
+
+| # | Test | Validates |
+|---|------|-----------|
+| 1 | `test_multiplier_constant_exists` | `_SEC_13F_VALUE_MULTIPLIER == 1000` |
+| 2 | `test_multiplier_is_used_in_get_fund_summary` | total_value and holdings multiplied |
+| 3 | `test_multiplier_is_used_in_get_holdings` | FundInfo and Holding values multiplied |
+| 4 | `test_compare_two_filings_applies_multiplier` | current/previous values multiplied |
+| 5 | `test_validate_flags_low_value_many_holdings` | Warns on 20+ holdings with <$10M |
+| 6 | `test_validate_flags_low_avg_per_holding` | Warns on <$500K avg per holding |
+| 7 | `test_validate_passes_normal_fund` | No warning for normal $6.5B fund |
+| 8 | `test_validate_handles_zero_holdings` | No crash on zero holdings |
+| 9 | `test_pct_of_portfolio_still_correct` | Percentages unaffected (70/30 stays 70/30) |
+
+---
+
+## Files changed (summary)
+
+| File | Type | Description |
+|------|------|-------------|
+| `src/filings/earnings_calendar.py` | **New** | Earnings calendar data layer |
+| `src/filings/templates/earnings_calendar.html` | **New** | Calendar full page |
+| `src/filings/templates/partials/earnings_calendar_day.html` | **New** | Day-detail HTMX partial |
+| `src/filings/templates/partials/earnings_calendar_grid.html` | **New** | Calendar grid HTMX partial |
+| `tests/test_retail_timeout.py` | **New** | 15 test cases for timeout protection |
+| `tests/test_13f_value_multiplier.py` | **New** | 9 test cases for x1000 value fix |
+| `src/filings/client.py` | Modified | x1000 multiplier + validation check |
+| `src/filings/web.py` | Modified | New routes + timeout protection + shared helpers |
+| `src/filings/earnings.py` | Modified | Shared `fetch_finnhub_calendar_raw()` |
+| `src/filings/earnings_scorecard.py` | Modified | `_fmp_get` → `fmp_get` (public) |
+| `src/filings/sentiment.py` | Modified | ApeWisdom fetch hardening |
+| `src/filings/templates/base.html` | Modified | Nav link for earnings calendar |
+| `src/filings/templates/grand_portfolio.html` | Modified | B/M/K value formatting + stale indicator |
+| `src/filings/templates/index.html` | Modified | B/M/K value formatting + stale indicator |
+| `src/filings/templates/investor.html` | Modified | B/M/K value formatting |
+| `README.md` | Modified | Earnings calendar user docs |
+| `README_DEV.md` | Modified | Earnings calendar developer docs |
+
+---
+
 ## Environment variables
 
 | Variable | Default | Purpose |

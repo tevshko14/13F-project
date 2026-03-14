@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 
@@ -27,6 +28,41 @@ _identity = os.environ.get("SEC_IDENTITY", "13f-tool-user user@example.com")
 set_identity(_identity)
 
 _HEADERS = {"User-Agent": _identity}
+
+logger = logging.getLogger(__name__)
+
+# SEC 13F filings report values in *thousands* of dollars.
+# The edgartools library returns raw XML values without conversion,
+# so we must multiply by 1000 to get actual dollar amounts.
+_SEC_13F_VALUE_MULTIPLIER = 1000
+
+# ── Post-ingestion validation thresholds ─────────────────────────────
+# A fund with 20+ holdings and total value under $10M (after x1000
+# multiplier) is almost certainly wrong.  Log a warning so it gets
+# caught during sync rather than silently serving bad data.
+_MIN_VALUE_PER_HOLDING = 500_000  # $500K avg value per holding is suspicious floor
+
+
+def _validate_fund_values(
+    cik: str, name: str, total_value: int, num_holdings: int
+) -> None:
+    """Log a warning if a fund's portfolio value looks anomalously low."""
+    if num_holdings == 0 or total_value <= 0:
+        return
+    avg_per_holding = total_value / num_holdings
+    if num_holdings >= 20 and total_value < 10_000_000:
+        logger.warning(
+            "VALIDATION: Fund %s (CIK %s) has %d holdings but total value "
+            "is only $%s — likely missing x1000 multiplier",
+            name, cik, num_holdings, f"{total_value:,.0f}",
+        )
+    elif avg_per_holding < _MIN_VALUE_PER_HOLDING and num_holdings >= 5:
+        logger.warning(
+            "VALIDATION: Fund %s (CIK %s) avg value per holding is $%s "
+            "(%d holdings, $%s total) — unusually low",
+            name, cik, f"{avg_per_holding:,.0f}", num_holdings,
+            f"{total_value:,.0f}",
+        )
 
 
 def _search_edgar_efts(query: str) -> list[SearchResult]:
@@ -121,7 +157,7 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
         cik=cik,
         report_period=str(tf.report_period),
         filing_date=str(tf.filing_date),
-        total_value=int(tf.total_value),
+        total_value=int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER,
         total_holdings=len(holdings_df),
     )
 
@@ -135,7 +171,7 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
                 issuer_name=str(row.Issuer),
                 title_of_class=str(row.Class),
                 cusip=str(row.Cusip),
-                value=int(row.Value),
+                value=int(row.Value) * _SEC_13F_VALUE_MULTIPLIER,
                 shares=int(row.SharesPrnAmount),
                 share_type=str(row.Type),
             )
@@ -167,8 +203,8 @@ def _compare_two_filings(current_df, previous_df) -> list[HoldingChange]:
 
         curr_shares = int(curr.SharesPrnAmount) if curr else 0
         prev_shares = int(prev.SharesPrnAmount) if prev else 0
-        curr_value = int(curr.Value) if curr else 0
-        prev_value = int(prev.Value) if prev else 0
+        curr_value = int(curr.Value) * _SEC_13F_VALUE_MULTIPLIER if curr else 0
+        prev_value = int(prev.Value) * _SEC_13F_VALUE_MULTIPLIER if prev else 0
         name = str(curr.Issuer) if curr else str(prev.Issuer)
 
         if prev is None:
@@ -232,7 +268,7 @@ def compare_quarters(
         cik=cik,
         report_period=str(tf_current.report_period),
         filing_date=str(tf_current.filing_date),
-        total_value=int(tf_current.total_value),
+        total_value=int(tf_current.total_value) * _SEC_13F_VALUE_MULTIPLIER,
         total_holdings=len(tf_current.holdings),
     )
     previous_info = FundInfo(
@@ -240,7 +276,7 @@ def compare_quarters(
         cik=cik,
         report_period=str(tf_previous.report_period),
         filing_date=str(tf_previous.filing_date),
-        total_value=int(tf_previous.total_value),
+        total_value=int(tf_previous.total_value) * _SEC_13F_VALUE_MULTIPLIER,
         total_holdings=len(tf_previous.holdings),
     )
 
@@ -295,7 +331,7 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
 
     tf = ThirteenF(filings[0])
     holdings_df = tf.holdings
-    total_val = int(tf.total_value) if tf.total_value else 0
+    total_val = int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER if tf.total_value else 0
 
     sorted_df = holdings_df.sort_values("Value", ascending=False)
 
@@ -306,14 +342,14 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
                 "issuer": str(row.Issuer),
                 "ticker": _safe_ticker(row),
                 "cusip": str(row.Cusip),
-                "value": int(row.Value),
+                "value": int(row.Value) * _SEC_13F_VALUE_MULTIPLIER,
                 "shares": int(row.SharesPrnAmount),
             }
         )
 
     all_holdings = []
     for row in sorted_df.itertuples():
-        val = int(row.Value)
+        val = int(row.Value) * _SEC_13F_VALUE_MULTIPLIER
         all_holdings.append(
             {
                 "issuer": str(row.Issuer),
@@ -376,8 +412,11 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
         except Exception:
             continue
 
+    fund_name = tf.management_company_name or company.name
+    _validate_fund_values(cik, fund_name, total_val, len(holdings_df))
+
     return {
-        "name": tf.management_company_name or company.name,
+        "name": fund_name,
         "cik": cik,
         "report_period": str(tf.report_period),
         "filing_date": str(tf.filing_date),
@@ -402,7 +441,7 @@ def get_enriched_holdings(
 
     tf = ThirteenF(filings[0])
     holdings_df = tf.holdings
-    total_val = int(tf.total_value) if tf.total_value else 0
+    total_val = int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER if tf.total_value else 0
 
     fund = FundInfo(
         name=tf.management_company_name or company.name,
@@ -427,7 +466,7 @@ def get_enriched_holdings(
 
     holdings = []
     for row in sorted_df.itertuples():
-        val = int(row.Value)
+        val = int(row.Value) * _SEC_13F_VALUE_MULTIPLIER
         cusip = str(row.Cusip)
         change = activity_by_cusip.get(cusip)
         activity = change.status if change and change.status != "UNCHANGED" else None
