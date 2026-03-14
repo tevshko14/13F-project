@@ -12,11 +12,12 @@
 **Files changed:** 18
 **Commits:** 10
 
-This branch contains three categories of work:
+This branch contains four categories of work:
 
 1. **Earnings Calendar** — a new full-page feature (design, API, templates, refactoring, docs)
 2. **/retail timeout fix** — a critical bug fix for the Signals product, plus a simplify pass and test suite
 3. **x1000 value fix** — critical fix for SEC 13F portfolio values displayed 1000x too low, plus simplify pass and test suite
+4. **Ticker correction** — fix broken/malformed ticker symbols from CUSIP mapping failures
 
 ---
 
@@ -273,6 +274,74 @@ Fixed comment at line 632 that incorrectly said "13F total_value from edgartools
 
 ---
 
+### 11. Fix broken and malformed ticker symbols (`PENDING_COMMIT`)
+
+**Problem:** Several fund holdings displayed malformed ticker symbols instead of proper stock tickers. Examples: "HILTON G", "CARDLYTI", "Compagni", "General" appeared as clickable ticker links, leading to broken `/stock/HILTON G` pages. This happened because when the CUSIP→ticker mapping failed, the system fell back to displaying the first 8 characters of the company name as if it were a ticker.
+
+**Root Causes:**
+1. **Missing CUSIPs** in edgartools' bundled `ct.pq` mapping file (e.g., Hilton Grand Vacations CUSIP `46321A104` not in ct.pq)
+2. **Stale ticker mappings** (e.g., `FB` still mapped instead of `META`)
+3. **Display fallback** in `web.py` used `h.get("ticker") or h.get("issuer", "?")[:8]` — truncating issuer names to 8 chars and displaying them as fake tickers with broken stock links
+
+**Fix (4 parts):**
+
+#### Part A — CUSIP override table (`client.py`)
+
+Added `_CUSIP_OVERRIDES` dict for CUSIPs that edgartools can't resolve:
+
+| CUSIP | Ticker | Company |
+|-------|--------|---------|
+| `46321A104` | HGV | Hilton Grand Vacations |
+| `432848101` | HLT | Hilton Worldwide Holdings |
+| `H25662105` | CFRUY | Compagnie Financière Richemont (ADR) |
+
+CUSIP overrides are checked first in `_safe_ticker()` — highest priority.
+
+#### Part B — Ticker validation (`client.py`)
+
+Added `_is_valid_ticker()` function that rejects malformed tickers:
+- Contains spaces (`"KKR & CO"`, `"HILTON G"`)
+- Longer than 6 characters (`"CARDLYTI"`, `"Compagni"`)
+- Contains non-alphanumeric characters (except dots for `BRK.A` etc.)
+
+`_safe_ticker()` now validates the resolved ticker and returns `None` for invalid ones, instead of passing garbage through.
+
+#### Part C — Display fallback fix (`web.py`)
+
+Changed the `top_tickers` list comprehension from:
+```python
+h.get("ticker") or h.get("issuer", "?")[:8]  # OLD — truncated issuer name
+```
+to:
+```python
+h.get("ticker") for h in ... if h.get("ticker")  # NEW — skip if no ticker
+```
+
+Holdings without valid tickers are simply excluded from the top holdings tag list instead of showing garbage.
+
+#### Part D — Post-ingestion ticker validation (`client.py`)
+
+Added `_validate_tickers()` function called at the end of `get_fund_summary()`. Logs an INFO message listing all holdings without valid tickers, so new mapping gaps are visible in logs during sync.
+
+**Re-processing requirement:** After deploying, the sync worker must re-ingest all funds so cached data gets corrected tickers.
+
+---
+
+### 12. Test suite for ticker corrections (`PENDING_COMMIT`)
+
+Added `tests/test_ticker_corrections.py` — 31 test cases.
+
+| Area | Tests | What's validated |
+|------|-------|-----------------|
+| `_TICKER_CORRECTIONS` | 3 | FB→META, TWTR→X, BMNRD→BMNR |
+| `_CUSIP_OVERRIDES` | 3 | HGV, HLT, CFRUY overrides exist |
+| `_is_valid_ticker` | 8 | Standard tickers, dots, ADRs, spaces, length, special chars, empty, lowercase names |
+| `_safe_ticker` | 11 | Normal ticker, FB→META, CUSIP priority, NaN/None, malformed rejection, whitespace stripping |
+| `_validate_tickers` | 3 | Logs missing, no log when valid, truncates long lists |
+| Display fallback | 3 | Filters None, old pattern produced garbage, all-valid passthrough |
+
+---
+
 ## Files changed (summary)
 
 | File | Type | Description |
@@ -283,8 +352,9 @@ Fixed comment at line 632 that incorrectly said "13F total_value from edgartools
 | `src/filings/templates/partials/earnings_calendar_grid.html` | **New** | Calendar grid HTMX partial |
 | `tests/test_retail_timeout.py` | **New** | 15 test cases for timeout protection |
 | `tests/test_13f_value_multiplier.py` | **New** | 9 test cases for x1000 value fix |
-| `src/filings/client.py` | Modified | x1000 multiplier + centralized helpers + validation |
-| `src/filings/web.py` | Modified | New routes + timeout protection + format_value filter + stale_cutoff global |
+| `tests/test_ticker_corrections.py` | **New** | 31 test cases for ticker correction |
+| `src/filings/client.py` | Modified | CUSIP overrides + ticker validation + _safe_ticker rewrite |
+| `src/filings/web.py` | Modified | Removed truncated-issuer display fallback |
 | `src/filings/aum_data.py` | Modified | Fixed misleading comment about 13F values |
 | `src/filings/earnings.py` | Modified | Shared `fetch_finnhub_calendar_raw()` |
 | `src/filings/earnings_scorecard.py` | Modified | `_fmp_get` → `fmp_get` (public) |
