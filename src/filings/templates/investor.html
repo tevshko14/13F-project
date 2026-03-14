@@ -519,14 +519,7 @@
 {# ══════════════════════════════════════════════════════════════════ #}
 <article>
     <header>
-        <strong>Total Value:</strong>
-        {% if fund.total_value >= 1000000000 %}
-            ${{ "%.1f"|format(fund.total_value / 1000000000) }}B
-        {% elif fund.total_value >= 1000000 %}
-            ${{ "%.0f"|format(fund.total_value / 1000000) }}M
-        {% else %}
-            ${{ "{:,.0f}".format(fund.total_value) }}
-        {% endif %}
+        <strong>Total Value:</strong> {{ fund.total_value | format_value }}
         &nbsp;&middot;&nbsp;
         <strong>Total Holdings:</strong> {{ fund.total_holdings }}
     </header>

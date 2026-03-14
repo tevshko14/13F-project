@@ -43,6 +43,16 @@ _SEC_13F_VALUE_MULTIPLIER = 1000
 _MIN_VALUE_PER_HOLDING = 500_000  # $500K avg value per holding is suspicious floor
 
 
+def _filing_total_value(tf) -> int:
+    """Convert ThirteenF.total_value from thousands to actual dollars."""
+    return int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER if tf.total_value else 0
+
+
+def _row_value(row) -> int:
+    """Convert a holdings DataFrame row's Value from thousands to actual dollars."""
+    return int(row.Value) * _SEC_13F_VALUE_MULTIPLIER
+
+
 def _validate_fund_values(
     cik: str, name: str, total_value: int, num_holdings: int
 ) -> None:
@@ -157,7 +167,7 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
         cik=cik,
         report_period=str(tf.report_period),
         filing_date=str(tf.filing_date),
-        total_value=int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER,
+        total_value=_filing_total_value(tf),
         total_holdings=len(holdings_df),
     )
 
@@ -171,7 +181,7 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
                 issuer_name=str(row.Issuer),
                 title_of_class=str(row.Class),
                 cusip=str(row.Cusip),
-                value=int(row.Value) * _SEC_13F_VALUE_MULTIPLIER,
+                value=_row_value(row),
                 shares=int(row.SharesPrnAmount),
                 share_type=str(row.Type),
             )
@@ -203,8 +213,8 @@ def _compare_two_filings(current_df, previous_df) -> list[HoldingChange]:
 
         curr_shares = int(curr.SharesPrnAmount) if curr else 0
         prev_shares = int(prev.SharesPrnAmount) if prev else 0
-        curr_value = int(curr.Value) * _SEC_13F_VALUE_MULTIPLIER if curr else 0
-        prev_value = int(prev.Value) * _SEC_13F_VALUE_MULTIPLIER if prev else 0
+        curr_value = _row_value(curr) if curr else 0
+        prev_value = _row_value(prev) if prev else 0
         name = str(curr.Issuer) if curr else str(prev.Issuer)
 
         if prev is None:
@@ -268,7 +278,7 @@ def compare_quarters(
         cik=cik,
         report_period=str(tf_current.report_period),
         filing_date=str(tf_current.filing_date),
-        total_value=int(tf_current.total_value) * _SEC_13F_VALUE_MULTIPLIER,
+        total_value=_filing_total_value(tf_current),
         total_holdings=len(tf_current.holdings),
     )
     previous_info = FundInfo(
@@ -276,7 +286,7 @@ def compare_quarters(
         cik=cik,
         report_period=str(tf_previous.report_period),
         filing_date=str(tf_previous.filing_date),
-        total_value=int(tf_previous.total_value) * _SEC_13F_VALUE_MULTIPLIER,
+        total_value=_filing_total_value(tf_previous),
         total_holdings=len(tf_previous.holdings),
     )
 
@@ -331,7 +341,7 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
 
     tf = ThirteenF(filings[0])
     holdings_df = tf.holdings
-    total_val = int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER if tf.total_value else 0
+    total_val = _filing_total_value(tf)
 
     sorted_df = holdings_df.sort_values("Value", ascending=False)
 
@@ -342,14 +352,14 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
                 "issuer": str(row.Issuer),
                 "ticker": _safe_ticker(row),
                 "cusip": str(row.Cusip),
-                "value": int(row.Value) * _SEC_13F_VALUE_MULTIPLIER,
+                "value": _row_value(row),
                 "shares": int(row.SharesPrnAmount),
             }
         )
 
     all_holdings = []
     for row in sorted_df.itertuples():
-        val = int(row.Value) * _SEC_13F_VALUE_MULTIPLIER
+        val = _row_value(row)
         all_holdings.append(
             {
                 "issuer": str(row.Issuer),
@@ -441,7 +451,7 @@ def get_enriched_holdings(
 
     tf = ThirteenF(filings[0])
     holdings_df = tf.holdings
-    total_val = int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER if tf.total_value else 0
+    total_val = _filing_total_value(tf)
 
     fund = FundInfo(
         name=tf.management_company_name or company.name,
@@ -466,7 +476,7 @@ def get_enriched_holdings(
 
     holdings = []
     for row in sorted_df.itertuples():
-        val = int(row.Value) * _SEC_13F_VALUE_MULTIPLIER
+        val = _row_value(row)
         cusip = str(row.Cusip)
         change = activity_by_cusip.get(cusip)
         activity = change.status if change and change.status != "UNCHANGED" else None
