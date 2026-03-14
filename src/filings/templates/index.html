@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Superinvestor Portfolios — PaperPanda{% endblock %}
 {% block meta_description %}Track 13F holdings of top superinvestors like Warren Buffett, Bill Ackman, and more. See portfolio values, top holdings, and recent changes.{% endblock %}
 {% block content %}
@@ -65,12 +66,7 @@
                 <a href="/holdings/{{ si.cik }}">{{ si.fund_name }}</a>
             </td>
             <td colspan="4">
-                <div style="display:flex;gap:0.5em;align-items:center;">
-                    <div class="pp-skeleton" style="width:60px;height:14px;"></div>
-                    <div class="pp-skeleton" style="width:40px;height:14px;"></div>
-                    <div class="pp-skeleton" style="width:80px;height:14px;"></div>
-                    <div class="pp-skeleton" style="width:100px;height:14px;"></div>
-                </div>
+                {{ skeleton_fund_row() }}
             </td>
         </tr>
         {% endif %}

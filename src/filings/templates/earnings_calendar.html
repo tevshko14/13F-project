@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Earnings Calendar — Upcoming Earnings Reports | PaperPanda{% endblock %}
 {% block meta_description %}Interactive earnings calendar showing upcoming quarterly earnings reports with BMO/AMC timing, EPS estimates, and revenue forecasts.{% endblock %}
 {% block og_title %}Earnings Calendar | PaperPanda{% endblock %}
@@ -98,7 +99,7 @@
      hx-get="/api/earnings-calendar/grid?view=weekly"
      hx-trigger="load"
      hx-swap="innerHTML">
-    <div class="pp-skeleton-table" style="padding:1.5em;"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+    <div style="padding:1.5em;">{{ skeleton_rows(6) }}</div>
 </div>
 
 {# ── Day detail panel (appears when clicking a day) ── #}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Retail Sentiment & Reddit Trending Stocks | PaperPanda{% endblock %}
 {% block meta_description %}Monitor retail trader sentiment — Reddit trending tickers, market fear and greed index, and finance YouTuber schedules. See what retail investors are buzzing about.{% endblock %}
 {% block og_title %}Retail Sentiment & Reddit Trending Stocks | PaperPanda{% endblock %}
@@ -318,7 +319,7 @@
 
     {# Leaderboard table (lazy-loaded partial) #}
     <div id="retail-leaderboard-content">
-        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+        {{ skeleton_rows(10) }}
     </div>
 </div>
 
@@ -328,7 +329,7 @@
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-calendar" class="rt-panel{% if view == 'calendar' %} active{% endif %}">
     <div id="retail-calendar-content">
-        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+        {{ skeleton_rows(5) }}
     </div>
 </div>{# end panel-calendar #}
 

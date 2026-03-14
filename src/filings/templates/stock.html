@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }}{% if stock and stock.num_holders %} | {{ stock.num_holders }} Superinvestor Holder{{ "s" if stock.num_holders != 1 }}{% endif %}, 13F Activity & Analysis | PaperPanda{% endblock %}
 {% block meta_description %}{{ stock_info.ticker or stock_info.cusip or "Stock" }} ({{ stock_info.issuer_name or "Stock Detail" }}){% if stock_info.sector %} — {{ stock_info.sector }}{% endif %}{% if stock_info.industry %}, {{ stock_info.industry }}{% endif %} stock held by {{ stock.num_holders if stock else 0 }} superinvestors. Track 13F filings, analyst ratings, insider trades, and quarterly activity on PaperPanda.{% endblock %}
 {% block og_title %}{{ stock_info.ticker or "Stock" }} — {{ stock_info.issuer_name or "Stock Detail" }} | PaperPanda{% endblock %}
@@ -813,7 +814,7 @@
                     .catch(function() {
                         clearTimeout(timer);
                         chartEl.style.opacity = '1';
-                        chartEl.innerHTML = '<div class="pp-section-error"><span>Unable to load price chart.</span><button onclick="fetchOHLCV(\'' + period + '\')">Retry</button></div>';
+                        chartEl.innerHTML = '<div class="pp-section-error"><span>Unable to load price chart.</span><button onclick="ppChartPeriod(\'' + period + '\')">Retry</button></div>';
                     });
             }
 
@@ -843,41 +844,23 @@
         var perPage = 10;
 
         // Auto-load news
-        loadTickerNews('{{ stock_info.ticker }}');
-
-        function loadTickerNews(ticker) {
-            var container = document.getElementById('ticker-news-container');
-            var url = 'https://api.tickertick.com/feed?q=tt:' + ticker.toLowerCase() + '&n=50';
-            var newsRetries = 3;
-
-            function doFetchNews() {
-                var controller = new AbortController();
-                var timer = setTimeout(function() { controller.abort(); }, 10000);
-
-                fetch(url, { signal: controller.signal })
-                    .then(function(resp) { clearTimeout(timer); return resp.json(); })
-                    .then(function(data) {
-                        if (!data.stories || data.stories.length === 0) {
-                            container.innerHTML =
-                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                                'No recent news found for ' + ticker + '.</p>';
-                            return;
-                        }
-                        allStories = data.stories;
-                        currentPage = 0;
-                        renderNewsPage(container);
-                    })
-                    .catch(function() {
-                        clearTimeout(timer);
-                        newsRetries--;
-                        if (newsRetries > 0) { doFetchNews(); return; }
-                        container.innerHTML =
-                            '<div class="pp-section-error"><span>Unable to load news.</span>' +
-                            '<button onclick="newsRetries=3;doFetchNews();">Retry</button></div>';
-                    });
+        var _newsTicker = '{{ stock_info.ticker }}';
+        ppLoadSection({
+            el: 'ticker-news-container',
+            url: 'https://api.tickertick.com/feed?q=tt:' + _newsTicker.toLowerCase() + '&n=50',
+            json: true,
+            errorMsg: 'Unable to load news',
+            render: function(data, el) {
+                if (!data.stories || data.stories.length === 0) {
+                    el.innerHTML = '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                        'No recent news found for ' + _newsTicker + '.</p>';
+                    return;
+                }
+                allStories = data.stories;
+                currentPage = 0;
+                renderNewsPage(el);
             }
-            doFetchNews();
-        }
+        });
 
         function renderNewsPage(container) {
             var totalPages = Math.ceil(allStories.length / perPage);
@@ -1180,14 +1163,14 @@
 {# ── Sub-panel: Congress (lazy-loaded on first pill click) ── #}
 <div class="pp-pill-panel" id="own-panel-congress">
     <div id="congress-content">
-        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+        {{ skeleton_rows(6) }}
     </div>
 </div>
 
 {# ── Sub-panel: SEC Filings (lazy-loaded on first pill click) ── #}
 <div class="pp-pill-panel" id="own-panel-filings">
     <div id="filings-content">
-        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+        {{ skeleton_rows(6) }}
     </div>
 </div>
 
@@ -1195,7 +1178,7 @@
 <div class="pp-pill-panel" id="own-panel-insider">
     <div id="insider-insights-container"></div>
     <div id="insider-content">
-        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+        {{ skeleton_rows(6) }}
     </div>
 </div>
 
@@ -1210,17 +1193,17 @@
     </div>
     <div id="forecast-analysts-panel" class="pp-pill-panel active">
         <div id="analyst-ratings-content">
-            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+            {{ skeleton_rows(4) }}
         </div>
     </div>
     <div id="forecast-earnings-panel" class="pp-pill-panel">
         <div id="earnings-content">
-            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+            {{ skeleton_rows(4) }}
         </div>
     </div>
     <div id="forecast-estimates-panel" class="pp-pill-panel">
         <div id="estimates-content">
-            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+            {{ skeleton_rows(4) }}
         </div>
     </div>
 </div>
@@ -1233,12 +1216,12 @@
     </div>
     <div id="signal-panel-sentiment" class="pp-pill-panel active">
         <div id="signals-content">
-            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+            {{ skeleton_rows(4) }}
         </div>
     </div>
     <div id="signal-panel-short-interest" class="pp-pill-panel">
         <div id="short-interest-content">
-            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+            {{ skeleton_rows(4) }}
         </div>
     </div>
 </div>
@@ -1246,7 +1229,7 @@
 {# ── Vitals Tab ── #}
 <div id="tab-vitals" class="tab-content">
     <div id="vitals-content">
-        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
+        {{ skeleton_rows(6) }}
     </div>
 </div>
 
@@ -1282,15 +1265,6 @@ window.toggleHolders = function(btn) {
 {# ── Tab Switching Logic ── #}
 <script>
 (function() {
-    // Helper: innerHTML doesn't execute <script> tags — re-insert them as live elements
-    function activateScripts(container) {
-        container.querySelectorAll('script').forEach(function(old) {
-            var s = document.createElement('script');
-            s.textContent = old.textContent;
-            old.parentNode.replaceChild(s, old);
-        });
-    }
-
     var analystLoaded = false;
     var signalsLoaded = false;
     var shortInterestLoaded = false;

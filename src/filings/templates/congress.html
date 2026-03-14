@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Congress Trading — STOCK Act Disclosures | PaperPanda{% endblock %}
 {% block meta_description %}Track congressional stock trading. See what House and Senate members are buying and selling — powered by STOCK Act disclosures.{% endblock %}
 {% block og_title %}Congress Trading — STOCK Act Disclosures | PaperPanda{% endblock %}
@@ -971,9 +972,7 @@
          hx-get="/api/congress-activity?timeframe=ALL&amp;chamber=all&amp;party=all"
          hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
          hx-swap="innerHTML">
-        <div class="pp-skeleton-table">
-            <div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div>
-        </div>
+        {{ skeleton_rows(10) }}
     </div>
 </div>{# end panel-activity #}
 

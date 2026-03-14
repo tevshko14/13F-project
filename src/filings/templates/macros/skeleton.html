@@ -1,0 +1,22 @@
+{# Reusable skeleton loading placeholders #}
+
+{% macro skeleton_rows(n=6) -%}
+<div class="pp-skeleton-table">{% for _ in range(n) %}<div class="pp-skeleton pp-skeleton-row"></div>{% endfor %}</div>
+{%- endmacro %}
+
+{% macro skeleton_chart(height='200px') -%}
+<div class="pp-skeleton pp-skeleton-chart" style="height:{{ height }};"></div>
+{%- endmacro %}
+
+{% macro skeleton_cards(n=4) -%}
+<div style="padding:1em;display:grid;grid-template-columns:1fr 1fr;gap:0.6em;">{% for _ in range(n) %}<div class="pp-skeleton pp-skeleton-card"></div>{% endfor %}</div>
+{%- endmacro %}
+
+{% macro skeleton_fund_row() -%}
+<div style="display:flex;gap:0.5em;align-items:center;">
+    <div class="pp-skeleton" style="width:60px;height:14px;"></div>
+    <div class="pp-skeleton" style="width:40px;height:14px;"></div>
+    <div class="pp-skeleton" style="width:80px;height:14px;"></div>
+    <div class="pp-skeleton" style="width:100px;height:14px;"></div>
+</div>
+{%- endmacro %}
