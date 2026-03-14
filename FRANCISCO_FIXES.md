@@ -12,13 +12,14 @@
 **Files changed:** 23
 **Commits:** 17
 
-This branch contains five categories of work:
+This branch contains six categories of work:
 
 1. **Earnings Calendar** — a new full-page feature (design, API, templates, refactoring, docs)
 2. **/retail timeout fix** — a critical bug fix for the Signals product, plus a simplify pass and test suite
 3. **x1000 value fix** — critical fix for SEC 13F portfolio values displayed 1000x too low, plus simplify pass and test suite
 4. **Ticker correction** — fix broken/malformed ticker symbols from CUSIP mapping failures
 5. **Macro page unlock** — remove password gate from fully functional macro dashboard
+6. **Skeleton UI** — shared loading placeholders with reusable macros, error handling, and retry across all 11 pages
 
 ---
 
@@ -417,6 +418,59 @@ Initial render → Skeleton/shimmer UI → Data loaded (success)
 
 ---
 
+### 17. Extract reusable skeleton macros + test suite (`3bedd72`)
+
+**Problem:** The skeleton HTML added in commit 16 was copy-pasted across 11 templates. Each skeleton block was 3–10 lines of identical markup. Changing the shimmer class name or row structure would require editing every template.
+
+**Fix — Macro extraction (`templates/macros/skeleton.html`):**
+
+Created a shared Jinja2 macro file with four macros:
+
+| Macro | Arguments | Renders |
+|-------|-----------|---------|
+| `skeleton_rows(n=6)` | Row count | `n` shimmer rows in a `.pp-skeleton-table` container |
+| `skeleton_chart(height='200px')` | CSS height | Single `.pp-skeleton-chart` div with custom height |
+| `skeleton_cards(n=4)` | Card count | `n` shimmer cards in a 2-column CSS grid |
+| `skeleton_fund_row()` | — | 4-column flex row mimicking fund data (60/40/80/100px widths) |
+
+**Templates updated (11 files):**
+
+All inline skeleton HTML replaced with macro calls:
+
+| Template | Replacement |
+|----------|-------------|
+| `stock.html` | Already had macro calls |
+| `congress.html` | Already had macro calls |
+| `grand_portfolio.html` | Already had macro calls |
+| `insider_trading.html` | Already had macro calls |
+| `retail.html` | `skeleton_rows(10)` + `skeleton_rows(5)` |
+| `macro.html` | `skeleton_rows(6)` (padded) |
+| `earnings_calendar.html` | `skeleton_rows(6)` (padded) |
+| `alternative_signals.html` | `skeleton_rows(8)` + `skeleton_rows(5)` |
+| `investor.html` | `skeleton_rows(4)` |
+| `index.html` | `skeleton_fund_row()` |
+| `home.html` | `skeleton_cards(4)` + `skeleton_rows(5)` + `skeleton_chart('300px')` + `skeleton_chart('150px')` + `skeleton_rows(3)` |
+
+JS-embedded skeleton strings (generated via JavaScript template literals) were intentionally left untouched — they cannot use server-side Jinja2 macros.
+
+**Test suite — `tests/test_skeleton_macros.py` (26 tests):**
+
+| Area | Tests | What's validated |
+|------|-------|-----------------|
+| `skeleton_rows` | 7 | Default 6 rows, custom count, 1 row, 0 rows, wrapper div, dual CSS classes, large count (50) |
+| `skeleton_chart` | 4 | Default 200px height, custom height, CSS classes, single div structure |
+| `skeleton_cards` | 5 | Default 4 cards, custom count, grid layout, 0 cards, dual CSS classes |
+| `skeleton_fund_row` | 4 | Flex layout, 4 placeholder columns, column widths (60/40/80/100px), consistent 14px height |
+| Cross-cutting | 6 | No whitespace leaks (all 4 macros), single import, combined import |
+
+```bash
+PYTHONPATH=src python -m pytest tests/test_skeleton_macros.py -v
+```
+
+**No re-processing required** — purely frontend template changes.
+
+---
+
 ## Files changed (summary)
 
 | File | Type | Description |
@@ -428,6 +482,8 @@ Initial render → Skeleton/shimmer UI → Data loaded (success)
 | `tests/test_retail_timeout.py` | **New** | 15 test cases for timeout protection |
 | `tests/test_13f_value_multiplier.py` | **New** | 9 test cases for x1000 value fix |
 | `tests/test_ticker_corrections.py` | **New** | 74 test cases for ticker correction |
+| `tests/test_skeleton_macros.py` | **New** | 26 test cases for skeleton macro rendering |
+| `src/filings/templates/macros/skeleton.html` | **New** | Reusable skeleton loading-placeholder macros |
 | `src/filings/client.py` | Modified | CUSIP overrides + ticker validation + _safe_ticker rewrite |
 | `src/filings/web.py` | Modified | Removed truncated-issuer fallback + _top_tickers helper + macro gate removal |
 | `src/filings/templates/macro.html` | Modified | Removed password key references, added beta badge |
