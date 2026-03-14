@@ -971,9 +971,9 @@
          hx-get="/api/congress-activity?timeframe=ALL&amp;chamber=all&amp;party=all"
          hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
          hx-swap="innerHTML">
-        <article>
-            <p aria-busy="true"><span class="spinner"></span> Loading congressional activity intelligence...</p>
-        </article>
+        <div class="pp-skeleton-table">
+            <div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div>
+        </div>
     </div>
 </div>{# end panel-activity #}
 

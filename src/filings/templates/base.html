@@ -300,6 +300,62 @@
             margin-right: 0.5em;
         }
 
+        /* ── Skeleton shimmer (shared across all pages) ── */
+        @keyframes ppShimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .pp-skeleton {
+            background: linear-gradient(90deg, var(--pp-overlay-5) 25%, var(--pp-overlay-10) 50%, var(--pp-overlay-5) 75%);
+            background-size: 200% 100%;
+            animation: ppShimmer 1.5s infinite ease-in-out;
+            border-radius: 6px;
+        }
+        .pp-skeleton-row {
+            height: 18px;
+            margin-bottom: 0.7em;
+        }
+        .pp-skeleton-row:nth-child(odd) { width: 92%; }
+        .pp-skeleton-row:nth-child(even) { width: 68%; }
+        .pp-skeleton-card {
+            height: 80px;
+            margin-bottom: 0.75em;
+        }
+        .pp-skeleton-chart {
+            height: 200px;
+            margin-bottom: 0.75em;
+        }
+        .pp-skeleton-table {
+            padding: 0.75em;
+        }
+        .pp-skeleton-table .pp-skeleton-row { height: 16px; }
+
+        /* ── Section error state ── */
+        .pp-section-error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6em;
+            padding: 1.5em 1em;
+            color: var(--pp-text-muted);
+            font-size: 0.88em;
+        }
+        .pp-section-error button {
+            background: none;
+            border: 1px solid var(--pp-overlay-10);
+            border-radius: 6px;
+            padding: 0.3em 0.8em;
+            font-size: 0.9em;
+            color: var(--pp-text-muted);
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            margin: 0;
+        }
+        .pp-section-error button:hover {
+            background: var(--pp-overlay-5);
+            color: var(--pp-text-secondary);
+        }
+
         .actions { display: flex; gap: 0.5em; }
         .actions a { white-space: nowrap; font-size: 0.85em; padding: 0.3em 0.8em; }
 
@@ -2524,6 +2580,145 @@
         document.addEventListener('htmx:afterSettle', ppRestoreExpandState);
     }
     </script>
+    {# ── ppLoadSection: fetch with skeleton, timeout, retry, and error fallback ── #}
+    <script>
+    (function() {
+        /**
+         * ppLoadSection — universal loader for fetch-based sections.
+         *
+         * @param {Object} opts
+         * @param {string}   opts.el        - target element ID
+         * @param {string}   opts.url       - API endpoint to fetch
+         * @param {Function} [opts.render]  - fn(html, el) — custom render; default sets innerHTML + activates scripts
+         * @param {string}   [opts.errorMsg]- user-visible error text
+         * @param {string}   [opts.skeleton]- skeleton HTML (injected immediately)
+         * @param {number}   [opts.timeout] - ms before abort (default 10000)
+         * @param {number}   [opts.retries] - max retries (default 3)
+         * @param {boolean}  [opts.json]    - if true, parses JSON and passes to render(data, el)
+         */
+        window.ppLoadSection = function(opts) {
+            var el = typeof opts.el === 'string' ? document.getElementById(opts.el) : opts.el;
+            if (!el) return;
+
+            var url = opts.url;
+            var errorMsg = opts.errorMsg || 'Unable to load data';
+            var skeleton = opts.skeleton || _defaultSkeleton();
+            var timeout = opts.timeout || 10000;
+            var maxRetries = opts.retries != null ? opts.retries : 3;
+            var isJson = opts.json || false;
+            var render = opts.render || null;
+            var attempt = 0;
+
+            // Show skeleton
+            el.innerHTML = skeleton;
+
+            function doFetch() {
+                attempt++;
+                var controller = new AbortController();
+                var timer = setTimeout(function() { controller.abort(); }, timeout);
+
+                fetch(url, { signal: controller.signal })
+                    .then(function(resp) {
+                        clearTimeout(timer);
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                        return isJson ? resp.json() : resp.text();
+                    })
+                    .then(function(data) {
+                        if (render) {
+                            render(data, el);
+                        } else {
+                            el.innerHTML = data;
+                            _activateScripts(el);
+                        }
+                        if (window.initSortableTables) window.initSortableTables();
+                    })
+                    .catch(function() {
+                        clearTimeout(timer);
+                        if (attempt < maxRetries) {
+                            doFetch();
+                        } else {
+                            el.innerHTML = _errorHtml(errorMsg, url, opts);
+                        }
+                    });
+            }
+
+            doFetch();
+        };
+
+        function _defaultSkeleton() {
+            var html = '<div class="pp-skeleton-table">';
+            for (var i = 0; i < 6; i++) {
+                html += '<div class="pp-skeleton pp-skeleton-row"></div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function _errorHtml(msg, url, opts) {
+            // Encode opts as a data attribute for retry
+            var retryId = 'pp-retry-' + Math.random().toString(36).substr(2, 6);
+            // Store opts reference for retry
+            window['_ppRetryOpts_' + retryId] = opts;
+            return '<div class="pp-section-error">' +
+                '<span>' + msg + '.</span>' +
+                '<button onclick="var o=window[\'_ppRetryOpts_' + retryId + '\'];if(o){o.retries=1;ppLoadSection(o);}">Retry</button>' +
+                '</div>';
+        }
+
+        function _activateScripts(container) {
+            container.querySelectorAll('script').forEach(function(old) {
+                var s = document.createElement('script');
+                s.textContent = old.textContent;
+                old.parentNode.replaceChild(s, old);
+            });
+        }
+
+        /* ── HTMX global error handling: swap in error UI on failed requests ── */
+        document.addEventListener('htmx:responseError', function(evt) {
+            var target = evt.detail.target || (evt.detail.elt && evt.detail.elt);
+            if (!target) return;
+            var url = evt.detail.pathInfo ? evt.detail.pathInfo.requestPath : '';
+            target.innerHTML = '<div class="pp-section-error">' +
+                '<span>Unable to load data.</span>' +
+                '<button onclick="htmx.ajax(\'GET\',\'' + url.replace(/'/g, "\\'") + '\',{target:this.closest(\'[hx-get],[hx-post]\') || this.parentNode.parentNode, swap:\'innerHTML\'})">Retry</button>' +
+                '</div>';
+        });
+
+        /* ── HTMX timeout: 10s per request ── */
+        document.addEventListener('htmx:configRequest', function(evt) {
+            evt.detail.timeout = 10000;
+        });
+
+        /* ── HTMX swap error (network failure, timeout) ── */
+        document.addEventListener('htmx:sendError', function(evt) {
+            var target = evt.detail.target || evt.detail.elt;
+            if (!target) return;
+            var url = '';
+            if (target.getAttribute) {
+                url = target.getAttribute('hx-get') || target.getAttribute('hx-post') || '';
+            }
+            target.innerHTML = '<div class="pp-section-error">' +
+                '<span>Unable to load data.</span>' +
+                '<button onclick="htmx.ajax(\'GET\',\'' + url.replace(/'/g, "\\'") + '\',{target:this.closest(\'[hx-get],[hx-post]\') || this.parentNode.parentNode, swap:\'innerHTML\'})">Retry</button>' +
+                '</div>';
+        });
+
+        /* Also handle htmx:timeout */
+        document.addEventListener('htmx:timeout', function(evt) {
+            var target = evt.detail.target || evt.detail.elt;
+            if (!target) return;
+            var url = '';
+            if (target.getAttribute) {
+                url = target.getAttribute('hx-get') || target.getAttribute('hx-post') || '';
+            }
+            target.innerHTML = '<div class="pp-section-error">' +
+                '<span>Request timed out.</span>' +
+                '<button onclick="htmx.ajax(\'GET\',\'' + url.replace(/'/g, "\\'") + '\',{target:this.closest(\'[hx-get],[hx-post]\') || this.parentNode.parentNode, swap:\'innerHTML\'})">Retry</button>' +
+                '</div>';
+        });
+    })();
+    </script>
+
 {% block extra_scripts %}{% endblock %}
 </body>
 </html>

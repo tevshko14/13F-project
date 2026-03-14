@@ -124,9 +124,7 @@
     {% if trades %}
     {% include "partials/insider_trades.html" %}
     {% else %}
-    <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-        Loading insider trades...
-    </p>
+    <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
     {% endif %}
 </div>
 
@@ -470,14 +468,17 @@
             return;
         }
 
-        /* Show loading */
+        /* Show skeleton */
         document.getElementById('insider-trades-content').innerHTML =
-            '<p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading insider trades...</p>';
+            '<div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>';
 
         var url = '/api/insider-trades?filter=' + filter;
         if (currentPeriod) url += '&period=' + currentPeriod;
-        fetch(url)
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); }, 10000);
+        fetch(url, { signal: controller.signal })
             .then(function(resp) {
+                clearTimeout(timer);
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 return resp.text();
             })
@@ -494,15 +495,21 @@
                 if (window.initSortableTables) window.initSortableTables();
             })
             .catch(function() {
-                /* Retry once after a short delay before showing the error */
+                clearTimeout(timer);
+                /* Retry up to 3 times before showing the error */
                 if (!retried[cacheKey]) {
-                    retried[cacheKey] = true;
-                    setTimeout(function() { loadTrades(filter); }, 1500);
+                    retried[cacheKey] = 1;
+                    setTimeout(function() { loadTrades(filter); }, 1000);
+                    return;
+                }
+                if (retried[cacheKey] < 3) {
+                    retried[cacheKey]++;
+                    setTimeout(function() { loadTrades(filter); }, 1000);
                     return;
                 }
                 document.getElementById('insider-trades-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Failed to load insider trades. Please try again later.</p>';
+                    '<div class="pp-section-error"><span>Unable to load insider trades.</span>' +
+                    '<button onclick="retried={}; loadTrades(\'' + filter + '\')">Retry</button></div>';
             });
     }
 
