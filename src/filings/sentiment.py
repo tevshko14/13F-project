@@ -303,24 +303,40 @@ def _build_apewisdom_index(data: list[dict]) -> dict[str, dict]:
 
 
 def _fetch_apewisdom_pages() -> list[dict]:
-    """Fetch 5 ApeWisdom pages concurrently and update cache."""
+    """Fetch 5 ApeWisdom pages concurrently and update cache.
+
+    Per-page timeout is 6s.  Overall collection timeout is 8s — if
+    ApeWisdom is down we return whatever pages we got (possibly empty)
+    rather than blocking indefinitely.
+    """
     global _apewisdom_cache, _apewisdom_index
 
     def _fetch_page(page: int) -> list[dict]:
         url = f"https://apewisdom.io/api/v1.0/filter/all-stocks/page/{page}"
-        raw = _http_get_json(url, timeout=8)
+        try:
+            raw = _http_get_json(url, timeout=6)
+        except Exception:
+            return []
         if not raw or not isinstance(raw, dict):
             return []
         return raw.get("results") or []
 
     all_results: list[dict] = []
-    futures = {_sentiment_executor.submit(_fetch_page, p): p for p in range(1, 6)}
-    # Collect in page order so ranking stays consistent
-    page_results: dict[int, list[dict]] = {}
-    for future in as_completed(futures):
-        page_results[futures[future]] = future.result()
-    for p in sorted(page_results):
-        all_results.extend(page_results[p])
+    try:
+        futures = {_sentiment_executor.submit(_fetch_page, p): p for p in range(1, 6)}
+        # Collect in page order so ranking stays consistent
+        page_results: dict[int, list[dict]] = {}
+        for future in as_completed(futures, timeout=8):
+            page_results[futures[future]] = future.result()
+        for p in sorted(page_results):
+            all_results.extend(page_results[p])
+    except TimeoutError:
+        # as_completed timed out — collect whatever pages finished
+        logger.warning("ApeWisdom fetch: timed out after 8s, got %d pages", len(page_results))
+        for p in sorted(page_results):
+            all_results.extend(page_results[p])
+    except Exception:
+        logger.warning("ApeWisdom fetch failed", exc_info=True)
 
     with _lock:
         _apewisdom_cache = (time.time(), all_results)
