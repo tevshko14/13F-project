@@ -22,10 +22,25 @@ from unittest.mock import patch
 import pytest
 
 # ── Stub heavy deps so filings.sentiment can be imported ──────────
-for _mod in ("edgar", "yfinance", "supabase", "postgrest", "gotrue",
+# Only stub modules that aren't already installed — avoids clobbering
+# real packages (e.g. edgartools provides 'edgar')
+for _mod in ("yfinance", "supabase", "postgrest", "gotrue",
              "storage3", "realtime", "supafunc"):
     if _mod not in sys.modules:
         sys.modules[_mod] = types.ModuleType(_mod)
+# edgar (edgartools) may or may not be installed; stub only if missing
+if "edgar" not in sys.modules:
+    _edgar_stub = types.ModuleType("edgar")
+    _edgar_stub.set_identity = lambda *a: None  # type: ignore[attr-defined]
+    _edgar_stub.find = None  # type: ignore[attr-defined]
+    _edgar_stub.Company = type("Company", (), {})  # type: ignore[attr-defined]
+    _edgar_stub.ThirteenF = type("ThirteenF", (), {})  # type: ignore[attr-defined]
+    sys.modules["edgar"] = _edgar_stub
+    _es = types.ModuleType("edgar.entity")
+    sys.modules["edgar.entity"] = _es
+    _ess = types.ModuleType("edgar.entity.search")
+    _ess.CompanySearchResults = type("CompanySearchResults", (), {})  # type: ignore[attr-defined]
+    sys.modules["edgar.entity.search"] = _ess
 
 
 logger = logging.getLogger(__name__)
