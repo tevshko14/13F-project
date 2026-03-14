@@ -521,6 +521,11 @@ templates.env.filters["format_short_date"] = _format_short_date
 templates.env.filters["abbreviate_sector"] = _abbreviate_sector
 templates.env.filters["format_value"] = _format_value
 
+
+def _top_tickers(cached: dict, n: int = 5) -> list[str]:
+    """Extract up to *n* valid ticker symbols from a fund's cached top holdings."""
+    return [h["ticker"] for h in cached.get("top_holdings", [])[:n] if h.get("ticker")]
+
 # Attach rate limiter
 if _has_limiter:
     app.state.limiter = limiter
@@ -2006,11 +2011,7 @@ async def fund_row(request: Request, cik: str):
         ):
             asyncio.create_task(_trigger_single_refresh(app, cik_normalized))
 
-        top_tickers = [
-            h.get("ticker")
-            for h in cached.get("top_holdings", [])[:5]
-            if h.get("ticker")
-        ]
+        top_tickers = _top_tickers(cached)
         return templates.TemplateResponse(
             "partials/fund_row.html",
             {
@@ -2336,11 +2337,7 @@ async def funds_page(request: Request, view: str = "funds"):
     for si in SUPERINVESTORS:
         cached = cache_data.get(si.cik)
         if cached:
-            top_tickers = [
-                h.get("ticker")
-                for h in cached.get("top_holdings", [])[:5]
-                if h.get("ticker")
-            ]
+            top_tickers = _top_tickers(cached)
             si_summaries.append(
                 SuperinvestorSummary(
                     cik=si.cik,

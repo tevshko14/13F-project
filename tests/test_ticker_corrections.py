@@ -143,18 +143,17 @@ class TestSafeTicker:
 
     def test_fb_corrected_to_meta(self):
         row = MockRow(ticker="FB", cusip="30303M102")
-        assert _safe_ticker(row, cusip="30303M102") == "META"
+        assert _safe_ticker(row) == "META"
 
     def test_cusip_override_takes_priority(self):
         """CUSIP override wins over whatever edgartools returns."""
         row = MockRow(ticker="WRONG", cusip="46321A104")
-        assert _safe_ticker(row, cusip="46321A104") == "HGV"
+        assert _safe_ticker(row) == "HGV"
 
     def test_cusip_override_with_no_ticker_column(self):
         """Even without a Ticker column, CUSIP override works."""
         row = MockRow(cusip="46321A104")
-        # Remove Ticker attribute
-        assert _safe_ticker(row, cusip="46321A104") == "HGV"
+        assert _safe_ticker(row) == "HGV"
 
     def test_nan_returns_none(self):
         row = MockRow(ticker="nan")

@@ -351,29 +351,27 @@ _TICKER_CORRECTIONS: dict[str, str] = {
     "BMNRD": "BMNR",
 }
 
-# Maximum length for a valid US ticker symbol.
-# Standard tickers are 1-5 chars (e.g. A, AAPL, GOOGL).
-# Some ADRs and preferred shares use 6 chars (e.g. CFRUY).
-_MAX_TICKER_LEN = 6
+# Pre-compiled regex for ticker validation.  Valid tickers are 1-6
+# alphanumeric characters, optionally with dots (e.g. BRK.A).
+_VALID_TICKER_RE = re.compile(r'^[A-Z0-9.]{1,6}$', re.IGNORECASE)
 
 
 def _is_valid_ticker(t: str) -> bool:
     """Check if a string looks like a valid ticker symbol.
 
-    Valid tickers are 1-6 alphanumeric characters, optionally with dots
-    (e.g. BRK.A, BRK.B).  Rejects strings with spaces, special chars,
+    Rejects strings with spaces, special chars, >6 chars,
     or that are clearly truncated company names.
     """
-    if not t or len(t) > _MAX_TICKER_LEN:
+    if not t:
         return False
-    return bool(re.match(r'^[A-Z0-9.]{1,6}$', t, re.IGNORECASE))
+    return bool(_VALID_TICKER_RE.match(t))
 
 
-def _safe_ticker(row, cusip: str | None = None) -> str | None:
+def _safe_ticker(row) -> str | None:
     """Extract and clean ticker from a DataFrame row.
 
     Resolution order:
-    1. CUSIP override (if cusip provided and matches _CUSIP_OVERRIDES)
+    1. CUSIP override (from row.Cusip if present)
     2. edgartools Ticker column (from ct.pq CUSIP mapping)
     3. Ticker correction (rename table)
     4. Validation — reject malformed tickers (spaces, >6 chars, special chars)
@@ -381,6 +379,7 @@ def _safe_ticker(row, cusip: str | None = None) -> str | None:
     Returns None if no valid ticker can be resolved.
     """
     # 1. CUSIP-level override (highest priority)
+    cusip = str(row.Cusip) if hasattr(row, "Cusip") else None
     if cusip:
         override = _CUSIP_OVERRIDES.get(cusip)
         if override:
@@ -433,7 +432,7 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
         top_holdings.append(
             {
                 "issuer": str(row.Issuer),
-                "ticker": _safe_ticker(row, cusip),
+                "ticker": _safe_ticker(row),
                 "cusip": cusip,
                 "value": _row_value(row),
                 "shares": int(row.SharesPrnAmount),
@@ -447,7 +446,7 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
         all_holdings.append(
             {
                 "issuer": str(row.Issuer),
-                "ticker": _safe_ticker(row, cusip),
+                "ticker": _safe_ticker(row),
                 "cusip": cusip,
                 "value": val,
                 "shares": int(row.SharesPrnAmount),
@@ -586,7 +585,7 @@ def get_enriched_holdings(
                 value=val,
                 shares=int(row.SharesPrnAmount),
                 share_type=str(row.Type),
-                ticker=_safe_ticker(row, cusip),
+                ticker=_safe_ticker(row),
                 pct_of_portfolio=round(val / total_val * 100, 2)
                 if total_val > 0
                 else 0,
