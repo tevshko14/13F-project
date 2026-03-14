@@ -2007,8 +2007,9 @@ async def fund_row(request: Request, cik: str):
             asyncio.create_task(_trigger_single_refresh(app, cik_normalized))
 
         top_tickers = [
-            h.get("ticker") or h.get("issuer", "?")[:8]
+            h.get("ticker")
             for h in cached.get("top_holdings", [])[:5]
+            if h.get("ticker")
         ]
         return templates.TemplateResponse(
             "partials/fund_row.html",
@@ -2336,8 +2337,9 @@ async def funds_page(request: Request, view: str = "funds"):
         cached = cache_data.get(si.cik)
         if cached:
             top_tickers = [
-                h.get("ticker") or h.get("issuer", "?")[:8]
+                h.get("ticker")
                 for h in cached.get("top_holdings", [])[:5]
+                if h.get("ticker")
             ]
             si_summaries.append(
                 SuperinvestorSummary(
