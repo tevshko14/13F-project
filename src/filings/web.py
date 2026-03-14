@@ -458,6 +458,9 @@ app.mount(
 
 # Template globals
 templates.env.globals["current_year"] = datetime.now().year
+# Rolling 12-month stale cutoff for fund filings
+_stale_cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+templates.env.globals["stale_cutoff"] = _stale_cutoff
 templates.env.globals["supabase_url"] = auth.SUPABASE_URL
 templates.env.globals["supabase_anon_key"] = auth.SUPABASE_ANON_KEY
 templates.env.globals["auth_enabled"] = bool(auth.CLERK_DOMAIN or auth.SUPABASE_ANON_KEY)
@@ -497,8 +500,26 @@ def _abbreviate_sector(value: str) -> str:
     return _SECTOR_ABBREV.get(value, value)
 
 
+def _format_value(value, prefix: str = "$", precision: int = 1) -> str:
+    """Format a dollar value with B/M/K suffixes for compact display.
+
+    Examples: 6_500_000_000 → "$6.5B", 450_000_000 → "$450M", 75_000 → "$75K"
+    """
+    if not value or value == 0:
+        return f"{prefix}0"
+    v = float(value)
+    if v >= 1_000_000_000:
+        return f"{prefix}{v / 1_000_000_000:.{precision}f}B"
+    if v >= 1_000_000:
+        return f"{prefix}{v / 1_000_000:.0f}M"
+    if v >= 1_000:
+        return f"{prefix}{v / 1_000:.0f}K"
+    return f"{prefix}{v:,.0f}"
+
+
 templates.env.filters["format_short_date"] = _format_short_date
 templates.env.filters["abbreviate_sector"] = _abbreviate_sector
+templates.env.filters["format_value"] = _format_value
 
 # Attach rate limiter
 if _has_limiter:
