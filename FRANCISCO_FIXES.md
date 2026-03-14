@@ -9,15 +9,16 @@
 
 **Branch:** `claude/francisco-fixes-aABrd`
 **Base:** `main`
-**Files changed:** 19
-**Commits:** 14
+**Files changed:** 20
+**Commits:** 15
 
-This branch contains four categories of work:
+This branch contains five categories of work:
 
 1. **Earnings Calendar** — a new full-page feature (design, API, templates, refactoring, docs)
 2. **/retail timeout fix** — a critical bug fix for the Signals product, plus a simplify pass and test suite
 3. **x1000 value fix** — critical fix for SEC 13F portfolio values displayed 1000x too low, plus simplify pass and test suite
 4. **Ticker correction** — fix broken/malformed ticker symbols from CUSIP mapping failures
+5. **Macro page unlock** — remove password gate from fully functional macro dashboard
 
 ---
 
@@ -157,7 +158,7 @@ Tests are designed to run without heavy dependencies (edgar, yfinance, supabase)
 | `src/filings/earnings.py` | Modified | Shared `fetch_finnhub_calendar_raw()` |
 | `src/filings/earnings_scorecard.py` | Modified | `_fmp_get` → `fmp_get` (public) |
 | `src/filings/sentiment.py` | Modified | ApeWisdom fetch hardening |
-| `src/filings/templates/base.html` | Modified | Nav link for earnings calendar |
+| `src/filings/templates/base.html` | Modified | Nav links: earnings calendar + always-visible Macro with beta badge |
 | `README.md` | Modified | Earnings calendar user docs |
 | `README_DEV.md` | Modified | Earnings calendar developer docs |
 
@@ -355,6 +356,23 @@ Added `tests/test_ticker_corrections.py` — 74 test cases.
 
 ---
 
+### 14. Remove /macro page password gate (`dcce113`)
+
+**Problem:** The `/macro` page was fully functional (earnings scorecard + market breadth with real data from Supabase/FMP/Finnhub/yfinance) but hidden behind a password gate (`?key=panda2026`). Without the key, users saw a generic "Page Under Construction" dead end. The Macro nav link was also conditionally hidden — only visible when already on the `/macro` page.
+
+**Fix:**
+
+- **Removed `_MACRO_KEY` constant and `_check_macro_key()` function** from `web.py`
+- **Removed password checks** from `/macro`, `/api/macro/scorecard`, and `/api/macro/breadth` route handlers
+- **Removed all `?key=` / `macroKey` references** from `macro.html` template (HTMX URLs and JavaScript)
+- **Made Macro nav link always visible** in `base.html` sidebar (was previously conditional on `request.url.path.startswith('/macro')`)
+- **Added BETA badge** to nav link and page header
+- **Added beta feedback banner** with contact email at top of macro page
+
+**No re-processing required** — the macro page uses its own data sources (not cached fund data).
+
+---
+
 ## Files changed (summary)
 
 | File | Type | Description |
@@ -367,12 +385,13 @@ Added `tests/test_ticker_corrections.py` — 74 test cases.
 | `tests/test_13f_value_multiplier.py` | **New** | 9 test cases for x1000 value fix |
 | `tests/test_ticker_corrections.py` | **New** | 74 test cases for ticker correction |
 | `src/filings/client.py` | Modified | CUSIP overrides + ticker validation + _safe_ticker rewrite |
-| `src/filings/web.py` | Modified | Removed truncated-issuer fallback + _top_tickers helper |
+| `src/filings/web.py` | Modified | Removed truncated-issuer fallback + _top_tickers helper + macro gate removal |
+| `src/filings/templates/macro.html` | Modified | Removed password key references, added beta badge |
 | `src/filings/aum_data.py` | Modified | Fixed misleading comment about 13F values |
 | `src/filings/earnings.py` | Modified | Shared `fetch_finnhub_calendar_raw()` |
 | `src/filings/earnings_scorecard.py` | Modified | `_fmp_get` → `fmp_get` (public) |
 | `src/filings/sentiment.py` | Modified | ApeWisdom fetch hardening |
-| `src/filings/templates/base.html` | Modified | Nav link for earnings calendar |
+| `src/filings/templates/base.html` | Modified | Nav links: earnings calendar + always-visible Macro with beta badge |
 | `src/filings/templates/grand_portfolio.html` | Modified | B/M/K filter + rolling stale indicator |
 | `src/filings/templates/index.html` | Modified | B/M/K filter + rolling stale indicator |
 | `src/filings/templates/investor.html` | Modified | B/M/K filter |
