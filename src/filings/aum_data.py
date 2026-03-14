@@ -629,7 +629,7 @@ def sync_all_deployment_data(
             xbrl_cash = fetch_xbrl_cash(si.cik)
 
             # Compute metrics
-            # 13F total_value from edgartools is already in dollars
+            # 13F total_value is converted from thousands to dollars at ingestion (client.py)
             metrics = compute_deployment_metrics(
                 cik=si.cik,
                 thirteenf_value=thirteenf_value,
