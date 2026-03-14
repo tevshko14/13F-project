@@ -322,21 +322,20 @@ def _fetch_apewisdom_pages() -> list[dict]:
         return raw.get("results") or []
 
     all_results: list[dict] = []
+    futures = {_sentiment_executor.submit(_fetch_page, p): p for p in range(1, 6)}
+    page_results: dict[int, list[dict]] = {}
     try:
-        futures = {_sentiment_executor.submit(_fetch_page, p): p for p in range(1, 6)}
-        # Collect in page order so ranking stays consistent
-        page_results: dict[int, list[dict]] = {}
         for future in as_completed(futures, timeout=8):
             page_results[futures[future]] = future.result()
-        for p in sorted(page_results):
-            all_results.extend(page_results[p])
     except TimeoutError:
         # as_completed timed out — collect whatever pages finished
         logger.warning("ApeWisdom fetch: timed out after 8s, got %d pages", len(page_results))
-        for p in sorted(page_results):
-            all_results.extend(page_results[p])
+        for f in futures:
+            f.cancel()
     except Exception:
         logger.warning("ApeWisdom fetch failed", exc_info=True)
+    for p in sorted(page_results):
+        all_results.extend(page_results[p])
 
     with _lock:
         _apewisdom_cache = (time.time(), all_results)
