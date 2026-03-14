@@ -921,6 +921,21 @@
         .pp-sidebar-toggle svg { width: 12px; height: 12px; stroke-width: 3; transition: transform 0.25s; }
         .pp-sidebar.expanded .pp-sidebar-toggle svg { transform: rotate(180deg); }
 
+        /* ── Shared icon button (search, close, etc.) ── */
+        .pp-icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--pp-text-muted);
+        }
+        .pp-icon-btn:hover { color: var(--pp-text); }
+
         /* ── Sidebar search bar ── */
         .pp-sidebar-search {
             position: relative;
@@ -928,23 +943,16 @@
             flex-shrink: 0;
         }
         .pp-search-icon-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
             width: 38px;
             height: 38px;
             margin: 0 auto;
-            padding: 0;
             background: var(--pp-overlay-5);
             border: 1px solid var(--pp-border);
             border-radius: 10px;
-            cursor: pointer;
-            color: var(--pp-text-muted);
             transition: background 0.15s, color 0.15s;
         }
         .pp-search-icon-btn:hover {
             background: var(--pp-surface-hover);
-            color: var(--pp-text);
         }
         .pp-search-icon-btn svg { width: 16px; height: 16px; opacity: 0.6; }
         /* When expanded, hide the icon button and show the input */
@@ -1046,20 +1054,7 @@
             font-size: 1em;
             padding: 0.6em 0.75em;
         }
-        .pp-mobile-search-close {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 36px;
-            height: 36px;
-            padding: 0;
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--pp-text-muted);
-            flex-shrink: 0;
-        }
-        .pp-mobile-search-close:hover { color: var(--pp-text); }
+        .pp-mobile-search-close { flex-shrink: 0; }
         .pp-mobile-search-overlay .pp-search-dropdown {
             position: relative;
             top: 0.5em;
@@ -1067,20 +1062,6 @@
             max-height: 60vh;
         }
 
-        /* Mobile search button in header */
-        .pp-mobile-search-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 36px;
-            height: 36px;
-            padding: 0;
-            background: none;
-            border: none;
-            cursor: pointer;
-            color: var(--pp-text-muted);
-        }
-        .pp-mobile-search-btn:hover { color: var(--pp-text); }
         /* Hide mobile search btn on desktop */
         @media (min-width: 1024px) {
             .pp-mobile-search-btn { display: none; }
@@ -1675,7 +1656,7 @@
             </picture>
         </a>
         <div class="pp-mobile-actions">
-            <button class="pp-mobile-search-btn" onclick="ppToggleMobileSearch()" aria-label="Search">
+            <button class="pp-icon-btn pp-mobile-search-btn" onclick="ppToggleMobileSearch()" aria-label="Search">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             </button>
             <button id="theme-toggle-mobile" class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">
@@ -1716,7 +1697,7 @@
                    oninput="ppGlobalSearch(this.value, 'pp-mobile-search-results')"
                    onfocus="ppGlobalSearch(this.value, 'pp-mobile-search-results')"
                    onkeydown="ppSearchKeydown(event, 'pp-mobile-search-results')">
-            <button class="pp-mobile-search-close" onclick="ppToggleMobileSearch()" aria-label="Close search">
+            <button class="pp-icon-btn pp-mobile-search-close" onclick="ppToggleMobileSearch()" aria-label="Close search">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
@@ -1750,7 +1731,7 @@
 
         {# ── Global Search Bar (sidebar) ── #}
         <div class="pp-sidebar-search" id="pp-sidebar-search">
-            <button class="pp-search-icon-btn" onclick="ppExpandAndFocusSearch()" title="Search (Ctrl+K)" aria-label="Search">
+            <button class="pp-icon-btn pp-search-icon-btn" onclick="ppExpandAndFocusSearch()" title="Search (Ctrl+K)" aria-label="Search">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             </button>
             <div class="pp-search-input-wrap">
@@ -2195,7 +2176,6 @@
         };
 
         function _doFilter(query, containerId) {
-            containerId = containerId || 'ticker-search-results';
             var container = document.getElementById(containerId);
             var state = _getState(containerId);
             if (!container || !_indexReady) return;
@@ -2310,15 +2290,13 @@
             container.innerHTML = html;
             container.style.display = "block";
 
-            // Attach click handlers
-            var cid = containerId; // capture for closure
+            // Attach click handlers (state captured once, shared across closures)
             var items = container.querySelectorAll(".ts-item");
             items.forEach(function(el) {
                 el.addEventListener("click", function() {
                     var idx = parseInt(el.dataset.gidx);
-                    var st = _getState(cid);
-                    if (st.flatItems[idx]) {
-                        tickerSearchGo(st.flatItems[idx].ticker, st.flatItems[idx].type, st.flatItems[idx].cik, st.flatItems[idx].member_id);
+                    if (state.flatItems[idx]) {
+                        tickerSearchGo(state.flatItems[idx].ticker, state.flatItems[idx].type, state.flatItems[idx].cik, state.flatItems[idx].member_id);
                     }
                 });
             });
@@ -2326,7 +2304,6 @@
 
         // ── Keyboard navigation (parameterized by container) ──
         window.ppSearchKeydown = function(e, containerId) {
-            containerId = containerId || 'ticker-search-results';
             var container = document.getElementById(containerId);
             var state = _getState(containerId);
             if (!container || container.style.display === "none" || state.flatItems.length === 0) return;
@@ -2387,21 +2364,27 @@
             }
         };
 
-        // Close all search dropdowns on outside click
+        // Close all search dropdowns on outside click (elements cached once)
         if (!window._ppSearchClickBound) {
             window._ppSearchClickBound = true;
+            var _searchPairs = [
+                ['ticker-search', 'ticker-search-results'],
+                ['pp-sidebar-search', 'pp-global-search-results']
+            ].map(function(pair) {
+                return { wrap: document.getElementById(pair[0]), results: document.getElementById(pair[1]) };
+            });
+            var _mobileOverlay = document.getElementById('pp-mobile-search-overlay');
             document.addEventListener("click", function(e) {
-                // Close hero search dropdown (home page)
-                var search = document.getElementById("ticker-search");
-                var results = document.getElementById("ticker-search-results");
-                if (search && results && !search.contains(e.target)) {
-                    results.style.display = "none";
+                for (var i = 0; i < _searchPairs.length; i++) {
+                    var p = _searchPairs[i];
+                    if (p.wrap && p.results && !p.wrap.contains(e.target)) {
+                        p.results.style.display = "none";
+                    }
                 }
-                // Close sidebar search dropdown
-                var sidebarSearch = document.getElementById("pp-sidebar-search");
-                var sidebarResults = document.getElementById("pp-global-search-results");
-                if (sidebarSearch && sidebarResults && !sidebarSearch.contains(e.target)) {
-                    sidebarResults.style.display = "none";
+                // Close mobile search overlay if click is outside it
+                if (_mobileOverlay && _mobileOverlay.style.display !== 'none'
+                    && !_mobileOverlay.contains(e.target)) {
+                    ppToggleMobileSearch();
                 }
             });
         }
@@ -2810,6 +2793,9 @@
     ppRestoreExpandState();
 
     // ── Global search helpers ──
+    // Sidebar CSS transition is 250ms — allow a small buffer for focus
+    var PP_SIDEBAR_TRANSITION_MS = 280;
+
     window.ppExpandAndFocusSearch = function() {
         var sidebar = document.getElementById('pp-sidebar');
         if (sidebar && !sidebar.classList.contains('expanded')) {
@@ -2818,7 +2804,7 @@
         setTimeout(function() {
             var input = document.getElementById('pp-global-search-input');
             if (input) input.focus();
-        }, 280); // wait for sidebar expand transition
+        }, PP_SIDEBAR_TRANSITION_MS);
     };
 
     window.ppToggleMobileSearch = function() {
@@ -2831,10 +2817,10 @@
             if (results) results.style.display = 'none';
         } else {
             overlay.style.display = 'block';
-            setTimeout(function() {
+            requestAnimationFrame(function() {
                 var input = document.getElementById('pp-mobile-search-input');
                 if (input) input.focus();
-            }, 50);
+            });
         }
     };
 
