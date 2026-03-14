@@ -9,13 +9,14 @@
 
 **Branch:** `claude/francisco-fixes-aABrd`
 **Base:** `main`
-**Files changed:** 12 (net +2,200 lines)
-**Commits:** 7
+**Files changed:** 18
+**Commits:** 10
 
-This branch contains two categories of work:
+This branch contains three categories of work:
 
 1. **Earnings Calendar** — a new full-page feature (design, API, templates, refactoring, docs)
 2. **/retail timeout fix** — a critical bug fix for the Signals product, plus a simplify pass and test suite
+3. **x1000 value fix** — critical fix for SEC 13F portfolio values displayed 1000x too low, plus simplify pass and test suite
 
 ---
 
@@ -161,7 +162,7 @@ Tests are designed to run without heavy dependencies (edgar, yfinance, supabase)
 
 ---
 
-### 8. Fix fund portfolio values wrong by 1000x (`PENDING_COMMIT`)
+### 8. Fix fund portfolio values wrong by 1000x (`be3e946`)
 
 **Problem:** Several fund portfolio values were displayed wrong by ~1,000x. AKO Capital showed $6.5M instead of ~$6.5B. Baupost showed $5.2M instead of ~$5.2B. This was a credibility-destroying bug for a financial data product.
 
@@ -202,7 +203,7 @@ This prevents the bug from silently recurring.
 
 #### Part D — Stale data indicator
 
-Added a "stale" label in the Period column for funds whose `report_period` is before 2024-06-01. Appears on both `/funds` and homepage tables with a tooltip: "This fund's data may be stale — last filing is over a year old."
+Added a "stale" label in the Period column for funds whose `report_period` is older than 12 months (rolling threshold). Appears on both `/funds` and homepage tables with a tooltip: "This fund's data may be stale — last filing is over a year old."
 
 Affected funds:
 - Leon Cooperman / Omega Advisors (last filing: Dec 2018)
@@ -213,7 +214,7 @@ Affected funds:
 
 ---
 
-### 9. Test suite for x1000 fix (`PENDING_COMMIT`)
+### 9. Test suite for x1000 fix (`be3e946`)
 
 Added `tests/test_13f_value_multiplier.py` — 9 test cases.
 
@@ -231,6 +232,47 @@ Added `tests/test_13f_value_multiplier.py` — 9 test cases.
 
 ---
 
+### 10. Simplify pass #3 — x1000 fix cleanup (`2deea6d`)
+
+Addressed code quality and reuse findings from the x1000 fix:
+
+#### A — Reusable `format_value` Jinja filter (`web.py`)
+
+B/M/K formatting was duplicated ~40+ times across 4 templates with inline `{% if %}` chains. Extracted into a single `_format_value()` function registered as a Jinja filter:
+
+```python
+templates.env.filters["format_value"] = _format_value
+```
+
+Templates now use `{{ value | format_value }}` instead of 5-line inline conditionals.
+
+#### B — Centralized multiplier helpers (`client.py`)
+
+11 scattered `int(x) * _SEC_13F_VALUE_MULTIPLIER` call sites with inconsistent None guards → extracted into 2 helpers:
+
+- `_filing_total_value(tf)` — converts `ThirteenF.total_value` with None guard
+- `_row_value(row)` — converts a holdings DataFrame row's `Value`
+
+#### C — Rolling stale threshold (`web.py`)
+
+Hardcoded `"2024-06-01"` stale cutoff → rolling 12-month threshold computed at startup:
+
+```python
+_stale_cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+templates.env.globals["stale_cutoff"] = _stale_cutoff
+```
+
+#### D — Template consistency
+
+- `fund_row.html` partial (HTMX lazy-loaded rows) now uses `| format_value` filter for consistency with the main tables
+- `investor.html` was missing the K tier in its inline formatting — fixed by using the shared filter
+
+#### E — Misleading comment fix (`aum_data.py`)
+
+Fixed comment at line 632 that incorrectly said "13F total_value from edgartools is already in dollars" — updated to reflect that conversion happens at ingestion in `client.py`.
+
+---
+
 ## Files changed (summary)
 
 | File | Type | Description |
@@ -241,15 +283,17 @@ Added `tests/test_13f_value_multiplier.py` — 9 test cases.
 | `src/filings/templates/partials/earnings_calendar_grid.html` | **New** | Calendar grid HTMX partial |
 | `tests/test_retail_timeout.py` | **New** | 15 test cases for timeout protection |
 | `tests/test_13f_value_multiplier.py` | **New** | 9 test cases for x1000 value fix |
-| `src/filings/client.py` | Modified | x1000 multiplier + validation check |
-| `src/filings/web.py` | Modified | New routes + timeout protection + shared helpers |
+| `src/filings/client.py` | Modified | x1000 multiplier + centralized helpers + validation |
+| `src/filings/web.py` | Modified | New routes + timeout protection + format_value filter + stale_cutoff global |
+| `src/filings/aum_data.py` | Modified | Fixed misleading comment about 13F values |
 | `src/filings/earnings.py` | Modified | Shared `fetch_finnhub_calendar_raw()` |
 | `src/filings/earnings_scorecard.py` | Modified | `_fmp_get` → `fmp_get` (public) |
 | `src/filings/sentiment.py` | Modified | ApeWisdom fetch hardening |
 | `src/filings/templates/base.html` | Modified | Nav link for earnings calendar |
-| `src/filings/templates/grand_portfolio.html` | Modified | B/M/K value formatting + stale indicator |
-| `src/filings/templates/index.html` | Modified | B/M/K value formatting + stale indicator |
-| `src/filings/templates/investor.html` | Modified | B/M/K value formatting |
+| `src/filings/templates/grand_portfolio.html` | Modified | B/M/K filter + rolling stale indicator |
+| `src/filings/templates/index.html` | Modified | B/M/K filter + rolling stale indicator |
+| `src/filings/templates/investor.html` | Modified | B/M/K filter |
+| `src/filings/templates/partials/fund_row.html` | Modified | B/M/K filter + stale indicator |
 | `README.md` | Modified | Earnings calendar user docs |
 | `README_DEV.md` | Modified | Earnings calendar developer docs |
 
