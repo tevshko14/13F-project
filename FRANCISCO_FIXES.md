@@ -9,8 +9,8 @@
 
 **Branch:** `claude/francisco-fixes-aABrd`
 **Base:** `main`
-**Files changed:** 18
-**Commits:** 10
+**Files changed:** 19
+**Commits:** 14
 
 This branch contains four categories of work:
 
@@ -274,7 +274,7 @@ Fixed comment at line 632 that incorrectly said "13F total_value from edgartools
 
 ---
 
-### 11. Fix broken and malformed ticker symbols (`PENDING_COMMIT`)
+### 11. Fix broken and malformed ticker symbols (`1369209`)
 
 **Problem:** Several fund holdings displayed malformed ticker symbols instead of proper stock tickers. Examples: "HILTON G", "CARDLYTI", "Compagni", "General" appeared as clickable ticker links, leading to broken `/stock/HILTON G` pages. This happened because when the CUSIP→ticker mapping failed, the system fell back to displaying the first 8 characters of the company name as if it were a ticker.
 
@@ -327,17 +327,30 @@ Added `_validate_tickers()` function called at the end of `get_fund_summary()`. 
 
 ---
 
-### 12. Test suite for ticker corrections (`PENDING_COMMIT`)
+### 12. Simplify pass #4 — ticker fix cleanup (`f56f320`)
 
-Added `tests/test_ticker_corrections.py` — 31 test cases.
+- **Pre-compiled regex**: `_VALID_TICKER_RE` compiled at module level instead of per-call `re.match()`; removed redundant `_MAX_TICKER_LEN` constant (regex already enforces length)
+- **Removed `cusip` parameter** from `_safe_ticker()` — now reads `row.Cusip` internally via `hasattr`, eliminating boilerplate at all 3 call sites
+- **Extracted `_top_tickers(cached)`** helper in `web.py` to deduplicate identical list comprehension in fund_row and funds_page endpoints
+
+---
+
+### 13. Test suite for ticker corrections (`1369209`, expanded `PENDING_COMMIT`)
+
+Added `tests/test_ticker_corrections.py` — 74 test cases.
 
 | Area | Tests | What's validated |
 |------|-------|-----------------|
 | `_TICKER_CORRECTIONS` | 3 | FB→META, TWTR→X, BMNRD→BMNR |
 | `_CUSIP_OVERRIDES` | 3 | HGV, HLT, CFRUY overrides exist |
+| `_VALID_TICKER_RE` | 4 | Pre-compiled, matches standard, rejects invalid, case insensitive |
 | `_is_valid_ticker` | 8 | Standard tickers, dots, ADRs, spaces, length, special chars, empty, lowercase names |
+| `_is_valid_ticker` boundary | 10 | Exactly 6/7 chars, single char, digits-only, mixed case, dots at boundaries, whitespace, tab |
 | `_safe_ticker` | 11 | Normal ticker, FB→META, CUSIP priority, NaN/None, malformed rejection, whitespace stripping |
-| `_validate_tickers` | 3 | Logs missing, no log when valid, truncates long lists |
+| `_safe_ticker` edge cases | 9 | No Cusip attr, CUSIP not in overrides, correction after strip, NaN variants, all overrides end-to-end, all corrections end-to-end |
+| `_validate_tickers` | 6 | Logs missing, no log when valid, truncates long lists, empty holdings, empty string ticker, log includes fund name/CIK |
+| `_top_tickers` helper | 8 | Extract valid, skip None, n parameter, default n=5, empty, missing key, all None, missing ticker key |
+| Bug report tickers | 9 | HILTON G, HGV override, CARDLYTI, Compagni, CFRUY override, General, KKR & CO, FB→META, TWTR→X |
 | Display fallback | 3 | Filters None, old pattern produced garbage, all-valid passthrough |
 
 ---
@@ -352,9 +365,9 @@ Added `tests/test_ticker_corrections.py` — 31 test cases.
 | `src/filings/templates/partials/earnings_calendar_grid.html` | **New** | Calendar grid HTMX partial |
 | `tests/test_retail_timeout.py` | **New** | 15 test cases for timeout protection |
 | `tests/test_13f_value_multiplier.py` | **New** | 9 test cases for x1000 value fix |
-| `tests/test_ticker_corrections.py` | **New** | 31 test cases for ticker correction |
+| `tests/test_ticker_corrections.py` | **New** | 74 test cases for ticker correction |
 | `src/filings/client.py` | Modified | CUSIP overrides + ticker validation + _safe_ticker rewrite |
-| `src/filings/web.py` | Modified | Removed truncated-issuer display fallback |
+| `src/filings/web.py` | Modified | Removed truncated-issuer fallback + _top_tickers helper |
 | `src/filings/aum_data.py` | Modified | Fixed misleading comment about 13F values |
 | `src/filings/earnings.py` | Modified | Shared `fetch_finnhub_calendar_raw()` |
 | `src/filings/earnings_scorecard.py` | Modified | `_fmp_get` → `fmp_get` (public) |
