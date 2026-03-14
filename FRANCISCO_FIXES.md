@@ -10,7 +10,7 @@
 **Branch:** `claude/francisco-fixes-aABrd`
 **Base:** `main`
 **Files changed:** 20
-**Commits:** 15
+**Commits:** 16
 
 This branch contains five categories of work:
 
@@ -370,6 +370,13 @@ Added `tests/test_ticker_corrections.py` — 74 test cases.
 - **Added beta feedback banner** with contact email at top of macro page
 
 **No re-processing required** — the macro page uses its own data sources (not cached fund data).
+
+---
+
+### 15. Simplify pass #5 — macro badge cleanup (`00c5477`)
+
+- **Extracted `.badge-beta` CSS class** in `base.html` — replaced duplicated inline styles on both BETA badges (nav link + page header) with a shared class following the existing `.badge-*` system (13+ variants)
+- **Size variants**: `.badge-beta-sm` (nav context) and `.badge-beta-lg` (h1 context) for the two different size needs
 
 ---
 
