@@ -98,10 +98,14 @@
 
 {# ── Scrolling Ticker Tape (lazy-loaded) ── #}
 <div id="ticker-tape-wrap" style="margin: 1.5em 0 2em 0;"
-     hx-get="/api/ticker-tape" hx-trigger="load" hx-swap="innerHTML">
-    <p class="text-muted" style="text-align:center;font-size:0.85em;" aria-busy="true">
-        Loading market data...
-    </p>
+     hx-get="/api/ticker-tape" hx-trigger="load" hx-swap="innerHTML" hx-timeout="10000">
+    <div style="display:flex;gap:1em;justify-content:center;padding:0.5em 0;">
+        <div class="pp-skeleton" style="width:80px;height:16px;"></div>
+        <div class="pp-skeleton" style="width:60px;height:16px;"></div>
+        <div class="pp-skeleton" style="width:90px;height:16px;"></div>
+        <div class="pp-skeleton" style="width:70px;height:16px;"></div>
+        <div class="pp-skeleton" style="width:85px;height:16px;"></div>
+    </div>
 </div>
 
 {# ══════════════════════════════════════════════════════════════ #}
@@ -114,8 +118,13 @@
         <div class="bento-card-header">
             <h3 class="bento-card-title">Market Overview</h3>
         </div>
-        <div class="bento-card-body" hx-get="/api/market-overview" hx-trigger="load" hx-swap="innerHTML">
-            <div class="bento-loading"><span class="spinner"></span></div>
+        <div class="bento-card-body" hx-get="/api/market-overview" hx-trigger="load" hx-swap="innerHTML" hx-timeout="10000">
+            <div style="padding:1em;display:grid;grid-template-columns:1fr 1fr;gap:0.6em;">
+                <div class="pp-skeleton pp-skeleton-card"></div>
+                <div class="pp-skeleton pp-skeleton-card"></div>
+                <div class="pp-skeleton pp-skeleton-card"></div>
+                <div class="pp-skeleton pp-skeleton-card"></div>
+            </div>
         </div>
     </div>
 
@@ -124,8 +133,14 @@
         <div class="bento-card-header">
             <h3 class="bento-card-title">Market News</h3>
         </div>
-        <div class="bento-card-body bento-card-body-flex" hx-get="/api/market-news" hx-trigger="load delay:0.5s" hx-swap="innerHTML">
-            <div class="bento-loading"><span class="spinner"></span></div>
+        <div class="bento-card-body bento-card-body-flex" hx-get="/api/market-news" hx-trigger="load delay:0.5s" hx-swap="innerHTML" hx-timeout="10000">
+            <div style="padding:1em;">
+                <div class="pp-skeleton pp-skeleton-row"></div>
+                <div class="pp-skeleton pp-skeleton-row"></div>
+                <div class="pp-skeleton pp-skeleton-row"></div>
+                <div class="pp-skeleton pp-skeleton-row"></div>
+                <div class="pp-skeleton pp-skeleton-row"></div>
+            </div>
         </div>
     </div>
 
@@ -142,8 +157,8 @@
                         onclick="switchHeatmapPeriod('1M', this)">1M</button>
             </div>
         </div>
-        <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML">
-            <div class="bento-loading"><span class="spinner"></span></div>
+        <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML" hx-timeout="10000">
+            <div class="pp-skeleton pp-skeleton-chart" style="margin:1em;height:300px;"></div>
         </div>
     </div>
 
@@ -152,15 +167,21 @@
         <div class="bento-card-header">
             <h3 class="bento-card-title">Retail Sentiment</h3>
         </div>
-        <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
-            <div class="bento-loading"><span class="spinner"></span></div>
+        <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load delay:1.5s" hx-swap="innerHTML" hx-timeout="10000">
+            <div style="padding:1em;">
+                <div class="pp-skeleton pp-skeleton-chart" style="height:150px;"></div>
+            </div>
         </div>
     </div>
 
     {# ── Card 5: Trending with Smart Money (12 cols) ── #}
     <div class="glass-card bento-trending">
-        <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
-            <div class="bento-loading"><span class="spinner"></span></div>
+        <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load delay:1.5s" hx-swap="innerHTML" hx-timeout="10000">
+            <div style="padding:1em;">
+                <div class="pp-skeleton pp-skeleton-row"></div>
+                <div class="pp-skeleton pp-skeleton-row"></div>
+                <div class="pp-skeleton pp-skeleton-row"></div>
+            </div>
         </div>
     </div>
 
@@ -232,7 +253,10 @@ function switchHeatmapPeriod(period, btn) {
             }
         })
         .catch(function() {
-            if (body) body.style.opacity = '';
+            if (body) {
+                body.style.opacity = '';
+                body.innerHTML = '<div class="pp-section-error"><span>Unable to load heatmap data.</span><button onclick="switchHeatmapPeriod(\'' + period + '\', document.querySelector(\'.heatmap-pill.active\'))">Retry</button></div>';
+            }
         });
 }
 </script>

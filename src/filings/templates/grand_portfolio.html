@@ -468,8 +468,13 @@
             <td class="text-small">
                 <a href="/holdings/{{ si.cik }}">{{ si.fund_name }}</a>
             </td>
-            <td colspan="4" aria-busy="true">
-                <span class="spinner"></span> Loading from SEC EDGAR...
+            <td colspan="4">
+                <div style="display:flex;gap:0.5em;align-items:center;">
+                    <div class="pp-skeleton" style="width:60px;height:14px;"></div>
+                    <div class="pp-skeleton" style="width:40px;height:14px;"></div>
+                    <div class="pp-skeleton" style="width:80px;height:14px;"></div>
+                    <div class="pp-skeleton" style="width:100px;height:14px;"></div>
+                </div>
             </td>
         </tr>
         {% endif %}
@@ -490,9 +495,9 @@
          hx-get="/api/activity-feed?timeframe=ALL&ptype=guru"
          hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
          hx-swap="innerHTML">
-        <article>
-            <p aria-busy="true"><span class="spinner"></span> Loading activity intelligence...</p>
-        </article>
+        <div class="pp-skeleton-table">
+            <div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div>
+        </div>
     </div>
     </div>{# end glass-card #}
     <script>
@@ -519,9 +524,9 @@
          hx-get="/api/deployment-leaderboard"
          hx-trigger="{% if view == 'deployment' %}load{% else %}revealed{% endif %}"
          hx-swap="innerHTML">
-        <article>
-            <p aria-busy="true"><span class="spinner"></span> Loading deployment data...</p>
-        </article>
+        <div class="pp-skeleton-table">
+            <div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div>
+        </div>
     </div>
     </div>{# end glass-card #}
 </div>{# end panel-deployment #}

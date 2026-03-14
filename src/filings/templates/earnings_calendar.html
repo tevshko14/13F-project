@@ -98,9 +98,7 @@
      hx-get="/api/earnings-calendar/grid?view=weekly"
      hx-trigger="load"
      hx-swap="innerHTML">
-    <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-        <span aria-busy="true">Loading earnings calendar…</span>
-    </div>
+    <div class="pp-skeleton-table" style="padding:1.5em;"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
 </div>
 
 {# ── Day detail panel (appears when clicking a day) ── #}

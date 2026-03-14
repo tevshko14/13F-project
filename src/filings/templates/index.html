@@ -64,8 +64,13 @@
             <td class="text-small">
                 <a href="/holdings/{{ si.cik }}">{{ si.fund_name }}</a>
             </td>
-            <td colspan="4" aria-busy="true">
-                <span class="spinner"></span> Loading from SEC EDGAR...
+            <td colspan="4">
+                <div style="display:flex;gap:0.5em;align-items:center;">
+                    <div class="pp-skeleton" style="width:60px;height:14px;"></div>
+                    <div class="pp-skeleton" style="width:40px;height:14px;"></div>
+                    <div class="pp-skeleton" style="width:80px;height:14px;"></div>
+                    <div class="pp-skeleton" style="width:100px;height:14px;"></div>
+                </div>
             </td>
         </tr>
         {% endif %}

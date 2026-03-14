@@ -330,7 +330,7 @@
         <div class="chart-container" id="portfolio-donut"></div>
         <div class="chart-legend" id="portfolio-legend">
             <div class="chart-empty" id="portfolio-chart-loading">
-                <span aria-busy="true">Loading chart data...</span>
+                <div class="pp-skeleton pp-skeleton-chart" style="height:120px;width:100%;"></div>
             </div>
         </div>
     </div>
@@ -347,8 +347,11 @@
         '#00838f', '#f9a825', '#4e342e', '#546e7a', '#ad1457'
     ];
 
-    fetch('/api/portfolio-chart/{{ fund.cik }}')
-        .then(function(r) { return r.json(); })
+    var _chartController = new AbortController();
+    var _chartTimer = setTimeout(function() { _chartController.abort(); }, 10000);
+
+    fetch('/api/portfolio-chart/{{ fund.cik }}', { signal: _chartController.signal })
+        .then(function(r) { clearTimeout(_chartTimer); return r.json(); })
         .then(function(data) {
             if (!data || data.length === 0) {
                 legendEl.innerHTML = '<div class="chart-empty">No portfolio data available</div>';
@@ -502,7 +505,8 @@
             }); // end requireECharts
         })
         .catch(function() {
-            legendEl.innerHTML = '<div class="chart-empty">Failed to load chart data</div>';
+            clearTimeout(_chartTimer);
+            legendEl.innerHTML = '<div class="pp-section-error"><span>Unable to load chart data.</span><button onclick="location.reload()">Retry</button></div>';
         });
 })();
 </script>
@@ -511,7 +515,9 @@
 <div id="deployment-card-slot"
      hx-get="/api/deployment/{{ fund.cik }}"
      hx-trigger="load"
-     hx-swap="innerHTML">
+     hx-swap="innerHTML"
+     hx-timeout="10000">
+    <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
 </div>
 
 {# ══════════════════════════════════════════════════════════════════ #}

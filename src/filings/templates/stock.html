@@ -620,9 +620,13 @@
     {# ── News section ── #}
     <h4 style="margin-top: 0.5em;">Latest News</h4>
     <div id="ticker-news-container">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading news...
-        </p>
+        <div style="padding:0.5em 0;">
+            <div class="pp-skeleton pp-skeleton-row"></div>
+            <div class="pp-skeleton pp-skeleton-row"></div>
+            <div class="pp-skeleton pp-skeleton-row"></div>
+            <div class="pp-skeleton pp-skeleton-row"></div>
+            <div class="pp-skeleton pp-skeleton-row"></div>
+        </div>
     </div>
 
     {# ── ECharts OHLCV candlestick chart ── #}
@@ -801,12 +805,15 @@
             function fetchOHLCV(period) {
                 _currentPeriod = period;
                 chartEl.style.opacity = '0.5';
-                fetch('/api/stock/' + TICKER + '/ohlcv?period=' + period)
-                    .then(function(r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+                var controller = new AbortController();
+                var timer = setTimeout(function() { controller.abort(); }, 10000);
+                fetch('/api/stock/' + TICKER + '/ohlcv?period=' + period, { signal: controller.signal })
+                    .then(function(r) { clearTimeout(timer); if (!r.ok) throw new Error(r.status); return r.json(); })
                     .then(function(data) { chartEl.style.opacity = '1'; renderChart(data); })
                     .catch(function() {
+                        clearTimeout(timer);
                         chartEl.style.opacity = '1';
-                        chartEl.innerHTML = '<p style="text-align:center;padding:3em 0;color:var(--pico-muted-color)">Price data unavailable for ' + TICKER + '</p>';
+                        chartEl.innerHTML = '<div class="pp-section-error"><span>Unable to load price chart.</span><button onclick="fetchOHLCV(\'' + period + '\')">Retry</button></div>';
                     });
             }
 
@@ -841,25 +848,35 @@
         function loadTickerNews(ticker) {
             var container = document.getElementById('ticker-news-container');
             var url = 'https://api.tickertick.com/feed?q=tt:' + ticker.toLowerCase() + '&n=50';
+            var newsRetries = 3;
 
-            fetch(url)
-                .then(function(resp) { return resp.json(); })
-                .then(function(data) {
-                    if (!data.stories || data.stories.length === 0) {
+            function doFetchNews() {
+                var controller = new AbortController();
+                var timer = setTimeout(function() { controller.abort(); }, 10000);
+
+                fetch(url, { signal: controller.signal })
+                    .then(function(resp) { clearTimeout(timer); return resp.json(); })
+                    .then(function(data) {
+                        if (!data.stories || data.stories.length === 0) {
+                            container.innerHTML =
+                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
+                                'No recent news found for ' + ticker + '.</p>';
+                            return;
+                        }
+                        allStories = data.stories;
+                        currentPage = 0;
+                        renderNewsPage(container);
+                    })
+                    .catch(function() {
+                        clearTimeout(timer);
+                        newsRetries--;
+                        if (newsRetries > 0) { doFetchNews(); return; }
                         container.innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'No recent news found for ' + ticker + '.</p>';
-                        return;
-                    }
-                    allStories = data.stories;
-                    currentPage = 0;
-                    renderNewsPage(container);
-                })
-                .catch(function() {
-                    container.innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Failed to load news. Please try again later.</p>';
-                });
+                            '<div class="pp-section-error"><span>Unable to load news.</span>' +
+                            '<button onclick="newsRetries=3;doFetchNews();">Retry</button></div>';
+                    });
+            }
+            doFetchNews();
         }
 
         function renderNewsPage(container) {
@@ -1163,18 +1180,14 @@
 {# ── Sub-panel: Congress (lazy-loaded on first pill click) ── #}
 <div class="pp-pill-panel" id="own-panel-congress">
     <div id="congress-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading congressional trading data...
-        </p>
+        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
     </div>
 </div>
 
 {# ── Sub-panel: SEC Filings (lazy-loaded on first pill click) ── #}
 <div class="pp-pill-panel" id="own-panel-filings">
     <div id="filings-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading SEC filings...
-        </p>
+        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
     </div>
 </div>
 
@@ -1182,9 +1195,7 @@
 <div class="pp-pill-panel" id="own-panel-insider">
     <div id="insider-insights-container"></div>
     <div id="insider-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading insider trading data...
-        </p>
+        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
     </div>
 </div>
 
@@ -1199,17 +1210,17 @@
     </div>
     <div id="forecast-analysts-panel" class="pp-pill-panel active">
         <div id="analyst-ratings-content">
-            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading analyst ratings...</p>
+            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
         </div>
     </div>
     <div id="forecast-earnings-panel" class="pp-pill-panel">
         <div id="earnings-content">
-            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading earnings data...</p>
+            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
         </div>
     </div>
     <div id="forecast-estimates-panel" class="pp-pill-panel">
         <div id="estimates-content">
-            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading estimates data...</p>
+            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
         </div>
     </div>
 </div>
@@ -1222,12 +1233,12 @@
     </div>
     <div id="signal-panel-sentiment" class="pp-pill-panel active">
         <div id="signals-content">
-            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading signals data...</p>
+            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
         </div>
     </div>
     <div id="signal-panel-short-interest" class="pp-pill-panel">
         <div id="short-interest-content">
-            <p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading short interest data...</p>
+            <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
         </div>
     </div>
 </div>
@@ -1235,9 +1246,7 @@
 {# ── Vitals Tab ── #}
 <div id="tab-vitals" class="tab-content">
     <div id="vitals-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading vitals data...
-        </p>
+        <div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
     </div>
 </div>
 
@@ -1307,16 +1316,7 @@ window.toggleHolders = function(btn) {
         if (pill === 'analysts' && !analystLoaded) {
             analystLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/analysts/{{ stock_info.ticker }}')
-                .then(function(r) { return r.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('analyst-ratings-content');
-                    el.innerHTML = html; activateScripts(el);
-                })
-                .catch(function() {
-                    document.getElementById('analyst-ratings-content').innerHTML =
-                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load analyst ratings.</p>';
-                });
+            ppLoadSection({ el: 'analyst-ratings-content', url: '/api/analysts/{{ stock_info.ticker }}', errorMsg: 'Unable to load analyst ratings' });
             {% else %}
             document.getElementById('analyst-ratings-content').innerHTML =
                 '<p class="text-muted" style="text-align:center;padding:2em 0;">Analyst ratings require a ticker symbol.</p>';
@@ -1326,16 +1326,7 @@ window.toggleHolders = function(btn) {
         if (pill === 'earnings' && !earningsLoaded) {
             earningsLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/earnings/{{ stock_info.ticker }}')
-                .then(function(r) { return r.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('earnings-content');
-                    el.innerHTML = html; activateScripts(el);
-                })
-                .catch(function() {
-                    document.getElementById('earnings-content').innerHTML =
-                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load earnings data.</p>';
-                });
+            ppLoadSection({ el: 'earnings-content', url: '/api/earnings/{{ stock_info.ticker }}', errorMsg: 'Unable to load earnings data' });
             {% else %}
             document.getElementById('earnings-content').innerHTML =
                 '<p class="text-muted" style="text-align:center;padding:2em 0;">Earnings data requires a ticker symbol.</p>';
@@ -1345,16 +1336,7 @@ window.toggleHolders = function(btn) {
         if (pill === 'estimates' && !estimatesLoaded) {
             estimatesLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/estimates/{{ stock_info.ticker }}')
-                .then(function(r) { return r.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('estimates-content');
-                    el.innerHTML = html; activateScripts(el);
-                })
-                .catch(function() {
-                    document.getElementById('estimates-content').innerHTML =
-                        '<p class="text-muted" style="text-align:center;padding:2em 0;">Failed to load estimates data.</p>';
-                });
+            ppLoadSection({ el: 'estimates-content', url: '/api/estimates/{{ stock_info.ticker }}', errorMsg: 'Unable to load estimates data' });
             {% else %}
             document.getElementById('estimates-content').innerHTML =
                 '<p class="text-muted" style="text-align:center;padding:2em 0;">Estimates data requires a ticker symbol.</p>';
@@ -1381,45 +1363,20 @@ window.toggleHolders = function(btn) {
         if (pill === 'sentiment' && !signalsLoaded) {
             signalsLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/signals/{{ stock_info.ticker }}')
-                .then(function(resp) { return resp.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('signals-content');
-                    el.innerHTML = html;
-                    activateScripts(el);
-                    if (window.initSortableTables) window.initSortableTables();
-                })
-                .catch(function() {
-                    document.getElementById('signals-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Failed to load signals data. Please try again later.</p>';
-                });
+            ppLoadSection({ el: 'signals-content', url: '/api/signals/{{ stock_info.ticker }}', errorMsg: 'Unable to load signals data' });
             {% else %}
             document.getElementById('signals-content').innerHTML =
-                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                'Signals data requires a ticker symbol.</p>';
+                '<p class="text-muted" style="text-align: center; padding: 2em 0;">Signals data requires a ticker symbol.</p>';
             {% endif %}
         }
 
         if (pill === 'short-interest' && !shortInterestLoaded) {
             shortInterestLoaded = true;
             {% if stock_info.ticker %}
-            fetch('/api/signals/{{ stock_info.ticker }}/short-interest')
-                .then(function(resp) { return resp.text(); })
-                .then(function(html) {
-                    var el = document.getElementById('short-interest-content');
-                    el.innerHTML = html;
-                    activateScripts(el);
-                })
-                .catch(function() {
-                    document.getElementById('short-interest-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Failed to load short interest data. Please try again later.</p>';
-                });
+            ppLoadSection({ el: 'short-interest-content', url: '/api/signals/{{ stock_info.ticker }}/short-interest', errorMsg: 'Unable to load short interest data' });
             {% else %}
             document.getElementById('short-interest-content').innerHTML =
-                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                'Short interest data requires a ticker symbol.</p>';
+                '<p class="text-muted" style="text-align: center; padding: 2em 0;">Short interest data requires a ticker symbol.</p>';
             {% endif %}
         }
     }
@@ -1460,27 +1417,11 @@ window.toggleHolders = function(btn) {
         if (tab === 'vitals' && !vitalsLoaded) {
             vitalsLoaded = true;
             {% if stock_info.ticker %}
-            var vitalsUrl = '/api/vitals/{{ stock_info.ticker }}';
+            ppLoadSection({ el: 'vitals-content', url: '/api/vitals/{{ stock_info.ticker }}', errorMsg: 'Unable to load vitals data' });
             {% else %}
-            var vitalsUrl = null;
+            document.getElementById('vitals-content').innerHTML =
+                '<p class="text-muted" style="text-align: center; padding: 2em 0;">Vitals data requires a ticker symbol.</p>';
             {% endif %}
-
-            if (vitalsUrl) {
-                fetch(vitalsUrl)
-                    .then(function(resp) { return resp.text(); })
-                    .then(function(html) {
-                        document.getElementById('vitals-content').innerHTML = html;
-                    })
-                    .catch(function() {
-                        document.getElementById('vitals-content').innerHTML =
-                            '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                            'Failed to load vitals data. Please try again later.</p>';
-                    });
-            } else {
-                document.getElementById('vitals-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Vitals data requires a ticker symbol.</p>';
-            }
         }
 
     };
@@ -1498,113 +1439,43 @@ window.toggleHolders = function(btn) {
             if (pill.dataset.ownTab === 'congress' && !congressLoaded) {
                 congressLoaded = true;
                 {% if stock_info.ticker %}
-                var congressUrl = '/api/stock/{{ stock_info.ticker }}/congress';
+                ppLoadSection({ el: 'congress-content', url: '/api/stock/{{ stock_info.ticker }}/congress', errorMsg: 'Unable to load congressional trading data' });
                 {% else %}
-                var congressUrl = null;
+                document.getElementById('congress-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">Congressional trading data requires a ticker symbol.</p>';
                 {% endif %}
-                if (congressUrl) {
-                    fetch(congressUrl)
-                        .then(function(resp) {
-                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                            return resp.text();
-                        })
-                        .then(function(html) {
-                            var el = document.getElementById('congress-content');
-                            el.innerHTML = html;
-                            activateScripts(el);
-                            if (window.initSortableTables) window.initSortableTables();
-                        })
-                        .catch(function() {
-                            document.getElementById('congress-content').innerHTML =
-                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                                'Failed to load congressional trading data. Please try again later.</p>';
-                        });
-                } else {
-                    document.getElementById('congress-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Congressional trading data requires a ticker symbol.</p>';
-                }
             }
 
             // Lazy-load SEC filings on first pill click
             if (pill.dataset.ownTab === 'filings' && !filingsLoaded) {
                 filingsLoaded = true;
                 {% if stock_info.ticker %}
-                var filingsUrl = '/api/company-filings/{{ stock_info.ticker }}';
+                ppLoadSection({ el: 'filings-content', url: '/api/company-filings/{{ stock_info.ticker }}', errorMsg: 'Unable to load SEC filings' });
                 {% else %}
-                var filingsUrl = null;
+                document.getElementById('filings-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">SEC filings require a ticker symbol.</p>';
                 {% endif %}
-                if (filingsUrl) {
-                    fetch(filingsUrl)
-                        .then(function(resp) { return resp.text(); })
-                        .then(function(html) {
-                            var el = document.getElementById('filings-content');
-                            el.innerHTML = html;
-                            activateScripts(el);
-                        })
-                        .catch(function() {
-                            document.getElementById('filings-content').innerHTML =
-                                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                                'Failed to load SEC filings. Please try again later.</p>';
-                        });
-                } else {
-                    document.getElementById('filings-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'SEC filings require a ticker symbol.</p>';
-                }
             }
 
             // Lazy-load insider trading on first pill click
             if (pill.dataset.ownTab === 'insider' && !insiderLoaded) {
                 insiderLoaded = true;
                 {% if stock_info.ticker %}
-                var insiderUrl = '/api/insider-trades/{{ stock_info.ticker }}';
-                var insightsUrl = '/api/insider-insights/{{ stock_info.ticker }}';
+                // Load insights silently (non-blocking)
+                fetch('/api/insider-insights/{{ stock_info.ticker }}')
+                    .then(function(resp) { return resp.ok ? resp.text() : ''; })
+                    .then(function(html) {
+                        if (html && html.trim()) {
+                            document.getElementById('insider-insights-container').innerHTML = html;
+                        }
+                    })
+                    .catch(function() {});
+                // Load insider trades with retry
+                ppLoadSection({ el: 'insider-content', url: '/api/insider-trades/{{ stock_info.ticker }}', errorMsg: 'Unable to load insider trading data' });
                 {% else %}
-                var insiderUrl = null;
-                var insightsUrl = null;
+                document.getElementById('insider-content').innerHTML =
+                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">Insider trading data requires a ticker symbol.</p>';
                 {% endif %}
-                if (insiderUrl) {
-                    if (insightsUrl) {
-                        fetch(insightsUrl)
-                            .then(function(resp) { return resp.ok ? resp.text() : ''; })
-                            .then(function(html) {
-                                if (html && html.trim()) {
-                                    document.getElementById('insider-insights-container').innerHTML = html;
-                                }
-                            })
-                            .catch(function() {});
-                    }
-                    var insiderRetried = false;
-                    function fetchInsider() {
-                        fetch(insiderUrl)
-                            .then(function(resp) {
-                                if (!resp.ok) throw new Error('HTTP ' + resp.status);
-                                return resp.text();
-                            })
-                            .then(function(html) {
-                                var el = document.getElementById('insider-content');
-                                el.innerHTML = html;
-                                activateScripts(el);
-                                if (window.initSortableTables) window.initSortableTables();
-                            })
-                            .catch(function() {
-                                if (!insiderRetried) {
-                                    insiderRetried = true;
-                                    setTimeout(fetchInsider, 1500);
-                                    return;
-                                }
-                                document.getElementById('insider-content').innerHTML =
-                                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                                    'Failed to load insider trading data. Please try again later.</p>';
-                            });
-                    }
-                    fetchInsider();
-                } else {
-                    document.getElementById('insider-content').innerHTML =
-                        '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                        'Insider trading data requires a ticker symbol.</p>';
-                }
             }
 
             if (window.initSortableTables) window.initSortableTables();

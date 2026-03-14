@@ -9,8 +9,8 @@
 
 **Branch:** `claude/francisco-fixes-aABrd`
 **Base:** `main`
-**Files changed:** 20
-**Commits:** 16
+**Files changed:** 23
+**Commits:** 17
 
 This branch contains five categories of work:
 
@@ -377,6 +377,43 @@ Added `tests/test_ticker_corrections.py` — 74 test cases.
 
 - **Extracted `.badge-beta` CSS class** in `base.html` — replaced duplicated inline styles on both BETA badges (nav link + page header) with a shared class following the existing `.badge-*` system (13+ variants)
 - **Size variants**: `.badge-beta-sm` (nav context) and `.badge-beta-lg` (h1 context) for the two different size needs
+
+---
+
+### 16. Replace all "Loading..." states with skeleton UI + error handling
+
+**Problem:** Every page showed plain "Loading [section]..." text with no timeout, no retry, and no error state. If an API call failed or timed out, users saw "Loading..." forever. The stock detail page alone had 12 such sections. With ~200 DAU, this was the single biggest UX trust gap.
+
+**Fix — Shared infrastructure (`base.html`):**
+
+- **Added `ppLoadSection()` utility function** — universal loader with skeleton UI, 10s AbortController timeout, 3 automatic retries, and error-with-retry fallback. Works for any fetch-based section.
+- **Added global HTMX error handling** — `htmx:responseError`, `htmx:sendError`, and `htmx:timeout` listeners that swap in a retry-button error state instead of leaving stale content
+- **Added `htmx:configRequest` handler** setting 10s timeout for all HTMX requests
+- **Added shared CSS** — `.pp-skeleton` (shimmer gradient), `.pp-skeleton-row` (text-line placeholder), `.pp-skeleton-card` (stat card placeholder), `.pp-skeleton-chart` (chart placeholder), `.pp-skeleton-table` (table container), `.pp-section-error` (compact error + retry button)
+
+**Fix — Per-page updates (11 templates):**
+
+| Page | Sections Updated | Method |
+|------|-----------------|--------|
+| **Homepage** (`home.html`) | Ticker tape, Market Overview, Market News, S&P 500 Heatmap, Retail Sentiment, Trending | Skeleton placeholders replacing `<span class="spinner">` + HTMX error coverage |
+| **Stock Detail** (`stock.html`) | Price chart, News, Congress, SEC Filings, Insider, Analysts, Earnings, Estimates, Signals, Short Interest, Vitals (12 sections) | All fetch calls converted to `ppLoadSection()` with skeleton + timeout + retry |
+| **Funds** (`grand_portfolio.html`) | Fund rows, Activity feed, Deployment leaderboard | Skeleton rows replacing spinner + HTMX error coverage |
+| **Congress** (`congress.html`) | Activity intelligence dashboard | Skeleton table replacing spinner |
+| **Holdings Detail** (`investor.html`) | Portfolio chart, Deployment card | AbortController timeout + error retry + skeleton |
+| **Retail Sentiment** (`retail.html`) | Leaderboard, Calendar | Timeout + retry loop (leaderboard), `ppLoadSection()` (calendar) |
+| **Macro** (`macro.html`) | Earnings scorecard, Market performance | Skeleton placeholders |
+| **Earnings Calendar** (`earnings_calendar.html`) | Calendar grid | Skeleton placeholder |
+| **Alternative Signals** (`alternative_signals.html`) | Short interest, Google Trends macro, Trending searches, Ticker lookup | Skeleton replacing spinner |
+| **Insider Trading** (`insider_trading.html`) | Trade table | AbortController timeout + 3-retry loop + error UI |
+| **Index** (`index.html`) | Fund rows | Skeleton bars replacing spinner |
+
+**Lifecycle for every section:**
+```
+Initial render → Skeleton/shimmer UI → Data loaded (success)
+                                     → Error state with Retry (failure after 3 attempts)
+```
+
+**No re-processing required** — purely frontend template changes.
 
 ---
 

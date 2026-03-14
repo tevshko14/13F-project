@@ -74,9 +74,7 @@
          hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
          hx-trigger="load"
          hx-swap="innerHTML">
-        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-            <span aria-busy="true">Loading earnings scorecard…</span>
-        </div>
+        <div class="pp-skeleton-table" style="padding:1.5em;"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>
     </div>
 </div>
 
@@ -98,9 +96,7 @@
         </div>
     </div>
     <div id="mb-content">
-        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-            <span aria-busy="true">Loading market performance…</span>
-        </div>
+        <div class="pp-skeleton-table" style="padding:1.5em;"><div class="pp-skeleton pp-skeleton-chart" style="height:250px;"></div></div>
     </div>
 </div>
 
