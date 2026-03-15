@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Retail Sentiment & Reddit Trending Stocks | PaperPanda{% endblock %}
 {% block meta_description %}Monitor retail trader sentiment — Reddit trending tickers, market fear and greed index, and finance YouTuber schedules. See what retail investors are buzzing about.{% endblock %}
 {% block og_title %}Retail Sentiment & Reddit Trending Stocks | PaperPanda{% endblock %}
@@ -486,9 +487,7 @@
 
     {# Leaderboard table (lazy-loaded partial) #}
     <div id="retail-leaderboard-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading leaderboard...
-        </p>
+        {{ skeleton_rows(10) }}
     </div>
 </div>
 
@@ -498,9 +497,7 @@
 {# ══════════════════════════════════════════════════════════════════ #}
 <div id="panel-calendar" class="rt-panel{% if view == 'calendar' %} active{% endif %}">
     <div id="retail-calendar-content">
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading event calendar...
-        </p>
+        {{ skeleton_rows(5) }}
     </div>
 </div>{# end panel-calendar #}
 
@@ -809,12 +806,17 @@
         history.replaceState(null, '', url.toString());
     };
 
+    var _lbRetries = 3;
     function loadLeaderboard() {
+        var lbContainer = document.getElementById('retail-leaderboard-content');
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); }, 10000);
         /* Fetch JSON (charts) + HTML (table) in parallel */
         Promise.all([
-            fetch('/api/retail/leaderboard-data').then(function(r) { return r.json(); }),
-            fetch('/api/retail/leaderboard').then(function(r) { return r.text(); })
+            fetch('/api/retail/leaderboard-data', { signal: controller.signal }).then(function(r) { return r.json(); }),
+            fetch('/api/retail/leaderboard', { signal: controller.signal }).then(function(r) { return r.text(); })
         ]).then(function(results) {
+            clearTimeout(timer);
             var data = results[0];
             var tableHtml = results[1];
 
@@ -822,9 +824,7 @@
             renderRetailTreemap(data.treemap_data);
             renderBubbleChart(data.bubble_data);
 
-            var lbContainer = document.getElementById('retail-leaderboard-content');
             lbContainer.innerHTML = tableHtml;
-            /* Re-create <script> tags so they execute after innerHTML injection */
             lbContainer.querySelectorAll('script').forEach(function(old) {
                 var s = document.createElement('script');
                 s.textContent = old.textContent;
@@ -832,38 +832,18 @@
             });
             if (window.initSortableTables) window.initSortableTables();
         }).catch(function() {
-            document.getElementById('retail-leaderboard-content').innerHTML =
-                '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                'Failed to load leaderboard. Please try again later.</p>';
+            clearTimeout(timer);
+            _lbRetries--;
+            if (_lbRetries > 0) { loadLeaderboard(); return; }
+            lbContainer.innerHTML =
+                '<div class="pp-section-error"><span>Unable to load leaderboard.</span>' +
+                '<button onclick="_lbRetries=3;loadLeaderboard();">Retry</button></div>';
         });
     }
 
     /* ── Calendar lazy-load ── */
     function loadCalendar() {
-        fetch('/api/retail/calendar')
-            .then(function(r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.text();
-            })
-            .then(function(html) {
-                var container = document.getElementById('retail-calendar-content');
-                container.innerHTML = html;
-                /* Scripts injected via innerHTML don't execute automatically.
-                   Re-create each <script> so the browser evaluates them. */
-                container.querySelectorAll('script').forEach(function(old) {
-                    var s = document.createElement('script');
-                    s.textContent = old.textContent;
-                    old.parentNode.replaceChild(s, old);
-                });
-                if (window.initSortableTables) window.initSortableTables();
-            })
-            .catch(function() {
-                document.getElementById('retail-calendar-content').innerHTML =
-                    '<div style="text-align: center; padding: 2em 0;">' +
-                    '<p class="text-muted">Calendar is temporarily unavailable.</p>' +
-                    '<button onclick="loadCalendar()" style="margin-top: 0.5em; font-size: 0.85em;">Retry</button>' +
-                    '</div>';
-            });
+        ppLoadSection({ el: 'retail-calendar-content', url: '/api/retail/calendar', errorMsg: 'Unable to load event calendar' });
     }
     window.loadCalendar = loadCalendar;
 

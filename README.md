@@ -25,7 +25,7 @@ A web dashboard for tracking SEC 13F institutional holdings filings from 84 supe
 - **Trade History** - Full sortable trade table
 
 ### Navigation
-Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Support the Panda** | **🔔 Notification Bell**
+Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Earnings Calendar** | **Support the Panda** | **🔔 Notification Bell**
 
 ### Retail Page (`/retail`)
 - **Sentiment Tab** - CNN Fear & Greed gauge, summary cards (Most Mentioned, Biggest Rank Mover, Top 5 Trending)
@@ -40,6 +40,15 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Sup
 ### Insider Trading Page (`/insider-trading`)
 - **Global Screener** - Latest insider buys/sells across all stocks with top-tickers chart
 - **Per-Ticker View** - Full insider trade history (back to IPO) with quarterly grouping, insider summary cards, stacked bar chart, hover tooltips with quarterly breakdowns, and per-insider dropdown filter
+
+### Earnings Calendar Page (`/earnings-calendar`)
+- **Weekly View** — Mon–Fri grid showing upcoming earnings reports grouped by day, with BMO (Before Market Open) / AMC (After Market Close) timing badges
+- **Monthly Heatmap** — Calendar grid color-coded by earnings density (more reports = deeper red), with mini company logo strips per day
+- **Hover Cards** — Mouse over any company logo to see name, sector, EPS/revenue estimates, actuals (if reported), and beat/miss badges
+- **Day Detail Panel** — Click any day to expand a full table with company, ticker, timing, estimates, actuals, and beat/miss results
+- **Navigation** — Week/month toggle, prev/next arrows, "Today" button; all views load via HTMX without full page reload
+- **Data Sources** — Finnhub `/calendar/earnings` (primary, free tier) with FMP `/earning_calendar` fallback (premium); deterministic mock data when no API keys configured
+- **Feature Flag** — Controlled by `EARNINGS_CALENDAR_ENABLED` env var (default: enabled)
 
 ### Support Page (`/support`)
 - **Panda Fund Dashboard** - Transparency page showing monthly funding progress, cost breakdown, and funding history chart (ECharts)
@@ -185,6 +194,8 @@ railway up
 | `STRIPE_PRICING_TABLE_ID` | No | - | Stripe Pricing Table ID (recurring subscriptions) |
 | `PANDA_FUND_RAISED` | No | - | Current month's donation total in dollars |
 | `FEEDBACK_LINK` | No | - | URL to feedback form (Notion, Google Form, etc.) |
+| `FMP_API_KEY` | No | 250 calls/day | Financial Modeling Prep (earnings calendar fallback, earnings scorecard) |
+| `EARNINGS_CALENDAR_ENABLED` | No | - | Enable/disable earnings calendar page (default: `1` = enabled) |
 | `ENABLE_BACKGROUND_REFRESH` | No | - | Enable/disable background 13F refresh (default: `true`) |
 | `WEB_WORKERS` | No | - | Gunicorn worker count (default: `2`) |
 | `HEALTH_SECRET` | No | - | Secret for `/health/detail` endpoint |
@@ -215,6 +226,9 @@ src/filings/
 ├── insider_trading.py  # Form 4 insider transaction data (Supabase-first + scrape fallback)
 ├── insider_sync.py     # Cron worker: scrape OpenInsider → upsert to Supabase (every 30 min)
 ├── congress_trading.py # STOCK Act: Capitol Trades scraper + display prep (chamber viz, trending, consensus, momentum, activity)
+├── earnings.py         # Per-ticker earnings history (yfinance + Finnhub + FMP)
+├── earnings_scorecard.py # Macro earnings season metrics (FMP + Supabase)
+├── earnings_calendar.py  # Earnings calendar (Finnhub + FMP, week/month views)
 ├── models.py           # Dataclasses (data contracts)
 ├── watchlist.py        # Watchlist persistence
 ├── notifications.py    # Notification creators (13F, YouTube, Reddit, Congress) + filing season detection
@@ -240,6 +254,7 @@ src/filings/
     ├── notifications.html # Notification history page
     ├── activity.html   # Cross-fund activity feed
     ├── support.html    # Panda Fund transparency dashboard + Stripe donations
+    ├── earnings_calendar.html  # Earnings calendar page (weekly/monthly views)
     └── partials/       # HTMX / lazy-loaded partials
         ├── heatmap.html             # S&P 500 ECharts treemap
         ├── most_added.html          # Most-added-by-superinvestors table
@@ -254,6 +269,8 @@ src/filings/
         ├── compare_content.html     # Compare quarters (lazy-loaded)
         ├── options_feed.html        # Unusual options activity table (OI delta, moneyness, greeks)
         ├── options_clusters.html    # Clustered unusual options cards (multi-contract tickers)
+        ├── earnings_calendar_grid.html  # Earnings calendar grid/heatmap (HTMX partial)
+        ├── earnings_calendar_day.html   # Earnings calendar day detail table (HTMX partial)
         └── data_error.html          # Reusable error partial (rate limits, HTMX-aware)
 ```
 
@@ -334,6 +351,8 @@ Per-ticker data merges hot table → OpenInsider scrape → cold table, deduplic
 | People Data Labs | 7 days | Headcount changes slowly |
 | App Store Ratings | 7 days | App ratings change slowly |
 | Finnhub Sentiment | 2 hours | News changes frequently |
+| Earnings Calendar | 1 hour (in-memory) | Calendar events change intraday as companies confirm timing |
+| Finnhub Raw Calendar | 1 hour (in-memory, shared) | Shared by earnings calendar + revenue enrichment |
 | CNN Fear & Greed | 1 hour | Market-wide index, intraday updates |
 | ApeWisdom Reddit | 1 hour | Reddit mentions aggregated hourly |
 | Analyst Ratings | 5 minutes | Fresh data preferred |

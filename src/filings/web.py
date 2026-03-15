@@ -215,6 +215,41 @@ async def _to_heavy(fn, *args):
     return await loop.run_in_executor(pool, fn, *args)
 
 
+async def _safe_fetch(coro, label: str, timeout: int = 10):
+    """Await *coro* with a timeout; return None on any failure.
+
+    Used by /retail endpoints to ensure no single data source can block
+    the page render.  Failures are logged but never bubble up.
+    """
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("/retail: %s timed out (%ds)", label, timeout)
+        return None
+    except Exception:
+        logger.warning("/retail: %s failed", label, exc_info=True)
+        return None
+
+
+async def _fetch_retail_data() -> tuple[list[dict], dict | None]:
+    """Fetch ApeWisdom + CNN Fear&Greed for leaderboard endpoints.
+
+    Returns (all_data, fear_greed) — both degrade gracefully to empty/None.
+    """
+    try:
+        all_data, fear_greed = await asyncio.wait_for(
+            asyncio.gather(
+                _to_heavy(sentiment._get_apewisdom_all),
+                _to_heavy(sentiment._get_cnn_fear_greed),
+            ),
+            timeout=10,
+        )
+    except Exception:
+        logger.warning("_fetch_retail_data: data fetch failed", exc_info=True)
+        all_data, fear_greed = [], None
+    return all_data or [], fear_greed
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Lifespan
 # ═══════════════════════════════════════════════════════════════════════
@@ -446,6 +481,10 @@ app.mount(
 
 # Template globals
 templates.env.globals["current_year"] = datetime.now().year
+# Rolling 12-month stale cutoff for fund filings
+# Computed at startup; Railway restarts daily so drift is negligible.
+_stale_cutoff = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+templates.env.globals["stale_cutoff"] = _stale_cutoff
 templates.env.globals["supabase_url"] = auth.SUPABASE_URL
 templates.env.globals["supabase_anon_key"] = auth.SUPABASE_ANON_KEY
 templates.env.globals["auth_enabled"] = bool(auth.CLERK_DOMAIN or auth.SUPABASE_ANON_KEY)
@@ -501,9 +540,32 @@ def _format_pretty_date(value: str) -> str:
         return value
 
 
+def _format_value(value, prefix: str = "$", precision: int = 1) -> str:
+    """Format a dollar value with B/M/K suffixes for compact display.
+
+    Examples: 6_500_000_000 → "$6.5B", 450_000_000 → "$450M", 75_000 → "$75K"
+    """
+    if not value or value == 0:
+        return f"{prefix}0"
+    v = float(value)
+    if v >= 1_000_000_000:
+        return f"{prefix}{v / 1_000_000_000:.{precision}f}B"
+    if v >= 1_000_000:
+        return f"{prefix}{v / 1_000_000:.0f}M"
+    if v >= 1_000:
+        return f"{prefix}{v / 1_000:.0f}K"
+    return f"{prefix}{v:,.0f}"
+
+
 templates.env.filters["format_short_date"] = _format_short_date
 templates.env.filters["format_pretty_date"] = _format_pretty_date
 templates.env.filters["abbreviate_sector"] = _abbreviate_sector
+templates.env.filters["format_value"] = _format_value
+
+
+def _top_tickers(cached: dict, n: int = 5) -> list[str]:
+    """Extract up to *n* valid ticker symbols from a fund's cached top holdings."""
+    return [h["ticker"] for h in cached.get("top_holdings", [])[:n] if h.get("ticker")]
 
 # Attach rate limiter
 if _has_limiter:
@@ -2016,10 +2078,15 @@ async def fund_row(request: Request, cik: str):
     cached = await _get_fund_data(cik)
 
     if cached:
-        top_tickers = [
-            h.get("ticker") or h.get("issuer", "?")[:8]
-            for h in cached.get("top_holdings", [])[:5]
-        ]
+        # Trigger background refresh if this fund is stale
+        if (
+            _ENABLE_BACKGROUND_REFRESH
+            and cache.is_fund_stale(cached)
+            and cik_normalized not in _refresh_in_progress
+        ):
+            asyncio.create_task(_trigger_single_refresh(app, cik_normalized))
+
+        top_tickers = _top_tickers(cached)
         return templates.TemplateResponse(
             "partials/fund_row.html",
             {
@@ -2306,10 +2373,7 @@ async def funds_page(request: Request, view: str = "funds"):
     for si in SUPERINVESTORS:
         cached = cache_data.get(si.cik)
         if cached:
-            top_tickers = [
-                h.get("ticker") or h.get("issuer", "?")[:8]
-                for h in cached.get("top_holdings", [])[:5]
-            ]
+            top_tickers = _top_tickers(cached)
             si_summaries.append(
                 SuperinvestorSummary(
                     cik=si.cik,
@@ -3821,6 +3885,7 @@ async def alt_signals_short_interest(request: Request):
 
 # --- Macro Earnings Scorecard ---
 
+
 @app.get("/macro", response_class=HTMLResponse)
 async def macro_page(
     request: Request,
@@ -4173,25 +4238,197 @@ async def stock_wsb_api(request: Request, ticker: str):
     )
 
 
+# ─── Earnings Calendar (standalone page) ──────────────────────────────
+@app.get("/earnings-calendar", response_class=HTMLResponse)
+async def earnings_calendar_page(request: Request):
+    """Earnings Calendar page — interactive visual calendar of upcoming earnings."""
+    from filings import earnings_calendar
+
+    if not earnings_calendar.FEATURE_ENABLED:
+        return templates.TemplateResponse(
+            "under_construction.html",
+            {"request": request},
+            status_code=200,
+        )
+
+    return templates.TemplateResponse(
+        "earnings_calendar.html",
+        {"request": request},
+    )
+
+
+@app.get("/api/earnings-calendar/grid", response_class=HTMLResponse)
+async def earnings_calendar_grid_api(
+    request: Request,
+    view: str = "weekly",
+    offset: int = 0,
+):
+    """HTMX endpoint — returns the earnings calendar grid partial."""
+    from filings import earnings_calendar
+    from datetime import datetime, timedelta
+
+    if view not in ("weekly", "monthly"):
+        view = "weekly"
+    offset = max(-24, min(24, offset))
+
+    now = datetime.now()
+
+    if view == "monthly":
+        target_month = now.month + offset
+        target_year = now.year
+        while target_month > 12:
+            target_month -= 12
+            target_year += 1
+        while target_month < 1:
+            target_month += 12
+            target_year -= 1
+
+        data = await _to_heavy(
+            earnings_calendar.get_month_view, target_year, target_month,
+        )
+
+        # Build month cells for template
+        import calendar as cal_mod
+        first_day = datetime(target_year, target_month, 1)
+        # weekday(): Monday=0 ... Sunday=6
+        start_weekday = first_day.weekday()
+        days_in_month = cal_mod.monthrange(target_year, target_month)[1]
+
+        by_date = data.get("by_date", {})
+        max_count = max((len(v) for v in by_date.values()), default=0) or 1
+
+        month_cells = []
+        # Pad leading empty cells
+        for _ in range(start_weekday):
+            month_cells.append({"empty": True})
+
+        for day_num in range(1, days_in_month + 1):
+            d = datetime(target_year, target_month, day_num)
+            date_str = d.strftime("%Y-%m-%d")
+            day_entries = by_date.get(date_str, [])
+            count = len(day_entries)
+            top_tickers = [e["ticker"] for e in day_entries[:3]]
+
+            # Heat level 0-4
+            if count == 0:
+                heat = 0
+            elif count <= max_count * 0.25:
+                heat = 1
+            elif count <= max_count * 0.5:
+                heat = 2
+            elif count <= max_count * 0.75:
+                heat = 3
+            else:
+                heat = 4
+
+            month_cells.append({
+                "empty": False,
+                "day": day_num,
+                "date": date_str,
+                "count": count,
+                "heat": heat,
+                "top_tickers": top_tickers,
+                "is_today": date_str == now.strftime("%Y-%m-%d"),
+                "is_weekend": d.weekday() >= 5,
+            })
+
+        # Pad trailing empty cells
+        trailing = (7 - len(month_cells) % 7) % 7
+        for _ in range(trailing):
+            month_cells.append({"empty": True})
+
+        return templates.TemplateResponse(
+            "partials/earnings_calendar_grid.html",
+            {
+                "request": request,
+                "view": "monthly",
+                "stats": data.get("stats", {}),
+                "weeks": [],
+                "month_cells": month_cells,
+                "logo_tickers": _logo_set,
+            },
+        )
+    else:
+        # Weekly view
+        days_since_monday = now.weekday()
+        target_monday = now - timedelta(days=days_since_monday) + timedelta(weeks=offset)
+        target_friday = target_monday + timedelta(days=4)
+
+        data = await _to_heavy(
+            earnings_calendar.get_earnings_calendar,
+            target_monday.strftime("%Y-%m-%d"),
+            target_friday.strftime("%Y-%m-%d"),
+            1,
+        )
+
+        return templates.TemplateResponse(
+            "partials/earnings_calendar_grid.html",
+            {
+                "request": request,
+                "view": "weekly",
+                "stats": data.get("stats", {}),
+                "weeks": data.get("weeks", []),
+                "month_cells": [],
+                "logo_tickers": _logo_set,
+            },
+        )
+
+
+@app.get("/api/earnings-calendar/day", response_class=HTMLResponse)
+async def earnings_calendar_day_api(
+    request: Request,
+    date: str = "",
+):
+    """HTMX endpoint — returns the day detail table partial."""
+    from filings import earnings_calendar
+    from datetime import datetime
+
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    elif not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
+        return PlainTextResponse("Invalid date format", status_code=400)
+
+    data = await _to_heavy(
+        earnings_calendar.get_earnings_calendar, date, date, 1,
+    )
+    entries = data.get("by_date", {}).get(date, [])
+    has_actuals = any(e.get("eps_actual") is not None for e in entries)
+
+    try:
+        dt = datetime.strptime(date, "%Y-%m-%d")
+        date_label = dt.strftime("%A, %B %d, %Y")
+    except ValueError:
+        date_label = date
+
+    return templates.TemplateResponse(
+        "partials/earnings_calendar_day.html",
+        {
+            "request": request,
+            "entries": entries,
+            "date": date,
+            "date_label": date_label,
+            "has_actuals": has_actuals,
+            "logo_tickers": _logo_set,
+        },
+    )
+
+
 @app.get("/retail", response_class=HTMLResponse)
 async def retail_page(request: Request, view: str = "sentiment"):
     if view not in ("sentiment", "leaderboard", "calendar"):
         view = "sentiment"
 
-    # Hard 12-second timeout per call — prevents page hang when external
-    # APIs (CNN, ApeWisdom) accept the connection but stall on response.
-    async def _safe(coro, fallback=None):
-        try:
-            return await asyncio.wait_for(coro, timeout=12)
-        except (asyncio.TimeoutError, Exception) as exc:
-            logger.warning("retail_page: call failed/timed out: %s", exc)
-            return fallback
-
+    # Fetch all three data sources independently — any failure returns None,
+    # never blocks the page.  10-second overall timeout prevents Railway kill.
     fear_greed, apewisdom, high_impact_events = await asyncio.gather(
-        _safe(_to_heavy(sentiment._get_cnn_fear_greed)),
-        _safe(_to_heavy(sentiment._get_apewisdom_all), fallback=[]),
-        _safe(asyncio.to_thread(youtube.get_high_impact_events, 9), fallback=[]),
+        _safe_fetch(_to_heavy(sentiment._get_cnn_fear_greed), "cnn_fear_greed"),
+        _safe_fetch(_to_heavy(sentiment._get_apewisdom_all), "apewisdom"),
+        _safe_fetch(asyncio.to_thread(youtube.get_high_impact_events, 9), "youtube"),
     )
+
+    # Normalise: apewisdom returns list or None
+    if not apewisdom:
+        apewisdom = []
 
     # Compute summary stats from ApeWisdom data
     top_stocks = apewisdom[:5] if apewisdom else []
@@ -4219,17 +4456,14 @@ async def retail_page(request: Request, view: str = "sentiment"):
             "biggest_mover": biggest_mover,
             "youtubers": _FINANCE_YOUTUBERS,
             "has_guru_data": has_guru_data,
-            "high_impact_events": high_impact_events,
+            "high_impact_events": high_impact_events or [],
         },
     )
 
 
 @app.get("/api/retail/leaderboard", response_class=HTMLResponse)
 async def retail_leaderboard_api(request: Request):
-    all_data, fear_greed = await asyncio.gather(
-        _to_heavy(sentiment._get_apewisdom_all),
-        _to_heavy(sentiment._get_cnn_fear_greed),
-    )
+    all_data, fear_greed = await _fetch_retail_data()
     ownership_map = _get_ownership_map()
     enriched = sentiment.build_retail_leaderboard_data(
         all_data, ownership_map, fear_greed
@@ -4248,10 +4482,7 @@ async def retail_leaderboard_api(request: Request):
 @app.get("/api/retail/leaderboard-data")
 async def retail_leaderboard_data(request: Request):
     """Enriched leaderboard JSON for treemap, bubble chart, and guru toggle."""
-    all_data, fear_greed = await asyncio.gather(
-        _to_heavy(sentiment._get_apewisdom_all),
-        _to_heavy(sentiment._get_cnn_fear_greed),
-    )
+    all_data, fear_greed = await _fetch_retail_data()
     ownership_map = _get_ownership_map()
     result = sentiment.build_retail_leaderboard_data(
         all_data, ownership_map, fear_greed

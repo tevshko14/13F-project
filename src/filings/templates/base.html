@@ -343,6 +343,62 @@
             margin-right: 0.5em;
         }
 
+        /* ── Skeleton shimmer (shared across all pages) ── */
+        @keyframes ppShimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        .pp-skeleton {
+            background: linear-gradient(90deg, var(--pp-overlay-5) 25%, var(--pp-overlay-10) 50%, var(--pp-overlay-5) 75%);
+            background-size: 200% 100%;
+            animation: ppShimmer 1.5s infinite ease-in-out;
+            border-radius: 6px;
+        }
+        .pp-skeleton-row {
+            height: 18px;
+            margin-bottom: 0.7em;
+        }
+        .pp-skeleton-row:nth-child(odd) { width: 92%; }
+        .pp-skeleton-row:nth-child(even) { width: 68%; }
+        .pp-skeleton-card {
+            height: 80px;
+            margin-bottom: 0.75em;
+        }
+        .pp-skeleton-chart {
+            height: 200px;
+            margin-bottom: 0.75em;
+        }
+        .pp-skeleton-table {
+            padding: 0.75em;
+        }
+        .pp-skeleton-table .pp-skeleton-row { height: 16px; }
+
+        /* ── Section error state ── */
+        .pp-section-error {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.6em;
+            padding: 1.5em 1em;
+            color: var(--pp-text-muted);
+            font-size: 0.88em;
+        }
+        .pp-section-error button {
+            background: none;
+            border: 1px solid var(--pp-overlay-10);
+            border-radius: 6px;
+            padding: 0.3em 0.8em;
+            font-size: 0.9em;
+            color: var(--pp-text-muted);
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+            margin: 0;
+        }
+        .pp-section-error button:hover {
+            background: var(--pp-overlay-5);
+            color: var(--pp-text-secondary);
+        }
+
         .actions { display: flex; gap: 0.5em; }
         .actions a { white-space: nowrap; font-size: 0.85em; padding: 0.3em 0.8em; }
 
@@ -446,6 +502,19 @@
         :root[data-theme="dark"] .badge-liquidated { background: rgba(251, 113, 133, 0.15); color: #fb7185; }
         :root[data-theme="dark"] .badge-mixed { background: rgba(161, 98, 7, 0.18); color: #fbbf24; }
         :root[data-theme="dark"] .badge-neutral { background: var(--pp-surface-hover); color: var(--pp-text-secondary); }
+
+        /* Beta feature badge */
+        .badge-beta {
+            display: inline-block;
+            background: var(--pp-accent, #ef4444);
+            color: #fff;
+            border-radius: 4px;
+            vertical-align: middle;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .badge-beta-sm { font-size: 0.6em; padding: 1px 5px; margin-left: 4px; }
+        .badge-beta-lg { font-size: 0.4em; padding: 2px 8px; }
 
         /* Activity stats bar (sticky header) */
         .activity-stats-bar {
@@ -896,6 +965,237 @@
         .pp-sidebar-toggle:hover { color: #ef4444; background: var(--pp-surface-hover); box-shadow: 0 2px 12px rgba(239, 68, 68, 0.3); }
         .pp-sidebar-toggle svg { width: 12px; height: 12px; stroke-width: 3; transition: transform 0.25s; }
         .pp-sidebar.expanded .pp-sidebar-toggle svg { transform: rotate(180deg); }
+
+        /* ── Shared icon button (search, close, etc.) ── */
+        .pp-icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--pp-text-muted);
+        }
+        .pp-icon-btn:hover { color: var(--pp-text); }
+
+        /* ── Sidebar search trigger (⌘K command palette) ── */
+        .pp-search-trigger {
+            display: flex;
+            align-items: center;
+            width: calc(100% - 16px);
+            margin: 4px 8px 8px;
+            padding: 0 10px;
+            height: 34px;
+            background: none;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-sizing: border-box;
+            flex-shrink: 0;
+        }
+        .pp-search-trigger:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.12);
+            color: rgba(255, 255, 255, 0.6);
+        }
+        .pp-search-trigger-icon {
+            flex-shrink: 0;
+            width: 14px;
+            height: 14px;
+            opacity: 0.5;
+        }
+        .pp-search-trigger-text {
+            flex: 1;
+            text-align: left;
+            margin-left: 8px;
+        }
+        .pp-search-trigger-kbd {
+            font-family: inherit;
+            font-size: 11px;
+            padding: 2px 5px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: rgba(255, 255, 255, 0.3);
+            line-height: 1;
+        }
+        /* Collapsed sidebar: icon-only trigger */
+        .pp-sidebar:not(.expanded) .pp-search-trigger {
+            width: 34px;
+            height: 34px;
+            margin: 4px auto 8px;
+            padding: 0;
+            justify-content: center;
+            border: none;
+        }
+        .pp-sidebar:not(.expanded) .pp-search-trigger-text,
+        .pp-sidebar:not(.expanded) .pp-search-trigger-kbd { display: none; }
+        .pp-sidebar:not(.expanded) .pp-search-trigger-icon { margin: 0; }
+        /* Hide trigger when palette is open — visibility preserves layout */
+        .pp-search-palette-open .pp-search-trigger { visibility: hidden; }
+        .pp-search-palette-open .pp-mobile-search-btn { visibility: hidden; }
+
+        /* ── Command palette modal ── */
+        .pp-cmd-backdrop {
+            position: fixed;
+            inset: 0;
+            z-index: 9000;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+        .pp-cmd-modal {
+            position: fixed;
+            top: 20vh;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9001;
+            width: min(560px, 90vw);
+            background: var(--pp-surface, #1a1f2e);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-modal {
+            background: #fff;
+            border-color: rgba(0, 0, 0, 0.1);
+            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+        }
+        .pp-cmd-input-wrap {
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            height: 48px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-input-wrap {
+            border-bottom-color: rgba(0, 0, 0, 0.08);
+        }
+        .pp-cmd-input-icon {
+            flex-shrink: 0;
+            width: 18px;
+            height: 18px;
+            color: rgba(255, 255, 255, 0.3);
+            margin-right: 12px;
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-input-icon { color: rgba(0, 0, 0, 0.35); }
+        .pp-cmd-input,
+        .pp-cmd-input:focus,
+        .pp-cmd-input:active {
+            flex: 1;
+            height: 100%;
+            background: none !important;
+            border: none !important;
+            outline: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            -webkit-appearance: none;
+            appearance: none;
+            color: var(--pp-text, rgba(255,255,255,0.85));
+            font-size: 16px;
+            font-family: inherit;
+            font-weight: 400;
+            margin: 0;
+            padding: 0;
+        }
+        .pp-cmd-input::placeholder {
+            color: rgba(255, 255, 255, 0.3);
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-input::placeholder {
+            color: rgba(0, 0, 0, 0.35);
+        }
+        .pp-cmd-esc {
+            flex-shrink: 0;
+            font-family: inherit;
+            font-size: 11px;
+            padding: 2px 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: rgba(255, 255, 255, 0.25);
+            line-height: 1;
+            cursor: pointer;
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-esc {
+            background: rgba(0, 0, 0, 0.04);
+            border-color: rgba(0, 0, 0, 0.1);
+            color: rgba(0, 0, 0, 0.3);
+        }
+        .pp-cmd-results {
+            max-height: min(400px, 50vh);
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+        .pp-cmd-results:empty { display: none; }
+        .pp-cmd-results .ts-category {
+            padding: 8px 16px 4px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: rgba(255, 255, 255, 0.35);
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-results .ts-category {
+            color: rgba(0, 0, 0, 0.4);
+        }
+        .pp-cmd-results .ts-item {
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            height: 40px;
+            cursor: pointer;
+            transition: background 0.1s ease;
+            font-size: 13px;
+            gap: 6px;
+        }
+        .pp-cmd-results .ts-item:hover,
+        .pp-cmd-results .ts-item.ts-active {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-results .ts-item:hover,
+        :root:not([data-theme="dark"]) .pp-cmd-results .ts-item.ts-active {
+            background: rgba(0, 0, 0, 0.04);
+        }
+        .pp-cmd-results .ts-empty {
+            padding: 24px 16px;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.3);
+            font-size: 13px;
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-results .ts-empty {
+            color: rgba(0, 0, 0, 0.4);
+        }
+        .pp-cmd-results .ts-item-ticker {
+            font-weight: 600;
+            min-width: 48px;
+        }
+        .pp-cmd-results .ts-item-name {
+            flex: 1;
+            color: rgba(255, 255, 255, 0.5);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-results .ts-item-name {
+            color: rgba(0, 0, 0, 0.5);
+        }
+        .pp-cmd-results .ts-item-meta {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.3);
+        }
+        :root:not([data-theme="dark"]) .pp-cmd-results .ts-item-meta {
+            color: rgba(0, 0, 0, 0.35);
+        }
 
         /* Content wrapper — Bento card pushed right by sidebar */
         .pp-content-wrapper {
@@ -1489,6 +1789,9 @@
             </picture>
         </a>
         <div class="pp-mobile-actions">
+            <button class="pp-icon-btn pp-mobile-search-btn" onclick="ppOpenSearchPalette()" aria-label="Search">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </button>
             <button id="theme-toggle-mobile" class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">
                 <span class="theme-toggle-thumb">
                     <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -1541,6 +1844,13 @@
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
         </button>
 
+        {# ── Search trigger (opens ⌘K command palette) ── #}
+        <button class="pp-search-trigger" onclick="ppOpenSearchPalette()" title="Search (⌘K)" aria-label="Search">
+            <svg class="pp-search-trigger-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span class="pp-search-trigger-text">Search</span>
+            <kbd class="pp-search-trigger-kbd">⌘K</kbd>
+        </button>
+
         <nav class="pp-sidebar-nav">
             <div class="pp-nav-group">
                 <span class="pp-nav-group-label">Overview</span>
@@ -1588,6 +1898,7 @@
                 <a href="/macro" class="pp-nav-link {% if request.url.path.startswith('/macro') %}active{% endif %}">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
                     <span>Macro</span>
+                    <span class="badge-beta badge-beta-sm">BETA</span>
                 </a>
             </div>
         </nav>
@@ -1858,9 +2169,7 @@
         var _fuseStocks = null;   // Fuse instance for stocks
         var _fuseInvestors = null; // Fuse instance for investors
         var _indexReady = false;
-        var _selectedIdx = -1;
-        var _flatItems = [];
-        var _debounceTimer = null;
+        // (state is now per-container — see _containerState)
 
         var _fusePoliticians = null; // Fuse instance for politicians
 
@@ -1957,20 +2266,36 @@
         };
         var escHtml = window.escHtml; // local alias for this scope
 
-        window.tickerSearchFilter = function(query) {
-            // Debounce: wait 150ms after last keystroke
-            clearTimeout(_debounceTimer);
-            _debounceTimer = setTimeout(function() { _doFilter(query); }, 150);
+        // Per-container state for keyboard navigation
+        var _containerState = {};
+        function _getState(containerId) {
+            if (!_containerState[containerId]) {
+                _containerState[containerId] = { selectedIdx: -1, flatItems: [], debounceTimer: null };
+            }
+            return _containerState[containerId];
+        }
+
+        // ── Global search function (parameterized by container ID) ──
+        window.ppGlobalSearch = function(query, containerId) {
+            var state = _getState(containerId);
+            clearTimeout(state.debounceTimer);
+            state.debounceTimer = setTimeout(function() { _doFilter(query, containerId); }, 150);
         };
 
-        function _doFilter(query) {
-            var container = document.getElementById("ticker-search-results");
+        // Legacy wrapper for home hero search
+        window.tickerSearchFilter = function(query) {
+            ppGlobalSearch(query, 'ticker-search-results');
+        };
+
+        function _doFilter(query, containerId) {
+            var container = document.getElementById(containerId);
+            var state = _getState(containerId);
             if (!container || !_indexReady) return;
 
             query = (query || "").trim();
             if (query.length < 1) {
                 container.style.display = "none";
-                _flatItems = [];
+                state.flatItems = [];
                 return;
             }
 
@@ -1990,7 +2315,6 @@
                 var aExact = a.ticker.toUpperCase().indexOf(qUpper) === 0 ? 0 : 1;
                 var bExact = b.ticker.toUpperCase().indexOf(qUpper) === 0 ? 0 : 1;
                 if (aExact !== bExact) return aExact - bExact;
-                // Then by superinvestor status
                 var aSuper = a.held_by_super ? 0 : 1;
                 var bSuper = b.held_by_super ? 0 : 1;
                 return aSuper - bSuper;
@@ -2000,17 +2324,16 @@
             if (stocks.length === 0 && investors.length === 0 && politicians.length === 0) {
                 container.innerHTML = '<div class="ts-empty">No results found for &ldquo;' + escHtml(query) + '&rdquo;</div>';
                 container.style.display = "block";
-                _flatItems = [];
-                _selectedIdx = -1;
+                state.flatItems = [];
+                state.selectedIdx = -1;
                 return;
             }
 
             // Build categorized HTML
             var html = '';
-            _flatItems = [];
+            state.flatItems = [];
             var globalIdx = 0;
 
-            // ── STOCKS section ──
             if (stocks.length > 0) {
                 html += '<div class="ts-category">Stocks</div>';
                 for (var s = 0; s < stocks.length; s++) {
@@ -2032,12 +2355,11 @@
                         + '<span class="ts-item-name">' + escHtml(st.name) + '</span>'
                         + (metaStr ? '<span class="ts-item-meta">' + metaStr + '</span>' : '')
                         + '</div>';
-                    _flatItems.push({ ticker: st.ticker, type: 'ticker', cik: '' });
+                    state.flatItems.push({ ticker: st.ticker, type: 'ticker', cik: '' });
                     globalIdx++;
                 }
             }
 
-            // ── INVESTORS section ──
             if (investors.length > 0) {
                 html += '<div class="ts-category">Investors</div>';
                 for (var v = 0; v < investors.length; v++) {
@@ -2050,12 +2372,11 @@
                         + '<span class="ts-item-name">' + escHtml(inv.name) + '</span>'
                         + '<span class="ts-item-meta">Fund</span>'
                         + '</div>';
-                    _flatItems.push({ ticker: inv.ticker, type: 'investor', cik: inv.cik || '' });
+                    state.flatItems.push({ ticker: inv.ticker, type: 'investor', cik: inv.cik || '' });
                     globalIdx++;
                 }
             }
 
-            // ── POLITICIANS section ──
             if (politicians.length > 0) {
                 html += '<div class="ts-category">Congress</div>';
                 for (var p = 0; p < politicians.length; p++) {
@@ -2072,55 +2393,63 @@
                         + '<span class="ts-item-name">' + escHtml(pol.name) + '</span>'
                         + '<span class="ts-item-meta" style="color:' + partyColor + ';">Congress</span>'
                         + '</div>';
-                    _flatItems.push({ ticker: pol.ticker, type: 'politician', member_id: pol.member_id || '' });
+                    state.flatItems.push({ ticker: pol.ticker, type: 'politician', member_id: pol.member_id || '' });
                     globalIdx++;
                 }
             }
 
-            _selectedIdx = -1;
+            state.selectedIdx = -1;
             container.innerHTML = html;
             container.style.display = "block";
 
-            // Attach click handlers
+            // Attach click handlers (state captured once, shared across closures)
             var items = container.querySelectorAll(".ts-item");
             items.forEach(function(el) {
                 el.addEventListener("click", function() {
                     var idx = parseInt(el.dataset.gidx);
-                    if (_flatItems[idx]) {
-                        tickerSearchGo(_flatItems[idx].ticker, _flatItems[idx].type, _flatItems[idx].cik, _flatItems[idx].member_id);
+                    if (state.flatItems[idx]) {
+                        tickerSearchGo(state.flatItems[idx].ticker, state.flatItems[idx].type, state.flatItems[idx].cik, state.flatItems[idx].member_id);
                     }
                 });
             });
         }
 
-        window.tickerSearchKeydown = function(e) {
-            var container = document.getElementById("ticker-search-results");
-            if (!container || container.style.display === "none" || _flatItems.length === 0) return;
+        // ── Keyboard navigation (parameterized by container) ──
+        window.ppSearchKeydown = function(e, containerId) {
+            var container = document.getElementById(containerId);
+            var state = _getState(containerId);
+            if (!container || container.style.display === "none" || state.flatItems.length === 0) return;
 
             if (e.key === "ArrowDown") {
                 e.preventDefault();
-                _selectedIdx = Math.min(_selectedIdx + 1, _flatItems.length - 1);
-                _highlightItems(container);
+                state.selectedIdx = Math.min(state.selectedIdx + 1, state.flatItems.length - 1);
+                _highlightItems(container, state);
             } else if (e.key === "ArrowUp") {
                 e.preventDefault();
-                _selectedIdx = Math.max(_selectedIdx - 1, 0);
-                _highlightItems(container);
+                state.selectedIdx = Math.max(state.selectedIdx - 1, 0);
+                _highlightItems(container, state);
             } else if (e.key === "Enter") {
                 e.preventDefault();
-                var idx = _selectedIdx >= 0 ? _selectedIdx : 0;
-                if (_flatItems[idx]) {
-                    tickerSearchGo(_flatItems[idx].ticker, _flatItems[idx].type, _flatItems[idx].cik, _flatItems[idx].member_id);
+                var idx = state.selectedIdx >= 0 ? state.selectedIdx : 0;
+                if (state.flatItems[idx]) {
+                    tickerSearchGo(state.flatItems[idx].ticker, state.flatItems[idx].type, state.flatItems[idx].cik, state.flatItems[idx].member_id);
                 }
             } else if (e.key === "Escape") {
                 container.style.display = "none";
+                e.target.blur();
             }
         };
 
-        function _highlightItems(container) {
+        // Legacy wrapper for home hero search
+        window.tickerSearchKeydown = function(e) {
+            ppSearchKeydown(e, 'ticker-search-results');
+        };
+
+        function _highlightItems(container, state) {
             var items = container.querySelectorAll(".ts-item");
             items.forEach(function(el) {
                 var idx = parseInt(el.dataset.gidx);
-                if (idx === _selectedIdx) {
+                if (idx === state.selectedIdx) {
                     el.classList.add("ts-active");
                     el.scrollIntoView({ block: "nearest" });
                 } else {
@@ -2130,7 +2459,8 @@
         }
 
         window.tickerSearchGo = function(ticker, type, cik, memberId) {
-            // PostHog: track search selections
+            // Close command palette if open
+            if (window.ppCloseSearchPalette) ppCloseSearchPalette();
             if (window.posthog) {
                 posthog.capture('stock_search', {
                     ticker: ticker,
@@ -2140,21 +2470,21 @@
                 });
             }
             if (type === 'investor' && cik) {
-                window.location.href = "/holdings/" + cik;
+                window.location.href = "/holdings/" + encodeURIComponent(cik);
             } else if (type === 'politician' && memberId) {
-                window.location.href = "/politician/" + memberId;
+                window.location.href = "/politician/" + encodeURIComponent(memberId);
             } else {
-                window.location.href = "/stock/" + ticker;
+                window.location.href = "/stock/" + encodeURIComponent(ticker);
             }
         };
 
-        // Close dropdown on outside click (guard: register once across HTMX swaps)
+        // Close home hero search dropdown on outside click
         if (!window._ppSearchClickBound) {
             window._ppSearchClickBound = true;
             document.addEventListener("click", function(e) {
-                var search = document.getElementById("ticker-search");
-                var results = document.getElementById("ticker-search-results");
-                if (search && results && !search.contains(e.target)) {
+                var wrap = document.getElementById('ticker-search');
+                var results = document.getElementById('ticker-search-results');
+                if (wrap && results && !wrap.contains(e.target)) {
                     results.style.display = "none";
                 }
             });
@@ -2591,11 +2921,197 @@
         }
     }
     ppRestoreExpandState();
+
+    // ── ⌘K Command Palette ──
+    window.ppOpenSearchPalette = function() {
+        var backdrop = document.getElementById('pp-cmd-backdrop');
+        var modal = document.getElementById('pp-cmd-modal');
+        var input = document.getElementById('pp-cmd-input');
+        if (!backdrop || !modal) return;
+        document.body.classList.add('pp-search-palette-open');
+        backdrop.style.display = 'block';
+        modal.style.display = 'flex';
+        // Reset state
+        if (input) {
+            input.value = '';
+            requestAnimationFrame(function() { input.focus(); });
+        }
+        var results = document.getElementById('pp-cmd-results');
+        if (results) results.innerHTML = '';
+    };
+
+    window.ppCloseSearchPalette = function() {
+        var backdrop = document.getElementById('pp-cmd-backdrop');
+        var modal = document.getElementById('pp-cmd-modal');
+        if (backdrop) backdrop.style.display = 'none';
+        if (modal) modal.style.display = 'none';
+        // Clear results DOM to free references
+        var results = document.getElementById('pp-cmd-results');
+        if (results) results.innerHTML = '';
+        document.body.classList.remove('pp-search-palette-open');
+    };
+
+    window.ppCmdKeydown = function(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            ppCloseSearchPalette();
+            return;
+        }
+        // Delegate arrow/enter to the shared ppSearchKeydown
+        ppSearchKeydown(e, 'pp-cmd-results');
+    };
+
+    // ── Ctrl+K / Cmd+K global shortcut ──
+    if (!window._ppSearchShortcutBound) {
+        window._ppSearchShortcutBound = true;
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                ppOpenSearchPalette();
+            }
+        });
+    }
     if (!window._ppExpandListenerBound) {
         window._ppExpandListenerBound = true;
         document.addEventListener('htmx:afterSettle', ppRestoreExpandState);
     }
     </script>
+    {# ── ppLoadSection: fetch with skeleton, timeout, retry, and error fallback ── #}
+    <script>
+    (function() {
+        /**
+         * ppLoadSection — universal loader for fetch-based sections.
+         *
+         * @param {Object} opts
+         * @param {string}   opts.el        - target element ID
+         * @param {string}   opts.url       - API endpoint to fetch
+         * @param {Function} [opts.render]  - fn(html, el) — custom render; default sets innerHTML + activates scripts
+         * @param {string}   [opts.errorMsg]- user-visible error text
+         * @param {string}   [opts.skeleton]- skeleton HTML (injected immediately)
+         * @param {number}   [opts.timeout] - ms before abort (default 10000)
+         * @param {number}   [opts.retries] - max retries (default 3)
+         * @param {boolean}  [opts.json]    - if true, parses JSON and passes to render(data, el)
+         */
+        window.ppLoadSection = function(opts) {
+            var el = typeof opts.el === 'string' ? document.getElementById(opts.el) : opts.el;
+            if (!el) return;
+
+            var url = opts.url;
+            var errorMsg = opts.errorMsg || 'Unable to load data';
+            var skeleton = opts.skeleton || _defaultSkeleton();
+            var timeout = opts.timeout || 10000;
+            var maxRetries = opts.retries != null ? opts.retries : 3;
+            var isJson = opts.json || false;
+            var render = opts.render || null;
+            var attempt = 0;
+            var _activeController = null;
+
+            // Show skeleton
+            el.innerHTML = skeleton;
+
+            function doFetch() {
+                // Abort any previous in-flight request
+                if (_activeController) { try { _activeController.abort(); } catch(e) {} }
+                attempt++;
+                var controller = _activeController = new AbortController();
+                var timer = setTimeout(function() { controller.abort(); }, timeout);
+
+                fetch(url, { signal: controller.signal })
+                    .then(function(resp) {
+                        clearTimeout(timer);
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                        return isJson ? resp.json() : resp.text();
+                    })
+                    .then(function(data) {
+                        _activeController = null;
+                        if (render) {
+                            render(data, el);
+                        } else {
+                            el.innerHTML = data;
+                            _activateScripts(el);
+                        }
+                        if (window.initSortableTables) window.initSortableTables(el);
+                    })
+                    .catch(function() {
+                        clearTimeout(timer);
+                        _activeController = null;
+                        if (attempt < maxRetries) {
+                            setTimeout(doFetch, 1000 * attempt);
+                        } else {
+                            el.innerHTML = _errorHtml(errorMsg, url, opts);
+                        }
+                    });
+            }
+
+            doFetch();
+        };
+
+        function _defaultSkeleton() {
+            var html = '<div class="pp-skeleton-table">';
+            for (var i = 0; i < 6; i++) {
+                html += '<div class="pp-skeleton pp-skeleton-row"></div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function _errorHtml(msg, url, opts) {
+            var retryId = 'pp-retry-' + Math.random().toString(36).substr(2, 6);
+            window['_ppRetryOpts_' + retryId] = opts;
+            return '<div class="pp-section-error">' +
+                '<span>' + msg + '.</span>' +
+                '<button onclick="var k=\'_ppRetryOpts_' + retryId + '\',o=window[k];if(o){delete window[k];o.retries=1;ppLoadSection(o);}">Retry</button>' +
+                '</div>';
+        }
+
+        function _activateScripts(container) {
+            // Prefer the global activateScripts (defined in stock.html) if available
+            if (window.activateScripts) { window.activateScripts(container); return; }
+            container.querySelectorAll('script').forEach(function(old) {
+                var s = document.createElement('script');
+                s.textContent = old.textContent;
+                old.parentNode.replaceChild(s, old);
+            });
+        }
+
+        /* ── HTMX global error handling ── */
+        if (!window._ppHtmxErrorBound) {
+            window._ppHtmxErrorBound = true;
+            function _htmxErrorSwap(evt, msg) {
+                var target = evt.detail.target || evt.detail.elt;
+                if (!target) return;
+                var url = (evt.detail.pathInfo && evt.detail.pathInfo.requestPath) ||
+                          (target.getAttribute && (target.getAttribute('hx-get') || target.getAttribute('hx-post'))) || '';
+                target.innerHTML = '<div class="pp-section-error">' +
+                    '<span>' + msg + '</span>' +
+                    '<button onclick="htmx.ajax(\'GET\',\'' + url.replace(/'/g, "\\'") + '\',{target:this.closest(\'[hx-get],[hx-post]\') || this.parentNode.parentNode, swap:\'innerHTML\'})">Retry</button>' +
+                    '</div>';
+            }
+            document.addEventListener('htmx:responseError', function(evt) { _htmxErrorSwap(evt, 'Unable to load data.'); });
+            document.addEventListener('htmx:sendError', function(evt) { _htmxErrorSwap(evt, 'Unable to load data.'); });
+            document.addEventListener('htmx:timeout', function(evt) { _htmxErrorSwap(evt, 'Request timed out.'); });
+            document.addEventListener('htmx:configRequest', function(evt) { evt.detail.timeout = 10000; });
+        }
+    })();
+    </script>
+
+    {# ── ⌘K Command Palette Modal ── #}
+    <div id="pp-cmd-backdrop" class="pp-cmd-backdrop" style="display:none;" onclick="ppCloseSearchPalette()"></div>
+    <div id="pp-cmd-modal" class="pp-cmd-modal" style="display:none;">
+        <div class="pp-cmd-input-wrap">
+            <svg class="pp-cmd-input-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="search"
+                   id="pp-cmd-input"
+                   class="pp-cmd-input"
+                   placeholder="Search tickers, companies, or investors..."
+                   autocomplete="off"
+                   oninput="ppGlobalSearch(this.value, 'pp-cmd-results')"
+                   onkeydown="ppCmdKeydown(event)">
+            <kbd class="pp-cmd-esc" onclick="ppCloseSearchPalette()">Esc</kbd>
+        </div>
+        <div id="pp-cmd-results" class="pp-cmd-results"></div>
+    </div>
+
 {% block extra_scripts %}{% endblock %}
 </body>
 </html>

@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 
@@ -27,6 +28,69 @@ _identity = os.environ.get("SEC_IDENTITY", "13f-tool-user user@example.com")
 set_identity(_identity)
 
 _HEADERS = {"User-Agent": _identity}
+
+logger = logging.getLogger(__name__)
+
+# SEC 13F filings report values in *thousands* of dollars.
+# The edgartools library returns raw XML values without conversion,
+# so we must multiply by 1000 to get actual dollar amounts.
+_SEC_13F_VALUE_MULTIPLIER = 1000
+
+# ── Post-ingestion validation thresholds ─────────────────────────────
+# A fund with 20+ holdings and total value under $10M (after x1000
+# multiplier) is almost certainly wrong.  Log a warning so it gets
+# caught during sync rather than silently serving bad data.
+_MIN_HOLDINGS_FOR_TOTAL_CHECK = 20
+_MIN_TOTAL_VALUE = 10_000_000       # $10M — fund with 20+ holdings below this is suspicious
+_MIN_HOLDINGS_FOR_AVG_CHECK = 5
+_MIN_VALUE_PER_HOLDING = 500_000    # $500K avg value per holding is suspicious floor
+
+
+def _filing_total_value(tf) -> int:
+    """Convert ThirteenF.total_value from thousands to actual dollars."""
+    return int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER if tf.total_value else 0
+
+
+def _row_value(row) -> int:
+    """Convert a holdings DataFrame row's Value from thousands to actual dollars."""
+    return int(row.Value) * _SEC_13F_VALUE_MULTIPLIER
+
+
+def _validate_fund_values(
+    cik: str, name: str, total_value: int, num_holdings: int
+) -> None:
+    """Log a warning if a fund's portfolio value looks anomalously low."""
+    if num_holdings == 0 or total_value <= 0:
+        return
+    avg_per_holding = total_value / num_holdings
+    if num_holdings >= _MIN_HOLDINGS_FOR_TOTAL_CHECK and total_value < _MIN_TOTAL_VALUE:
+        logger.warning(
+            "VALIDATION: Fund %s (CIK %s) has %d holdings but total value "
+            "is only $%s — likely missing x1000 multiplier",
+            name, cik, num_holdings, f"{total_value:,.0f}",
+        )
+    elif avg_per_holding < _MIN_VALUE_PER_HOLDING and num_holdings >= _MIN_HOLDINGS_FOR_AVG_CHECK:
+        logger.warning(
+            "VALIDATION: Fund %s (CIK %s) avg value per holding is $%s "
+            "(%d holdings, $%s total) — unusually low",
+            name, cik, f"{avg_per_holding:,.0f}", num_holdings,
+            f"{total_value:,.0f}",
+        )
+
+
+def _validate_tickers(cik: str, name: str, holdings: list[dict]) -> None:
+    """Log warnings for holdings with missing or invalid tickers."""
+    missing = []
+    for h in holdings:
+        ticker = h.get("ticker")
+        if not ticker:
+            missing.append(h.get("issuer", "?"))
+    if missing:
+        logger.info(
+            "TICKER: Fund %s (CIK %s) has %d/%d holdings without a valid ticker: %s",
+            name, cik, len(missing), len(holdings),
+            ", ".join(missing[:10]) + ("..." if len(missing) > 10 else ""),
+        )
 
 
 def _search_edgar_efts(query: str) -> list[SearchResult]:
@@ -121,7 +185,7 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
         cik=cik,
         report_period=str(tf.report_period),
         filing_date=str(tf.filing_date),
-        total_value=int(tf.total_value),
+        total_value=_filing_total_value(tf),
         total_holdings=len(holdings_df),
     )
 
@@ -135,7 +199,7 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
                 issuer_name=str(row.Issuer),
                 title_of_class=str(row.Class),
                 cusip=str(row.Cusip),
-                value=int(row.Value),
+                value=_row_value(row),
                 shares=int(row.SharesPrnAmount),
                 share_type=str(row.Type),
             )
@@ -167,8 +231,8 @@ def _compare_two_filings(current_df, previous_df) -> list[HoldingChange]:
 
         curr_shares = int(curr.SharesPrnAmount) if curr else 0
         prev_shares = int(prev.SharesPrnAmount) if prev else 0
-        curr_value = int(curr.Value) if curr else 0
-        prev_value = int(prev.Value) if prev else 0
+        curr_value = _row_value(curr) if curr else 0
+        prev_value = _row_value(prev) if prev else 0
         name = str(curr.Issuer) if curr else str(prev.Issuer)
 
         if prev is None:
@@ -232,7 +296,7 @@ def compare_quarters(
         cik=cik,
         report_period=str(tf_current.report_period),
         filing_date=str(tf_current.filing_date),
-        total_value=int(tf_current.total_value),
+        total_value=_filing_total_value(tf_current),
         total_holdings=len(tf_current.holdings),
     )
     previous_info = FundInfo(
@@ -240,7 +304,7 @@ def compare_quarters(
         cik=cik,
         report_period=str(tf_previous.report_period),
         filing_date=str(tf_previous.filing_date),
-        total_value=int(tf_previous.total_value),
+        total_value=_filing_total_value(tf_previous),
         total_holdings=len(tf_previous.holdings),
     )
 
@@ -259,29 +323,95 @@ def compare_quarters(
     return current_info, previous_info, changes[:top_n]
 
 
-# Known SEC EDGAR ticker → current trading symbol corrections.
-# 13F filings resolve tickers from CUSIP which can lag behind renames,
-# share-class changes, or ticker migrations.
+# ── Ticker correction tables ──────────────────────────────────────
+# The edgartools CUSIP→ticker mapping (ct.pq) is static and incomplete.
+# These tables patch known gaps at two levels:
+#
+# 1. _CUSIP_OVERRIDES: CUSIPs missing from ct.pq entirely, or mapped to
+#    a wrong/stale ticker.  Checked first — highest priority.
+# 2. _TICKER_CORRECTIONS: ticker-level renames (FB→META, TWTR→X).
+#    Applied after CUSIP lookup when the CUSIP *does* resolve but to an
+#    outdated symbol.
+#
+# To add a new correction: identify whether the problem is a missing CUSIP
+# or a stale ticker, and add to the appropriate table.
+
+_CUSIP_OVERRIDES: dict[str, str] = {
+    # Hilton Grand Vacations — CUSIP changed after spin-off, not in ct.pq
+    "46321A104": "HGV",
+    # Hilton Worldwide Holdings — alternate CUSIP not in ct.pq
+    "432848101": "HLT",
+    # Compagnie Financière Richemont — Swiss CUSIP, no US listing
+    # Maps to the US-traded ADR (CFRUY) for display purposes
+    "H25662105": "CFRUY",
+}
+
 _TICKER_CORRECTIONS: dict[str, str] = {
-    "FB": "META",
-    "TWTR": "X",
+    # Ticker renames / migrations
+    "FB": "META",        # Meta Platforms, June 2022
+    "TWTR": "X",         # Twitter → X Corp, October 2023
+    # edgartools padding artifacts (5-char field overflow)
     "BMNRD": "BMNR",
 }
 
+# Pre-compiled regex for ticker validation.  Valid tickers are 1-6
+# alphanumeric characters, optionally with dots (e.g. BRK.A).
+_VALID_TICKER_RE = re.compile(r'^[A-Z0-9.]{1,6}$', re.IGNORECASE)
+
+
+def _is_valid_ticker(t: str) -> bool:
+    """Check if a string looks like a valid ticker symbol.
+
+    Rejects strings with spaces, special chars, >6 chars,
+    or that are clearly truncated company names.
+    """
+    if not t:
+        return False
+    return bool(_VALID_TICKER_RE.match(t))
+
 
 def _safe_ticker(row) -> str | None:
-    """Extract ticker from a DataFrame row, handling missing/NaN values.
+    """Extract and clean ticker from a DataFrame row.
 
-    SEC EDGAR stores tickers in a fixed-width 5-char field, so values
-    may arrive padded (e.g. ``"BMNR "`` or ``"BMNRD"`` for BMNR).
-    We strip whitespace and apply known corrections.
+    Resolution order:
+    1. CUSIP override (from row.Cusip if present)
+    2. edgartools Ticker column (from ct.pq CUSIP mapping)
+    3. Ticker correction (rename table)
+    4. Validation — reject malformed tickers (spaces, >6 chars, special chars)
+
+    Returns None if no valid ticker can be resolved.
     """
+    # 1. CUSIP-level override (highest priority)
+    cusip = str(row.Cusip) if hasattr(row, "Cusip") else None
+    if cusip:
+        override = _CUSIP_OVERRIDES.get(cusip)
+        if override:
+            return override
+
+    # 2. Extract from edgartools Ticker column
+    t = None
     if hasattr(row, "Ticker"):
         val = row.Ticker
         if val and str(val).strip() not in ("", "nan", "None", "NaN"):
             t = str(val).strip()
-            return _TICKER_CORRECTIONS.get(t, t)
-    return None
+
+    if t is None:
+        return None
+
+    # 3. Apply ticker-level corrections
+    t = _TICKER_CORRECTIONS.get(t, t)
+
+    # 4. Validate
+    if not _is_valid_ticker(t):
+        logger.debug(
+            "Rejected invalid ticker %r (CUSIP %s, issuer %s)",
+            t,
+            cusip or "?",
+            getattr(row, "Issuer", "?"),
+        )
+        return None
+
+    return t
 
 
 def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
@@ -295,30 +425,32 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
 
     tf = ThirteenF(filings[0])
     holdings_df = tf.holdings
-    total_val = int(tf.total_value) if tf.total_value else 0
+    total_val = _filing_total_value(tf)
 
     sorted_df = holdings_df.sort_values("Value", ascending=False)
 
     top_holdings = []
     for row in sorted_df.head(10).itertuples():
+        cusip = str(row.Cusip)
         top_holdings.append(
             {
                 "issuer": str(row.Issuer),
                 "ticker": _safe_ticker(row),
-                "cusip": str(row.Cusip),
-                "value": int(row.Value),
+                "cusip": cusip,
+                "value": _row_value(row),
                 "shares": int(row.SharesPrnAmount),
             }
         )
 
     all_holdings = []
     for row in sorted_df.itertuples():
-        val = int(row.Value)
+        val = _row_value(row)
+        cusip = str(row.Cusip)
         all_holdings.append(
             {
                 "issuer": str(row.Issuer),
                 "ticker": _safe_ticker(row),
-                "cusip": str(row.Cusip),
+                "cusip": cusip,
                 "value": val,
                 "shares": int(row.SharesPrnAmount),
                 "pct": round(val / total_val * 100, 2) if total_val > 0 else 0,
@@ -376,8 +508,12 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
         except Exception:
             continue
 
+    fund_name = tf.management_company_name or company.name
+    _validate_fund_values(cik, fund_name, total_val, len(holdings_df))
+    _validate_tickers(cik, fund_name, all_holdings)
+
     return {
-        "name": tf.management_company_name or company.name,
+        "name": fund_name,
         "cik": cik,
         "report_period": str(tf.report_period),
         "filing_date": str(tf.filing_date),
@@ -402,7 +538,7 @@ def get_enriched_holdings(
 
     tf = ThirteenF(filings[0])
     holdings_df = tf.holdings
-    total_val = int(tf.total_value) if tf.total_value else 0
+    total_val = _filing_total_value(tf)
 
     fund = FundInfo(
         name=tf.management_company_name or company.name,
@@ -427,7 +563,7 @@ def get_enriched_holdings(
 
     holdings = []
     for row in sorted_df.itertuples():
-        val = int(row.Value)
+        val = _row_value(row)
         cusip = str(row.Cusip)
         change = activity_by_cusip.get(cusip)
         activity = change.status if change and change.status != "UNCHANGED" else None

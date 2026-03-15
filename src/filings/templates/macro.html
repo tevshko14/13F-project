@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Macro — Market Indicators | PaperPanda{% endblock %}
 {% block meta_description %}Track earnings season performance, market performance, and macro indicators across the S&P 500, NASDAQ 100, and Dow 30.{% endblock %}
 {% block og_title %}Macro Indicators | PaperPanda{% endblock %}
@@ -241,9 +242,7 @@
              hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
              hx-trigger="load"
              hx-swap="innerHTML">
-            <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-                <span aria-busy="true">Loading earnings scorecard…</span>
-            </div>
+            <div style="padding:1.5em;">{{ skeleton_rows(6) }}</div>
         </div>
     </div>
 
@@ -265,9 +264,7 @@
             </div>
         </div>
         <div id="ec-content">
-            <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-                <span aria-busy="true">Loading earnings calendar…</span>
-            </div>
+            <div style="padding:1.5em;">{{ skeleton_rows(6) }}</div>
         </div>
     </div>
 </div>
@@ -290,9 +287,7 @@
         </div>
     </div>
     <div id="mb-content">
-        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-            <span aria-busy="true">Loading market performance…</span>
-        </div>
+        <div class="pp-skeleton-table" style="padding:1.5em;"><div class="pp-skeleton pp-skeleton-chart" style="height:250px;"></div></div>
     </div>
 </div>
 
@@ -489,6 +484,7 @@
 
     /* ── Earnings Scorecard controls ── */
     var esCurrentIndex = '{{ current_index }}';
+
     window.esChangeIndex = function(idx) {
         esCurrentIndex = idx;
         activatePill('es-index-nav', idx);

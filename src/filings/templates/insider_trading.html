@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Insider Trading Screener — SEC Form 4 Filings | PaperPanda{% endblock %}
 {% block meta_description %}Track real-time SEC Form 4 insider buys and sells across all public companies. See which executives, directors, and major shareholders are trading their own stock.{% endblock %}
 {% block og_title %}Insider Trading Screener — SEC Form 4 Filings | PaperPanda{% endblock %}
@@ -95,9 +96,7 @@
         {% if trades %}
         {% include "partials/insider_trades.html" %}
         {% else %}
-        <p aria-busy="true" style="text-align: center; padding: 2em 0;">
-            Loading insider trades...
-        </p>
+        {{ skeleton_rows(8) }}
         {% endif %}
     </div>
 </section>
@@ -427,13 +426,17 @@
             return;
         }
 
+        /* Show skeleton */
         document.getElementById('insider-trades-content').innerHTML =
-            '<p aria-busy="true" style="text-align: center; padding: 2em 0;">Loading insider trades...</p>';
+            '<div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>';
 
         var url = '/api/insider-trades?filter=' + filter;
         if (currentPeriod) url += '&period=' + currentPeriod;
-        fetch(url)
+        var controller = new AbortController();
+        var timer = setTimeout(function() { controller.abort(); }, 10000);
+        fetch(url, { signal: controller.signal })
             .then(function(resp) {
+                clearTimeout(timer);
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 return resp.text();
             })
@@ -449,17 +452,25 @@
                 if (window.initSortableTables) window.initSortableTables();
             })
             .catch(function() {
+                clearTimeout(timer);
+                /* Retry up to 3 times before showing the error */
                 if (!retried[cacheKey]) {
-                    retried[cacheKey] = true;
-                    setTimeout(function() { loadTrades(filter); }, 1500);
+                    retried[cacheKey] = 1;
+                    setTimeout(function() { loadTrades(filter); }, 1000);
+                    return;
+                }
+                if (retried[cacheKey] < 3) {
+                    retried[cacheKey]++;
+                    setTimeout(function() { loadTrades(filter); }, 1000);
                     return;
                 }
                 document.getElementById('insider-trades-content').innerHTML =
-                    '<p class="text-muted" style="text-align: center; padding: 2em 0;">' +
-                    'Failed to load insider trades. Please try again later.</p>';
+                    '<div class="pp-section-error"><span>Unable to load insider trades.</span>' +
+                    '<button onclick="_retryInsiderTab(\'' + filter + '\')">Retry</button></div>';
             });
     }
 
+    window._retryInsiderTab = function(filter) { retried = {}; loadTrades(filter); };
     window.switchInsiderTab = loadTrades;
 
     window.switchInsiderPeriod = function(period) {

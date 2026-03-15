@@ -80,7 +80,7 @@ def _api_key() -> str:
     return os.environ.get("FMP_API_KEY", "")
 
 
-def _fmp_get(path: str, params: dict | None = None) -> list | dict | None:
+def fmp_get(path: str, params: dict | None = None) -> list | dict | None:
     key = _api_key()
     if not key:
         return None
@@ -171,7 +171,7 @@ def fetch_earnings_data(
     return data
 
 
-def _build_company_lookup(index: str) -> dict[str, dict]:
+def build_company_lookup(index: str) -> dict[str, dict]:
     """Build {symbol: {name, sector}} from market_data constituents."""
     try:
         from filings import market_data
@@ -311,7 +311,7 @@ def _fetch_scorecard(
 ) -> dict:
     """Primary scorecard fetch — tries earnings_history DB, then FMP."""
     quarter, start, end = _resolve_quarter(quarter)
-    company_info = _build_company_lookup(index)
+    company_info = build_company_lookup(index)
 
     # ── L3: earnings_history table (primary source) ──────────
     results = _fetch_from_earnings_history(start, end, company_info, sector)
@@ -410,7 +410,7 @@ def _fetch_from_fmp(
     sector: str | None,
 ) -> list[dict] | None:
     """Fallback: FMP ``/earning_calendar`` bulk endpoint (premium)."""
-    calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    calendar = fmp_get("/earning_calendar", {"from": start, "to": end})
     if calendar is None or not isinstance(calendar, list):
         return None
 
@@ -559,7 +559,7 @@ def _trend_from_db(
 
 def _trend_from_fmp(start: str, end: str) -> list[dict] | None:
     """Build per-quarter metric rows from FMP earning_calendar (fallback)."""
-    calendar = _fmp_get("/earning_calendar", {"from": start, "to": end})
+    calendar = fmp_get("/earning_calendar", {"from": start, "to": end})
     if calendar is None or not isinstance(calendar, list):
         return None
 
@@ -615,7 +615,7 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
 
     # L3/L4: build trend from earnings_history (or FMP fallback)
     quarters = get_available_quarters()
-    company_info = _build_company_lookup(index)
+    company_info = build_company_lookup(index)
     tickers = set(company_info.keys()) if company_info else None
 
     trend: list[dict] = []
@@ -676,7 +676,7 @@ def backfill_revenue(index: str = "sp500") -> dict:
     from filings.earnings import _load_finnhub_bulk_calendar, _enrich_rows_with_revenue
     from filings import supabase_cache
 
-    company_info = _build_company_lookup(index)
+    company_info = build_company_lookup(index)
     tickers = sorted(company_info.keys())
 
     # ── Step 1: fetch bulk calendar from Finnhub ──────────────
@@ -1071,7 +1071,7 @@ def fetch_earnings_calendar(
         company_info = None
         norm_lookup = None
     else:
-        company_info = _build_company_lookup(index)
+        company_info = build_company_lookup(index)
         if not company_info:
             return _build_empty_calendar(index, period)
         # Normalize: Finnhub uses "." (e.g. BRK.B), our lookup uses "-"
@@ -1225,7 +1225,7 @@ def _build_mock_calendar(
 ) -> dict:
     """Deterministic mock calendar for dev (no FINNHUB_API_KEY)."""
     rng = random.Random(42)
-    company_info = _build_company_lookup(index)
+    company_info = build_company_lookup(index)
     symbols = sorted(company_info.keys())[:30]
 
     today = datetime.now()

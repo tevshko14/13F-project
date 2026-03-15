@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Alternative Signals — Google Trends, Search Interest & More | PaperPanda{% endblock %}
 {% block meta_description %}Explore alternative market signals — Google Trends search interest, trending searches linked to tickers, macro sentiment keywords, and more.{% endblock %}
 {% block og_title %}Alternative Signals | PaperPanda{% endblock %}
@@ -410,10 +411,7 @@
         <div hx-get="/api/google-trends/trending"
              hx-trigger="load"
              hx-swap="innerHTML">
-            <div class="gt-loading">
-                <div class="gt-loading-spinner"></div>
-                <div style="margin-top: 0.5em; font-size: 0.85em;">Loading trending searches...</div>
-            </div>
+            {{ skeleton_rows(5) }}
         </div>
     </div>
 </div>
@@ -473,7 +471,7 @@
         ticker = ticker.trim().toUpperCase();
         if (!ticker) return;
         var result = document.getElementById('gt-ticker-result');
-        result.innerHTML = '<div class="gt-loading"><div class="gt-loading-spinner"></div><div style="margin-top: 0.5em; font-size: 0.85em;">Loading keywords for ' + ticker + '...</div></div>';
+        result.innerHTML = '<div class="pp-skeleton-table"><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div><div class="pp-skeleton pp-skeleton-row"></div></div>';
         htmx.ajax('GET', '/api/google-trends/ticker/' + encodeURIComponent(ticker), {target: '#gt-ticker-result', swap: 'innerHTML'});
     }
 

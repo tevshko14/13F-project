@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}PaperPanda — Free Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard{% endblock %}
 {% block meta_description %}PaperPanda is a free 13F portfolio tracker that monitors superinvestor holdings, insider trading (SEC Form 4), congressional stock trades, S&P 500 heatmaps, and analyst ratings. Track what Warren Buffett, Bill Ackman, Michael Burry, and 80+ hedge fund managers are buying and selling in real time.{% endblock %}
 {% block og_title %}PaperPanda — Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard{% endblock %}
@@ -109,9 +110,13 @@
 
     <div id="ticker-tape-wrap" class="ticker-tape-shell"
          hx-get="/api/ticker-tape" hx-trigger="load" hx-swap="innerHTML">
-        <p class="text-muted" style="text-align:center;font-size:0.85em;" aria-busy="true">
-            Loading market data...
-        </p>
+        <div style="display:flex;gap:1em;justify-content:center;padding:0.5em 0;">
+            <div class="pp-skeleton" style="width:80px;height:16px;"></div>
+            <div class="pp-skeleton" style="width:60px;height:16px;"></div>
+            <div class="pp-skeleton" style="width:90px;height:16px;"></div>
+            <div class="pp-skeleton" style="width:70px;height:16px;"></div>
+            <div class="pp-skeleton" style="width:85px;height:16px;"></div>
+        </div>
     </div>
 
     <div class="section-head">
@@ -125,7 +130,7 @@
                 <h3 class="bento-card-title">Market Overview</h3>
             </div>
             <div class="bento-card-body" hx-get="/api/market-overview" hx-trigger="load" hx-swap="innerHTML">
-                <div class="bento-loading"><span class="spinner"></span></div>
+                {{ skeleton_cards(4) }}
             </div>
         </div>
 
@@ -134,7 +139,7 @@
                 <h3 class="bento-card-title">Market News</h3>
             </div>
             <div class="bento-card-body bento-card-body-flex" hx-get="/api/market-news" hx-trigger="load delay:0.5s" hx-swap="innerHTML">
-                <div class="bento-loading"><span class="spinner"></span></div>
+                <div style="padding:1em;">{{ skeleton_rows(5) }}</div>
             </div>
         </div>
 
@@ -151,7 +156,7 @@
                 </div>
             </div>
             <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML">
-                <div class="bento-loading"><span class="spinner"></span></div>
+                <div style="margin:1em;">{{ skeleton_chart('300px') }}</div>
             </div>
         </div>
 
@@ -160,13 +165,13 @@
                 <h3 class="bento-card-title">Retail Sentiment</h3>
             </div>
             <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
-                <div class="bento-loading"><span class="spinner"></span></div>
+                <div style="padding:1em;">{{ skeleton_chart('150px') }}</div>
             </div>
         </div>
 
         <div class="glass-card bento-trending">
             <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
-                <div class="bento-loading"><span class="spinner"></span></div>
+                <div style="padding:1em;">{{ skeleton_rows(3) }}</div>
             </div>
         </div>
 
@@ -240,7 +245,10 @@ function switchHeatmapPeriod(period, btn) {
             }
         })
         .catch(function() {
-            if (body) body.style.opacity = '';
+            if (body) {
+                body.style.opacity = '';
+                body.innerHTML = '<div class="pp-section-error"><span>Unable to load heatmap data.</span><button onclick="switchHeatmapPeriod(\'' + period + '\', document.querySelector(\'.heatmap-pill.active\'))">Retry</button></div>';
+            }
         });
 }
 </script>

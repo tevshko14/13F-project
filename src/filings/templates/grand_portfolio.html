@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
 {% block meta_description %}Track 13F holdings of 84 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more. See portfolio values, top holdings, and recent buys and sells.{% endblock %}
 {% block og_title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
@@ -253,7 +254,7 @@
         {% endif %}
     </article>
     {% endif %}
-    </div>
+    </div>{# end panel-holdings #}
 
     <div id="panel-funds" class="gp-panel{% if view == 'funds' %} active{% endif %}">
         <div class="cache-info" title="This data is automatically synchronized with official SEC filings every 24 hours.">
@@ -315,8 +316,8 @@
                     <td class="text-small">
                         <a href="/holdings/{{ si.cik }}">{{ si.fund_name }}</a>
                     </td>
-                    <td colspan="4" aria-busy="true">
-                        <span class="spinner"></span> Loading from SEC EDGAR...
+                    <td colspan="4">
+                        {{ skeleton_fund_row() }}
                     </td>
                 </tr>
                 {% endif %}
@@ -333,9 +334,7 @@
                  hx-get="/api/activity-feed?timeframe=ALL&ptype=guru"
                  hx-trigger="{% if view == 'activity' %}load{% else %}revealed{% endif %}"
                  hx-swap="innerHTML">
-                <article>
-                    <p aria-busy="true"><span class="spinner"></span> Loading activity intelligence...</p>
-                </article>
+                {{ skeleton_rows(10) }}
             </div>
         </div>
         <script>
@@ -358,9 +357,7 @@
                  hx-get="/api/deployment-leaderboard"
                  hx-trigger="{% if view == 'deployment' %}load{% else %}revealed{% endif %}"
                  hx-swap="innerHTML">
-                <article class="gp-panel-pad">
-                    <p aria-busy="true"><span class="spinner"></span> Loading deployment data...</p>
-                </article>
+                {{ skeleton_rows(10) }}
             </div>
         </div>
     </div>

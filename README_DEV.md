@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-12 (Earnings stock reaction enrichment via Tiingo EOD, sidebar nav: Options moved to Tools)
+> Last updated: 2026-03-14 (Francisco-fixes merge: x1000 value fix, ticker corrections, earnings calendar, skeleton UI, retail timeouts, ⌘K command palette, macro page unlock)
 
 ---
 
@@ -243,6 +243,9 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── wsb_sentiment.py              # Reddit/WSB sentiment: top mentioned tickers via ApeWisdom API, per-ticker sentiment lookup, free/no key
     ├── openfigi.py                   # OpenFIGI CUSIP→ticker resolution: batch mapping (100/request), 7-day cache, free tier (no key for basic)
     ├── frankfurter.py                # FX rates: 12 major currencies vs USD, 30-day sparklines, Frankfurter API (ECB rates), free/no key/no rate limits
+    ├── earnings.py                   # Per-ticker earnings history (yfinance + Finnhub + FMP, 3-tier cache) + shared fetch_finnhub_calendar_raw()
+    ├── earnings_scorecard.py         # Macro earnings season metrics (FMP, Supabase 5-tier L1→L5 cache) + shared fmp_get(), build_company_lookup()
+    ├── earnings_calendar.py          # Earnings calendar page (Finnhub + FMP, week/month views, 1h in-memory cache)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -264,8 +267,9 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── activity.html             # Cross-fund activity feed (top 100)
         ├── stock.html                # Stock detail (8 tabs: Overview, Ownership, Analysts, Signals, Vitals, Filings, Insider, Congress)
         ├── screener.html              # Stock Valuation Screener: DCF, Monte Carlo, Relative Value tabs + assumptions sidebar with user-controlled peer selector (Fuse.js search, chip tags). Clerk auth gate (blur overlay + sign-in card, same pattern as options page)
-        ├── screener_gate.html        # Legacy password gate (still used by /macro page)
+        ├── screener_gate.html        # Password gate (used by /macro and /options)
         ├── support.html              # Panda Fund: progress bar, Stripe Buy Button + Pricing Table, cost breakdown, funding history chart
+        ├── earnings_calendar.html    # Earnings calendar page (weekly/monthly toggle, HTMX-driven grid + day detail)
         ├── deployment.html           # Capital Deployed standalone page (/deployment)
         ├── notifications.html        # Notification history page
         ├── error.html                # Error page
@@ -298,6 +302,10 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── options_feed.html       # Unusual options activity table: OI Δ (green/red), Moneyness badges (5 color variants), Delta, urgency
             ├── options_clusters.html   # Clustered unusual options cards: ticker, direction, contract count, premium, vol/OI, urgency
             ├── financials.html        # SEC financial statements: 4 sub-tabs (Income, Balance, Cash Flow, Ratios) with ECharts insight charts + annual/quarterly toggle
+            ├── earnings.html             # Per-ticker earnings history tab (lazy-loaded)
+            ├── earnings_scorecard.html   # Macro earnings scorecard partial (lazy-loaded)
+            ├── earnings_calendar_grid.html # Earnings calendar grid/heatmap (HTMX partial: weekly 5-day cards + monthly color-coded heatmap)
+            ├── earnings_calendar_day.html # Earnings calendar day detail table (HTMX partial: company/timing/estimates/actuals)
             └── data_error.html         # Reusable error partial (rate limit CTA, generic fallback, HTMX-aware)
 ```
 
@@ -1289,6 +1297,167 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 - Watchlist: module-level `_watchlist_cache`, reads disk on cold start only
 - Bell: `_bell_cache` dict keyed by `since` timestamp, 15-second TTL, auto-evicts stale keys
 
+### 5.17 Earnings Calendar Module (`earnings_calendar.py`)
+
+Provides a week-by-week or month-level view of upcoming/recent quarterly earnings reports with BMO/AMC timing.
+
+**Feature flag:** `EARNINGS_CALENDAR_ENABLED` env var (default `"1"`). When `"0"`, the main page returns `under_construction.html`.
+
+**Architecture:**
+
+```
+User visits /earnings-calendar
+         │
+         ▼
+earnings_calendar.html (main page — JS + HTMX controls)
+         │ hx-get on load
+         ▼
+/api/earnings-calendar/grid?view=weekly&offset=0
+         │
+         ▼
+earnings_calendar.get_earnings_calendar(start, end)
+  ├── L1: in-memory _cal_cache (1h TTL, keyed by "start:end", max 50)
+  ├── L2: Finnhub /calendar/earnings
+  │        └── via earnings.fetch_finnhub_calendar_raw() (shared 1h cache)
+  ├── L3: FMP /earning_calendar (fallback)
+  │        └── via earnings_scorecard.fmp_get() (shared HTTP helper)
+  └── L4: deterministic mock data (dev-only, no API keys)
+         │
+         ▼
+_enrich_entries()
+  └── _get_company_lookup()
+       └── earnings_scorecard._build_company_lookup("sp500")
+            └── market_data.get_sp500_constituents() (24h cache)
+         │
+         ▼
+_build_response() → {entries, by_date, weeks, stats, range, source}
+         │
+         ▼
+Render partials/earnings_calendar_grid.html
+```
+
+**Module dependency graph:**
+
+```
+earnings_calendar.py
+  ├── imports from earnings.py:
+  │   ├── fetch_finnhub_calendar_raw()  — shared Finnhub raw fetch (1h cached)
+  │   └── _fmt_revenue()               — revenue formatting ($94.2B, $12.3M, etc.)
+  └── imports from earnings_scorecard.py:
+      ├── fmp_get()                    — shared FMP HTTP helper (API key, logging, error handling)
+      └── build_company_lookup()      — S&P 500 {ticker: {name, sector}} dict
+```
+
+**No circular imports.** All cross-module imports are lazy (inside function bodies), so modules load independently.
+
+**Key functions:**
+
+| Function | Description |
+|---|---|
+| `get_earnings_calendar(start, end, weeks)` | Main entry point — returns structured calendar dict |
+| `get_week_view(target_date)` | Convenience: single Mon–Fri week centered on a date |
+| `get_month_view(year, month)` | Convenience: full calendar month for heatmap view |
+| `_fetch_finnhub_calendar(start, end)` | Parse raw Finnhub JSON into normalized entries |
+| `_fetch_fmp_calendar(start, end)` | Parse raw FMP JSON into normalized entries |
+| `_enrich_entries(entries)` | Add company name, sector, formatted estimates, beat/miss |
+| `_build_response(entries, start, end, source)` | Build weeks structure, stats, sort by date/timing |
+| `_build_mock_entries(start, end)` | Deterministic mock data for dev mode (30 companies, hash-based) |
+
+**Normalized entry schema (internal):**
+
+```python
+{
+    "ticker": str,           # "AAPL"
+    "date": str,             # "2026-03-10"
+    "timing": str,           # "bmo" | "amc" | "unknown"
+    "eps_estimate": float,   # 1.58
+    "eps_actual": float,     # None until reported
+    "revenue_estimate": float,  # 98_300_000_000
+    "revenue_actual": float,
+    "year": int,
+    "quarter": int,
+    "confirmed": bool,       # True if Finnhub has timing data
+    # Added by _enrich_entries():
+    "name": str,             # "Apple Inc."
+    "sector": str,           # "Technology"
+    "eps_estimate_fmt": str,  # "$1.58"
+    "revenue_estimate_fmt": str,  # "$98.3B"
+    "eps_actual_fmt": str,
+    "revenue_actual_fmt": str,
+    "beat_eps": bool | None,
+    "beat_revenue": bool | None,
+}
+```
+
+**Caching strategy:**
+
+| Cache | Location | TTL | Key | Max Size |
+|---|---|---|---|---|
+| `_cal_cache` (enriched entries) | `earnings_calendar.py` | 1h | `"start:end"` | 50 |
+| `_finnhub_raw_cache` (shared raw API) | `earnings.py` | 1h | `"start:end"` | 50 |
+| `_finnhub_cal_cache` (parsed revenue) | `earnings.py` | 6h | global (single) | 1 |
+| S&P 500 constituents | `market_data.py` | 24h | global (single) | 1 |
+
+The two Finnhub caches (`_finnhub_raw_cache` at 1h and `_finnhub_cal_cache` at 6h) intentionally have different TTLs. The raw cache is shared between the calendar page and revenue enrichment. The parsed revenue cache lives longer because revenue data rarely changes intra-day. When the 6h cache expires, it re-fetches through the raw layer (which may serve from its own 1h cache).
+
+**Shared functions (reuse points):**
+
+These functions in `earnings.py` and `earnings_scorecard.py` are used by the calendar and other modules:
+
+| Function | Module | Used By |
+|---|---|---|
+| `fetch_finnhub_calendar_raw(start, end)` | `earnings.py` | `earnings_calendar.py`, `earnings.py` (revenue enrichment) |
+| `_fmt_revenue(val)` | `earnings.py` | `earnings_calendar.py`, `earnings.py` (display formatting) |
+| `fmp_get(path, params)` | `earnings_scorecard.py` | `earnings_calendar.py`, `earnings_scorecard.py` (all FMP calls) |
+| `_build_company_lookup(index)` | `earnings_scorecard.py` | `earnings_calendar.py`, `earnings_scorecard.py` (enrichment) |
+
+**Web routes (web.py, lines 3694–3859):**
+
+| Route | Query Params | Handler Logic |
+|---|---|---|
+| `GET /earnings-calendar` | — | Feature flag check → render full page or under_construction |
+| `GET /api/earnings-calendar/grid` | `view` (weekly\|monthly), `offset` (int, default 0) | Compute date range from offset → `get_earnings_calendar()` or `get_month_view()` → render grid partial |
+| `GET /api/earnings-calendar/day` | `date` (YYYY-MM-DD, defaults to today) | `get_week_view(date)` → filter entries for target date → render day partial |
+
+**HTMX interaction flow:**
+
+```
+1. Page load → earnings_calendar.html renders controls + empty #ec-content div
+2. hx-trigger="load" → HTMX fires GET /api/earnings-calendar/grid?view=weekly
+   → grid partial replaces #ec-content innerHTML
+3. View toggle (Weekly/Monthly buttons) → JS ecSwitchView()
+   → resets offset to 0, re-fires HTMX via ecLoadGrid()
+4. Navigation arrows (← →) → JS ecNavigate(±1)
+   → increments/decrements offset, re-fires HTMX
+5. "Today" button → JS ecGoToday()
+   → resets offset to 0, re-fires HTMX
+6. Click day card (weekly) or heatmap cell (monthly) → JS ecShowDayDetail(date)
+   → HTMX GET /api/earnings-calendar/day?date=...
+   → day detail table slides in below grid in #ec-day-detail
+7. Hover company logo → JS ecShowHoverCard(event, el)
+   → reads data-* attributes → positions 280px tooltip card
+   → shows company name, sector, EPS/revenue estimates, actuals, beat/miss badges
+8. Click company logo → navigates to /stock/{ticker}
+```
+
+**Template structure:**
+
+| Template | Content |
+|---|---|
+| `earnings_calendar.html` | Full page: controls bar (view toggle, nav arrows, "Today" button), `#ec-content` HTMX container, `#ec-day-detail` panel, JS functions |
+| `earnings_calendar_grid.html` | **Weekly**: stats bar + 5-day cards (BMO/AMC/TBD logo sections, overflow counter, hover cards). **Monthly**: 7-column heatmap grid (5 color intensities by report count, mini logos, clickable, weekends faded) |
+| `earnings_calendar_day.html` | Scrollable table: Company (logo + name), Ticker (linked to /stock/), Timing badge (BMO green / AMC blue / TBD gray), Est. Revenue, Est. EPS, Actual EPS (conditional column), Beat/Miss badge (green/red) |
+
+**Logo rendering:**
+- Company logos lazy-loaded from `/api/logo/{ticker}.png` (existing logo proxy)
+- Grid view: 24×24px logos, hover card: 32×32px
+- Fallback: 2-letter ticker abbreviation in colored circle
+- `logo_tickers` set passed from route handler to template for conditional rendering
+
+**Mock data (dev mode):**
+
+When both `FINNHUB_API_KEY` and `FMP_API_KEY` are unset, the calendar generates deterministic mock entries using `_MOCK_EARNINGS` (30 well-known S&P 500 companies). The MD5 hash of each date determines how many companies report (2–6 per weekday), ensuring consistent output across page reloads. Mock entries have estimates but no actuals (all beat/miss fields are None).
+
 ---
 
 ## 6. Web Routes
@@ -1343,7 +1512,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/screener` | `screener_page` | Clerk auth gate (client-side blur overlay) | `screener.html` |
 | GET | `/api/screener/{ticker}` | `api_screener` | yfinance + SEC XBRL + Tiingo (parallel) | JSON response |
 | GET | `/api/screener/peers` | `api_screener_peers` | yfinance + Tiingo + market_data (parallel batch) | JSON response |
-| GET | `/macro` | `macro_page` | Cookie auth gate → macro dashboard | `screener_gate.html` or `macro.html` |
+| GET | `/macro` | `macro_page` | Screener auth gate → macro dashboard | `screener_gate.html` or `macro.html` |
 | POST | `/macro/auth` | `macro_auth` | Password check → set `scr_auth` cookie (30d) | Redirect → `/macro` or `screener_gate.html` |
 | GET | `/api/macro/scorecard` | `macro_scorecard_api` | earnings_scorecard (L1+L2 cache) | `partials/earnings_scorecard.html` |
 | GET | `/api/macro/breadth` | `macro_breadth_api` | market_breadth (yfinance) | `partials/market_breadth.html` |
@@ -1355,6 +1524,10 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | GET | `/api/macro/fx` | `macro_fx_api` | frankfurter (FX rates) | `partials/macro_fx.html` |
 | GET | `/api/options/ivrank` | `options_ivrank_api` | cboe_data (IV rank batch) | `partials/options_ivrank.html` |
 | GET | `/api/stock/{ticker}/wsb` | `stock_wsb_api` | wsb_sentiment (ApeWisdom) | `partials/stock_wsb_sentiment.html` |
+| GET | `/earnings-calendar` | `earnings_calendar_page` | Feature flag check | `earnings_calendar.html` (or `under_construction.html` if disabled) |
+| GET | `/api/earnings-calendar/grid` | `earnings_calendar_grid_api` | Finnhub → FMP → mock (1h cache) | `partials/earnings_calendar_grid.html` |
+| GET | `/api/earnings-calendar/day` | `earnings_calendar_day_api` | Same as grid (from cached calendar data) | `partials/earnings_calendar_day.html` |
+| GET | `/api/logo/{ticker}.png` | `logo_proxy` | Logo cache / external fetch | PNG image |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
 
 **Key patterns:**
@@ -1827,7 +2000,7 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Screener password gate: cookie-based auth (`scr_auth`, SHA-256, 30-day, `SCREENER_PASSWORD` env var), beta feature badge
 - [x] Macro Dashboard: glassmorphism hero + glass nav shell, teal pill toggles, Fraunces serif fonts, aurora blobs, dark mode support
 - [x] Macro password gate: reuses screener's `scr_auth` cookie, parameterized `screener_gate.html` template
-- [x] NASDAQ 100 toggle fix: `_build_company_lookup()` was calling `get_sp500_constituents()` for both indices; added `get_nasdaq100_constituents()` (Wikipedia scrape, 24h cache)
+- [x] NASDAQ 100 toggle fix: `build_company_lookup()` was calling `get_sp500_constituents()` for both indices; added `get_nasdaq100_constituents()` (Wikipedia scrape, 24h cache)
 - [x] Revenue estimate backfill: scraped historical revenue estimates for Q1-Q4 2025 (~5500 rows), coverage 0% → 92-95%
 - [x] Finnhub bulk calendar: week-by-week fetching to avoid 1500-result API limit, expanded from 7 → 10 weeks
 - [x] Sidebar nav: added Macro link under Tools group (pie-chart icon)

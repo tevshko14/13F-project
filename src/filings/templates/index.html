@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Superinvestor Portfolios — PaperPanda{% endblock %}
 {% block meta_description %}Track 13F holdings of top superinvestors like Warren Buffett, Bill Ackman, and more. See portfolio values, top holdings, and recent changes.{% endblock %}
 {% block extra_head_scripts %}
@@ -205,7 +206,7 @@
             <td class="text-small">
                 <a href="/holdings/{{ si.cik }}">{{ summary.fund_name }}</a>
             </td>
-            <td class="text-right">${{ "{:,.0f}".format(summary.portfolio_value) }}</td>
+            <td class="text-right">{{ summary.portfolio_value | format_value }}</td>
             <td class="text-right">{{ summary.num_holdings }}</td>
             <td>
                 <div class="tag-list">
@@ -214,7 +215,12 @@
                     {% endfor %}
                 </div>
             </td>
-            <td class="text-small">{{ summary.report_period }}</td>
+            <td class="text-small">
+                {{ summary.report_period }}
+                {% if summary.report_period and summary.report_period < stale_cutoff %}
+                    <br><span style="color: var(--del-color, #c0392b); font-size: 0.75rem;" title="This fund's data may be stale — last filing is over a year old">stale</span>
+                {% endif %}
+            </td>
         </tr>
         {% else %}
         {# No cache — lazy load via HTMX, staggered to avoid overwhelming SEC #}
@@ -227,8 +233,8 @@
             <td class="text-small">
                 <a href="/holdings/{{ si.cik }}">{{ si.fund_name }}</a>
             </td>
-            <td colspan="4" aria-busy="true">
-                <span class="spinner"></span> Loading from SEC EDGAR...
+            <td colspan="4">
+                {{ skeleton_fund_row() }}
             </td>
         </tr>
         {% endif %}
