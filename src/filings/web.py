@@ -1210,7 +1210,7 @@ async def _feature_announcement_scanner() -> None:
 
 _health_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="health")
 _startup_ts: float = 0.0  # set in lifespan
-_STARTUP_GRACE = 90  # seconds: don't report unhealthy during cold start
+_STARTUP_GRACE = 300  # seconds: don't report unhealthy during cold start + sweep
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
