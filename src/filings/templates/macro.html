@@ -284,6 +284,9 @@
                 {% endfor %}
             </div>
         </div>
+        <div style="margin-top: 0.75rem; padding: 0.6em 1em; border-radius: 8px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); font-size: 0.82rem; color: rgba(245, 158, 11, 0.85);">
+            ⚠ This section is a work in progress. Data may be incomplete or inaccurate while we finalize the pipeline.
+        </div>
         <div id="es-content"
              hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
              hx-trigger="load"

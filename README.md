@@ -1,6 +1,6 @@
 # PaperPanda — 13F Filing Tracker
 
-A web dashboard for tracking SEC 13F institutional holdings filings from 84 superinvestors (Buffett, Ackman, Burry, Einhorn, and more). Live at [paperpanda.io](https://paperpanda.io).
+A web dashboard for tracking SEC 13F institutional holdings filings from 85 superinvestors (Buffett, Ackman, Burry, Einhorn, and more). Live at [paperpanda.io](https://paperpanda.io).
 
 ## Features
 
@@ -33,9 +33,9 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Ear
 - **Calendar Tab** - Finance YouTuber schedules and topics
 
 ### Top Funds Page (`/funds`)
-- **Funds Tab** - Overview of all 84 tracked institutional investors with HTMX lazy-loading
+- **Funds Tab** - Overview of all 85 tracked institutional investors with HTMX lazy-loading
 - **Holdings Tab** - Aggregated view of all superinvestor holdings ranked by conviction
-- **Activity Tab** - Real-time buys, sells, and position changes across all 84 funds
+- **Activity Tab** - Real-time buys, sells, and position changes across all 85 funds
 
 ### Insider Trading Page (`/insider-trading`)
 - **Global Screener** - Latest insider buys/sells across all stocks with top-tickers chart
@@ -236,7 +236,7 @@ src/filings/
 ├── youtube_sync.py     # Cron worker: sync YouTube events + create notifications
 ├── company_filings.py  # SEC filing links for stock pages
 ├── auth.py             # Authentication (sign-in, sessions)
-├── superinvestors.py   # 84 hardcoded superinvestors
+├── superinvestors.py   # 85 hardcoded superinvestors
 ├── display.py          # CLI Rich formatters
 ├── static/             # Static assets
 │   ├── logo-nav.png        # Light-mode navbar logo

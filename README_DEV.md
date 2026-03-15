@@ -24,7 +24,7 @@
 
 ## 1. Project Overview
 
-A tool for tracking SEC 13F institutional holdings filings from 84 hardcoded
+A tool for tracking SEC 13F institutional holdings filings from 85 hardcoded
 "superinvestors" (Buffett, Ackman, Burry, Einhorn, etc.). Provides both a CLI and a
 web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 
@@ -165,7 +165,7 @@ uv run filings-web          # starts at http://localhost:8000
    a. Heatmap section: HTMX fires GET /api/heatmap → "loading" stub with
       auto-retry (hx-trigger="load delay:5s") until market data is ready
    b. Most-added section: HTMX fires GET /api/most-added → renders table from cache
-   c. 84 superinvestor rows, each marked for lazy-load
+   c. 85 superinvestor rows, each marked for lazy-load
 4. Browser HTMX fires GET /api/fund-row/{cik} for each row
 5. fund_row() checks cache FIRST:
    a. Cache hit → returns immediately (zero SEC calls)
@@ -185,7 +185,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
 1. User clicks ticker link (e.g., /stock/AAPL)
 2. stock_detail() loads app.state.fund_cache (preloaded dict)
 3. build_stock_detail("AAPL", cache, superinvestors):
-   a. Iterates all 84 cached funds
+   a. Iterates all 85 cached funds
    b. For each fund, scans all_holdings for ticker match
    c. Builds StockHolder with value, shares, activity from flat changes
    d. Returns StockDetail (or None → 404)
@@ -215,7 +215,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
 └── src/filings/
     ├── __init__.py                   # version = "0.1.0"
     ├── models.py                     # 13 dataclasses (data contracts)
-    ├── superinvestors.py             # 84 hardcoded funds + CIK lookup dict
+    ├── superinvestors.py             # 85 hardcoded funds + CIK lookup dict
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
     ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications tables)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
@@ -315,7 +315,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
 
 ### 4.1 Superinvestor Registry (`superinvestors.py`)
 
-The system tracks exactly **84 hardcoded superinvestors**. This is the source
+The system tracks exactly **85 hardcoded superinvestors**. This is the source
 list — there is no database of investors. The full list matches
 [Dataroma's manager list](https://www.dataroma.com/m/managers.php) plus a few
 additional notable investors.
@@ -417,7 +417,7 @@ This is used everywhere to filter cache data to only known superinvestors.
 | 81 | Wallace Weitz | Weitz Investment Management | 883965 |
 | 82 | Yacktman Asset Mgmt | Yacktman Asset Management | 905567 |
 | 83 | David Tepper | Appaloosa LP | 1656456 |
-| 84 | David Abrams | Abrams Capital Management | 1358706 |
+| 85 | David Abrams | Abrams Capital Management | 1358706 |
 
 ### 4.2 Cache File Schema (`~/.13f-cache/fund_data.json`)
 
@@ -933,7 +933,7 @@ cash balances), and 13F filings (equity holdings).
 | `fetch_adv_bulk_data()` | Downloads SEC Form ADV bulk XML, extracts RAUM for funds with CRD numbers |
 | `fetch_xbrl_cash(cik)` | Queries SEC XBRL Company Facts API for cash & equivalents from 10-K/10-Q |
 | `compute_deployment_metrics(cik, ...)` | Combines ADV + XBRL + 13F into a single metrics dict |
-| `sync_all_deployment_data()` | Syncs all 84 funds, writes results to Supabase `api_cache` (category: `deployment`) |
+| `sync_all_deployment_data()` | Syncs all 85 funds, writes results to Supabase `api_cache` (category: `deployment`) |
 | `load_all_deployment_data()` | Loads all deployment entries from Supabase cache |
 | `build_deployment_leaderboard(data)` | Builds sorted list for table display, sorted by cash value descending |
 
@@ -1282,7 +1282,7 @@ Maps Tradier field names to yfinance equivalents so `detect_unusual()` works unc
 
 ### 5.19 Performance Optimizations
 
-**Problem:** With 84 superinvestors, synchronous file I/O was blocking the async event loop.
+**Problem:** With 85 superinvestors, synchronous file I/O was blocking the async event loop.
 Per-fund TTL now skips fresh funds during background refresh, reducing API calls significantly.
 
 | Optimization | Before | After |
@@ -1290,7 +1290,7 @@ Per-fund TTL now skips fresh funds during background refresh, reducing API calls
 | Cache saves during refresh | Save entire JSON to disk after EVERY fund (84×) | Batch: save every 10 funds, via `asyncio.to_thread` |
 | Notification bell polls | Direct DB query on every poll (every tab, every user) | 15-second in-memory `_bell_cache` collapses identical polls; single DB query returns count + latest |
 | Watchlist reads | Read `watchlist.json` from disk on every request | In-memory cache (`_watchlist_cache`), disk reads only on cold start |
-| HTMX lazy-load (cold start) | All 84 rows fire simultaneously on page load | Staggered: 3 rows per second (`delay:{{ loop.index0 // 3 }}s`) |
+| HTMX lazy-load (cold start) | All 85 rows fire simultaneously on page load | Staggered: 3 rows per second (`delay:{{ loop.index0 // 3 }}s`) |
 | Fund row disk save | Synchronous `save_cache()` blocking response | `asyncio.create_task(asyncio.to_thread(...))` — fire-and-forget |
 
 **In-memory caching pattern** (used by `watchlist.py` and notification bell):
@@ -2071,7 +2071,7 @@ they don't get re-introduced.
 | Bridgewater returning wrong entity | Multiple CIK matches for "Bridgewater" | CIK verification + hardcoded superinvestor list |
 | CIK cache key mismatch | `fund_row` stored cache with zero-padded CIK ("0001067983") but lookups used stripped CIK ("1067983") | Added `cik_normalized = cik.lstrip("0") or cik` in fund_row endpoint |
 | Stale cache after multi-quarter update | Old cache lacked `quarterly_changes` field | Graceful degradation with `.get("quarterly_changes", [])` + delete cache to regenerate |
-| Server unresponsive after 84 superinvestor expansion | `save_cache()` called synchronously after every fund during background refresh (84× disk writes blocking event loop); `notifications.json` and `watchlist.json` read from disk on every HTTP request; 84 HTMX lazy-loads fired simultaneously | Batched cache writes (every 10 funds, via `asyncio.to_thread`); in-memory caching for notification/watchlist state; staggered HTMX lazy-loads (3 per second); fire-and-forget disk saves in fund_row endpoint |
+| Server unresponsive after 85 superinvestor expansion | `save_cache()` called synchronously after every fund during background refresh (84× disk writes blocking event loop); `notifications.json` and `watchlist.json` read from disk on every HTTP request; 84 HTMX lazy-loads fired simultaneously | Batched cache writes (every 10 funds, via `asyncio.to_thread`); in-memory caching for notification/watchlist state; staggered HTMX lazy-loads (3 per second); fire-and-forget disk saves in fund_row endpoint |
 | 13F fund data disappearing after TTL expiry | `load_cache_from_supabase()` called `get_cached()` which returns `None` when TTL expires, causing all fund data to vanish until the sync worker refreshes | Switched to `get_cached_with_stale()` which returns expired data as stale fallback; added L2 Supabase fallback to all fund web endpoints with L1 promotion |
 | Insider trades "failed to load" on deploy | When L1 TTL expires and Supabase query fails (transient), `get_latest_insider_trades()` fell through to OpenInsider scrape which also failed, returning empty list | Added `_get_cached_with_stale()` to insider_trading.py; both global and per-ticker functions now use 4-tier fallback (L1 fresh → L2 Supabase → L3 scrape → L4 stale L1), never returning empty results if data was previously loaded |
 

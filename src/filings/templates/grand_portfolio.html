@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
 {% block title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
-{% block meta_description %}Track 13F holdings of 84 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more. See portfolio values, top holdings, and recent buys and sells.{% endblock %}
+{% block meta_description %}Track 13F holdings of 85 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more. See portfolio values, top holdings, and recent buys and sells.{% endblock %}
 {% block og_title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
-{% block og_description %}Track 13F holdings of 84 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more.{% endblock %}
+{% block og_description %}Track 13F holdings of 85 superinvestors including Warren Buffett, Bill Ackman, Michael Burry, and more.{% endblock %}
 {% block twitter_title %}Top Superinvestor Funds — 13F Portfolio Tracker | PaperPanda{% endblock %}
-{% block twitter_description %}Track 13F holdings of 84 superinvestors. See portfolio values, top holdings & recent changes.{% endblock %}
+{% block twitter_description %}Track 13F holdings of 85 superinvestors. See portfolio values, top holdings & recent changes.{% endblock %}
 {% block extra_head_scripts %}
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -34,7 +34,7 @@
         <p class="funds-kicker">PaperPanda Funds Terminal</p>
         <h1>Top Superinvestor Funds</h1>
         <p>
-            13F portfolio intelligence across 84 tracked superinvestors, powered by SEC EDGAR data.
+            13F portfolio intelligence across 85 tracked superinvestors, powered by SEC EDGAR data.
             Explore capital concentration, momentum shifts, activity flow, and deployment posture.
         </p>
     </header>
@@ -295,12 +295,12 @@
                     <td class="text-small">
                         <a href="/holdings/{{ si.cik }}">{{ summary.fund_name }}</a>
                     </td>
-                    <td class="text-right">${{ "{:,.0f}".format(summary.portfolio_value) }}</td>
+                    <td class="text-right">{{ summary.portfolio_value | format_value }}</td>
                     <td class="text-right">{{ summary.num_holdings }}</td>
                     <td>
                         <div class="tag-list">
                             {% for t in summary.top_holdings %}
-                            <a href="/stock/{{ t }}" class="tag">{{ t }}</a>
+                            <a href="/stock/{{ t }}" class="tag"><img src="/api/logo/{{ t }}.png" width="14" height="14" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{{ t }}</a>
                             {% endfor %}
                         </div>
                     </td>
