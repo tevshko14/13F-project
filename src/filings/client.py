@@ -31,24 +31,49 @@ _HEADERS = {"User-Agent": _identity}
 
 logger = logging.getLogger(__name__)
 
+# ── Value multiplier detection ────────────────────────────────────────
+# edgartools is inconsistent: most funds return values in actual dollars,
+# but ~7 of 85 return values in thousands (raw SEC XML).  We detect which
+# case we're in by checking value/share ratios across the top holdings.
+# If the average $/share is < $1, values are clearly in thousands.
+_VALUE_PER_SHARE_THRESHOLD = 1.0  # Below this → values are in thousands
+
+
+def _detect_multiplier(holdings_df) -> int:
+    """Return 1000 if values appear to be in thousands, else 1.
+
+    Checks the average value/share across the first 5 holdings.
+    If it's below $1/share, values are clearly in thousands and need x1000.
+    """
+    ratios = []
+    for row in holdings_df.head(5).itertuples():
+        shares = int(row.SharesPrnAmount) if hasattr(row, "SharesPrnAmount") else 0
+        val = int(row.Value) if hasattr(row, "Value") else 0
+        if shares > 0 and val > 0:
+            ratios.append(val / shares)
+    if not ratios:
+        return 1
+    avg_vps = sum(ratios) / len(ratios)
+    if avg_vps < _VALUE_PER_SHARE_THRESHOLD:
+        return 1000
+    return 1
+
+
+def _filing_total_value(tf, mult: int = 1) -> int:
+    """Extract ThirteenF.total_value, applying multiplier if values are in thousands."""
+    return int(tf.total_value) * mult if tf.total_value else 0
+
+
+def _row_value(row, mult: int = 1) -> int:
+    """Extract a holdings row's Value, applying multiplier if values are in thousands."""
+    return int(row.Value) * mult
+
+
 # ── Post-ingestion validation thresholds ─────────────────────────────
-# edgartools already converts SEC 13F values from thousands to actual
-# dollars internally.  These thresholds detect anomalously low values
-# (e.g., a new edgartools version dropping the conversion).
 _MIN_HOLDINGS_FOR_TOTAL_CHECK = 20
 _MIN_TOTAL_VALUE = 10_000_000       # $10M — fund with 20+ holdings below this is suspicious
 _MIN_HOLDINGS_FOR_AVG_CHECK = 5
 _MIN_VALUE_PER_HOLDING = 500_000    # $500K avg value per holding is suspicious floor
-
-
-def _filing_total_value(tf) -> int:
-    """Extract ThirteenF.total_value (already in actual dollars via edgartools)."""
-    return int(tf.total_value) if tf.total_value else 0
-
-
-def _row_value(row) -> int:
-    """Extract a holdings DataFrame row's Value (already in actual dollars via edgartools)."""
-    return int(row.Value)
 
 
 def _validate_fund_values(
@@ -174,13 +199,16 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
     latest = filings[0]
     tf = ThirteenF(latest)
     holdings_df = tf.holdings
+    mult = _detect_multiplier(holdings_df)
+    if mult > 1:
+        logger.info("CIK %s: values in thousands, applying x%d multiplier", cik, mult)
 
     fund = FundInfo(
         name=tf.management_company_name or company.name,
         cik=cik,
         report_period=str(tf.report_period),
         filing_date=str(tf.filing_date),
-        total_value=_filing_total_value(tf),
+        total_value=_filing_total_value(tf, mult),
         total_holdings=len(holdings_df),
     )
 
@@ -194,7 +222,7 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
                 issuer_name=str(row.Issuer),
                 title_of_class=str(row.Class),
                 cusip=str(row.Cusip),
-                value=_row_value(row),
+                value=_row_value(row, mult),
                 shares=int(row.SharesPrnAmount),
                 share_type=str(row.Type),
             )
@@ -203,7 +231,7 @@ def get_holdings(cik: str, top_n: int = 25) -> tuple[FundInfo, list[Holding]]:
     return fund, holdings
 
 
-def _compare_two_filings(current_df, previous_df) -> list[HoldingChange]:
+def _compare_two_filings(current_df, previous_df, mult: int = 1) -> list[HoldingChange]:
     """Compare two filing DataFrames and return a list of HoldingChanges.
 
     This is the core diff algorithm used by both compare_quarters()
@@ -226,8 +254,8 @@ def _compare_two_filings(current_df, previous_df) -> list[HoldingChange]:
 
         curr_shares = int(curr.SharesPrnAmount) if curr else 0
         prev_shares = int(prev.SharesPrnAmount) if prev else 0
-        curr_value = _row_value(curr) if curr else 0
-        prev_value = _row_value(prev) if prev else 0
+        curr_value = _row_value(curr, mult) if curr else 0
+        prev_value = _row_value(prev, mult) if prev else 0
         name = str(curr.Issuer) if curr else str(prev.Issuer)
 
         if prev is None:
@@ -285,13 +313,14 @@ def compare_quarters(
 
     tf_current = ThirteenF(filings[0])
     tf_previous = ThirteenF(filings[1])
+    mult = _detect_multiplier(tf_current.holdings)
 
     current_info = FundInfo(
         name=tf_current.management_company_name or company.name,
         cik=cik,
         report_period=str(tf_current.report_period),
         filing_date=str(tf_current.filing_date),
-        total_value=_filing_total_value(tf_current),
+        total_value=_filing_total_value(tf_current, mult),
         total_holdings=len(tf_current.holdings),
     )
     previous_info = FundInfo(
@@ -299,11 +328,11 @@ def compare_quarters(
         cik=cik,
         report_period=str(tf_previous.report_period),
         filing_date=str(tf_previous.filing_date),
-        total_value=_filing_total_value(tf_previous),
+        total_value=_filing_total_value(tf_previous, mult),
         total_holdings=len(tf_previous.holdings),
     )
 
-    changes = _compare_two_filings(tf_current.holdings, tf_previous.holdings)
+    changes = _compare_two_filings(tf_current.holdings, tf_previous.holdings, mult)
 
     # Sort: NEW first, then CLOSED, then by absolute share change descending
     status_order = {
@@ -420,7 +449,10 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
 
     tf = ThirteenF(filings[0])
     holdings_df = tf.holdings
-    total_val = _filing_total_value(tf)
+    mult = _detect_multiplier(holdings_df)
+    if mult > 1:
+        logger.info("CIK %s: values in thousands, applying x%d multiplier", cik, mult)
+    total_val = _filing_total_value(tf, mult)
 
     sorted_df = holdings_df.sort_values("Value", ascending=False)
 
@@ -432,14 +464,14 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
                 "issuer": str(row.Issuer),
                 "ticker": _safe_ticker(row),
                 "cusip": cusip,
-                "value": _row_value(row),
+                "value": _row_value(row, mult),
                 "shares": int(row.SharesPrnAmount),
             }
         )
 
     all_holdings = []
     for row in sorted_df.itertuples():
-        val = _row_value(row)
+        val = _row_value(row, mult)
         cusip = str(row.Cusip)
         all_holdings.append(
             {
@@ -462,7 +494,7 @@ def get_fund_summary(cik: str, history_quarters: int = 8) -> dict:
             tf_newer = tf if i == 0 else ThirteenF(filings[i])
             tf_older = ThirteenF(filings[i + 1])
 
-            change_list = _compare_two_filings(tf_newer.holdings, tf_older.holdings)
+            change_list = _compare_two_filings(tf_newer.holdings, tf_older.holdings, mult)
 
             period_label = _report_period_to_quarter_label(str(tf_newer.report_period))
 
@@ -533,7 +565,10 @@ def get_enriched_holdings(
 
     tf = ThirteenF(filings[0])
     holdings_df = tf.holdings
-    total_val = _filing_total_value(tf)
+    mult = _detect_multiplier(holdings_df)
+    if mult > 1:
+        logger.info("CIK %s: values in thousands, applying x%d multiplier", cik, mult)
+    total_val = _filing_total_value(tf, mult)
 
     fund = FundInfo(
         name=tf.management_company_name or company.name,
@@ -558,7 +593,7 @@ def get_enriched_holdings(
 
     holdings = []
     for row in sorted_df.itertuples():
-        val = _row_value(row)
+        val = _row_value(row, mult)
         cusip = str(row.Cusip)
         change = activity_by_cusip.get(cusip)
         activity = change.status if change and change.status != "UNCHANGED" else None

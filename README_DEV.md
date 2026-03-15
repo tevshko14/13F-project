@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-14 (Francisco-fixes merge: x1000 value fix, ticker corrections, earnings calendar, skeleton UI, retail timeouts, ⌘K command palette, macro page unlock)
+> Last updated: 2026-03-14 (Earnings calendar: company names, list truncation, macro filter hierarchy; 13F auto-detect value multiplier)
 
 ---
 

@@ -929,6 +929,51 @@ def _fmt_rev(val: float | None) -> str:
     return f"{sign}${abs_val:.0f}"
 
 
+_finnhub_symbols_cache: dict | None = None
+_finnhub_symbols_ts: float = 0
+
+
+def _load_finnhub_symbol_names() -> dict[str, str]:
+    """Fetch Finnhub /stock/symbol?exchange=US → {symbol: description}.
+
+    Cached for 24 hours.  Returns empty dict on failure.
+    """
+    global _finnhub_symbols_cache, _finnhub_symbols_ts
+
+    now = time.time()
+    if _finnhub_symbols_cache is not None and (now - _finnhub_symbols_ts) < 86400:
+        return _finnhub_symbols_cache
+
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return {}
+
+    try:
+        r = httpx.get(
+            "https://finnhub.io/api/v1/stock/symbol",
+            params={"exchange": "US", "token": key},
+            timeout=30,
+            follow_redirects=True,
+        )
+        r.raise_for_status()
+        data = r.json()
+        result = {}
+        for item in data:
+            sym = item.get("symbol", "")
+            desc = item.get("description", "")
+            if sym and desc:
+                result[sym] = desc
+        _finnhub_symbols_cache = result
+        _finnhub_symbols_ts = now
+        logger.info("Finnhub symbol names: %d tickers loaded", len(result))
+        return result
+    except Exception:
+        logger.warning("Finnhub /stock/symbol fetch failed", exc_info=True)
+        if _finnhub_symbols_cache is not None:
+            return _finnhub_symbols_cache
+        return {}
+
+
 def _load_finnhub_earnings_calendar() -> list[dict] | None:
     """Fetch Finnhub /calendar/earnings for past 1 week + next 4 weeks.
 
@@ -1067,6 +1112,14 @@ def fetch_earnings_calendar(
         return _build_empty_calendar(index, period)
 
     # ── Filter by index constituents (unless "all") ────────────
+    # Always load company info for name resolution
+    _all_company_info = build_company_lookup("sp500")
+    _nasdaq_info = build_company_lookup("nasdaq")
+    _all_company_info.update(_nasdaq_info)  # merge both
+
+    # Finnhub symbol names for tickers not in any index
+    _finnhub_names = _load_finnhub_symbol_names()
+
     if index == "all":
         company_info = None
         norm_lookup = None
@@ -1102,7 +1155,12 @@ def fetch_earnings_calendar(
         else:
             # All-stocks mode — use Finnhub symbol directly
             our_sym = finnhub_sym.replace(".", "-")  # normalize to our format
-            info = {"name": item.get("name") or our_sym, "sector": ""}
+            known = _all_company_info.get(our_sym, {})
+            fh_name = _finnhub_names.get(finnhub_sym, "")
+            info = {
+                "name": known.get("name") or fh_name or item.get("name") or our_sym,
+                "sector": known.get("sector", ""),
+            }
 
         d = item["date"]
         is_si = our_sym in si_tickers

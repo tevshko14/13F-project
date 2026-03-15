@@ -125,6 +125,14 @@
         border-radius: 8px; font-size: 0.82em; margin-bottom: 1em; text-align: center;
     }
     .ec-empty { text-align: center; padding: 3em; color: var(--pp-text-muted); }
+    .ec-show-more-btn {
+        display: block; width: 100%; padding: 0.6em;
+        background: var(--pp-overlay-5, #f4f4f5); border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-top: none; border-radius: 0 0 12px 12px;
+        font-size: 0.82em; font-weight: 600; color: var(--pp-text-muted);
+        cursor: pointer; transition: background 0.15s, color 0.15s;
+    }
+    .ec-show-more-btn:hover { background: var(--pp-overlay-8, #e8e8e8); color: var(--pp-text); }
 
     /* ── Grid view styles (.ecg-) ── */
     .ecg-controls-bar {
@@ -457,7 +465,7 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
                 </thead>
                 <tbody>
                     {% for e in day.entries %}
-                    <tr data-ec-row>
+                    <tr data-ec-row{% if loop.index > 10 %} class="ec-overflow-row" style="display:none;"{% endif %}>
                         <td><span class="ec-hour-badge ec-hour-{{ e.hour }}">{{ e.hour_label }}</span></td>
                         <td>
                             {% if e.has_page %}
@@ -481,6 +489,11 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
                 </tbody>
             </table>
         </div>
+        {% if day.entries|length > 10 %}
+        <button class="ec-show-more-btn" onclick="ecToggleMore(this)">
+            Show {{ day.entries|length - 10 }} more companies
+        </button>
+        {% endif %}
     </div>
     {% endfor %}
 </div>
@@ -533,8 +546,10 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
                     </tr>
                 </thead>
                 <tbody>
+                    {% set rns = namespace(idx=0) %}
                     {% for r in data.just_reported if r.date == d %}
-                    <tr>
+                    {% set rns.idx = rns.idx + 1 %}
+                    <tr{% if rns.idx > 10 %} class="ec-overflow-row" style="display:none;"{% endif %}>
                         <td><a href="/stock/{{ r.symbol }}" class="ec-ticker-link">{{ r.symbol }}</a></td>
                         <td class="ec-col-name ec-name" title="{{ r.name }}">{{ r.name }}</td>
                         <td style="text-align:right;" class="{% if r.eps_beat == true %}ec-beat{% elif r.eps_beat == false %}ec-miss{% endif %}">
@@ -559,6 +574,11 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
                 </tbody>
             </table>
         </div>
+        {% if rns.idx > 10 %}
+        <button class="ec-show-more-btn" onclick="ecToggleMore(this)">
+            Show {{ rns.idx - 10 }} more companies
+        </button>
+        {% endif %}
     </div>
     {% endfor %}
 </details>
@@ -1017,6 +1037,19 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
         });
     };
 
+    window.ecToggleMore = function (btn) {
+        var panel = btn.closest('.ec-date-panel') || btn.closest('.ec-reported-panel');
+        if (!panel) return;
+        var rows = panel.querySelectorAll('.ec-overflow-row');
+        var expanding = rows.length > 0 && rows[0].style.display === 'none';
+        rows.forEach(function (r) { r.style.display = expanding ? '' : 'none'; });
+        if (expanding) {
+            btn.textContent = 'Show less';
+        } else {
+            btn.textContent = 'Show ' + rows.length + ' more companies';
+        }
+    };
+
     window.ecSwitchReportedTab = function (idx) {
         document.querySelectorAll('[data-rep-idx].ec-date-tab').forEach(function (btn) {
             btn.classList.toggle('active', parseInt(btn.dataset.repIdx) === idx);
@@ -1031,12 +1064,26 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
     ============================================================ */
     window.ecFilterTable = function (query) {
         query = query.toLowerCase();
-        // Filter rows in the active panel only
         var activePanel = document.querySelector('.ec-date-panel.active');
         if (!activePanel) return;
-        activePanel.querySelectorAll('[data-ec-row]').forEach(function (row) {
-            row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
-        });
+        var btn = activePanel.querySelector('.ec-show-more-btn');
+        if (query) {
+            // When searching, show all matching rows (ignore overflow truncation)
+            activePanel.querySelectorAll('[data-ec-row]').forEach(function (row) {
+                row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
+            });
+            if (btn) btn.style.display = 'none';
+        } else {
+            // Reset: show first 10, hide overflow
+            activePanel.querySelectorAll('[data-ec-row]').forEach(function (row) {
+                row.style.display = row.classList.contains('ec-overflow-row') ? 'none' : '';
+            });
+            if (btn) {
+                btn.style.display = '';
+                var overflowCount = activePanel.querySelectorAll('.ec-overflow-row').length;
+                btn.textContent = 'Show ' + overflowCount + ' more companies';
+            }
+        }
     };
 
     /* ============================================================

@@ -127,7 +127,7 @@
         box-shadow: 0 8px 18px rgba(13, 148, 136, 0.28);
     }
 
-    /* ── Pill Buttons (index / period toggles) ── */
+    /* ── Pill Buttons (sub-tab toggles — Scorecard/Calendar, Sentiment/Economic/etc.) ── */
     .pp-pill-nav {
         display: flex; gap: 0.38rem; flex-wrap: wrap;
         padding: 0; margin-bottom: 0;
@@ -148,6 +148,34 @@
         border-color: #0f766e;
         background: linear-gradient(120deg, #0f766e, #0d9488);
         color: #fff; box-shadow: 0 4px 10px rgba(13, 148, 136, 0.22);
+    }
+
+    /* ── Secondary Filter Buttons (index / period / impact filters) ── */
+    .pp-filter-nav {
+        display: flex; gap: 0.32rem; flex-wrap: wrap;
+        padding: 0; margin-bottom: 0; align-items: center;
+    }
+    .pp-filter-nav .pp-pill-btn {
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        border-radius: 4px; padding: 3px 10px;
+        font-size: 0.74rem; font-weight: 400;
+        background: transparent; color: rgba(15, 23, 42, 0.45);
+        box-shadow: none;
+    }
+    .pp-filter-nav .pp-pill-btn:hover {
+        border-color: rgba(15, 23, 42, 0.25);
+        color: rgba(15, 23, 42, 0.7);
+        background: rgba(15, 23, 42, 0.04);
+    }
+    .pp-filter-nav .pp-pill-btn.active {
+        border-color: rgba(15, 23, 42, 0.3);
+        background: rgba(15, 23, 42, 0.08);
+        color: rgba(15, 23, 42, 0.85);
+    }
+    .pp-filter-sep {
+        width: 1px; height: 16px;
+        background: rgba(15, 23, 42, 0.12);
+        margin: 0 0.25rem;
     }
 
     /* ── Panel + Controls ── */
@@ -197,6 +225,24 @@
         background: rgba(45, 212, 191, 0.1);
         border-color: rgba(45, 212, 191, 0.4);
     }
+    :root[data-theme="dark"] .pp-filter-nav .pp-pill-btn {
+        color: rgba(255, 255, 255, 0.45);
+        border-color: rgba(255, 255, 255, 0.1);
+        background: transparent;
+    }
+    :root[data-theme="dark"] .pp-filter-nav .pp-pill-btn:hover {
+        color: rgba(255, 255, 255, 0.7);
+        border-color: rgba(255, 255, 255, 0.2);
+        background: rgba(255, 255, 255, 0.05);
+    }
+    :root[data-theme="dark"] .pp-filter-nav .pp-pill-btn.active {
+        color: rgba(255, 255, 255, 0.9);
+        border-color: rgba(255, 255, 255, 0.25);
+        background: rgba(255, 255, 255, 0.1);
+    }
+    :root[data-theme="dark"] .pp-filter-sep {
+        background: rgba(255, 255, 255, 0.1);
+    }
 
     /* ── Reduced Motion ── */
     @media (prefers-reduced-motion: reduce) {
@@ -231,7 +277,7 @@
     {# ── Scorecard sub-panel ── #}
     <div id="earn-sub-scorecard" class="earn-sub active">
         <div class="macro-controls" style="margin-top: 0.4rem;">
-            <div class="pp-pill-nav" id="es-index-nav" style="margin-bottom: 0;">
+            <div class="pp-filter-nav" id="es-index-nav" style="margin-bottom: 0;">
                 {% for key, label in indices.items() %}
                 <button class="pp-pill-btn {% if key == current_index %}active{% endif %}"
                         data-key="{{ key }}" onclick="esChangeIndex('{{ key }}')">{{ label }}</button>
@@ -249,14 +295,14 @@
     {# ── Calendar sub-panel ── #}
     <div id="earn-sub-calendar" class="earn-sub">
         <div class="macro-controls" style="margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
-            <div class="pp-pill-nav" id="ec-index-nav" style="margin-bottom: 0;">
+            <div class="pp-filter-nav" id="ec-index-nav" style="margin-bottom: 0;">
                 {% for key, label in indices.items() %}
                 <button class="pp-pill-btn {% if key == 'all' %}active{% endif %}"
                         data-key="{{ key }}" onclick="ecChangeIndex('{{ key }}')">{{ label }}</button>
                 {% endfor %}
             </div>
-            <span style="color:var(--pp-text-muted); font-size:0.8rem;">·</span>
-            <div class="pp-pill-nav" id="ec-period-nav" style="margin-bottom: 0;">
+            <div class="pp-filter-sep"></div>
+            <div class="pp-filter-nav" id="ec-period-nav" style="margin-bottom: 0;">
                 {% for key, label in calendar_periods.items() %}
                 <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
                         data-key="{{ key }}" onclick="ecChangePeriod('{{ key }}')">{{ label }}</button>
@@ -273,13 +319,14 @@
 <div class="macro-panel" id="macro-panel-breadth" role="tabpanel" aria-labelledby="tab-breadth">
     <div class="macro-controls">
         <h2>Market Performance</h2>
-        <div class="pp-pill-nav" id="mb-index-nav" style="margin-bottom: 0;">
+        <div class="pp-filter-nav" id="mb-index-nav" style="margin-bottom: 0;">
             {% for key, label in breadth_indices.items() %}
             <button class="pp-pill-btn {% if key == 'sp500' %}active{% endif %}"
                     data-key="{{ key }}" onclick="mbChangeIndex('{{ key }}')">{{ label }}</button>
             {% endfor %}
         </div>
-        <div class="pp-pill-nav" id="mb-period-nav" style="margin-bottom: 0;">
+        <div class="pp-filter-sep"></div>
+        <div class="pp-filter-nav" id="mb-period-nav" style="margin-bottom: 0;">
             {% for key, label in breadth_periods.items() %}
             <button class="pp-pill-btn {% if key == '1d' %}active{% endif %}"
                     data-key="{{ key }}" onclick="mbChangePeriod('{{ key }}')">{{ label }}</button>
@@ -295,19 +342,21 @@
 <div class="macro-panel" id="macro-panel-economic" role="tabpanel" aria-labelledby="tab-economic">
     <div class="macro-controls">
         <h2>Events Calendar</h2>
-        <div class="pp-pill-nav" id="ed-period-nav" style="margin-bottom: 0;">
+        <div class="pp-filter-nav" id="ed-period-nav" style="margin-bottom: 0;">
             {% for key, label in economic_periods.items() %}
             <button class="pp-pill-btn {% if key == 'this_week' %}active{% endif %}"
                     data-key="{{ key }}" onclick="edChangePeriod('{{ key }}')">{{ label }}</button>
             {% endfor %}
         </div>
-        <div class="pp-pill-nav" id="ed-impact-nav" style="margin-bottom: 0;">
+        <div class="pp-filter-sep"></div>
+        <div class="pp-filter-nav" id="ed-impact-nav" style="margin-bottom: 0;">
             {% for key, label in economic_impacts.items() %}
             <button class="pp-pill-btn {% if key == 'all' %}active{% endif %}"
                     data-key="{{ key }}" onclick="edChangeImpact('{{ key }}')">{{ label }}</button>
             {% endfor %}
         </div>
-        <div class="pp-pill-nav" id="ed-country-nav" style="margin-bottom: 0;">
+        <div class="pp-filter-sep"></div>
+        <div class="pp-filter-nav" id="ed-country-nav" style="margin-bottom: 0;">
             {% for key, label in economic_countries.items() %}
             <button class="pp-pill-btn {% if key == 'us' %}active{% endif %}"
                     data-key="{{ key }}" onclick="edChangeCountry('{{ key }}')">{{ label }}</button>
@@ -391,7 +440,7 @@
 <div class="macro-panel" id="macro-panel-volatility" role="tabpanel" aria-labelledby="tab-volatility">
     <div class="macro-controls">
         <h2>Volatility & Options Sentiment</h2>
-        <div class="pp-pill-nav" id="vol-type-nav" style="margin-bottom: 0;">
+        <div class="pp-filter-nav" id="vol-type-nav" style="margin-bottom: 0;">
             <button class="pp-pill-btn active" data-key="total" onclick="volChangeType('total')">Total</button>
             <button class="pp-pill-btn" data-key="index" onclick="volChangeType('index')">Index</button>
             <button class="pp-pill-btn" data-key="equity" onclick="volChangeType('equity')">Equity</button>
