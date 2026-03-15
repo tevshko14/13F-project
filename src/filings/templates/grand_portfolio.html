@@ -235,9 +235,17 @@
                     <td class="text-right">{{ "%.2f"|format(e.pct_of_aggregate) }}%</td>
                     <td>
                         <div class="tag-list">
-                            {% for h in e.holders %}
+                            {% for h in e.holders[:3] %}
                             <span class="tag">{{ h }}</span>
                             {% endfor %}
+                            {% if e.holders|length > 3 %}
+                            <button class="tag tag-more" onclick="this.parentElement.querySelector('.tag-overflow').style.display='flex';this.style.display='none';">+{{ e.holders|length - 3 }} more</button>
+                            <div class="tag-overflow" style="display:none;">
+                                {% for h in e.holders[3:] %}
+                                <span class="tag">{{ h }}</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>
@@ -751,6 +759,32 @@ window.toggleGrandPortfolio = function(btn) {
 
     a.tag:hover {
         background: rgba(13, 148, 136, 0.18);
+    }
+
+    .tag-more {
+        cursor: pointer;
+        border: 1px solid rgba(13, 148, 136, 0.25);
+        background: transparent;
+        color: #0d9488;
+        font-family: inherit;
+        margin: 0;
+        transition: background 0.15s;
+    }
+    .tag-more:hover {
+        background: rgba(13, 148, 136, 0.11);
+    }
+    :root[data-theme="dark"] .tag-more {
+        border-color: rgba(45, 212, 191, 0.2);
+        color: #2dd4bf;
+    }
+    :root[data-theme="dark"] .tag-more:hover {
+        background: rgba(45, 212, 191, 0.1);
+    }
+
+    .tag-overflow {
+        flex-wrap: wrap;
+        gap: 0.3rem;
+        width: 100%;
     }
 
     .gp-overflow { display: none; }

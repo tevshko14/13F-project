@@ -1137,7 +1137,7 @@ def build_grand_portfolio(
                     "weights": [],
                 }
             by_cusip[cusip]["combined_value"] += val
-            by_cusip[cusip]["holders"].append(si.display_name)
+            by_cusip[cusip]["holders"].append((si.display_name, val))
             by_cusip[cusip]["weights"].append(h.get("pct", 0))
             # Prefer a non-None ticker
             if h.get("ticker") and not by_cusip[cusip]["ticker"]:
@@ -1146,19 +1146,22 @@ def build_grand_portfolio(
     entries = []
     for data in by_cusip.values():
         weights = data["weights"]
+        # Sort holders by position value descending (largest positions first)
+        sorted_holders = sorted(data["holders"], key=lambda x: -x[1])
+        holder_names = [name for name, _ in sorted_holders]
         entries.append(
             GrandPortfolioEntry(
                 issuer_name=data["issuer_name"],
                 ticker=data["ticker"],
                 cusip=data["cusip"],
-                num_holders=len(data["holders"]),
+                num_holders=len(holder_names),
                 combined_value=data["combined_value"],
                 pct_of_aggregate=round(
                     data["combined_value"] / total_aggregate * 100, 3
                 )
                 if total_aggregate > 0
                 else 0,
-                holders=data["holders"],
+                holders=holder_names,
                 avg_weight=sum(weights) / len(weights) if weights else 0,
             )
         )
