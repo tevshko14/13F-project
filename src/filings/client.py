@@ -31,15 +31,10 @@ _HEADERS = {"User-Agent": _identity}
 
 logger = logging.getLogger(__name__)
 
-# SEC 13F filings report values in *thousands* of dollars.
-# The edgartools library returns raw XML values without conversion,
-# so we must multiply by 1000 to get actual dollar amounts.
-_SEC_13F_VALUE_MULTIPLIER = 1000
-
 # ── Post-ingestion validation thresholds ─────────────────────────────
-# A fund with 20+ holdings and total value under $10M (after x1000
-# multiplier) is almost certainly wrong.  Log a warning so it gets
-# caught during sync rather than silently serving bad data.
+# edgartools already converts SEC 13F values from thousands to actual
+# dollars internally.  These thresholds detect anomalously low values
+# (e.g., a new edgartools version dropping the conversion).
 _MIN_HOLDINGS_FOR_TOTAL_CHECK = 20
 _MIN_TOTAL_VALUE = 10_000_000       # $10M — fund with 20+ holdings below this is suspicious
 _MIN_HOLDINGS_FOR_AVG_CHECK = 5
@@ -47,13 +42,13 @@ _MIN_VALUE_PER_HOLDING = 500_000    # $500K avg value per holding is suspicious 
 
 
 def _filing_total_value(tf) -> int:
-    """Convert ThirteenF.total_value from thousands to actual dollars."""
-    return int(tf.total_value) * _SEC_13F_VALUE_MULTIPLIER if tf.total_value else 0
+    """Extract ThirteenF.total_value (already in actual dollars via edgartools)."""
+    return int(tf.total_value) if tf.total_value else 0
 
 
 def _row_value(row) -> int:
-    """Convert a holdings DataFrame row's Value from thousands to actual dollars."""
-    return int(row.Value) * _SEC_13F_VALUE_MULTIPLIER
+    """Extract a holdings DataFrame row's Value (already in actual dollars via edgartools)."""
+    return int(row.Value)
 
 
 def _validate_fund_values(
@@ -66,7 +61,7 @@ def _validate_fund_values(
     if num_holdings >= _MIN_HOLDINGS_FOR_TOTAL_CHECK and total_value < _MIN_TOTAL_VALUE:
         logger.warning(
             "VALIDATION: Fund %s (CIK %s) has %d holdings but total value "
-            "is only $%s — likely missing x1000 multiplier",
+            "is only $%s — values may not be converting from thousands correctly",
             name, cik, num_holdings, f"{total_value:,.0f}",
         )
     elif avg_per_holding < _MIN_VALUE_PER_HOLDING and num_holdings >= _MIN_HOLDINGS_FOR_AVG_CHECK:

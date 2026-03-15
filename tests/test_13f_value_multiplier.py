@@ -1,14 +1,14 @@
-"""Tests for the SEC 13F x1000 value multiplier fix.
+"""Tests for SEC 13F value handling.
 
-SEC 13F filings report all dollar values in *thousands*. The edgartools
-library returns these raw values without conversion. Our code must apply
-a x1000 multiplier at every ingestion point.
+edgartools converts SEC 13F values from thousands to actual dollars
+internally.  Our code must NOT apply any additional multiplier — it
+should pass through the edgartools values as-is.
 
 These tests verify:
-  - The multiplier constant exists and equals 1000
-  - get_fund_summary() applies the multiplier to total_value and all holdings
-  - get_holdings() applies the multiplier to FundInfo and Holding objects
-  - _compare_two_filings() applies the multiplier to current/previous values
+  - _filing_total_value() and _row_value() return raw values (no multiplier)
+  - get_fund_summary() preserves edgartools values unchanged
+  - get_holdings() preserves edgartools values unchanged
+  - _compare_two_filings() preserves edgartools values unchanged
   - _validate_fund_values() flags anomalously low portfolio values
 """
 
@@ -17,13 +17,12 @@ from __future__ import annotations
 import logging
 import sys
 import types
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 from dataclasses import dataclass
 
 import pytest
 
 # ── Ensure heavy deps are importable ─────────────────────────────────
-# edgartools is installed; stub only the deps that aren't available
 for _mod in ("yfinance", "supabase", "postgrest", "gotrue",
              "storage3", "realtime", "supafunc"):
     if _mod not in sys.modules:
@@ -31,42 +30,60 @@ for _mod in ("yfinance", "supabase", "postgrest", "gotrue",
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Multiplier constant tests
+# Value pass-through tests (no multiplier)
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def test_multiplier_constant_exists():
-    """The _SEC_13F_VALUE_MULTIPLIER constant must be 1000."""
-    from filings.client import _SEC_13F_VALUE_MULTIPLIER
-    assert _SEC_13F_VALUE_MULTIPLIER == 1000
+def test_filing_total_value_no_multiplier():
+    """_filing_total_value returns the raw edgartools value."""
+    from filings.client import _filing_total_value
+
+    mock_tf = MagicMock()
+    mock_tf.total_value = 6_568_000_000  # edgartools already in actual dollars
+    assert _filing_total_value(mock_tf) == 6_568_000_000
 
 
-def test_multiplier_is_used_in_get_fund_summary():
-    """get_fund_summary must multiply total_value by 1000."""
+def test_filing_total_value_none():
+    """_filing_total_value returns 0 for None."""
+    from filings.client import _filing_total_value
+
+    mock_tf = MagicMock()
+    mock_tf.total_value = None
+    assert _filing_total_value(mock_tf) == 0
+
+
+def test_row_value_no_multiplier():
+    """_row_value returns the raw edgartools value."""
+    from filings.client import _row_value
+
+    mock_row = MagicMock()
+    mock_row.Value = 3_000_000_000  # $3B, already in actual dollars
+    assert _row_value(mock_row) == 3_000_000_000
+
+
+def test_values_in_get_fund_summary():
+    """get_fund_summary must pass through edgartools values without multiplying."""
     from filings import client
     import pandas as pd
     from decimal import Decimal
 
-    # Mock a ThirteenF object
     mock_tf = MagicMock()
-    mock_tf.total_value = Decimal("6568")  # AKO Capital example: 6568 thousands
+    mock_tf.total_value = Decimal("6568000000")  # $6.568B in actual dollars
     mock_tf.management_company_name = "AKO Capital LLP"
     mock_tf.report_period = "2025-03-31"
     mock_tf.filing_date = "2025-05-15"
 
-    # Mock holdings DataFrame
     holdings_df = pd.DataFrame({
         "Issuer": ["APPLE INC", "MICROSOFT CORP"],
         "Class": ["COM", "COM"],
         "Cusip": ["037833100", "594918104"],
-        "Value": [3000, 3568],  # in thousands
+        "Value": [3_000_000_000, 3_568_000_000],  # actual dollars from edgartools
         "SharesPrnAmount": [100, 200],
         "Type": ["SH", "SH"],
         "Ticker": ["AAPL", "MSFT"],
     })
     mock_tf.holdings = holdings_df
 
-    # Mock the filings list
     mock_company = MagicMock()
     mock_filings = MagicMock()
     mock_filings.__len__ = lambda s: 1
@@ -77,25 +94,21 @@ def test_multiplier_is_used_in_get_fund_summary():
          patch.object(client, "ThirteenF", return_value=mock_tf):
         result = client.get_fund_summary("12345")
 
-    # total_value should be 6568 * 1000 = 6,568,000
-    assert result["total_value"] == 6_568_000
+    # Values should be passed through unchanged
+    assert result["total_value"] == 6_568_000_000
 
-    # Individual holding values should also be multiplied
     for h in result["all_holdings"]:
-        assert h["value"] >= 3_000_000  # 3000 * 1000
-
-    for h in result["top_holdings"]:
-        assert h["value"] >= 3_000_000
+        assert h["value"] >= 3_000_000_000  # actual dollars, not thousands
 
 
-def test_multiplier_is_used_in_get_holdings():
-    """get_holdings must multiply FundInfo.total_value and Holding.value."""
+def test_values_in_get_holdings():
+    """get_holdings must pass through edgartools values without multiplying."""
     from filings import client
     import pandas as pd
     from decimal import Decimal
 
     mock_tf = MagicMock()
-    mock_tf.total_value = Decimal("5278")  # Baupost example
+    mock_tf.total_value = Decimal("5278000000")  # $5.278B actual
     mock_tf.management_company_name = "Baupost Group"
     mock_tf.report_period = "2025-03-31"
     mock_tf.filing_date = "2025-05-15"
@@ -104,7 +117,7 @@ def test_multiplier_is_used_in_get_holdings():
         "Issuer": ["LIBERTY BROADBAND"],
         "Class": ["COM"],
         "Cusip": ["530307305"],
-        "Value": [2000],  # in thousands
+        "Value": [2_000_000_000],  # $2B actual
         "SharesPrnAmount": [500],
         "Type": ["SH"],
         "Ticker": ["LBRDA"],
@@ -122,32 +135,32 @@ def test_multiplier_is_used_in_get_holdings():
          patch.object(client, "ThirteenF", return_value=mock_tf):
         fund_info, holdings = client.get_holdings("67890")
 
-    assert fund_info.total_value == 5_278_000  # 5278 * 1000
-    assert holdings[0].value == 2_000_000  # 2000 * 1000
+    assert fund_info.total_value == 5_278_000_000
+    assert holdings[0].value == 2_000_000_000
 
 
-def test_compare_two_filings_applies_multiplier():
-    """_compare_two_filings must multiply current/previous values."""
+def test_compare_two_filings_no_multiplier():
+    """_compare_two_filings must pass through values without multiplying."""
     from filings import client
     import pandas as pd
 
     current_df = pd.DataFrame({
         "Issuer": ["APPLE INC"],
         "Cusip": ["037833100"],
-        "Value": [5000],  # 5000 thousands = $5M
+        "Value": [5_000_000_000],  # $5B actual
         "SharesPrnAmount": [100],
     })
     previous_df = pd.DataFrame({
         "Issuer": ["APPLE INC"],
         "Cusip": ["037833100"],
-        "Value": [3000],  # 3000 thousands = $3M
+        "Value": [3_000_000_000],  # $3B actual
         "SharesPrnAmount": [80],
     })
 
     changes = client._compare_two_filings(current_df, previous_df)
     assert len(changes) == 1
-    assert changes[0].current_value == 5_000_000  # 5000 * 1000
-    assert changes[0].previous_value == 3_000_000  # 3000 * 1000
+    assert changes[0].current_value == 5_000_000_000
+    assert changes[0].previous_value == 3_000_000_000
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -163,7 +176,6 @@ def test_validate_flags_low_value_many_holdings(caplog):
         _validate_fund_values("12345", "Suspicious Fund", 5_000_000, 25)
 
     assert "VALIDATION" in caplog.text
-    assert "likely missing x1000" in caplog.text
 
 
 def test_validate_flags_low_avg_per_holding(caplog):
@@ -196,24 +208,22 @@ def test_validate_handles_zero_holdings(caplog):
     with caplog.at_level(logging.WARNING):
         _validate_fund_values("12345", "Empty Fund", 0, 0)
 
-    # Should not crash, should not warn
     assert "VALIDATION" not in caplog.text
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Percentage calculation tests (ensure pct is still correct after x1000)
+# Percentage calculation tests
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def test_pct_of_portfolio_still_correct():
-    """Portfolio percentage calculation should be unaffected by the x1000
-    multiplier since both numerator and denominator are multiplied."""
+def test_pct_of_portfolio_correct():
+    """Portfolio percentage calculation should be correct with raw values."""
     from filings import client
     import pandas as pd
     from decimal import Decimal
 
     mock_tf = MagicMock()
-    mock_tf.total_value = Decimal("10000")  # 10000 thousands = $10M
+    mock_tf.total_value = Decimal("10000000000")  # $10B actual
     mock_tf.management_company_name = "Test Fund"
     mock_tf.report_period = "2025-03-31"
     mock_tf.filing_date = "2025-05-15"
@@ -222,7 +232,7 @@ def test_pct_of_portfolio_still_correct():
         "Issuer": ["AAPL", "MSFT"],
         "Class": ["COM", "COM"],
         "Cusip": ["037833100", "594918104"],
-        "Value": [7000, 3000],  # 70% and 30%
+        "Value": [7_000_000_000, 3_000_000_000],  # 70% and 30%
         "SharesPrnAmount": [100, 50],
         "Type": ["SH", "SH"],
         "Ticker": ["AAPL", "MSFT"],
@@ -239,6 +249,5 @@ def test_pct_of_portfolio_still_correct():
          patch.object(client, "ThirteenF", return_value=mock_tf):
         result = client.get_fund_summary("12345")
 
-    # Percentages should still be 70% and 30%
     pcts = [h["pct"] for h in result["all_holdings"]]
     assert pcts == [70.0, 30.0]
