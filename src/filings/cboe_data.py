@@ -299,31 +299,39 @@ def get_vix_term_structure() -> dict:
 
 
 def _fetch_vix_term_structure() -> dict:
-    """Fetch VIX tenor indices from yfinance."""
+    """Fetch VIX tenor indices from yfinance using a single batch download."""
     try:
         import yfinance as yf
 
-        tenor_symbols = {
-            "^VIX9D": "9D",
-            "^VIX": "1M (VIX)",
-            "^VIX3M": "3M",
-            "^VIX6M": "6M",
-        }
+        tenor_order = [
+            ("^VIX9D", "9D"),
+            ("^VIX", "1M (VIX)"),
+            ("^VIX3M", "3M"),
+            ("^VIX6M", "6M"),
+        ]
+        symbols = [s for s, _ in tenor_order]
+
+        df = yf.download(symbols, period="1d", progress=False, timeout=_YF_TIMEOUT)
+        if df.empty:
+            logger.warning("yfinance returned empty VIX term structure data")
+            return {}
 
         tenors = []
         spot = None
 
-        for sym, label in tenor_symbols.items():
+        for sym, label in tenor_order:
             try:
-                ticker = yf.Ticker(sym, session=_yf_session)
-                info = ticker.fast_info
-                price = getattr(info, "last_price", None) or getattr(info, "previous_close", None)
-                if price and price > 0:
-                    tenors.append({"label": label, "value": round(float(price), 2)})
+                # Handle multi-level columns from yfinance batch download
+                if hasattr(df.columns, "levels") and len(df.columns.levels) > 1:
+                    price = float(df["Close"][sym].iloc[-1])
+                else:
+                    price = float(df["Close"].iloc[-1])
+                if price > 0:
+                    tenors.append({"label": label, "value": round(price, 2)})
                     if sym == "^VIX":
-                        spot = round(float(price), 2)
+                        spot = round(price, 2)
             except Exception as exc:
-                logger.debug("VIX tenor %s fetch failed: %s", sym, exc)
+                logger.debug("VIX tenor %s extract failed: %s", sym, exc)
 
         if not tenors:
             return {}
@@ -367,14 +375,20 @@ def _fetch_skew_from_yfinance() -> list[dict]:
             return []
 
         result = []
-        close_col = "Close"
         # Handle multi-level columns from yfinance
-        if hasattr(df.columns, "levels"):
-            df.columns = df.columns.droplevel(1) if len(df.columns.levels) > 1 else df.columns
+        if hasattr(df.columns, "levels") and len(df.columns.levels) > 1:
+            # For single-ticker download, select ("Close", "^SKEW") or just flatten
+            if ("Close", "^SKEW") in df.columns:
+                close_series = df[("Close", "^SKEW")]
+            else:
+                df.columns = df.columns.droplevel(1)
+                close_series = df["Close"]
+        else:
+            close_series = df["Close"]
 
-        for idx, row in df.iterrows():
+        for idx, val in close_series.items():
             try:
-                val = float(row[close_col])
+                val = float(val)
                 if val > 0:
                     result.append({
                         "date": idx.strftime("%Y-%m-%d"),
