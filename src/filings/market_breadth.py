@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, object]] = {}
 _key_locks: dict[str, threading.Lock] = {}
-_TTL = 1800  # 30 minutes
+_TTL = 1800      # 30 minutes (L1 in-memory)
+_L2_TTL = 21600  # 6 hours (Supabase — survives redeploys)
 from filings.market_data import _YF_TIMEOUT
 
 # ── Constants ────────────────────────────────────────────────────
@@ -320,7 +321,7 @@ def _get_raw_data(
                 "idx_prices": idx_prices.to_dict() if idx_prices is not None else None,
             }
             sb_key = f"breadth:{cache_key}"
-            supabase_cache.set_cached(sb_key, "market_breadth", serialized, ttl_seconds=_TTL)
+            supabase_cache.set_cached(sb_key, "market_breadth", serialized, ttl_seconds=_L2_TTL)
         except Exception:
             logger.debug("Supabase breadth write-back failed for %s", cache_key)
 
@@ -652,13 +653,26 @@ def detect_divergence(
 # ── Public API ───────────────────────────────────────────────────
 
 def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
-    """Fetch breadth metrics + treemap data (cached 30 min)."""
+    """Fetch breadth metrics + treemap data (L1 30 min, L2 6 hours)."""
     cache_key = f"breadth:{index}:{period}"
 
     with _lock:
         cached = _cache.get(cache_key)
         if cached and time.time() - cached[0] < _TTL:
             return cached[1]
+
+    # L2: check Supabase for processed results
+    sb_key = f"result:{cache_key}"
+    try:
+        from filings import supabase_cache
+        l2 = supabase_cache.get_cached(sb_key)
+        if l2 and isinstance(l2, dict) and l2.get("metrics"):
+            with _lock:
+                _cache[cache_key] = (time.time(), l2)
+            logger.info("Breadth result warm-loaded from L2: %s", cache_key)
+            return l2
+    except Exception:
+        pass
 
     close_df, vol_df, constituents, _idx = _get_raw_data(index)
 
@@ -689,17 +703,38 @@ def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
 
     with _lock:
         _cache[cache_key] = (time.time(), data)
+
+    # Write processed result to L2
+    try:
+        from filings import supabase_cache
+        supabase_cache.set_cached(sb_key, "market_breadth", data, ttl_seconds=_L2_TTL)
+    except Exception:
+        pass
+
     return data
 
 
 def fetch_ad_line_history(index: str = "sp500") -> dict:
-    """Fetch cumulative A/D line data (cached 30 min)."""
+    """Fetch cumulative A/D line data (L1 30 min, L2 6 hours)."""
     cache_key = f"ad_line:{index}"
 
     with _lock:
         cached = _cache.get(cache_key)
         if cached and time.time() - cached[0] < _TTL:
             return cached[1]
+
+    # L2: check Supabase for processed results
+    sb_key = f"result:{cache_key}"
+    try:
+        from filings import supabase_cache
+        l2 = supabase_cache.get_cached(sb_key)
+        if l2 and isinstance(l2, dict) and l2.get("dates"):
+            with _lock:
+                _cache[cache_key] = (time.time(), l2)
+            logger.info("A/D line warm-loaded from L2: %s", cache_key)
+            return l2
+    except Exception:
+        pass
 
     close_df, _vol_df, constituents, idx_prices = _get_raw_data(index)
 
@@ -713,6 +748,14 @@ def fetch_ad_line_history(index: str = "sp500") -> dict:
 
     with _lock:
         _cache[cache_key] = (time.time(), data)
+
+    # Write processed result to L2
+    try:
+        from filings import supabase_cache
+        supabase_cache.set_cached(sb_key, "market_breadth", data, ttl_seconds=_L2_TTL)
+    except Exception:
+        pass
+
     return data
 
 
