@@ -276,7 +276,7 @@
 
     {# ── Scorecard sub-panel ── #}
     <div id="earn-sub-scorecard" class="earn-sub active">
-        <div class="macro-controls" style="margin-top: 0.4rem;">
+        <div class="macro-controls" style="margin-top: 0.75rem;">
             <div class="pp-filter-nav" id="es-index-nav" style="margin-bottom: 0;">
                 {% for key, label in indices.items() %}
                 <button class="pp-pill-btn {% if key == current_index %}active{% endif %}"
@@ -294,7 +294,7 @@
 
     {# ── Calendar sub-panel ── #}
     <div id="earn-sub-calendar" class="earn-sub">
-        <div class="macro-controls" style="margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+        <div class="macro-controls" style="margin-top: 0.75rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
             <div class="pp-filter-nav" id="ec-index-nav" style="margin-bottom: 0;">
                 {% for key, label in indices.items() %}
                 <button class="pp-pill-btn {% if key == 'all' %}active{% endif %}"
