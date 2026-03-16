@@ -27,9 +27,6 @@ _cache: dict[str, tuple[float, object]] = {}
 _TTL = 3600  # 1 hour (L1 in-memory)
 _DB_TTL = 604_800  # 7 days (L2 Supabase)
 
-_FMP_BASE = "https://financialmodelingprep.com/api/v3"
-_TIMEOUT = 15
-
 # ── Constants ────────────────────────────────────────────────────
 INDEX_CHOICES = {
     "sp500": "S&P 500",
@@ -79,34 +76,6 @@ def get_available_quarters() -> list[str]:
 def _api_key() -> str:
     return os.environ.get("FMP_API_KEY", "")
 
-
-def fmp_get(path: str, params: dict | None = None) -> list | dict | None:
-    key = _api_key()
-    if not key:
-        return None
-    p = dict(params or {})
-    p["apikey"] = key
-    try:
-        url = f"{_FMP_BASE}{path}"
-        logger.info("FMP request: %s params=%s", url, {k: v for k, v in p.items() if k != "apikey"})
-        r = httpx.get(url, params=p, timeout=_TIMEOUT)
-        r.raise_for_status()
-        data = r.json()
-        if isinstance(data, list):
-            logger.info("FMP %s returned %d items", path, len(data))
-        elif isinstance(data, dict):
-            # FMP returns {"Error Message": "..."} when plan lacks access
-            err_msg = data.get("Error Message") or data.get("message") or data.get("error")
-            if err_msg:
-                logger.error("FMP %s plan/access error: %s", path, err_msg)
-            else:
-                logger.warning("FMP %s returned dict (expected list): %s", path, str(data)[:200])
-        else:
-            logger.warning("FMP %s returned unexpected type: %s", path, str(data)[:200])
-        return data
-    except Exception:
-        logger.exception("FMP API error: %s", path)
-        return None
 
 
 def _parse_quarter(label: str) -> tuple[int, int] | None:
@@ -409,9 +378,11 @@ def _fetch_from_fmp(
     company_info: dict[str, dict],
     sector: str | None,
 ) -> list[dict] | None:
-    """Fallback: FMP ``/earning_calendar`` bulk endpoint (premium)."""
-    calendar = fmp_get("/earning_calendar", {"from": start, "to": end})
-    if calendar is None or not isinstance(calendar, list):
+    """Fallback: FMP earnings-calendar via shared bulk cache."""
+    from filings.fmp_cache import get_earnings_in_range, actual_eps as _aeps, actual_rev as _arev
+
+    calendar = get_earnings_in_range(start, end)
+    if not calendar:
         return None
 
     tickers = set(company_info.keys()) if company_info else None
@@ -427,9 +398,9 @@ def _fetch_from_fmp(
         if sector and item_sector and item_sector != sector:
             continue
 
-        actual_eps = item.get("eps")
+        actual_eps = _aeps(item)
         est_eps = item.get("epsEstimated")
-        actual_rev = item.get("revenue")
+        actual_rev = _arev(item)
         est_rev = item.get("revenueEstimated")
 
         if actual_eps is None and actual_rev is None:
@@ -558,33 +529,35 @@ def _trend_from_db(
 
 
 def _trend_from_fmp(start: str, end: str) -> list[dict] | None:
-    """Build per-quarter metric rows from FMP earning_calendar (fallback)."""
-    calendar = fmp_get("/earning_calendar", {"from": start, "to": end})
-    if calendar is None or not isinstance(calendar, list):
+    """Build per-quarter metric rows from FMP earnings-calendar (fallback)."""
+    from filings.fmp_cache import get_earnings_in_range, actual_eps as _aeps, actual_rev as _arev
+
+    calendar = get_earnings_in_range(start, end)
+    if not calendar:
         return None
 
-    rows = [
-        {
+    rows = []
+    for s in calendar:
+        eps = _aeps(s)
+        if eps is None:
+            continue
+        rev = _arev(s)
+        est_eps = s.get("epsEstimated")
+        est_rev = s.get("revenueEstimated")
+        rows.append({
             "symbol": s.get("symbol", ""),
             "date": s.get("date", ""),
             "eps_beat": (
-                s.get("eps", 0) > s.get("epsEstimated", 0)
-                if s.get("eps") is not None
-                and s.get("epsEstimated") is not None
-                else None
+                eps > est_eps
+                if est_eps is not None else None
             ),
             "rev_beat": (
-                s.get("revenue", 0) > s.get("revenueEstimated", 0)
-                if s.get("revenue") is not None
-                and s.get("revenueEstimated") is not None
-                else None
+                rev > est_rev
+                if rev is not None and est_rev is not None else None
             ),
             "eps_surprise_pct": None,
             "price_change": None,
-        }
-        for s in calendar
-        if s.get("eps") is not None
-    ]
+        })
     return rows if rows else None
 
 

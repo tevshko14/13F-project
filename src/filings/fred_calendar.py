@@ -98,7 +98,7 @@ _SERIES: dict[str, dict] = {
     },
     "PPIFID": {
         "name": "PPI Final Demand (MoM)", "impact": "medium", "category": "inflation",
-        "units": "pch", "display_unit": "%", "release_id": 101, "time": "08:30",
+        "units": "pch", "display_unit": "%", "release_id": 46, "time": "08:30",
     },
     # ── Employment ───────────────────────────────────────────────
     "PAYEMS": {
@@ -111,7 +111,7 @@ _SERIES: dict[str, dict] = {
     },
     "ICSA": {
         "name": "Initial Jobless Claims", "impact": "medium", "category": "employment",
-        "units": "lin", "display_unit": "K", "release_id": 176, "time": "08:30",
+        "units": "lin", "display_unit": "K", "release_id": 180, "time": "08:30",
     },
     # ── Growth ───────────────────────────────────────────────────
     "A191RL1Q225SBEA": {
@@ -121,21 +121,21 @@ _SERIES: dict[str, dict] = {
     # ── Consumer ─────────────────────────────────────────────────
     "RSXFS": {
         "name": "Retail Sales (MoM)", "impact": "high", "category": "consumer",
-        "units": "pch", "display_unit": "%", "release_id": 337, "time": "08:30",
+        "units": "pch", "display_unit": "%", "release_id": 9, "time": "08:30",
     },
     "UMCSENT": {
         "name": "Michigan Consumer Sentiment", "impact": "medium", "category": "consumer",
-        "units": "lin", "display_unit": "", "release_id": 175, "time": "10:00",
+        "units": "lin", "display_unit": "", "release_id": 91, "time": "10:00",
     },
     # ── Manufacturing ────────────────────────────────────────────
     "DGORDER": {
         "name": "Durable Goods Orders (MoM)", "impact": "medium", "category": "manufacturing",
-        "units": "pch", "display_unit": "%", "release_id": 97, "time": "08:30",
+        "units": "pch", "display_unit": "%", "release_id": 95, "time": "08:30",
     },
     # ── Housing ──────────────────────────────────────────────────
     "HOUST": {
         "name": "Housing Starts", "impact": "medium", "category": "housing",
-        "units": "lin", "display_unit": "K", "release_id": 60, "time": "08:30",
+        "units": "lin", "display_unit": "K", "release_id": 27, "time": "08:30",
     },
 }
 
@@ -249,8 +249,8 @@ def _fetch_release_dates(release_id: int, from_date: str, to_date: str) -> list[
     data = _fred_api("release/dates", {
         "release_id": release_id,
         "include_release_dates_with_no_data": True,
-        "sort_order": "asc",
-        "limit": 30,
+        "sort_order": "desc",
+        "limit": 12,  # covers ~3 months of weekly series (ICSA)
     })
     if not data:
         return []
@@ -425,56 +425,8 @@ def _load_finnhub_economic() -> list[dict]:
 
 
 def _load_fmp_economic() -> list[dict]:
-    """Fetch FMP /economic_calendar → normalised event list."""
-    key = _fmp_key()
-    if not key:
-        return []
-    try:
-        end = datetime.now() + timedelta(weeks=4)
-        start = datetime.now() - timedelta(weeks=1)
-        r = httpx.get(
-            "https://financialmodelingprep.com/api/v3/economic_calendar",
-            params={
-                "from": start.strftime("%Y-%m-%d"),
-                "to": end.strftime("%Y-%m-%d"),
-                "apikey": key,
-            },
-            timeout=_TIMEOUT,
-        )
-        r.raise_for_status()
-        raw = r.json()
-        if not isinstance(raw, list):
-            return []
-        events = []
-        for item in raw:
-            name = item.get("event", "")
-            if not name:
-                continue
-            date_str = str(item.get("date", ""))
-            t = ""
-            if " " in date_str:
-                date_str, time_part = date_str.split(" ", 1)
-                t = time_part[:5] if len(time_part) >= 5 else time_part
-            country = str(item.get("country", "")).upper()
-            events.append({
-                "series_id": f"FMP:{name[:40]}",
-                "event": name,
-                "date": date_str,
-                "time": t,
-                "country": country,
-                "impact": str(item.get("impact", "Low")).lower(),
-                "category": _categorise(name),
-                "actual": item.get("actual"),
-                "estimate": item.get("estimate"),
-                "previous": item.get("previous"),
-                "unit": str(item.get("unit", "")),
-                "source": "fmp",
-            })
-        logger.info("FMP economic calendar: %d events", len(events))
-        return events
-    except Exception:
-        logger.warning("FMP economic calendar fetch failed", exc_info=True)
-        return []
+    """FMP /economic-calendar — disabled (402 on free tier)."""
+    return []
 
 
 def _categorise(event_name: str) -> str:

@@ -27,10 +27,6 @@ _EARNINGS_TTL = 86_400  # 24 hours — earnings don't change once reported
 _FWD_TTL = 3_600  # 1 hour — forward estimates update more often
 _FWD_DB_TTL = 21_600  # 6 hours — DB freshness threshold for estimates
 
-_FMP_BASE = "https://financialmodelingprep.com/api/v3"
-_FMP_TIMEOUT = 15
-_fmp_revenue_available: bool | None = None  # None = untested, False = plan lacks access
-
 EST_EPS = "eps"
 EST_REVENUE = "revenue"
 
@@ -435,47 +431,13 @@ def _load_finnhub_bulk_calendar() -> dict[str, dict[str, dict]] | None:
 
 
 def _fetch_fmp_revenue_raw(ticker: str) -> dict[str, dict] | None:
-    """Fetch revenue data from FMP (fallback — requires premium plan)."""
-    global _fmp_revenue_available
+    """Fetch revenue data from FMP via shared bulk cache.
 
-    if _fmp_revenue_available is False:
-        return None
+    Uses :mod:`fmp_cache` so all consumers share a single API call.
+    """
+    from filings.fmp_cache import get_revenue_for_ticker
 
-    key = os.environ.get("FMP_API_KEY", "").strip()
-    if not key:
-        return None
-
-    try:
-        url = f"{_FMP_BASE}/historical/earning_calendar/{ticker}"
-        r = httpx.get(url, params={"apikey": key, "limit": 20}, timeout=_FMP_TIMEOUT)
-        r.raise_for_status()
-        data = r.json()
-
-        if isinstance(data, dict):
-            err = data.get("Error Message") or data.get("message") or data.get("error")
-            if err:
-                logger.warning(
-                    "FMP historical/earning_calendar unavailable (plan issue): %s", err
-                )
-                _fmp_revenue_available = False
-                return None
-
-        if not isinstance(data, list):
-            return None
-
-        _fmp_revenue_available = True
-        lookup: dict[str, dict] = {}
-        for item in data:
-            d = item.get("date")
-            rev = item.get("revenue")
-            rev_est = item.get("revenueEstimated")
-            if d and (rev is not None or rev_est is not None):
-                lookup[d] = {"revenue": rev, "revenueEstimated": rev_est}
-        return lookup if lookup else None
-
-    except Exception:
-        logger.debug("FMP revenue fetch failed for %s", ticker, exc_info=True)
-        return None
+    return get_revenue_for_ticker(ticker)
 
 
 def _enrich_rows_with_revenue(

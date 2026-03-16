@@ -7,8 +7,8 @@ Data flow:
   1. Check in-memory L1 cache (1h TTL)
   2. Fetch from Finnhub /calendar/earnings (free tier, bulk)
      — via :func:`earnings.fetch_finnhub_calendar_raw` (shared cache)
-  3. Fallback to FMP /earning_calendar (premium)
-     — via :func:`earnings_scorecard.fmp_get` (shared helper)
+  3. Fallback to FMP /stable/earnings-calendar
+     — via :mod:`fmp_cache` (shared bulk cache)
   4. Enrich with company metadata (name, sector, logo availability)
      — via :func:`earnings_scorecard.build_company_lookup` (shared)
 
@@ -184,15 +184,11 @@ def _fetch_finnhub_calendar(start: str, end: str) -> list[dict]:
 
 
 def _fetch_fmp_calendar(start: str, end: str) -> list[dict]:
-    """Fallback: FMP ``/earning_calendar`` endpoint.
+    """Fallback: FMP earnings-calendar via shared bulk cache."""
+    from filings.fmp_cache import get_earnings_in_range, actual_eps, actual_rev
 
-    Uses :func:`earnings_scorecard.fmp_get` for the shared HTTP helper
-    (handles API key, error parsing, logging).
-    """
-    from filings.earnings_scorecard import fmp_get
-
-    data = fmp_get("/earning_calendar", {"from": start, "to": end})
-    if data is None or not isinstance(data, list):
+    data = get_earnings_in_range(start, end)
+    if not data:
         return []
 
     entries = []
@@ -213,9 +209,9 @@ def _fetch_fmp_calendar(start: str, end: str) -> list[dict]:
             "date": date,
             "timing": timing,
             "eps_estimate": item.get("epsEstimated"),
-            "eps_actual": item.get("eps"),
+            "eps_actual": actual_eps(item),
             "revenue_estimate": item.get("revenueEstimated"),
-            "revenue_actual": item.get("revenue"),
+            "revenue_actual": actual_rev(item),
             "year": item.get("fiscalDateEnding", "")[:4] if item.get("fiscalDateEnding") else None,
             "quarter": None,
             "confirmed": True,

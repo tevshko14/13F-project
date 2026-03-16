@@ -220,61 +220,8 @@ def _load_finnhub() -> list[dict] | None:
 
 
 def _load_fmp() -> list[dict] | None:
-    """Fetch from FMP ``/economic_calendar``, return normalised list."""
-    key = _fmp_key()
-    if not key:
-        return None
-
-    end = datetime.now() + timedelta(weeks=4)
-    start = datetime.now() - timedelta(weeks=1)
-
-    try:
-        r = httpx.get(
-            "https://financialmodelingprep.com/api/v3/economic_calendar",
-            params={
-                "from": start.strftime("%Y-%m-%d"),
-                "to": end.strftime("%Y-%m-%d"),
-                "apikey": key,
-            },
-            timeout=_TIMEOUT,
-        )
-        r.raise_for_status()
-        raw = r.json()
-
-        if not isinstance(raw, list):
-            return []
-
-        events = []
-        for item in raw:
-            event_name = item.get("event", "")
-            if not event_name:
-                continue
-            # FMP date may include time: "2024-01-15 08:30:00"
-            date_str = str(item.get("date", ""))
-            t = ""
-            if " " in date_str:
-                date_str, time_part = date_str.split(" ", 1)
-                t = time_part[:5] if len(time_part) >= 5 else time_part
-
-            events.append({
-                "event": event_name,
-                "date": date_str,
-                "time": t,
-                "country": str(item.get("country", "")).upper(),
-                "impact": str(item.get("impact", "Low")).lower(),
-                "actual": item.get("actual"),
-                "estimate": item.get("estimate"),
-                "previous": item.get("previous"),
-                "unit": str(item.get("unit", "")),
-                "source": "fmp",
-            })
-
-        logger.info("FMP economic calendar: %d events", len(events))
-        return events
-
-    except Exception:
-        logger.warning("FMP economic calendar fetch failed", exc_info=True)
-        return None
+    """FMP /economic-calendar — disabled (402 on free tier)."""
+    return None
 
 
 def _load_raw_events() -> tuple[list[dict], bool]:

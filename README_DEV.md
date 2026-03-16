@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-15 (Macro: economic indicators with category filters + charts, events calendar grid/month/list views, multi-source merge FRED+Finnhub+FMP)
+> Last updated: 2026-03-15 (FMP shared cache module, fixed FRED release IDs, migrated FMP v3→stable API, disabled dead FMP economic-calendar endpoints)
 
 ---
 
@@ -239,15 +239,16 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── screener.py                   # Stock Valuation Screener: DCF model, Monte Carlo simulation, peer suggestions/valuation, financial data aggregation (3-tier price fallback)
     ├── cboe_data.py                  # CBOE volatility data: Put/Call ratios (CBOE CSV→yfinance fallback), VIX term structure, SKEW index, IV Rank batch computation
     ├── fred_data.py                  # FRED (Federal Reserve) economic data: GDP, CPI, unemployment, fed funds rate, 10Y yield, yield spread (requires FRED_API_KEY)
-    ├── fred_calendar.py              # Economic events calendar: FRED release dates + Finnhub + FMP merged, 3-tier cache (L1 mem → L2 economic_events table → L3 API)
+    ├── fred_calendar.py              # Economic events calendar: FRED release dates + Finnhub merged, 3-tier cache (L1 mem → L2 economic_events table → L3 API). FMP economic-calendar disabled (402)
     ├── fred_indicators.py            # FRED macro indicator cards: sparkline data for rates, inflation, employment, consumer, credit categories
     ├── treasury_data.py              # US Treasury data: daily yield curve (treasury.gov CSV), national debt (Fiscal Data API), free/no key
     ├── wsb_sentiment.py              # Reddit/WSB sentiment: top mentioned tickers via ApeWisdom API, per-ticker sentiment lookup, free/no key
     ├── openfigi.py                   # OpenFIGI CUSIP→ticker resolution: batch mapping (100/request), 7-day cache, free tier (no key for basic)
     ├── frankfurter.py                # FX rates: 12 major currencies vs USD, 30-day sparklines, Frankfurter API (ECB rates), free/no key/no rate limits
-    ├── earnings.py                   # Per-ticker earnings history (yfinance + Finnhub + FMP, 3-tier cache) + shared fetch_finnhub_calendar_raw()
-    ├── earnings_scorecard.py         # Macro earnings season metrics (FMP, Supabase 5-tier L1→L5 cache) + shared fmp_get(), build_company_lookup()
-    ├── earnings_calendar.py          # Earnings calendar page (Finnhub + FMP, week/month views, 1h in-memory cache)
+    ├── fmp_cache.py                  # Shared FMP earnings-calendar cache: single bulk fetch every 6h, L1 mem (6h) → L2 api_cache (24h) → API; serves all FMP consumers
+    ├── earnings.py                   # Per-ticker earnings history (yfinance + Finnhub + FMP via fmp_cache, 3-tier cache) + shared fetch_finnhub_calendar_raw()
+    ├── earnings_scorecard.py         # Macro earnings season metrics (Supabase 5-tier L1→L5 cache) + build_company_lookup()
+    ├── earnings_calendar.py          # Earnings calendar page (Finnhub + FMP via fmp_cache, week/month views, 1h in-memory cache)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -1321,8 +1322,8 @@ earnings_calendar.get_earnings_calendar(start, end)
   ├── L1: in-memory _cal_cache (1h TTL, keyed by "start:end", max 50)
   ├── L2: Finnhub /calendar/earnings
   │        └── via earnings.fetch_finnhub_calendar_raw() (shared 1h cache)
-  ├── L3: FMP /earning_calendar (fallback)
-  │        └── via earnings_scorecard.fmp_get() (shared HTTP helper)
+  ├── L3: FMP /stable/earnings-calendar (fallback)
+  │        └── via fmp_cache.get_earnings_in_range() (shared bulk cache, 6h TTL)
   └── L4: deterministic mock data (dev-only, no API keys)
          │
          ▼
@@ -1345,8 +1346,10 @@ earnings_calendar.py
   ├── imports from earnings.py:
   │   ├── fetch_finnhub_calendar_raw()  — shared Finnhub raw fetch (1h cached)
   │   └── _fmt_revenue()               — revenue formatting ($94.2B, $12.3M, etc.)
+  ├── imports from fmp_cache.py:
+  │   ├── get_earnings_in_range()     — shared FMP bulk cache (6h TTL)
+  │   ├── actual_eps() / actual_rev() — field-name resolution helpers
   └── imports from earnings_scorecard.py:
-      ├── fmp_get()                    — shared FMP HTTP helper (API key, logging, error handling)
       └── build_company_lookup()      — S&P 500 {ticker: {name, sector}} dict
 ```
 
@@ -1404,13 +1407,16 @@ The two Finnhub caches (`_finnhub_raw_cache` at 1h and `_finnhub_cal_cache` at 6
 
 **Shared functions (reuse points):**
 
-These functions in `earnings.py` and `earnings_scorecard.py` are used by the calendar and other modules:
+These functions are shared across earnings modules:
 
 | Function | Module | Used By |
 |---|---|---|
+| `get_bulk_earnings()` | `fmp_cache.py` | `earnings.py`, `earnings_scorecard.py`, `earnings_calendar.py` (all FMP data) |
+| `get_earnings_in_range(start, end)` | `fmp_cache.py` | `earnings_scorecard.py`, `earnings_calendar.py` (date-filtered FMP data) |
+| `get_revenue_for_ticker(ticker)` | `fmp_cache.py` | `earnings.py` (per-ticker revenue enrichment) |
+| `actual_eps(item)` / `actual_rev(item)` | `fmp_cache.py` | `earnings_scorecard.py`, `earnings_calendar.py` (field-name resolution) |
 | `fetch_finnhub_calendar_raw(start, end)` | `earnings.py` | `earnings_calendar.py`, `earnings.py` (revenue enrichment) |
 | `_fmt_revenue(val)` | `earnings.py` | `earnings_calendar.py`, `earnings.py` (display formatting) |
-| `fmp_get(path, params)` | `earnings_scorecard.py` | `earnings_calendar.py`, `earnings_scorecard.py` (all FMP calls) |
 | `_build_company_lookup(index)` | `earnings_scorecard.py` | `earnings_calendar.py`, `earnings_scorecard.py` (enrichment) |
 
 **Web routes (web.py, lines 3694–3859):**
