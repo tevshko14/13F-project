@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-14 (Earnings calendar: company names, list truncation, macro filter hierarchy; 13F auto-detect value multiplier)
+> Last updated: 2026-03-15 (Macro: economic indicators with category filters + charts, events calendar grid/month/list views, multi-source merge FRED+Finnhub+FMP)
 
 ---
 
@@ -239,6 +239,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── screener.py                   # Stock Valuation Screener: DCF model, Monte Carlo simulation, peer suggestions/valuation, financial data aggregation (3-tier price fallback)
     ├── cboe_data.py                  # CBOE volatility data: Put/Call ratios (CBOE CSV→yfinance fallback), VIX term structure, SKEW index, IV Rank batch computation
     ├── fred_data.py                  # FRED (Federal Reserve) economic data: GDP, CPI, unemployment, fed funds rate, 10Y yield, yield spread (requires FRED_API_KEY)
+    ├── fred_calendar.py              # Economic events calendar: FRED release dates + Finnhub + FMP merged, 3-tier cache (L1 mem → L2 economic_events table → L3 API)
+    ├── fred_indicators.py            # FRED macro indicator cards: sparkline data for rates, inflation, employment, consumer, credit categories
     ├── treasury_data.py              # US Treasury data: daily yield curve (treasury.gov CSV), national debt (Fiscal Data API), free/no key
     ├── wsb_sentiment.py              # Reddit/WSB sentiment: top mentioned tickers via ApeWisdom API, per-ticker sentiment lookup, free/no key
     ├── openfigi.py                   # OpenFIGI CUSIP→ticker resolution: batch mapping (100/request), 7-day cache, free tier (no key for basic)
@@ -1517,7 +1519,8 @@ When both `FINNHUB_API_KEY` and `FMP_API_KEY` are unset, the calendar generates 
 | GET | `/api/macro/scorecard` | `macro_scorecard_api` | earnings_scorecard (L1+L2 cache) | `partials/earnings_scorecard.html` |
 | GET | `/api/macro/breadth` | `macro_breadth_api` | market_breadth (yfinance) | `partials/market_breadth.html` |
 | GET | `/api/macro/calendar` | `macro_calendar_api` | earnings_scorecard calendar | `partials/earnings_calendar_macro.html` |
-| GET | `/api/macro/economic` | `macro_economic_api` | fred_calendar (FRED API) | `partials/economic_dashboard.html` |
+| GET | `/api/macro/economic` | `macro_economic_api` | fred_calendar (FRED+Finnhub+FMP merged) | `partials/economic_dashboard.html` |
+| GET | `/api/macro/indicators` | `macro_indicators_api` | fred_indicators + fred_data (sparklines + charts) | `partials/macro_indicators.html` |
 | GET | `/api/macro/volatility` | `macro_volatility_api` | cboe_data (P/C, VIX, SKEW) | `partials/macro_volatility.html` |
 | GET | `/api/macro/fred` | `macro_fred_api` | fred_data (GDP, CPI, rates) | `partials/macro_economic.html` |
 | GET | `/api/macro/treasury` | `macro_treasury_api` | treasury_data (yield curve, debt) | `partials/macro_treasury.html` |

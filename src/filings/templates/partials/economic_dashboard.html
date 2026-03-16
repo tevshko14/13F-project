@@ -1,4 +1,5 @@
 <style>
+    /* ── Countdown ── */
     .ed-countdown {
         background: linear-gradient(135deg, var(--pp-surface), var(--pp-overlay-5, var(--pp-surface-alt, #f8f8fa)));
         border: 1px solid var(--pp-border-light, var(--pp-border));
@@ -55,6 +56,8 @@
         align-self: flex-start;
         margin-top: 0.15em;
     }
+
+    /* ── Metric Cards ── */
     .ed-metrics {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -81,21 +84,8 @@
         margin-top: 0.3em;
         font-weight: 500;
     }
-    .ed-date-group { margin-bottom: 1.2em; }
-    .ed-date-header {
-        font-size: 0.88em;
-        font-weight: 700;
-        color: var(--pp-text);
-        padding: 0.6em 1em;
-        background: var(--pp-overlay-5, var(--pp-surface-alt, #f4f4f5));
-        border-radius: 8px 8px 0 0;
-        border: 1px solid var(--pp-border-light, var(--pp-border));
-        border-bottom: none;
-    }
-    .ed-date-group .pp-table-wrap {
-        border-radius: 0 0 12px 12px;
-        border-top: none;
-    }
+
+    /* ── Impact badges ── */
     .ed-impact-badge {
         display: inline-block;
         font-size: 0.7em;
@@ -153,6 +143,53 @@
         margin-left: 0.4em;
         vertical-align: middle;
     }
+
+    /* ── Date tab navigation ── */
+    .ed-date-tabs {
+        list-style: none; display: flex; gap: 0; padding: 0;
+        margin: 0;
+        border-bottom: 2px solid var(--pp-overlay-10, rgba(0,0,0,0.06));
+        overflow-x: auto; -webkit-overflow-scrolling: touch;
+    }
+    .ed-date-tab {
+        background: none; border: none;
+        border-bottom: 3px solid transparent;
+        padding: 0.6em 1.1em 0.5em;
+        font-size: 0.82em; font-weight: 600;
+        color: var(--pp-text-muted);
+        cursor: pointer; white-space: nowrap;
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .ed-date-tab:hover { color: var(--pp-text-secondary, var(--pp-text)); }
+    .ed-date-tab.active {
+        color: #0d9488;
+        border-bottom-color: #0d9488;
+    }
+    .ed-date-tab-count {
+        display: block; font-weight: 400; font-size: 0.8em;
+        color: var(--pp-text-muted); margin-top: 1px;
+    }
+    .ed-date-panel { display: none; }
+    .ed-date-panel.active { display: block; }
+
+    /* ── Date group (old list) ── */
+    .ed-date-group { margin-bottom: 1.2em; }
+    .ed-date-header {
+        font-size: 0.88em;
+        font-weight: 700;
+        color: var(--pp-text);
+        padding: 0.6em 1em;
+        background: var(--pp-overlay-5, var(--pp-surface-alt, #f4f4f5));
+        border-radius: 8px 8px 0 0;
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-bottom: none;
+    }
+    .ed-date-group .pp-table-wrap {
+        border-radius: 0 0 12px 12px;
+        border-top: none;
+    }
+
+    /* ── Search ── */
     .ed-search-wrap {
         margin-bottom: 1em;
     }
@@ -170,6 +207,8 @@
         outline: none;
         border-color: var(--pp-accent, #ef4444);
     }
+
+    /* ── Banners ── */
     .ed-mock-banner {
         padding: 0.6em 1em;
         background: rgba(245, 158, 11, 0.12);
@@ -193,6 +232,219 @@
         padding: 3em;
         color: var(--pp-text-muted);
     }
+
+    /* ── Show more button ── */
+    .ed-show-more-btn {
+        display: block; width: 100%; padding: 0.6em;
+        background: var(--pp-overlay-5, #f4f4f5); border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-top: none; border-radius: 0 0 12px 12px;
+        font-size: 0.82em; font-weight: 600; color: var(--pp-text-muted);
+        cursor: pointer; transition: background 0.15s, color 0.15s;
+    }
+    .ed-show-more-btn:hover { background: var(--pp-overlay-8, #e8e8e8); color: var(--pp-text); }
+
+    /* ── Just Released section ── */
+    .ed-just-released {
+        margin-top: 1.5em;
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-radius: 10px; overflow: hidden;
+    }
+    .ed-just-released summary {
+        padding: 0.8em 1.2em; font-weight: 600; font-size: 0.9em;
+        cursor: pointer; background: var(--pp-overlay-5, var(--pp-surface-alt, #f4f4f5));
+        color: var(--pp-text); list-style: none;
+        display: flex; align-items: center; gap: 0.5em;
+    }
+    .ed-just-released summary::before { content: "\25B6"; font-size: 0.7em; transition: transform 0.2s; }
+    .ed-just-released[open] summary::before { transform: rotate(90deg); }
+    .ed-just-released .pp-table-wrap { border: none; border-radius: 0; box-shadow: none; }
+
+    /* ── Grid view controls (.edg-) ── */
+    .edg-controls-bar {
+        display: flex; align-items: center; flex-wrap: wrap;
+        gap: 0.75em; margin-bottom: 1em;
+    }
+    .edg-nav-bar {
+        display: flex; align-items: center; gap: 0.5em;
+    }
+    .edg-nav-btn {
+        padding: 0.38em 0.75em; border-radius: 6px; font-size: 0.84em; font-weight: 600;
+        cursor: pointer; border: 1px solid var(--pp-border);
+        background: var(--pp-overlay-5, #f4f4f5); color: var(--pp-text);
+        transition: background 0.12s;
+    }
+    .edg-nav-btn:hover { background: var(--pp-overlay-8, #e8e8e8); }
+    .edg-nav-today {
+        background: var(--pp-accent, #ef4444); color: #fff; border-color: transparent;
+    }
+    .edg-nav-today:hover { opacity: 0.88; }
+    .edg-nav-label {
+        font-weight: 600; font-size: 0.88em; min-width: 170px;
+        text-align: center; color: var(--pp-text);
+    }
+
+    /* Scroll wrapper */
+    .edg-scroll { overflow-x: auto; overflow-y: visible; -webkit-overflow-scrolling: touch; padding-bottom: 8px; }
+
+    /* Week grid */
+    .edg-week-grid {
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 8px; min-width: 580px; width: 100%;
+    }
+
+    /* Month grid */
+    .edg-month-grid { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+    .edg-month-header-row {
+        display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 4px; padding: 0 2px;
+    }
+    .edg-month-header-cell {
+        text-align: center; font-size: 0.74em; font-weight: 600;
+        color: var(--pp-text-muted); padding: 4px 0;
+    }
+    .edg-month-week { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+
+    /* Day column */
+    .edg-day-col {
+        background: var(--pp-surface);
+        border: 1px solid var(--pp-border-light, var(--pp-border));
+        border-radius: 8px;
+        display: flex; flex-direction: column;
+    }
+    .edg-day-col.edg-today { border-color: var(--pp-accent, #ef4444); border-width: 2px; }
+    .edg-out-of-month { opacity: 0.35; }
+
+    /* Day header */
+    .edg-day-header {
+        display: flex; align-items: center; gap: 4px;
+        padding: 6px 10px; font-size: 0.78em;
+        background: var(--pp-overlay-5, #f4f4f5);
+        border-bottom: 1px solid var(--pp-border-light, var(--pp-border));
+    }
+    .edg-today .edg-day-header { background: rgba(239,68,68,0.08); }
+    .edg-past .edg-day-header { opacity: 0.65; }
+    .edg-day-name { color: var(--pp-text-muted); font-weight: 500; flex-shrink: 0; }
+    .edg-day-num { font-weight: 700; color: var(--pp-text); }
+    .edg-day-mon { font-size: 0.85em; color: var(--pp-text-muted); }
+    .edg-today-dot {
+        width: 6px; height: 6px; border-radius: 50%;
+        background: var(--pp-accent, #ef4444); margin-left: auto; flex-shrink: 0;
+    }
+
+    /* Event items in grid */
+    .edg-events { padding: 6px 8px; flex: 1 1 auto; min-height: 48px; }
+    .edg-event-item {
+        display: flex; align-items: flex-start; gap: 6px;
+        padding: 4px 6px; margin-bottom: 4px;
+        border-radius: 5px; font-size: 0.72em;
+        border-left: 3px solid var(--pp-border);
+        background: var(--pp-overlay-3, rgba(0,0,0,0.02));
+        line-height: 1.3;
+    }
+    .edg-event-item.edg-impact-high-border { border-left-color: #dc2626; }
+    .edg-event-item.edg-impact-medium-border { border-left-color: #d97706; }
+    .edg-event-item.edg-impact-low-border { border-left-color: var(--pp-border); }
+    .edg-event-body { flex: 1; min-width: 0; }
+    .edg-event-title {
+        font-weight: 600; color: var(--pp-text);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        max-width: 100%;
+    }
+    .edg-event-meta {
+        font-size: 0.88em; color: var(--pp-text-muted);
+        display: flex; gap: 0.4em; align-items: center; margin-top: 1px;
+    }
+    .edg-event-actual-hot { color: #dc2626; font-weight: 700; }
+    .edg-event-actual-cold { color: #2563eb; font-weight: 700; }
+    .edg-event-actual-neutral { color: var(--pp-text); font-weight: 600; }
+
+    /* Month compact view */
+    .edg-month-day-summary {
+        padding: 6px 8px; flex: 1;
+    }
+    .edg-month-count {
+        font-size: 0.75em; font-weight: 600; color: var(--pp-text-muted);
+        margin-bottom: 4px;
+    }
+    .edg-impact-dots {
+        display: flex; gap: 3px; flex-wrap: wrap;
+    }
+    .edg-impact-dot {
+        width: 7px; height: 7px; border-radius: 50%;
+    }
+    .edg-impact-dot-high { background: #dc2626; }
+    .edg-impact-dot-medium { background: #d97706; }
+    .edg-impact-dot-low { background: #94a3b8; }
+
+    /* More button in grid */
+    .edg-more-link {
+        font-size: 0.68em; font-weight: 600; color: var(--pp-text-muted);
+        cursor: pointer; margin-top: 2px;
+    }
+    .edg-more-link:hover { color: var(--pp-text); text-decoration: underline; }
+
+    /* ── Hover card ── */
+    .edg-hover-card {
+        position: fixed; z-index: 1000; display: none;
+        background: #1e1e24;
+        border: 1px solid rgba(255,255,255,0.13);
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.45), 0 0 0 1px rgba(0,0,0,0.2);
+        padding: 0.9em 1em;
+        min-width: 220px; max-width: 300px;
+        pointer-events: none;
+    }
+    @media (prefers-color-scheme: light) {
+        .edg-hover-card {
+            background: #ffffff;
+            border-color: rgba(0,0,0,0.12);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.06);
+        }
+    }
+    [data-theme="light"] .edg-hover-card {
+        background: #ffffff;
+        border-color: rgba(0,0,0,0.12);
+        box-shadow: 0 8px 32px rgba(0,0,0,0.16), 0 0 0 1px rgba(0,0,0,0.06);
+    }
+    .edg-hc-title {
+        font-weight: 700; font-size: 0.88em; color: var(--pp-text);
+        margin-bottom: 0.5em; line-height: 1.3;
+    }
+    .edg-hc-row {
+        display: flex; justify-content: space-between; align-items: center;
+        font-size: 0.78em; padding: 0.22em 0;
+        border-top: 1px solid var(--pp-border-light, var(--pp-border));
+    }
+    .edg-hc-label { color: var(--pp-text-muted); }
+    .edg-hc-val { font-weight: 600; color: var(--pp-text); text-align: right; }
+
+    /* ── Modal ── */
+    .edg-modal-overlay {
+        position: fixed; inset: 0; z-index: 2000;
+        background: rgba(0,0,0,0.42);
+        display: none; align-items: center; justify-content: center;
+        padding: 1em;
+    }
+    .edg-modal-overlay.open { display: flex; }
+    .edg-modal {
+        background: var(--pp-surface);
+        border-radius: 14px;
+        max-width: 600px; width: 100%; max-height: 80vh;
+        overflow-y: auto; padding: 1.25em 1.4em;
+        box-shadow: 0 16px 48px rgba(0,0,0,0.22);
+    }
+    .edg-modal-header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 1.1em;
+    }
+    .edg-modal-title { font-weight: 700; font-size: 0.95em; color: var(--pp-text); }
+    .edg-modal-close {
+        background: none; border: none; cursor: pointer; font-size: 1.25em;
+        color: var(--pp-text-muted); padding: 0 0.2em; line-height: 1;
+    }
+    .edg-modal-close:hover { color: var(--pp-text); }
+
+    /* ── Responsive ── */
     @media (max-width: 700px) {
         .ed-metrics { grid-template-columns: repeat(2, 1fr); }
         .ed-col-prev { display: none; }
@@ -200,6 +452,11 @@
         .ed-countdown-label { text-align: center; }
     }
 </style>
+
+{# ── Embed all events data for client-side grid rendering ── #}
+<script>
+window._edAllEvents = {{ data.events_by_date | tojson }};
+</script>
 
 {# ── Banners ── #}
 {% if data.is_mock %}
@@ -265,20 +522,50 @@
     </div>
 </div>
 
-{# ── Search ── #}
-{% if data.events_by_date %}
-<div class="ed-search-wrap">
-    <input type="text" class="ed-search" id="ed-table-search"
-           placeholder="Search events..."
-           oninput="edFilterTable(this.value)">
+{# ── View Toggle + Navigation ── #}
+<div class="edg-controls-bar">
+    <div class="pp-pill-nav" id="edg-view-nav" style="margin-bottom:0">
+        <button class="pp-pill-btn edg-view-btn" data-view="week" onclick="edgSetView('week')">Week Grid</button>
+        <button class="pp-pill-btn edg-view-btn" data-view="month" onclick="edgSetView('month')">Month Grid</button>
+        <button class="pp-pill-btn edg-view-btn" data-view="list" onclick="edgSetView('list')">List View</button>
+    </div>
+    <div id="edg-nav" class="edg-nav-bar">
+        <button class="edg-nav-btn" onclick="edgNavPrev()" aria-label="Previous">&#8592;</button>
+        <span id="edg-nav-label" class="edg-nav-label"></span>
+        <button class="edg-nav-btn edg-nav-today" onclick="edgNavToday()">Today</button>
+        <button class="edg-nav-btn" onclick="edgNavNext()" aria-label="Next">&#8594;</button>
+    </div>
 </div>
-{% endif %}
 
-{# ── Events Table (grouped by date) ── #}
-{% if data.events_by_date %}
+{# ── Grid container (JS renders here) ── #}
+<div class="edg-scroll"><div id="edg-container"></div></div>
+
+{# ── List view: Search + Date tabs + panels ── #}
+<div id="ed-list-view">
+    {% if data.events_by_date %}
+    <div class="ed-search-wrap">
+        <input type="text" class="ed-search" id="ed-table-search"
+               placeholder="Search events..."
+               oninput="edFilterTable(this.value)">
+    </div>
+
+    <nav>
+        <ul class="ed-date-tabs">
+            {% for day in data.events_by_date %}
+            <li>
+                <button class="ed-date-tab{% if loop.first %} active{% endif %}"
+                        onclick="edSwitchDateTab({{ loop.index0 }})"
+                        data-date-idx="{{ loop.index0 }}">
+                    {{ day.date_label }}
+                    <span class="ed-date-tab-count">{{ day.entries|length }} event{{ "s" if day.entries|length != 1 else "" }}</span>
+                </button>
+            </li>
+            {% endfor %}
+        </ul>
+    </nav>
+
     {% for day in data.events_by_date %}
-    <div class="ed-date-group" data-ed-day>
-        <div class="ed-date-header">{{ day.date_label }}</div>
+    <div class="ed-date-panel{% if loop.first %} active{% endif %}" data-date-idx="{{ loop.index0 }}" data-ed-day>
         <div class="pp-table-wrap">
             <table class="pp-table ed-table">
                 <thead>
@@ -293,7 +580,7 @@
                 </thead>
                 <tbody>
                     {% for e in day.entries %}
-                    <tr data-ed-row>
+                    <tr data-ed-row{% if loop.index > 15 %} class="ed-overflow-row" style="display:none;"{% endif %}>
                         <td><span class="ed-time">{{ e.time_label }}</span></td>
                         <td>
                             <span class="ed-event-name">{{ e.event }}</span>
@@ -322,16 +609,123 @@
                 </tbody>
             </table>
         </div>
+        {% if day.entries|length > 15 %}
+        <button class="ed-show-more-btn" onclick="edToggleMore(this)">
+            Show {{ day.entries|length - 15 }} more events
+        </button>
+        {% endif %}
     </div>
     {% endfor %}
-{% else %}
-<div class="ed-empty">
-    No economic events found for {{ data.period_label }}.
+    {% else %}
+    <div class="ed-empty">
+        No economic events found for {{ data.period_label }}.
+    </div>
+    {% endif %}
 </div>
+
+{# ── Just Released (collapsible) ── #}
+{% set released_events = [] %}
+{% for day in data.events_by_date %}
+    {% for e in day.entries %}
+        {% if e.is_released %}
+            {% set _ = released_events.append({'event': e.event, 'category': e.category, 'impact': e.impact, 'impact_class': e.impact_class, 'time_label': e.time_label, 'estimate_fmt': e.estimate_fmt, 'actual_fmt': e.actual_fmt, 'previous_fmt': e.previous_fmt, 'delta_direction': e.delta_direction, 'date_label': day.date_label}) %}
+        {% endif %}
+    {% endfor %}
+{% endfor %}
+{% if released_events|length > 0 %}
+<details class="ed-just-released" open>
+    <summary>Just Released ({{ released_events|length }})</summary>
+    <div class="pp-table-wrap">
+        <table class="pp-table ed-table">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">Time</th>
+                    <th>Event</th>
+                    <th style="width: 80px;">Impact</th>
+                    <th style="text-align:right;">Forecast</th>
+                    <th style="text-align:right;">Actual</th>
+                    <th class="ed-col-prev" style="text-align:right;">Previous</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for day in data.events_by_date %}
+                {% for e in day.entries %}
+                {% if e.is_released %}
+                <tr>
+                    <td><span class="ed-time">{{ e.time_label }}</span></td>
+                    <td>
+                        <span class="ed-event-name">{{ e.event }}</span>
+                        {% if e.category and e.category != 'other' %}
+                        <span class="ed-cat-badge">{{ e.category }}</span>
+                        {% endif %}
+                    </td>
+                    <td><span class="ed-impact-badge {{ e.impact_class }}">{{ e.impact }}</span></td>
+                    <td style="text-align:right; color:var(--pp-text-muted);">{{ e.estimate_fmt }}</td>
+                    <td style="text-align:right;">
+                        {% if e.delta_direction == 'hot' %}
+                        <span class="ed-hot">{{ e.actual_fmt }}</span>
+                        {% elif e.delta_direction == 'cold' %}
+                        <span class="ed-cold">{{ e.actual_fmt }}</span>
+                        {% else %}
+                        <span class="ed-neutral-val">{{ e.actual_fmt }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="ed-col-prev" style="text-align:right; color:var(--pp-text-muted);">{{ e.previous_fmt }}</td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</details>
 {% endif %}
+
+{# ── Hover Card ── #}
+<div id="edg-hover-card" class="edg-hover-card" role="tooltip" aria-live="polite">
+    <div id="edg-hc-title" class="edg-hc-title"></div>
+    <div class="edg-hc-row">
+        <span class="edg-hc-label">Time</span>
+        <span id="edg-hc-time" class="edg-hc-val"></span>
+    </div>
+    <div class="edg-hc-row">
+        <span class="edg-hc-label">Impact</span>
+        <span id="edg-hc-impact" class="edg-hc-val"></span>
+    </div>
+    <div class="edg-hc-row">
+        <span class="edg-hc-label">Forecast</span>
+        <span id="edg-hc-forecast" class="edg-hc-val"></span>
+    </div>
+    <div class="edg-hc-row">
+        <span class="edg-hc-label">Actual</span>
+        <span id="edg-hc-actual" class="edg-hc-val"></span>
+    </div>
+    <div class="edg-hc-row">
+        <span class="edg-hc-label">Previous</span>
+        <span id="edg-hc-previous" class="edg-hc-val"></span>
+    </div>
+    <div class="edg-hc-row" id="edg-hc-cat-row">
+        <span class="edg-hc-label">Category</span>
+        <span id="edg-hc-cat" class="edg-hc-val"></span>
+    </div>
+</div>
+
+{# ── Day Modal ("+N more" expansion in grid) ── #}
+<div id="edg-modal" class="edg-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="edg-modal-title"
+     onclick="if(event.target===this)edgCloseModal()">
+    <div class="edg-modal">
+        <div class="edg-modal-header">
+            <span id="edg-modal-title" class="edg-modal-title"></span>
+            <button class="edg-modal-close" onclick="edgCloseModal()" aria-label="Close">&#x2715;</button>
+        </div>
+        <div id="edg-modal-body"></div>
+    </div>
+</div>
 
 <script>
 (function() {
+    'use strict';
+
     /* ── Countdown timer ── */
     {% if data.countdown_target %}
     var edTarget = new Date('{{ data.countdown_target.iso_datetime }}');
@@ -359,16 +753,482 @@
     var edInterval = setInterval(edUpdateCountdown, 1000);
     {% endif %}
 
-    /* ── Client-side search filtering ── */
-    window.edFilterTable = function(query) {
-        query = query.toLowerCase();
-        document.querySelectorAll('[data-ed-row]').forEach(function(row) {
-            row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
+    /* ============================================================
+       STATE — shared with macro.html outer scope
+    ============================================================ */
+    var _s = window.edGridState = window.edGridState || { view: 'week', weekOffset: 0, monthOffset: 0 };
+
+    /* ============================================================
+       DATE MAP — index events by date
+    ============================================================ */
+    var _dateMap = null;
+    function _getDateMap() {
+        if (_dateMap) return _dateMap;
+        _dateMap = {};
+        (window._edAllEvents || []).forEach(function(dayGroup) {
+            var date = dayGroup.date;
+            if (!_dateMap[date]) _dateMap[date] = [];
+            dayGroup.entries.forEach(function(e) {
+                _dateMap[date].push(e);
+            });
         });
-        document.querySelectorAll('[data-ed-day]').forEach(function(group) {
-            var visible = group.querySelectorAll('[data-ed-row]:not([style*="display: none"])');
-            group.style.display = visible.length > 0 || !query ? '' : 'none';
+        return _dateMap;
+    }
+
+    /* ============================================================
+       DATE UTILITIES
+    ============================================================ */
+    function _today() { var d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+    function _fmt(d) { return d.toISOString().split('T')[0]; }
+
+    function _weekDates(offset) {
+        var t = _today();
+        var dow = t.getDay();
+        var mon = new Date(t);
+        mon.setDate(t.getDate() - (dow === 0 ? 6 : dow - 1) + offset * 7);
+        var out = [];
+        for (var i = 0; i < 5; i++) {
+            var d = new Date(mon); d.setDate(mon.getDate() + i);
+            out.push(_fmt(d));
+        }
+        return out;
+    }
+
+    function _monthInfo(offset) {
+        var t = _today();
+        var raw = t.getMonth() + offset;
+        var year  = t.getFullYear() + Math.floor(raw / 12);
+        var month = ((raw % 12) + 12) % 12;
+        var first = new Date(year, month, 1);
+        var last  = new Date(year, month + 1, 0);
+        var dow   = first.getDay();
+        var start = new Date(first);
+        start.setDate(first.getDate() - (dow === 0 ? 6 : dow - 1));
+        return { year: year, month: month, first: first, last: last, weekStart: start };
+    }
+
+    /* ============================================================
+       HTML HELPERS
+    ============================================================ */
+    function _safeAttr(str) {
+        return String(str || '').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+    }
+
+    function _impactBorderClass(impact) {
+        var imp = (impact || '').toLowerCase();
+        if (imp === 'high') return 'edg-impact-high-border';
+        if (imp === 'medium') return 'edg-impact-medium-border';
+        return 'edg-impact-low-border';
+    }
+
+    function _actualClass(direction) {
+        if (direction === 'hot') return 'edg-event-actual-hot';
+        if (direction === 'cold') return 'edg-event-actual-cold';
+        return 'edg-event-actual-neutral';
+    }
+
+    /* ============================================================
+       RENDER EVENT ITEM (week grid card)
+    ============================================================ */
+    function _renderEventItem(entry) {
+        var mini = JSON.stringify({
+            event: entry.event, time_label: entry.time_label,
+            impact: entry.impact, category: entry.category,
+            estimate_fmt: entry.estimate_fmt, actual_fmt: entry.actual_fmt,
+            previous_fmt: entry.previous_fmt, is_released: entry.is_released,
+            delta_direction: entry.delta_direction
+        });
+        var entryAttr = mini.replace(/"/g, '&quot;');
+        var borderCls = _impactBorderClass(entry.impact);
+
+        var html = '<div class="edg-event-item ' + borderCls + '" data-entry="' + entryAttr + '"' +
+            ' onmouseenter="edgShowCard(this)" onmousemove="edgMoveCard()" onmouseleave="edgScheduleHide()">';
+        html += '<div class="edg-event-body">';
+        html += '<div class="edg-event-title" title="' + _safeAttr(entry.event) + '">' + _safeAttr(entry.event) + '</div>';
+        html += '<div class="edg-event-meta">';
+        html += '<span>' + _safeAttr(entry.time_label || '') + '</span>';
+        if (entry.is_released && entry.actual_fmt) {
+            html += '<span class="' + _actualClass(entry.delta_direction) + '">' + _safeAttr(entry.actual_fmt) + '</span>';
+        }
+        html += '</div>';
+        html += '</div></div>';
+        return html;
+    }
+
+    /* ============================================================
+       RENDER DAY CELL (week grid)
+    ============================================================ */
+    function _renderDayCell(dateStr) {
+        var dm      = _getDateMap();
+        var events  = dm[dateStr] || [];
+        var todayS  = _fmt(_today());
+        var isToday = dateStr === todayS;
+        var isPast  = dateStr < todayS;
+        var d       = new Date(dateStr + 'T12:00:00');
+        var dayName = d.toLocaleString('en-US', { weekday: 'short' });
+        var dayNum  = d.getDate();
+
+        var cls = 'edg-day-col' + (isToday ? ' edg-today' : '') + (isPast ? ' edg-past' : '');
+        var html = '<div class="' + cls + '" data-date="' + dateStr + '">';
+        html += '<div class="edg-day-header">';
+        html += '<span class="edg-day-name">' + dayName + '</span>';
+        html += '<span class="edg-day-num">' + dayNum + '</span>';
+        if (isToday) html += '<span class="edg-today-dot"></span>';
+        html += '</div>';
+
+        html += '<div class="edg-events">';
+        var MAX = 5;
+        var shown = events.slice(0, MAX);
+        var more = events.length - MAX;
+        shown.forEach(function(e) { html += _renderEventItem(e); });
+        if (more > 0) {
+            html += '<div class="edg-more-link" onclick="edgOpenModal(\'' + _safeAttr(dateStr) + '\')">+' + more + ' more</div>';
+        }
+        if (events.length === 0) {
+            html += '<div style="font-size:0.72em;color:var(--pp-text-muted);padding:4px 0;">No events</div>';
+        }
+        html += '</div></div>';
+        return html;
+    }
+
+    /* ============================================================
+       RENDER DAY CELL (month grid — compact)
+    ============================================================ */
+    function _renderMonthDayCell(dateStr, outMonth) {
+        var dm      = _getDateMap();
+        var events  = dm[dateStr] || [];
+        var todayS  = _fmt(_today());
+        var isToday = dateStr === todayS;
+        var isPast  = dateStr < todayS;
+        var d       = new Date(dateStr + 'T12:00:00');
+        var dayName = d.toLocaleString('en-US', { weekday: 'short' });
+        var dayNum  = d.getDate();
+        var monName = d.toLocaleString('en-US', { month: 'short' });
+
+        var cls = 'edg-day-col' + (isToday ? ' edg-today' : '') + (isPast ? ' edg-past' : '') + (outMonth ? ' edg-out-of-month' : '');
+        var html = '<div class="' + cls + '" data-date="' + dateStr + '">';
+        html += '<div class="edg-day-header">';
+        html += '<span class="edg-day-name">' + dayName + '</span>';
+        html += '<span class="edg-day-num">' + dayNum + '&thinsp;<span class="edg-day-mon">' + monName + '</span></span>';
+        if (isToday) html += '<span class="edg-today-dot"></span>';
+        html += '</div>';
+
+        html += '<div class="edg-month-day-summary">';
+        if (events.length > 0) {
+            html += '<div class="edg-month-count">' + events.length + ' event' + (events.length !== 1 ? 's' : '') + '</div>';
+            html += '<div class="edg-impact-dots">';
+            events.forEach(function(e) {
+                var imp = (e.impact || '').toLowerCase();
+                var dotCls = 'edg-impact-dot';
+                if (imp === 'high') dotCls += ' edg-impact-dot-high';
+                else if (imp === 'medium') dotCls += ' edg-impact-dot-medium';
+                else dotCls += ' edg-impact-dot-low';
+                html += '<span class="' + dotCls + '"></span>';
+            });
+            html += '</div>';
+        }
+        html += '</div></div>';
+        return html;
+    }
+
+    /* ============================================================
+       RENDER DISPATCHERS
+    ============================================================ */
+    function _renderWeek() {
+        var dates = _weekDates(_s.weekOffset);
+        var mon   = new Date(dates[0] + 'T12:00:00');
+        var fri   = new Date(dates[4] + 'T12:00:00');
+        var opts  = { month: 'short', day: 'numeric' };
+        var label = mon.toLocaleString('en-US', opts) + ' \u2013 ' +
+                    fri.toLocaleString('en-US', Object.assign({ year: 'numeric' }, opts));
+        document.getElementById('edg-nav-label').textContent = label;
+
+        var html = '<div class="edg-week-grid">';
+        dates.forEach(function(d) { html += _renderDayCell(d); });
+        html += '</div>';
+        document.getElementById('edg-container').innerHTML = html;
+    }
+
+    function _renderMonth() {
+        var info  = _monthInfo(_s.monthOffset);
+        var label = info.first.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+        document.getElementById('edg-nav-label').textContent = label;
+
+        var html = '<div class="edg-month-grid">';
+        html += '<div class="edg-month-header-row">';
+        ['Mon','Tue','Wed','Thu','Fri'].forEach(function(n) {
+            html += '<div class="edg-month-header-cell">' + n + '</div>';
+        });
+        html += '</div>';
+
+        var cur = new Date(info.weekStart);
+        for (var w = 0; w < 6; w++) {
+            if (cur > info.last && w > 0) break;
+            html += '<div class="edg-month-week">';
+            for (var i = 0; i < 5; i++) {
+                var dateStr = _fmt(cur);
+                var outMonth = cur.getMonth() !== info.month;
+                html += _renderMonthDayCell(dateStr, outMonth);
+                cur.setDate(cur.getDate() + 1);
+            }
+            cur.setDate(cur.getDate() + 2); // skip weekend
+            html += '</div>';
+        }
+        html += '</div>';
+        document.getElementById('edg-container').innerHTML = html;
+    }
+
+    function edgRender() {
+        var container = document.getElementById('edg-container');
+        var nav       = document.getElementById('edg-nav');
+        var listView  = document.getElementById('ed-list-view');
+        var dateSection = document.getElementById('ed-date-section');
+
+        // Force list view on narrow screens
+        if (window.innerWidth < 768 && _s.view !== 'list') {
+            _s.view = 'list';
+        }
+
+        if (_s.view === 'list') {
+            container.style.display = 'none';
+            nav.style.display       = 'none';
+            if (listView) listView.style.display = '';
+        } else {
+            container.style.display = '';
+            nav.style.display       = 'flex';
+            if (listView) listView.style.display = 'none';
+            if (_s.view === 'week')  _renderWeek();
+            if (_s.view === 'month') _renderMonth();
+        }
+
+        // Sync view-toggle pill active states
+        document.querySelectorAll('.edg-view-btn').forEach(function(btn) {
+            btn.classList.toggle('active', btn.dataset.view === _s.view);
+        });
+
+        window.edSyncControls && window.edSyncControls();
+    }
+    window.edgRender = edgRender;
+
+    /* ============================================================
+       NAVIGATION
+    ============================================================ */
+    window.edgNavPrev = function() {
+        if (_s.view === 'week') _s.weekOffset--; else _s.monthOffset--;
+        edgRender();
+    };
+    window.edgNavNext = function() {
+        if (_s.view === 'week') _s.weekOffset++; else _s.monthOffset++;
+        edgRender();
+    };
+    window.edgNavToday = function() {
+        var dow = new Date().getDay();
+        _s.weekOffset = (dow === 0 || dow === 6) ? 1 : 0;
+        _s.monthOffset = 0;
+        edgRender();
+    };
+
+    /* ============================================================
+       VIEW TOGGLE
+    ============================================================ */
+    window.edgSetView = function(view) {
+        var prev = _s.view;
+        _s.view  = view;
+        // Switching between list and grid needs an HTMX reload (period changes)
+        if ((prev === 'list') !== (view === 'list')) {
+            window.edReloadCalendar && window.edReloadCalendar();
+        } else {
+            edgRender();
+        }
+    };
+
+    /* ============================================================
+       HOVER CARD
+    ============================================================ */
+    var _card      = document.getElementById('edg-hover-card');
+    var _hideTimer = null;
+    var _mouseX = 0, _mouseY = 0;
+    document.addEventListener('mousemove', function(e) { _mouseX = e.clientX; _mouseY = e.clientY; });
+
+    function _positionCard() {
+        var cw = _card.offsetWidth, ch = _card.offsetHeight;
+        var vw = window.innerWidth,  vh = window.innerHeight;
+        var left = _mouseX + 14;
+        var top  = _mouseY + 14;
+        if (left + cw > vw - 12) left = _mouseX - cw - 10;
+        if (left < 8) left = 8;
+        if (top + ch > vh - 12) top = _mouseY - ch - 10;
+        if (top < 8) top = 8;
+        _card.style.left = left + 'px';
+        _card.style.top  = top  + 'px';
+    }
+
+    window.edgShowCard = function(item) {
+        clearTimeout(_hideTimer);
+        var raw;
+        try { raw = JSON.parse(item.dataset.entry.replace(/&quot;/g, '"')); }
+        catch(e) { return; }
+
+        document.getElementById('edg-hc-title').textContent = raw.event || '';
+        document.getElementById('edg-hc-time').textContent = raw.time_label || '';
+        document.getElementById('edg-hc-impact').textContent = raw.impact || '';
+        document.getElementById('edg-hc-forecast').textContent = raw.estimate_fmt || '\u2014';
+
+        var actualEl = document.getElementById('edg-hc-actual');
+        if (raw.is_released && raw.actual_fmt) {
+            actualEl.textContent = raw.actual_fmt;
+            actualEl.style.color = raw.delta_direction === 'hot' ? '#dc2626' : raw.delta_direction === 'cold' ? '#2563eb' : '';
+        } else {
+            actualEl.textContent = '\u2014';
+            actualEl.style.color = '';
+        }
+
+        document.getElementById('edg-hc-previous').textContent = raw.previous_fmt || '\u2014';
+        var catRow = document.getElementById('edg-hc-cat-row');
+        var catEl = document.getElementById('edg-hc-cat');
+        if (raw.category && raw.category !== 'other') {
+            catEl.textContent = raw.category;
+            catRow.style.display = '';
+        } else {
+            catRow.style.display = 'none';
+        }
+
+        _card.style.display = 'block';
+        _positionCard();
+    };
+
+    window.edgMoveCard = function() {
+        if (_card.style.display === 'block') _positionCard();
+    };
+
+    window.edgScheduleHide = function() {
+        _hideTimer = setTimeout(function() { _card.style.display = 'none'; }, 120);
+    };
+
+    /* ============================================================
+       DAY MODAL
+    ============================================================ */
+    window.edgOpenModal = function(dateStr) {
+        var dm     = _getDateMap();
+        var events = dm[dateStr] || [];
+        var d      = new Date(dateStr + 'T12:00:00');
+        document.getElementById('edg-modal-title').textContent =
+            d.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+        var html = '';
+        if (events.length) {
+            html += '<div class="pp-table-wrap"><table class="pp-table ed-table"><thead><tr>';
+            html += '<th style="width:60px">Time</th><th>Event</th><th style="width:80px">Impact</th>';
+            html += '<th style="text-align:right">Forecast</th><th style="text-align:right">Actual</th>';
+            html += '<th style="text-align:right">Previous</th></tr></thead><tbody>';
+            events.forEach(function(e) {
+                html += '<tr>';
+                html += '<td><span class="ed-time">' + _safeAttr(e.time_label) + '</span></td>';
+                html += '<td><span class="ed-event-name">' + _safeAttr(e.event) + '</span>';
+                if (e.category && e.category !== 'other') {
+                    html += ' <span class="ed-cat-badge">' + _safeAttr(e.category) + '</span>';
+                }
+                html += '</td>';
+                var impCls = 'ed-impact-badge ';
+                var imp = (e.impact || '').toLowerCase();
+                if (imp === 'high') impCls += 'ed-impact-high';
+                else if (imp === 'medium') impCls += 'ed-impact-medium';
+                else impCls += 'ed-impact-low';
+                html += '<td><span class="' + impCls + '">' + _safeAttr(e.impact) + '</span></td>';
+                html += '<td style="text-align:right;color:var(--pp-text-muted)">' + _safeAttr(e.estimate_fmt || '') + '</td>';
+                html += '<td style="text-align:right">';
+                if (e.is_released && e.actual_fmt) {
+                    var cls = _actualClass(e.delta_direction).replace('edg-event-actual-', 'ed-');
+                    html += '<span class="' + cls + '">' + _safeAttr(e.actual_fmt) + '</span>';
+                } else {
+                    html += '<span style="color:var(--pp-text-muted)">&mdash;</span>';
+                }
+                html += '</td>';
+                html += '<td style="text-align:right;color:var(--pp-text-muted)">' + _safeAttr(e.previous_fmt || '') + '</td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+        } else {
+            html = '<p style="color:var(--pp-text-muted);font-size:0.88em">No events for this day.</p>';
+        }
+
+        document.getElementById('edg-modal-body').innerHTML = html;
+        document.getElementById('edg-modal').classList.add('open');
+    };
+
+    window.edgCloseModal = function() {
+        document.getElementById('edg-modal').classList.remove('open');
+    };
+
+    /* Keyboard: Escape closes modal */
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            edgCloseModal();
+            _card.style.display = 'none';
+        }
+    });
+
+    /* ============================================================
+       DATE TAB SWITCHING (list view)
+    ============================================================ */
+    window.edSwitchDateTab = function(idx) {
+        document.querySelectorAll('.ed-date-tab:not([data-rep-idx])').forEach(function(btn) {
+            btn.classList.toggle('active', parseInt(btn.dataset.dateIdx) === idx);
+        });
+        document.querySelectorAll('.ed-date-panel').forEach(function(panel) {
+            panel.classList.toggle('active', parseInt(panel.dataset.dateIdx) === idx);
         });
     };
+
+    window.edToggleMore = function(btn) {
+        var panel = btn.closest('.ed-date-panel');
+        if (!panel) return;
+        var rows = panel.querySelectorAll('.ed-overflow-row');
+        var expanding = rows.length > 0 && rows[0].style.display === 'none';
+        rows.forEach(function(r) { r.style.display = expanding ? '' : 'none'; });
+        if (expanding) {
+            btn.textContent = 'Show less';
+        } else {
+            btn.textContent = 'Show ' + rows.length + ' more events';
+        }
+    };
+
+    /* ============================================================
+       CLIENT-SIDE LIST SEARCH
+    ============================================================ */
+    window.edFilterTable = function(query) {
+        query = query.toLowerCase();
+        var activePanel = document.querySelector('.ed-date-panel.active');
+        if (!activePanel) return;
+        var btn = activePanel.querySelector('.ed-show-more-btn');
+        if (query) {
+            activePanel.querySelectorAll('[data-ed-row]').forEach(function(row) {
+                row.style.display = row.textContent.toLowerCase().indexOf(query) >= 0 ? '' : 'none';
+            });
+            if (btn) btn.style.display = 'none';
+        } else {
+            activePanel.querySelectorAll('[data-ed-row]').forEach(function(row) {
+                row.style.display = row.classList.contains('ed-overflow-row') ? 'none' : '';
+            });
+            if (btn) {
+                btn.style.display = '';
+                var overflowCount = activePanel.querySelectorAll('.ed-overflow-row').length;
+                btn.textContent = 'Show ' + overflowCount + ' more events';
+            }
+        }
+    };
+
+    /* ============================================================
+       INIT — run on every HTMX partial swap
+    ============================================================ */
+    // On weekends, default fresh loads to next week so the grid isn't empty
+    (function() {
+        var dow = new Date().getDay();
+        if ((dow === 0 || dow === 6) && _s.weekOffset === 0 && _s.view === 'week') {
+            _s.weekOffset = 1;
+        }
+    })();
+    edgRender();
+
 })();
 </script>

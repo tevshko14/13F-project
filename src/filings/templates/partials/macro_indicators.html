@@ -1,0 +1,250 @@
+{# FRED Macro Indicators Snapshot — loaded via /api/macro/indicators #}
+<style>
+.mi-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.8em; margin-top: 0.8em;
+}
+@media (max-width: 600px) { .mi-grid { grid-template-columns: 1fr 1fr; gap: 0.5em; } }
+@media (max-width: 380px) { .mi-grid { grid-template-columns: 1fr; } }
+
+.mi-card {
+    border: 1px solid var(--pp-border-light, rgba(15,23,42,0.08));
+    border-radius: 12px; padding: 1em 1em 0.7em;
+    background: var(--pp-card-bg, rgba(255,255,255,0.7));
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: border-color 0.15s, box-shadow 0.15s;
+    position: relative; overflow: hidden;
+}
+.mi-card:hover {
+    border-color: var(--pp-border, rgba(15,23,42,0.15));
+    box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+}
+:root[data-theme="dark"] .mi-card {
+    background: rgba(15,23,42,0.5);
+    border-color: rgba(255,255,255,0.08);
+}
+:root[data-theme="dark"] .mi-card:hover {
+    border-color: rgba(255,255,255,0.15);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+.mi-header { display: flex; align-items: center; gap: 0.4em; margin-bottom: 0.5em; }
+.mi-icon { font-size: 1.1em; }
+.mi-name {
+    font-size: 0.75em; font-weight: 600; color: var(--pp-text-muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.mi-value {
+    font-size: 1.6em; font-weight: 700; letter-spacing: -0.02em;
+    line-height: 1.1; margin-bottom: 0.15em;
+}
+
+.mi-change { font-size: 0.78em; font-weight: 600; margin-bottom: 0.5em; }
+.mi-change.up { color: #16a34a; }
+.mi-change.down { color: #ef4444; }
+.mi-change.neutral { color: var(--pp-text-muted); }
+
+.mi-sparkline {
+    width: 100%; height: 32px;
+    display: block;
+}
+.mi-sparkline polyline {
+    fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+}
+.mi-sparkline .spark-up { stroke: #16a34a; }
+.mi-sparkline .spark-down { stroke: #ef4444; }
+.mi-sparkline .spark-neutral { stroke: var(--pp-text-muted); }
+.mi-sparkline .spark-area {
+    opacity: 0.08;
+}
+
+.mi-note {
+    font-size: 0.68em; color: var(--pp-text-muted);
+    margin-top: 0.3em; font-style: italic;
+}
+
+.mi-date {
+    font-size: 0.68em; color: var(--pp-text-muted);
+    margin-top: 0.2em;
+}
+
+.mi-group-label {
+    font-size: 0.82em; font-weight: 700; color: var(--pp-text-muted);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin: 1.2em 0 0.3em; padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--pp-border-light, rgba(15,23,42,0.06));
+}
+.mi-group-label:first-child { margin-top: 0.4em; }
+:root[data-theme="dark"] .mi-group-label {
+    border-color: rgba(255,255,255,0.06);
+}
+
+.mi-mock-banner {
+    padding: 0.6em 1em; border-radius: 8px;
+    background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.3);
+    color: #a16207; font-size: 0.82em; text-align: center; margin-bottom: 0.8em;
+}
+:root[data-theme="dark"] .mi-mock-banner {
+    background: rgba(234, 179, 8, 0.1); color: #fbbf24;
+    border-color: rgba(234, 179, 8, 0.25);
+}
+
+.mi-updated {
+    font-size: 0.72em; color: var(--pp-text-muted);
+    text-align: right; margin-top: 0.5em;
+}
+
+/* ── Historical Charts (ECharts) within groups ── */
+.mi-charts-row {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 0.8em; margin-top: 0.8em;
+}
+@media (max-width: 600px) { .mi-charts-row { grid-template-columns: 1fr; } }
+.mi-chart-card {
+    border: 1px solid var(--pp-border-light, rgba(15,23,42,0.08));
+    border-radius: 12px; padding: 1em 1.2em;
+    background: var(--pp-card-bg, rgba(255,255,255,0.7));
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+:root[data-theme="dark"] .mi-chart-card {
+    background: rgba(15,23,42,0.5);
+    border-color: rgba(255,255,255,0.08);
+}
+.mi-chart-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.4em; }
+.mi-chart-title { font-size: 0.85em; font-weight: 700; }
+.mi-chart-unit { font-size: 0.72em; color: var(--pp-text-muted); }
+.mi-chart-val { font-size: 1.4em; font-weight: 700; letter-spacing: -0.02em; }
+.mi-chart-chg { font-size: 0.78em; font-weight: 600; margin-left: 0.4em; }
+.mi-chart-chg.up { color: #16a34a; }
+.mi-chart-chg.down { color: #ef4444; }
+.mi-chart-el { width: 100%; height: 140px; margin-top: 0.5em; }
+</style>
+
+{% if data.is_mock %}
+<div class="mi-mock-banner">
+    Demo data &mdash; set <code>FRED_API_KEY</code> for live Federal Reserve data.
+</div>
+{% endif %}
+
+{% for group in data.groups %}
+<div class="mi-group-section" data-group="{{ group.key }}">
+<div class="mi-group-label">{{ group.label }}</div>
+<div class="mi-grid">
+    {% for ind in group.indicators %}
+    <div class="mi-card">
+        <div class="mi-header">
+            <span class="mi-icon">{{ ind.icon }}</span>
+            <span class="mi-name">{{ ind.name }}</span>
+        </div>
+        <div class="mi-value">{{ ind.value_fmt }}</div>
+        <div class="mi-change {{ ind.direction }}">
+            {% if ind.direction == 'up' %}▲{% elif ind.direction == 'down' %}▼{% else %}—{% endif %}
+            {{ ind.change_fmt }}
+        </div>
+        {% if ind.sparkline and ind.sparkline|length > 2 %}
+        <svg class="mi-sparkline" viewBox="0 0 100 32" preserveAspectRatio="none">
+            {% set ns = namespace(points='', area='', min_v=ind.sparkline[0], max_v=ind.sparkline[0]) %}
+            {% for v in ind.sparkline %}
+                {% if v < ns.min_v %}{% set ns.min_v = v %}{% endif %}
+                {% if v > ns.max_v %}{% set ns.max_v = v %}{% endif %}
+            {% endfor %}
+            {% set range_v = ns.max_v - ns.min_v if ns.max_v != ns.min_v else 1 %}
+            {% for v in ind.sparkline %}
+                {% set x = (loop.index0 / (ind.sparkline|length - 1)) * 100 %}
+                {% set y = 30 - ((v - ns.min_v) / range_v) * 28 + 1 %}
+                {% set ns.points = ns.points ~ x|string ~ ',' ~ y|string ~ ' ' %}
+                {% set ns.area = ns.area ~ x|string ~ ',' ~ y|string ~ ' ' %}
+            {% endfor %}
+            <polygon class="spark-area spark-{{ ind.direction }}"
+                     points="0,31 {{ ns.area }}100,31"
+                     style="fill: {% if ind.direction == 'up' %}#16a34a{% elif ind.direction == 'down' %}#ef4444{% else %}currentColor{% endif %};" />
+            <polyline class="spark-{{ ind.direction }}" points="{{ ns.points }}" />
+        </svg>
+        {% endif %}
+        {% if ind.note %}
+        <div class="mi-note">{{ ind.note }}</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{# ── Historical charts for this group ── #}
+{% if charts and charts.get(group.key) %}
+<div class="mi-charts-row">
+    {% for ch in charts[group.key] %}
+    <div class="mi-chart-card">
+        <div class="mi-chart-header">
+            <span class="mi-chart-title">{{ ch.name }}</span>
+            <span class="mi-chart-unit">{{ ch.unit }} · {{ ch.freq }}</span>
+        </div>
+        <div>
+            <span class="mi-chart-val" style="color: {{ ch.color }};">
+                {% if ch.unit == '%' %}{{ "%.2f"|format(ch.latest.value) }}%{% elif ch.unit == 'Billions $' %}${{ "%.1f"|format(ch.latest.value) }}B{% else %}{{ "%.2f"|format(ch.latest.value) }}{% endif %}
+            </span>
+            {% if ch.change is not none %}
+            <span class="mi-chart-chg {{ 'up' if ch.change >= 0 else 'down' }}">
+                {{ '+' if ch.change >= 0 else '' }}{{ "%.2f"|format(ch.change) }}
+            </span>
+            {% endif %}
+        </div>
+        <div class="mi-chart-el" id="mi-chart-{{ ch.series_id }}"></div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+</div>{# /mi-group-section #}
+{% endfor %}
+
+<div class="mi-updated">
+    Updated {{ data.last_updated }} &middot; Source: Federal Reserve (FRED)
+</div>
+
+{# ── ECharts rendering for historical charts ── #}
+{% if charts %}
+<script>
+(function() {
+    var chartData = {{ charts_json|safe }};
+    requireECharts(function(err) {
+        if (err) return;
+        Object.keys(chartData).forEach(function(grp) {
+            chartData[grp].forEach(function(ch) {
+                var el = document.getElementById('mi-chart-' + ch.series_id);
+                if (!el || !ch.data || !ch.data.length) return;
+                // Dispose any existing instance to prevent memory leaks on HTMX re-swap
+                var existing = echarts.getInstanceByDom(el);
+                if (existing) existing.dispose();
+                var chart = echarts.init(el);
+                var dates = ch.data.map(function(d) { return d.date; });
+                var vals = ch.data.map(function(d) { return d.value; });
+                var seriesType = ch.chart || 'line';
+                var series = {
+                    type: seriesType === 'area' ? 'line' : seriesType,
+                    data: vals, smooth: seriesType !== 'bar', symbol: 'none',
+                    lineStyle: seriesType !== 'bar' ? { width: 2, color: ch.color } : undefined,
+                    itemStyle: { color: ch.color },
+                    areaStyle: seriesType === 'area' ? { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                        { offset: 0, color: ch.color + '44' },
+                        { offset: 1, color: ch.color + '08' }
+                    ]) } : undefined,
+                };
+                chart.setOption({
+                    grid: { left: 0, right: 0, top: 8, bottom: 0, containLabel: false },
+                    xAxis: { type: 'category', data: dates, show: false },
+                    yAxis: { type: 'value', show: false, scale: true },
+                    tooltip: {
+                        trigger: 'axis',
+                        formatter: function(params) {
+                            var p = params[0];
+                            return '<b>' + p.name + '</b><br/>' + ch.name + ': <b>' + p.value + '</b> ' + ch.unit;
+                        }
+                    },
+                    series: [series]
+                });
+                window._ppRegisterResize && window._ppRegisterResize(function() { chart.resize(); });
+            });
+        });
+    });
+})();
+</script>
+{% endif %}

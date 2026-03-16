@@ -3805,6 +3805,39 @@ async def gt_trending_api(request: Request):
     )
 
 
+@app.get("/api/macro/indicators", response_class=HTMLResponse)
+async def macro_indicators_api(request: Request):
+    """FRED macro indicators snapshot — sparkline cards + historical charts."""
+    if not _screener_authed(request):
+        return PlainTextResponse("Unauthorized", status_code=401)
+    from filings import fred_indicators, fred_data
+
+    data, chart_data = await asyncio.gather(
+        _to_heavy(fred_indicators.fetch_indicators),
+        _to_heavy(fred_data.get_dashboard_data),
+    )
+    # Map chart series → indicator groups
+    _chart_group = {
+        "FEDFUNDS": "rates", "GS10": "rates", "T10Y2Y": "rates",
+        "CPIAUCSL": "inflation", "UNRATE": "employment", "GDP": "consumer",
+    }
+    grouped_charts: dict[str, list] = {}
+    for sid, cdata in (chart_data or {}).items():
+        grp = _chart_group.get(sid)
+        if grp:
+            grouped_charts.setdefault(grp, []).append(cdata)
+
+    return templates.TemplateResponse(
+        "partials/macro_indicators.html",
+        {
+            "request": request,
+            "data": data,
+            "charts": grouped_charts,
+            "charts_json": json_module.dumps(grouped_charts, default=str),
+        },
+    )
+
+
 @app.get("/api/google-trends/macro", response_class=HTMLResponse)
 async def gt_macro_api(request: Request, category: str = ""):
     """Fetch macro trend chart for a category."""

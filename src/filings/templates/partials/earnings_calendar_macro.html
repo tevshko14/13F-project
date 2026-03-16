@@ -519,11 +519,12 @@ window._ecAllReported  = {{ data.just_reported | tojson }};
         <ul class="ec-date-tabs ec-reported-tabs">
             {% for d in ns.reported_dates %}
             <li>
+                {% set day_count = data.just_reported|selectattr("date", "equalto", d)|list|length %}
                 <button class="ec-date-tab{% if loop.first %} active{% endif %}"
                         onclick="ecSwitchReportedTab({{ loop.index0 }})"
                         data-rep-idx="{{ loop.index0 }}">
                     {{ d | format_short_date }}
-                    <span class="ec-date-tab-count">{{ data.just_reported|selectattr("date", "equalto", d)|list|length }}</span>
+                    <span class="ec-date-tab-count">{{ day_count }} compan{{ "ies" if day_count != 1 else "y" }}</span>
                 </button>
             </li>
             {% endfor %}

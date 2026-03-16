@@ -100,7 +100,8 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Ear
 - **Earnings Scorecard** - S&P 500 / NASDAQ 100 toggle, quarterly EPS & revenue beat rates, dual-beat tracking, per-company results table with sorting & search
 - **Market Performance** - Market breadth indicators with index and period toggles
 - **Earnings Calendar** - Upcoming earnings dates with list and grid views
-- **Events Calendar** - Economic calendar (FRED data) with impact and country filters
+- **Events Calendar** - Economic calendar (FRED + Finnhub + FMP merged) with week grid, month grid, and list views, countdown timer, hover cards
+- **Economic Indicators** - FRED macro indicator cards with sparklines, category filters (Rates, Inflation, Employment, Consumer, Credit), and integrated historical ECharts
 - **Macro Trends** - Google Trends sentiment for market-moving keywords (recession, inflation, etc.)
 
 ### Investor Pages

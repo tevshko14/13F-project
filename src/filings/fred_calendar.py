@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -38,13 +39,21 @@ from filings import supabase_cache
 
 logger = logging.getLogger(__name__)
 
-# ── FRED API config ──────────────────────────────────────────────
+# ── API config ───────────────────────────────────────────────────
 _FRED_BASE = "https://api.stlouisfed.org/fred"
 _TIMEOUT = 20
 
 
 def _fred_key() -> str:
     return os.environ.get("FRED_API_KEY", "").strip()
+
+
+def _finnhub_key() -> str:
+    return os.environ.get("FINNHUB_API_KEY", "").strip()
+
+
+def _fmp_key() -> str:
+    return os.environ.get("FMP_API_KEY", "").strip()
 
 
 # ── Public filter choices (same keys as economic_calendar.py) ───
@@ -129,6 +138,39 @@ _SERIES: dict[str, dict] = {
         "units": "lin", "display_unit": "K", "release_id": 60, "time": "08:30",
     },
 }
+
+# ── Category keyword map (used by _categorise) ──────────────────
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "inflation": ["CPI", "PPI", "PCE", "CONSUMER PRICE", "PRODUCER PRICE", "INFLATION"],
+    "employment": [
+        "NONFARM", "NFP", "UNEMPLOYMENT", "JOLTS", "CLAIMS",
+        "PAYROLL", "ADP", "LABOR",
+    ],
+    "growth": ["GDP", "GROSS DOMESTIC"],
+    "manufacturing": [
+        "ISM", "PMI", "EMPIRE STATE", "INDUSTRIAL PRODUCTION",
+        "DURABLE GOODS", "MANUFACTURING", "FACTORY",
+    ],
+    "monetary_policy": [
+        "FOMC", "FED MINUTES", "FEDERAL RESERVE", "FED FUNDS",
+        "FED CHAIR", "INTEREST RATE", "RATE DECISION", "POWELL",
+        "TREASURY", "BEIGE BOOK",
+    ],
+    "housing": [
+        "HOUSING STARTS", "BUILDING PERMITS", "HOME SALES",
+        "CASE-SHILLER", "NAHB", "MORTGAGE",
+    ],
+    "consumer": [
+        "RETAIL SALES", "CONSUMER CONFIDENCE", "MICHIGAN",
+        "PERSONAL INCOME", "PERSONAL SPENDING", "CONSUMER SENTIMENT",
+    ],
+}
+
+# ── Precompiled regex for _dedup_key ─────────────────────────────
+_RE_PARENS = re.compile(r"\s*\(.*?\)")
+_RE_FREQ_SUFFIX = re.compile(r"\s*[MQY]/[MQY]$", re.IGNORECASE)
+_RE_COUNTRY_PREFIX = re.compile(r"^(US|U\.S\.|UNITED STATES)\s+", re.IGNORECASE)
+_RE_WHITESPACE = re.compile(r"\s+")
 
 # FOMC rate-decision dates (ET 14:00).  The Fed publishes these a year in
 # advance; update _FOMC_DATES when the next year's schedule is released.
@@ -331,6 +373,180 @@ def _fetch_all_events() -> list[dict] | None:
     return events
 
 
+# ── Finnhub + FMP supplemental fetchers ─────────────────────────
+
+def _load_finnhub_economic() -> list[dict]:
+    """Fetch Finnhub /calendar/economic → normalised event list."""
+    key = _finnhub_key()
+    if not key:
+        return []
+    try:
+        end = datetime.now() + timedelta(weeks=4)
+        start = datetime.now() - timedelta(weeks=1)
+        r = httpx.get(
+            "https://finnhub.io/api/v1/calendar/economic",
+            params={
+                "from": start.strftime("%Y-%m-%d"),
+                "to": end.strftime("%Y-%m-%d"),
+                "token": key,
+            },
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        raw = r.json().get("economicCalendar", [])
+        events = []
+        for item in raw:
+            name = item.get("event", "")
+            if not name:
+                continue
+            t = str(item.get("time", "") or "")
+            if len(t) > 5:
+                t = t[:5]
+            country = str(item.get("country", "")).upper()
+            events.append({
+                "series_id": f"FH:{name[:40]}",
+                "event": name,
+                "date": str(item.get("date", "")),
+                "time": t,
+                "country": country,
+                "impact": str(item.get("impact", "low")).lower(),
+                "category": _categorise(name),
+                "actual": item.get("actual"),
+                "estimate": item.get("estimate"),
+                "previous": item.get("prev"),
+                "unit": str(item.get("unit", "")),
+                "source": "finnhub",
+            })
+        logger.info("Finnhub economic calendar: %d events", len(events))
+        return events
+    except Exception:
+        logger.warning("Finnhub economic calendar fetch failed", exc_info=True)
+        return []
+
+
+def _load_fmp_economic() -> list[dict]:
+    """Fetch FMP /economic_calendar → normalised event list."""
+    key = _fmp_key()
+    if not key:
+        return []
+    try:
+        end = datetime.now() + timedelta(weeks=4)
+        start = datetime.now() - timedelta(weeks=1)
+        r = httpx.get(
+            "https://financialmodelingprep.com/api/v3/economic_calendar",
+            params={
+                "from": start.strftime("%Y-%m-%d"),
+                "to": end.strftime("%Y-%m-%d"),
+                "apikey": key,
+            },
+            timeout=_TIMEOUT,
+        )
+        r.raise_for_status()
+        raw = r.json()
+        if not isinstance(raw, list):
+            return []
+        events = []
+        for item in raw:
+            name = item.get("event", "")
+            if not name:
+                continue
+            date_str = str(item.get("date", ""))
+            t = ""
+            if " " in date_str:
+                date_str, time_part = date_str.split(" ", 1)
+                t = time_part[:5] if len(time_part) >= 5 else time_part
+            country = str(item.get("country", "")).upper()
+            events.append({
+                "series_id": f"FMP:{name[:40]}",
+                "event": name,
+                "date": date_str,
+                "time": t,
+                "country": country,
+                "impact": str(item.get("impact", "Low")).lower(),
+                "category": _categorise(name),
+                "actual": item.get("actual"),
+                "estimate": item.get("estimate"),
+                "previous": item.get("previous"),
+                "unit": str(item.get("unit", "")),
+                "source": "fmp",
+            })
+        logger.info("FMP economic calendar: %d events", len(events))
+        return events
+    except Exception:
+        logger.warning("FMP economic calendar fetch failed", exc_info=True)
+        return []
+
+
+def _categorise(event_name: str) -> str:
+    """Match event name to a category via keyword search."""
+    upper = event_name.upper()
+    for cat, keywords in _CATEGORY_KEYWORDS.items():
+        for kw in keywords:
+            if kw in upper:
+                return cat
+    return "other"
+
+
+def _dedup_key(ev: dict) -> str:
+    """Generate a dedup key from event name + date.
+
+    Normalises event names to catch near-duplicates across sources.
+    E.g. "CPI (MoM)" from FRED vs "CPI m/m" from Finnhub,
+    or "US CPI" from FMP vs "CPI" from FRED.
+    """
+    name = ev.get("event", "").upper()
+    # Strip country prefixes: "US ", "U.S. ", "United States "
+    name = _RE_COUNTRY_PREFIX.sub("", name)
+    # Strip parenthetical suffixes: "(MoM)", "(QoQ)", "m/m", "q/q"
+    name = _RE_PARENS.sub("", name)
+    name = _RE_FREQ_SUFFIX.sub("", name)
+    # Collapse whitespace
+    name = _RE_WHITESPACE.sub(" ", name).strip()
+    date = ev.get("date", "")
+    return f"{date}:{name}"
+
+
+def _merge_events(
+    fred_events: list[dict],
+    finnhub_events: list[dict],
+    fmp_events: list[dict],
+) -> list[dict]:
+    """Merge events from all sources, preferring FRED > FMP > Finnhub.
+
+    FRED events are authoritative (official release dates + actuals).
+    FMP/Finnhub add estimate values and events FRED doesn't cover.
+    """
+    # Index FRED events by dedup key
+    seen: dict[str, dict] = {}
+    for ev in fred_events:
+        seen[_dedup_key(ev)] = ev
+
+    # Merge FMP (higher quality estimates than Finnhub)
+    for ev in fmp_events:
+        key = _dedup_key(ev)
+        if key in seen:
+            # FRED has this event — enrich with estimate if missing
+            existing = seen[key]
+            if existing.get("estimate") is None and ev.get("estimate") is not None:
+                existing["estimate"] = ev["estimate"]
+        else:
+            seen[key] = ev
+
+    # Merge Finnhub (fills remaining gaps)
+    for ev in finnhub_events:
+        key = _dedup_key(ev)
+        if key in seen:
+            existing = seen[key]
+            if existing.get("estimate") is None and ev.get("estimate") is not None:
+                existing["estimate"] = ev["estimate"]
+        else:
+            seen[key] = ev
+
+    merged = list(seen.values())
+    merged.sort(key=lambda e: (e.get("date", ""), e.get("time", "") or "99:99"))
+    return merged
+
+
 # ── Cache orchestration ──────────────────────────────────────────
 
 def _event_to_row(ev: dict) -> dict:
@@ -413,15 +629,32 @@ def _load_raw_events() -> tuple[list[dict], bool]:
             _l1_cache = {"events": events, "fetched_at": now, "is_mock": False}
         return events, False
 
-    # ── L3: FRED API ─────────────────────────────────────────────
-    api_result = _fetch_all_events()
-    if api_result:
-        rows = [_event_to_row(e) for e in api_result]
-        upserted = supabase_cache.upsert_economic_events(rows)
-        logger.info("FRED: upserted %d rows into economic_events", upserted)
-        with _lock:
-            _l1_cache = {"events": api_result, "fetched_at": now, "is_mock": False}
-        return api_result, False
+    # ── L3: FRED API + Finnhub + FMP (merged, parallel) ─────────
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        fred_fut = pool.submit(_fetch_all_events)
+        finnhub_fut = pool.submit(_load_finnhub_economic)
+        fmp_fut = pool.submit(_load_fmp_economic)
+        fred_events = fred_fut.result()
+        finnhub_events = finnhub_fut.result()
+        fmp_events = fmp_fut.result()
+
+    if fred_events or finnhub_events or fmp_events:
+        merged = _merge_events(
+            fred_events or [], finnhub_events, fmp_events
+        )
+        if merged:
+            # Persist FRED-sourced rows to DB (skip Finnhub/FMP to avoid schema mismatch)
+            fred_rows = [_event_to_row(e) for e in merged if e.get("source") == "fred"]
+            if fred_rows:
+                upserted = supabase_cache.upsert_economic_events(fred_rows)
+                logger.info("FRED: upserted %d rows into economic_events", upserted)
+            logger.info(
+                "Economic calendar merged: %d FRED + %d Finnhub + %d FMP → %d total",
+                len(fred_events or []), len(finnhub_events), len(fmp_events), len(merged),
+            )
+            with _lock:
+                _l1_cache = {"events": merged, "fetched_at": now, "is_mock": False}
+            return merged, False
 
     # ── Stale DB fallback ─────────────────────────────────────────
     stale_rows = supabase_cache.get_economic_events(window_start, window_end)
@@ -533,6 +766,8 @@ def fetch_economic_events(
         d = ev.get("date", "")
         if not (start_str <= d <= end_str):
             continue
+        if country == "us" and ev.get("country", "") not in ("US", ""):
+            continue
         if impact_filter == "high" and ev.get("impact") != "high":
             continue
         filtered.append(ev)
@@ -545,10 +780,12 @@ def fetch_economic_events(
 
         ev["is_released"] = actual is not None
 
-        # Delta vs previous (FRED has no estimates, so we compare actual vs previous)
-        if actual is not None and previous is not None:
+        # Delta: prefer actual vs estimate (beat/miss), fall back to actual vs previous
+        estimate = ev.get("estimate")
+        compare = estimate if estimate is not None else previous
+        if actual is not None and compare is not None:
             try:
-                delta = float(actual) - float(previous)
+                delta = float(actual) - float(compare)
                 ev["delta"] = delta
                 ev["delta_direction"] = "hot" if delta > 0 else ("cold" if delta < 0 else "neutral")
             except (TypeError, ValueError):
@@ -565,7 +802,7 @@ def fetch_economic_events(
         }.get(ev.get("impact", "low"), "ed-impact-low")
 
         ev["actual_fmt"]   = _fmt_val(actual, unit)
-        ev["estimate_fmt"] = "—"            # FRED doesn't provide forecasts
+        ev["estimate_fmt"] = _fmt_val(ev.get("estimate"), unit)
         ev["previous_fmt"] = _fmt_val(previous, unit)
         ev["time_label"]   = ev.get("time", "") or "TBD"
 
@@ -627,7 +864,7 @@ def fetch_economic_events(
         "impact_filter":    impact_filter,
         "is_mock":          is_mock,
         "is_unavailable":   not raw_events and not is_mock,
-        "source":           "fred",   # lets template show attribution
+        "source":           "merged",  # FRED + Finnhub + FMP
     }
 
     with _lock:

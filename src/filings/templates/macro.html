@@ -417,10 +417,25 @@
         </p>
     </div>
 
-    {# ── Economic sub-panel (FRED) ── #}
+    {# ── Economic sub-panel (FRED Indicators + Charts integrated) ── #}
     <div id="mt-sub-economic" class="mt-sub">
-        <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
-            <span aria-busy="true">Loading economic indicators…</span>
+        <div class="macro-controls" style="margin-top: 0.75rem;">
+            <div class="pp-filter-nav" id="mi-cat-nav" style="margin-bottom: 0;">
+                <button class="pp-pill-btn active" data-key="all" onclick="miChangeCat('all')">All</button>
+                <button class="pp-pill-btn" data-key="rates" onclick="miChangeCat('rates')">Rates</button>
+                <button class="pp-pill-btn" data-key="inflation" onclick="miChangeCat('inflation')">Inflation</button>
+                <button class="pp-pill-btn" data-key="employment" onclick="miChangeCat('employment')">Employment</button>
+                <button class="pp-pill-btn" data-key="consumer" onclick="miChangeCat('consumer')">Consumer</button>
+                <button class="pp-pill-btn" data-key="credit" onclick="miChangeCat('credit')">Credit</button>
+            </div>
+        </div>
+        <div id="mt-indicators-container"
+             hx-get="/api/macro/indicators"
+             hx-trigger="none"
+             hx-swap="innerHTML">
+            <div style="text-align:center; padding:3em; color:var(--pp-text-muted);">
+                <span aria-busy="true">Loading economic indicators…</span>
+            </div>
         </div>
     </div>
 
@@ -608,11 +623,23 @@
     var edCurrentImpact = 'all';
     var edCurrentCountry = 'us';
 
+    // Grid view state — persisted across HTMX partial swaps
+    window.edGridState = window.edGridState || { view: 'week', weekOffset: 0, monthOffset: 0 };
+
+    // Show period pills only in list view (called after each HTMX swap)
+    window.edSyncControls = function() {
+        var nav = document.getElementById('ed-period-nav');
+        if (nav) nav.style.display = window.edGridState.view === 'list' ? '' : 'none';
+    };
+
     function edReload() {
-        htmx.ajax('GET', '/api/macro/economic?period=' + edCurrentPeriod
+        // Grid modes always load period=all for client-side week/month navigation
+        var period = window.edGridState.view !== 'list' ? 'all' : edCurrentPeriod;
+        htmx.ajax('GET', '/api/macro/economic?period=' + period
             + '&impact=' + edCurrentImpact
             + '&country=' + edCurrentCountry, '#ed-content');
     }
+    window.edReloadCalendar = edReload;  // exported for partial to trigger reload on view switch
 
     window.edChangePeriod = function(p) {
         edCurrentPeriod = p;
@@ -645,7 +672,7 @@
 
         if (sub === 'economic' && !mtEconLoaded) {
             mtEconLoaded = true;
-            htmx.ajax('GET', '/api/macro/fred', '#mt-sub-economic');
+            htmx.ajax('GET', '/api/macro/indicators', '#mt-indicators-container');
         }
         if (sub === 'treasury' && !mtTreasuryLoaded) {
             mtTreasuryLoaded = true;
@@ -655,6 +682,18 @@
             mtFxLoaded = true;
             htmx.ajax('GET', '/api/macro/fx', '#mt-sub-fx');
         }
+    };
+
+    /* ── Economic Indicators category filter ── */
+    window.miChangeCat = function(cat) {
+        activatePill('mi-cat-nav', cat);
+        document.querySelectorAll('.mi-group-section').forEach(function(sec) {
+            if (cat === 'all' || sec.dataset.group === cat) {
+                sec.style.display = '';
+            } else {
+                sec.style.display = 'none';
+            }
+        });
     };
 
     /* ── Volatility controls ── */
@@ -668,10 +707,13 @@
         volReload();
     };
 
-    // Sync EC controls (period pill visibility) after each calendar partial swap
+    // Sync controls (period pill visibility) after each partial swap
     document.body.addEventListener('htmx:afterSwap', function(e) {
         if (e.detail.target.id === 'ec-content') {
             window.ecSyncControls && window.ecSyncControls();
+        }
+        if (e.detail.target.id === 'ed-content') {
+            window.edSyncControls && window.edSyncControls();
         }
     });
 })();
