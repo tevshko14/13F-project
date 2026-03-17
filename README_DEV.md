@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-15 (FMP shared cache module, fixed FRED release IDs, migrated FMP v3→stable API, disabled dead FMP economic-calendar endpoints)
+> Last updated: 2026-03-16 (Earnings scorecard: stock reaction backfill, price_change persistence, All Stocks index, pie chart labels, Guide column removal, pagination fix)
 
 ---
 
@@ -2017,6 +2017,11 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Homepage SEO: enriched meta tags, JSON-LD WebPage schema with `about[]` + `mentions[]`, expanded Organization `knowsAbout` (28 entities)
 - [x] Earnings scorecard: stock reaction enrichment via Tiingo EOD (close-to-close % change around report date, 8-worker parallel fetch, cached in scorecard_cache)
 - [x] Sidebar nav: moved Options from Signals → Tools group, removed PRO badge
+- [x] Earnings scorecard: price_change column persisted to DB via yfinance backfill (`scripts/backfill_price_change.py`), 1422/1422 Q1 2026 rows populated
+- [x] Earnings scorecard: "All Stocks" index shows all 1400+ tickers (was incorrectly filtering to S&P 500 only)
+- [x] Earnings scorecard: removed Guide column (never populated), added pie chart % labels + EPS/Revenue titles
+- [x] Supabase query pagination: `query_earnings_history()` paginates past 1000-row client cap
+- [x] Upsert protection: `upsert_earnings_history()` strips None keys to prevent clobbering backfilled data (price_change)
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)

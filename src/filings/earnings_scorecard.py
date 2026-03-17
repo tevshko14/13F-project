@@ -141,11 +141,29 @@ def fetch_earnings_data(
 
 
 def build_company_lookup(index: str) -> dict[str, dict]:
-    """Build {symbol: {name, sector}} from market_data constituents."""
+    """Build {symbol: {name, sector}} from market_data constituents.
+
+    For ``"all"`` index, merges both S&P 500 and NASDAQ 100 for display
+    enrichment (company names / sectors).  Callers use the ``index`` value
+    separately to decide whether to filter by this set.
+    """
     try:
         from filings import market_data
 
-        if index == "nasdaq":
+        if index == "all":
+            # Merge both indices so we have names/sectors for display
+            # but return empty filtering set (tickers=None in caller)
+            sp = market_data.get_sp500_constituents()
+            nq = market_data.get_nasdaq100_constituents()
+            merged = {
+                r["ticker"]: {"name": r.get("name", ""), "sector": r.get("sector", "")}
+                for r in sp
+            }
+            for r in nq:
+                if r["ticker"] not in merged:
+                    merged[r["ticker"]] = {"name": r.get("name", ""), "sector": r.get("sector", "")}
+            return merged
+        elif index == "nasdaq":
             rows = market_data.get_nasdaq100_constituents()
         else:
             rows = market_data.get_sp500_constituents()
@@ -281,9 +299,11 @@ def _fetch_scorecard(
     """Primary scorecard fetch — tries earnings_history DB, then FMP."""
     quarter, start, end = _resolve_quarter(quarter)
     company_info = build_company_lookup(index)
+    # For "all" index, don't filter — show every ticker in DB
+    tickers = None if index == "all" else (set(company_info.keys()) or None)
 
     # ── L3: earnings_history table (primary source) ──────────
-    results = _fetch_from_earnings_history(start, end, company_info, sector)
+    results = _fetch_from_earnings_history(start, end, company_info, tickers, sector)
 
     # ── L4: FMP earning_calendar (fallback) ──────────────────
     if results is None:
@@ -314,17 +334,19 @@ def _fetch_scorecard(
 def _fetch_from_earnings_history(
     start: str, end: str,
     company_info: dict[str, dict],
+    tickers: set[str] | None,
     sector: str | None,
 ) -> list[dict] | None:
-    """Query the ``earnings_history`` Supabase table (populated by per-ticker sync)."""
+    """Query the ``earnings_history`` Supabase table (populated by per-ticker sync).
+
+    *tickers* limits results to the given set; pass ``None`` for all.
+    """
     try:
         from filings import supabase_cache
 
         rows = supabase_cache.query_earnings_history(start, end)
         if rows is None:
             return None  # Supabase not configured or query failed
-
-        tickers = set(company_info.keys()) if company_info else None
         results: list[dict] = []
 
         for row in rows:
@@ -362,8 +384,7 @@ def _fetch_from_earnings_history(
                 "eps_surprise_pct": round(eps_surprise_pct, 2) if eps_surprise_pct is not None else None,
                 "rev_beat": rev_beat,
                 "rev_surprise_pct": round(rev_surprise_pct, 2) if rev_surprise_pct is not None else None,
-                "price_change": None,
-                "guide": "—",
+                "price_change": _safe_float(row.get("price_change")),
             })
 
         logger.info("earnings_history returned %d rows for %s–%s", len(results), start, end)
@@ -520,7 +541,7 @@ def _trend_from_db(
                 "eps_beat": r.get("beat_eps"),
                 "rev_beat": r.get("beat_revenue"),
                 "eps_surprise_pct": _safe_float(r.get("eps_surprise_pct")),
-                "price_change": None,
+                "price_change": _safe_float(r.get("price_change")),
             })
         return result if result else None
     except Exception:
@@ -589,7 +610,8 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
     # L3/L4: build trend from earnings_history (or FMP fallback)
     quarters = get_available_quarters()
     company_info = build_company_lookup(index)
-    tickers = set(company_info.keys()) if company_info else None
+    # For "all" index, don't filter by ticker set
+    tickers = None if index == "all" else (set(company_info.keys()) if company_info else None)
 
     trend: list[dict] = []
     has_real_data = False
@@ -610,7 +632,11 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
 
         if q_rows is not None:
             has_real_data = True
-            q_rows = _enrich_price_changes(q_rows)
+            # Only enrich via Tiingo when a small number of rows lack
+            # DB-sourced price_change; calling Tiingo for 1000+ tickers is too slow.
+            missing_count = sum(1 for r in q_rows if r.get("price_change") is None)
+            if 0 < missing_count < len(q_rows) // 2:
+                q_rows = _enrich_price_changes(q_rows)
             m = _compute_metrics(q_rows)
             trend.append({
                 "quarter": q_label,
@@ -851,7 +877,6 @@ def _build_mock_data(quarter: str, index: str, sector: str | None) -> dict:
             "rev_beat": actual_rev > est_rev,
             "rev_surprise_pct": round(rev_surp * 100, 2),
             "price_change": round(rng.uniform(-8, 12), 2),
-            "guide": rng.choice(["Raised", "Maintained", "Lowered", "—"]),
         })
 
     metrics = _compute_metrics(results)

@@ -3290,20 +3290,33 @@ def build_leaderboard_from_db(
 _EARNINGS_COLS = (
     "ticker,report_date,fiscal_quarter,eps_estimate,eps_actual,"
     "eps_surprise_pct,revenue_estimate,revenue_actual,"
-    "revenue_surprise_pct,beat_eps,beat_revenue,updated_at"
+    "revenue_surprise_pct,beat_eps,beat_revenue,price_change,updated_at"
 )
 
 
 def upsert_earnings_history(rows: list[dict]) -> int:
-    """Batch upsert rows into ``earnings_history``."""
+    """Batch upsert rows into ``earnings_history``.
+
+    Keys whose value is ``None`` are stripped so that existing DB values
+    (e.g. ``price_change`` populated by the backfill script) are never
+    accidentally overwritten with NULL.
+    """
     client = _get_client()
     if client is None or not rows:
         return 0
 
+    # Strip None values (except conflict keys) so we never clobber existing data
+    _REQUIRED = {"ticker", "report_date"}
+    cleaned = [
+        {k: v for k, v in row.items() if v is not None or k in _REQUIRED}
+        for row in rows
+        if row.get("ticker") and row.get("report_date")
+    ]
+
     upserted = 0
     CHUNK = 50
-    for i in range(0, len(rows), CHUNK):
-        chunk = rows[i : i + CHUNK]
+    for i in range(0, len(cleaned), CHUNK):
+        chunk = cleaned[i : i + CHUNK]
         try:
             client.table("earnings_history").upsert(
                 chunk, on_conflict="ticker,report_date"
@@ -3476,20 +3489,37 @@ def query_earnings_history(
         return None
 
     try:
-        resp = (
-            client.table("earnings_history")
-            .select(
-                "ticker,report_date,fiscal_quarter,"
-                "eps_estimate,eps_actual,eps_surprise_pct,"
-                "revenue_estimate,revenue_actual,revenue_surprise_pct,"
-                "beat_eps,beat_revenue"
-            )
-            .gte("report_date", start_date)
-            .lte("report_date", end_date)
-            .order("report_date", desc=True)
-            .execute()
+        # Supabase client caps at 1000 rows.  Paginate to get all.
+        all_rows: list[dict] = []
+        page_size = 1000
+        offset = 0
+        cols = (
+            "ticker,report_date,fiscal_quarter,"
+            "eps_estimate,eps_actual,eps_surprise_pct,"
+            "revenue_estimate,revenue_actual,revenue_surprise_pct,"
+            "beat_eps,beat_revenue,price_change"
         )
-        return resp.data or []
+        while True:
+            resp = (
+                client.table("earnings_history")
+                .select(cols)
+                .gte("report_date", start_date)
+                .lte("report_date", end_date)
+                .order("report_date", desc=True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = resp.data or []
+            all_rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        logger.info(
+            "query_earnings_history(%s–%s): %d rows fetched",
+            start_date, end_date, len(all_rows),
+        )
+        return all_rows
     except Exception as exc:
         logger.warning("query_earnings_history(%s–%s) failed: %s", start_date, end_date, exc)
         return None

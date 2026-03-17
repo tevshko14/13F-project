@@ -88,9 +88,6 @@
     #es-results-table td.es-beat { color: #22c55e; font-weight: 600; }
     #es-results-table td.es-miss { color: #ef4444; font-weight: 600; }
     .es-inline { color: var(--pp-text-muted); }
-    .es-guide-raised { color: #22c55e; }
-    .es-guide-lowered { color: #ef4444; }
-    .es-guide-maintained { color: var(--pp-text-muted); }
     .es-ticker-link {
         color: var(--pp-text); font-weight: 600; text-decoration: none;
     }
@@ -215,7 +212,6 @@
                 <th onclick="esSort('sector')" class="es-col-sector">Sector <span class="sort-arrow">&#9660;</span></th>
                 <th onclick="esSort('eps_surprise_pct')" style="text-align:right;">EPS Surp. <span class="sort-arrow">&#9660;</span></th>
                 <th onclick="esSort('rev_surprise_pct')" style="text-align:right;">Rev Surp. <span class="sort-arrow">&#9660;</span></th>
-                <th onclick="esSort('guide')">Guide <span class="sort-arrow">&#9660;</span></th>
                 <th onclick="esSort('price_change')" style="text-align:right;">Stock Reaction <span class="sort-arrow">&#9660;</span></th>
             </tr>
         </thead>
@@ -231,9 +227,6 @@
                 </td>
                 <td style="text-align:right;" class="{% if r.rev_surprise_pct is not none and r.rev_surprise_pct > 0 %}es-beat{% elif r.rev_surprise_pct is not none and r.rev_surprise_pct < 0 %}es-miss{% endif %}">
                     {% if r.rev_surprise_pct is not none %}{{ "+" if r.rev_surprise_pct > 0 }}{{ r.rev_surprise_pct }}%{% else %}—{% endif %}
-                </td>
-                <td class="{% if r.guide == 'Raised' %}es-guide-raised{% elif r.guide == 'Lowered' %}es-guide-lowered{% else %}es-guide-maintained{% endif %}">
-                    {{ r.guide }}
                 </td>
                 <td style="text-align:right;" class="{% if r.price_change is not none and r.price_change > 0 %}es-beat{% elif r.price_change is not none and r.price_change < 0 %}es-miss{% endif %}">
                     {% if r.price_change is not none %}{{ "+" if r.price_change > 0 }}{{ r.price_change }}%{% else %}—{% endif %}
@@ -262,31 +255,39 @@
             var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
             var textColor = isDark ? '#ccc' : '#333';
             var chart = echarts.init(donutEl);
+            var pieLabel = {
+                show: true,
+                formatter: '{d}%',
+                fontSize: 12,
+                color: textColor
+            };
+            var pieLabelLine = { show: true, length: 8, length2: 6 };
             chart.setOption({
                 tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-                legend: {
-                    bottom: 0, textStyle: { color: textColor, fontSize: 12 },
-                    data: ['EPS Beat', 'EPS Miss', 'EPS Inline', 'Rev Beat', 'Rev Miss', 'Rev Inline']
-                },
+                legend: { show: false },
+                title: [
+                    { text: 'EPS', left: '30%', top: '8%', textAlign: 'center', textStyle: { color: textColor, fontSize: 14, fontWeight: 'bold' } },
+                    { text: 'Revenue', left: '70%', top: '8%', textAlign: 'center', textStyle: { color: textColor, fontSize: 14, fontWeight: 'bold' } }
+                ],
                 series: [
                     {
-                        name: 'EPS', type: 'pie', radius: ['30%', '55%'],
-                        center: ['30%', '45%'], label: { show: false },
-                        emphasis: { label: { show: true, fontWeight: 'bold' } },
+                        name: 'EPS', type: 'pie', radius: ['28%', '50%'],
+                        center: ['30%', '55%'], label: pieLabel, labelLine: pieLabelLine,
+                        emphasis: { label: { show: true, fontWeight: 'bold', fontSize: 14 } },
                         data: [
-                            { value: {{ m.eps_beats }}, name: 'EPS Beat', itemStyle: { color: '#22c55e' } },
-                            { value: {{ m.eps_misses }}, name: 'EPS Miss', itemStyle: { color: '#ef4444' } },
-                            { value: {{ m.eps_inline }}, name: 'EPS Inline', itemStyle: { color: '#a1a1aa' } }
+                            { value: {{ m.eps_beats }}, name: 'Beat', itemStyle: { color: '#22c55e' } },
+                            { value: {{ m.eps_misses }}, name: 'Miss', itemStyle: { color: '#ef4444' } },
+                            { value: {{ m.eps_inline }}, name: 'Inline', itemStyle: { color: '#a1a1aa' } }
                         ]
                     },
                     {
-                        name: 'Revenue', type: 'pie', radius: ['30%', '55%'],
-                        center: ['70%', '45%'], label: { show: false },
-                        emphasis: { label: { show: true, fontWeight: 'bold' } },
+                        name: 'Revenue', type: 'pie', radius: ['28%', '50%'],
+                        center: ['70%', '55%'], label: pieLabel, labelLine: pieLabelLine,
+                        emphasis: { label: { show: true, fontWeight: 'bold', fontSize: 14 } },
                         data: [
-                            { value: {{ m.rev_beats }}, name: 'Rev Beat', itemStyle: { color: '#22c55e' } },
-                            { value: {{ m.rev_misses }}, name: 'Rev Miss', itemStyle: { color: '#ef4444' } },
-                            { value: {{ m.rev_inline }}, name: 'Rev Inline', itemStyle: { color: '#a1a1aa' } }
+                            { value: {{ m.rev_beats }}, name: 'Beat', itemStyle: { color: '#22c55e' } },
+                            { value: {{ m.rev_misses }}, name: 'Miss', itemStyle: { color: '#ef4444' } },
+                            { value: {{ m.rev_inline }}, name: 'Inline', itemStyle: { color: '#a1a1aa' } }
                         ]
                     }
                 ]
@@ -382,7 +383,7 @@
         var tbody = document.querySelector('#es-results-table tbody');
         var rows = Array.from(tbody.querySelectorAll('tr'));
         var colMap = { symbol:0, name:1, date:2, sector:3, eps_surprise_pct:4,
-                       rev_surprise_pct:5, guide:6, price_change:7 };
+                       rev_surprise_pct:5, price_change:6 };
         var idx = colMap[col] || 0;
         rows.sort(function(a, b) {
             var va = a.cells[idx].textContent.trim().replace('%','').replace('+','');
