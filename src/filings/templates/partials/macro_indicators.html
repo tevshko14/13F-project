@@ -98,10 +98,13 @@
 
 /* ── Historical Charts (ECharts) within groups ── */
 .mi-charts-row {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    display: grid; grid-template-columns: repeat(2, 1fr);
     gap: 0.8em; margin-top: 0.8em;
 }
-@media (max-width: 600px) { .mi-charts-row { grid-template-columns: 1fr; } }
+.mi-charts-row.mi-charts-single { grid-template-columns: 1fr; }
+.mi-charts-row.mi-charts-triple { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 900px) { .mi-charts-row, .mi-charts-row.mi-charts-triple { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .mi-charts-row, .mi-charts-row.mi-charts-triple { grid-template-columns: 1fr; } }
 .mi-chart-card {
     border: 1px solid var(--pp-border-light, rgba(15,23,42,0.08));
     border-radius: 12px; padding: 1em 1.2em;
@@ -119,7 +122,7 @@
 .mi-chart-chg { font-size: 0.78em; font-weight: 600; margin-left: 0.4em; }
 .mi-chart-chg.up { color: #16a34a; }
 .mi-chart-chg.down { color: #ef4444; }
-.mi-chart-el { width: 100%; height: 140px; margin-top: 0.5em; }
+.mi-chart-el { width: 100%; height: 160px; margin-top: 0.5em; }
 </style>
 
 {% if data.is_mock %}
@@ -171,7 +174,7 @@
 </div>
 {# ── Historical charts for this group ── #}
 {% if charts and charts.get(group.key) %}
-<div class="mi-charts-row">
+<div class="mi-charts-row{% if charts[group.key]|length == 1 %} mi-charts-single{% elif charts[group.key]|length == 3 %} mi-charts-triple{% endif %}">
     {% for ch in charts[group.key] %}
     <div class="mi-chart-card">
         <div class="mi-chart-header">

@@ -1267,6 +1267,24 @@ def pct_to_color(pct: float) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+# Approximate S&P 500 market-cap weights (top ~50).
+# Source: S&P Dow Jones Indices, last verified 2026-03-15.
+# Stocks not listed get a default small weight. Update quarterly.
+_SP500_WEIGHTS: dict[str, float] = {
+    "AAPL": 7.0, "MSFT": 6.5, "NVDA": 6.0, "AMZN": 3.8, "META": 2.6,
+    "GOOGL": 2.1, "GOOG": 1.8, "BRK-B": 1.7, "AVGO": 1.7, "TSLA": 1.6,
+    "JPM": 1.4, "LLY": 1.3, "V": 1.1, "UNH": 1.1, "MA": 1.0,
+    "XOM": 1.0, "COST": 0.9, "HD": 0.9, "PG": 0.8, "JNJ": 0.8,
+    "NFLX": 0.8, "ABBV": 0.7, "CRM": 0.7, "BAC": 0.7, "ORCL": 0.7,
+    "CVX": 0.6, "WMT": 0.6, "MRK": 0.6, "KO": 0.6, "CSCO": 0.5,
+    "AMD": 0.5, "PEP": 0.5, "ACN": 0.5, "LIN": 0.5, "ADBE": 0.5,
+    "TMO": 0.5, "MCD": 0.5, "ABT": 0.5, "PM": 0.4, "IBM": 0.4,
+    "GE": 0.4, "ISRG": 0.4, "NOW": 0.4, "CAT": 0.4, "TXN": 0.4,
+    "INTU": 0.4, "QCOM": 0.4, "GS": 0.4, "AMGN": 0.4, "BKNG": 0.4,
+}
+_SP500_DEFAULT_WEIGHT = 0.15  # ~0.15% for unlisted stocks
+
+
 def build_heatmap_data(
     market_data: dict,
     constituents: list[dict],
@@ -1312,9 +1330,11 @@ def build_heatmap_data(
         count = superinvestor_ticker_counts.get(ticker.upper(), 0)
         sector = c.get("sector", "Other")
 
+        weight = _SP500_WEIGHTS.get(ticker, _SP500_DEFAULT_WEIGHT)
+
         node = {
             "name": ticker,
-            "value": 1,  # equal weight
+            "value": weight,
             "pct_change": pct,
             "full_name": c["name"],
             "superinvestor_count": count,
@@ -1330,13 +1350,15 @@ def build_heatmap_data(
             sectors[sector] = []
         sectors[sector].append(node)
 
-    # Sort sectors by number of children (largest first)
+    # Sort sectors by total weight (largest first), children by weight
+    sector_weights = {s: sum(n["value"] for n in nodes) for s, nodes in sectors.items()}
     result = []
-    for name in sorted(sectors, key=lambda s: -len(sectors[s])):
+    for name in sorted(sectors, key=lambda s: -sector_weights[s]):
+        children = sorted(sectors[name], key=lambda n: -n["value"])
         result.append(
             {
                 "name": name,
-                "children": sectors[name],
+                "children": children,
             }
         )
 

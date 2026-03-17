@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-16 (Earnings scorecard: stock reaction backfill, price_change persistence, All Stocks index, pie chart labels, Guide column removal, pagination fix)
+> Last updated: 2026-03-16 (Heatmap market-cap weighting, retail heat meter, macro subtab reorder, FX chart reorder, indicator chart grid, BETA badge removal)
 
 ---
 
@@ -851,7 +851,7 @@ cache pattern as `analysts.py`.
 |---|---|---|---|
 | `get_sp500_constituents()` | Wikipedia (pd.read_html) | 24h | Ticker + sector list (~500 items) |
 | `get_sp500_market_data()` | Tiingo EOD (primary) + yfinance (fallback) | 30min | Daily % change for all S&P 500 tickers |
-| `build_heatmap_data()` | Pure computation | — | ECharts treemap format with colors + gold borders |
+| `build_heatmap_data()` | Pure computation | — | ECharts treemap format with market-cap weighting + colors |
 | `build_most_added_table()` | Cache (fund_data changes) | 30min | Top 25 stocks by superinvestor add count |
 | `get_52_week_range_bulk()` | yfinance bulk download (1y) | 30min | 52-week high/low/current for enrichment |
 | `get_all_listed_tickers()` | NASDAQ Trader (nasdaqtraded.txt) | 24h | All ~8K NYSE/NASDAQ/AMEX listings |
@@ -2022,6 +2022,13 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Earnings scorecard: removed Guide column (never populated), added pie chart % labels + EPS/Revenue titles
 - [x] Supabase query pagination: `query_earnings_history()` paginates past 1000-row client cap
 - [x] Upsert protection: `upsert_earnings_history()` strips None keys to prevent clobbering backfilled data (price_change)
+- [x] S&P 500 heatmap: market-cap weighted treemap (top 50 stocks sized by weight, sectors sorted by total weight)
+- [x] Retail leaderboard: visual heat meter (5-bar scale Cold→Viral), centered table, rank column centered, removed gold guru border, rank change moved beside velocity
+- [x] Macro subtabs reordered: Economic (default) → Treasury → FX Rates → Sentiment (was Sentiment first)
+- [x] FX Rates: sparkline charts moved above exchange rates table
+- [x] Economic indicators: responsive chart grid (1/2/3 columns based on chart count), chart height 140→160px
+- [x] Macro page: removed BETA badge from nav, removed WIP disclaimer from earnings scorecard
+- [x] Earnings scorecard: reaction % y-axis clamped to ±3% for readability
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)

@@ -29,9 +29,9 @@ _DB_TTL = 604_800  # 7 days (L2 Supabase)
 
 # ── Constants ────────────────────────────────────────────────────
 INDEX_CHOICES = {
+    "all": "All Stocks",
     "sp500": "S&P 500",
     "nasdaq": "NASDAQ 100",
-    "all": "All Stocks",
 }
 
 SECTORS = [

@@ -284,9 +284,6 @@
                 {% endfor %}
             </div>
         </div>
-        <div style="margin-top: 0.75rem; padding: 0.6em 1em; border-radius: 8px; background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); font-size: 0.82rem; color: rgba(245, 158, 11, 0.85);">
-            ⚠ This section is a work in progress. Data may be incomplete or inaccurate while we finalize the pipeline.
-        </div>
         <div id="es-content"
              hx-get="/api/macro/scorecard?index={{ current_index }}&quarter={{ current_quarter }}{% if current_sector %}&sector={{ current_sector }}{% endif %}"
              hx-trigger="load"
@@ -378,15 +375,15 @@
     <div class="macro-controls" style="margin-bottom: 0.6rem;">
         <h2>Macro Trends</h2>
         <div class="pp-pill-nav" id="mt-subtab-nav" style="margin-bottom: 0;">
-            <button class="pp-pill-btn active" data-key="sentiment" onclick="mtSwitchSub('sentiment')">Sentiment</button>
-            <button class="pp-pill-btn" data-key="economic" onclick="mtSwitchSub('economic')">Economic</button>
+            <button class="pp-pill-btn active" data-key="economic" onclick="mtSwitchSub('economic')">Economic</button>
             <button class="pp-pill-btn" data-key="treasury" onclick="mtSwitchSub('treasury')">Treasury</button>
             <button class="pp-pill-btn" data-key="fx" onclick="mtSwitchSub('fx')">FX Rates</button>
+            <button class="pp-pill-btn" data-key="sentiment" onclick="mtSwitchSub('sentiment')">Sentiment</button>
         </div>
     </div>
 
     {# ── Sentiment sub-panel (Google Trends — existing) ── #}
-    <div id="mt-sub-sentiment" class="mt-sub active">
+    <div id="mt-sub-sentiment" class="mt-sub">
         <p style="font-size: 0.85em; color: var(--pp-text-muted); margin-bottom: 1.2em;">
             Search interest for market-moving macro keywords over the last 3 months.
             Rising interest in "recession" or "stock market crash" often precedes volatility.
@@ -418,7 +415,7 @@
     </div>
 
     {# ── Economic sub-panel (FRED Indicators + Charts integrated) ── #}
-    <div id="mt-sub-economic" class="mt-sub">
+    <div id="mt-sub-economic" class="mt-sub active">
         <div class="macro-controls" style="margin-top: 0.75rem;">
             <div class="pp-filter-nav" id="mi-cat-nav" style="margin-bottom: 0;">
                 <button class="pp-pill-btn active" data-key="all" onclick="miChangeCat('all')">All</button>

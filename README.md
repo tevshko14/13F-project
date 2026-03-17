@@ -6,7 +6,7 @@ A web dashboard for tracking SEC 13F institutional holdings filings from 85 supe
 
 ### Homepage
 - **Bento Grid Layout** - Glassmorphism card design with mesh gradient background
-- **S&P 500 Heatmap** - Interactive treemap showing daily performance grouped by sector (ECharts), with gold borders on stocks held by superinvestors
+- **S&P 500 Heatmap** - Market-cap weighted interactive treemap showing daily performance grouped by sector (ECharts), with superinvestor overlap indicators
 - **Most Added by Superinvestors** - ECharts bar chart with gradient fills, analyst consensus tooltips, and 52-week range
 - **Most Bought by Congress** - ECharts bar chart of trending congressional stock purchases
 - **Trending with Smart Money** - Combined superinvestor + congress stacked bar chart with gradient fills

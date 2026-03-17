@@ -34,6 +34,16 @@
 
 {% if fx_data and fx_data.latest and fx_data.latest.rates %}
 <div class="fx-grid">
+    {# Sparkline Charts for Major Pairs #}
+    {% if fx_data.sparklines %}
+    {% for code, ts in fx_data.sparklines.items() %}
+    <div class="fx-card">
+        <h3>USD/{{ code }} <span style="font-size: 0.78em; font-weight: 400; color: var(--pp-text-muted);">30 days</span></h3>
+        <div class="fx-chart" id="fx-chart-{{ code }}"></div>
+    </div>
+    {% endfor %}
+    {% endif %}
+
     {# Rates Table #}
     <div class="fx-card fx-card-full">
         <h3>Exchange Rates <span style="font-size: 0.75em; font-weight: 400; color: var(--pp-text-muted);">Base: USD · {{ fx_data.latest.date }}</span></h3>
@@ -60,16 +70,6 @@
         </table>
         </div>
     </div>
-
-    {# Sparkline Charts for Major Pairs #}
-    {% if fx_data.sparklines %}
-    {% for code, ts in fx_data.sparklines.items() %}
-    <div class="fx-card">
-        <h3>USD/{{ code }} <span style="font-size: 0.78em; font-weight: 400; color: var(--pp-text-muted);">30 days</span></h3>
-        <div class="fx-chart" id="fx-chart-{{ code }}"></div>
-    </div>
-    {% endfor %}
-    {% endif %}
 </div>
 
 <p class="fx-note">

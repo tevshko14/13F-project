@@ -3922,7 +3922,7 @@ async def alt_signals_short_interest(request: Request):
 @app.get("/macro", response_class=HTMLResponse)
 async def macro_page(
     request: Request,
-    index: str = "sp500",
+    index: str = "all",
     quarter: str = "",
     sector: str = "",
 ):
@@ -3944,7 +3944,7 @@ async def macro_page(
     from filings import fred_calendar
 
     if index not in earnings_scorecard.INDEX_CHOICES:
-        index = "sp500"
+        index = "all"
     quarters = earnings_scorecard.get_available_quarters()
     if not quarter or quarter not in quarters:
         quarter = quarters[0]
@@ -4002,7 +4002,7 @@ async def macro_auth(request: Request):
 @app.get("/api/macro/scorecard", response_class=HTMLResponse)
 async def macro_scorecard_api(
     request: Request,
-    index: str = "sp500",
+    index: str = "all",
     quarter: str = "",
     sector: str = "",
 ):
@@ -4013,7 +4013,7 @@ async def macro_scorecard_api(
     from filings import earnings_scorecard
 
     if index not in earnings_scorecard.INDEX_CHOICES:
-        index = "sp500"
+        index = "all"
 
     data = await _to_heavy(
         earnings_scorecard.fetch_earnings_data,

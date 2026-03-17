@@ -39,26 +39,27 @@
         </div>
         <span class="text-muted text-small">{{ rows|length }} tickers</span>
     </header>
-    <figure>
-    <table class="pp-table" id="retail-leaderboard-table">
+    <figure style="display: flex; justify-content: center; overflow-x: auto;">
+    <table class="pp-table" id="retail-leaderboard-table" style="width: auto;">
         <thead>
             <tr>
-                <th class="text-right" data-sort="number" style="width: 50px;">Rank</th>
+                <th data-sort="number" style="width: 50px; text-align: center;">Rank</th>
                 <th data-sort="text">Ticker</th>
                 <th style="width: 40px; text-align: center;" data-sort="number">Heat</th>
                 <th class="text-right" data-sort="number">Mentions</th>
                 <th class="text-right" data-sort="number">Velocity</th>
+                <th class="text-right" data-sort="number">Rank Change</th>
                 <th class="text-right" data-sort="number">Engagement</th>
                 <th data-sort="number" style="text-align: center;">Smart Money</th>
-                <th class="text-right" data-sort="number">Rank Change</th>
             </tr>
         </thead>
         <tbody>
+            {% set heat_labels = {0: 'Cold', 1: 'Cool', 2: 'Warm', 3: 'Hot', 4: 'Fire', 5: 'Viral'} %}
+            {% set heat_colors = {0: '#94a3b8', 1: '#38bdf8', 2: '#4ade80', 3: '#fbbf24', 4: '#f97316', 5: '#ef4444'} %}
             {% for row in rows %}
             <tr{% if loop.index > 10 %} class="retail-overflow" style="display: none;"{% endif %}
-               data-guru-count="{{ row.guru_count }}"
-               {% if row.guru_count > 0 %}style="{% if loop.index > 10 %}display: none; {% endif %}border-left: 3px solid #FFD700;"{% endif %}>
-                <td class="text-right text-muted">{{ row.rank }}</td>
+               data-guru-count="{{ row.guru_count }}">
+                <td class="text-muted" style="text-align: center;">{{ row.rank }}</td>
                 <td>
                     <a href="/stock/{{ row.ticker }}" class="ticker" style="text-decoration: none; font-weight: 600;">
                         {% if logo_tickers is defined and row.ticker in logo_tickers %}<img src="/api/logo/{{ row.ticker }}.png" width="16" height="16" loading="lazy" decoding="async" onerror="this.style.display='none'" class="ticker-logo">{% endif %}{{ row.ticker }}
@@ -70,15 +71,12 @@
                     {% endif %}
                 </td>
                 <td style="text-align: center;" data-value="{{ row.heat }}">
-                    {% if row.heat >= 4 %}
-                        <span style="font-size: 1.3em; filter: saturate(2);" title="Velocity: {{ row.velocity_pct }}%">&#x1F525;</span>
-                    {% elif row.heat >= 2 %}
-                        <span style="font-size: 1em;" title="Velocity: {{ row.velocity_pct }}%">&#x1F525;</span>
-                    {% elif row.heat >= 1 %}
-                        <span style="font-size: 0.8em; filter: saturate(0.5);" title="Velocity: {{ row.velocity_pct }}%">&#x1F525;</span>
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
+                    {% set h = [row.heat, 5]|min %}
+                    <span title="{{ heat_labels[h] }}: {{ row.velocity_pct }}% velocity" style="display: inline-flex; gap: 2px; align-items: flex-end;">
+                        {% for i in range(5) %}
+                        <span style="width: 4px; height: {{ 8 + i * 3 }}px; border-radius: 1px; background: {% if i < h %}{{ heat_colors[h] }}{% else %}var(--pp-overlay-5, rgba(0,0,0,0.08)){% endif %};"></span>
+                        {% endfor %}
+                    </span>
                 </td>
                 <td class="text-right" data-value="{{ row.mentions }}">
                     <strong>{{ "{:,}".format(row.mentions) }}</strong>
@@ -90,6 +88,19 @@
                         <span style="color: #c62828; font-weight: 600;">{{ "%.1f"|format(row.velocity_pct) }}%</span>
                     {% else %}
                         <span class="text-muted">0%</span>
+                    {% endif %}
+                </td>
+                <td class="text-right" data-value="{{ row.rank_change }}">
+                    {% if row.rank_change > 0 %}
+                        <span class="badge badge-add" style="font-size: 0.8em; padding: 0.15em 0.5em;">
+                            &#x25B2; +{{ row.rank_change }}
+                        </span>
+                    {% elif row.rank_change < 0 %}
+                        <span class="badge badge-reduce" style="font-size: 0.8em; padding: 0.15em 0.5em;">
+                            &#x25BC; {{ row.rank_change }}
+                        </span>
+                    {% else %}
+                        <span class="text-muted">-</span>
                     {% endif %}
                 </td>
                 <td class="text-right" data-value="{{ row.engagement_ratio }}">
@@ -106,19 +117,6 @@
                         <span class="badge" style="background: #f5f5f5; color: #616161; font-size: 0.75em; padding: 0.15em 0.5em;"
                               title="{{ row.guru_names|join(', ') }}">
                             {{ row.guru_count }} Guru{{ 's' if row.guru_count > 1 else '' }}
-                        </span>
-                    {% else %}
-                        <span class="text-muted">-</span>
-                    {% endif %}
-                </td>
-                <td class="text-right" data-value="{{ row.rank_change }}">
-                    {% if row.rank_change > 0 %}
-                        <span class="badge badge-add" style="font-size: 0.8em; padding: 0.15em 0.5em;">
-                            &#x25B2; +{{ row.rank_change }}
-                        </span>
-                    {% elif row.rank_change < 0 %}
-                        <span class="badge badge-reduce" style="font-size: 0.8em; padding: 0.15em 0.5em;">
-                            &#x25BC; {{ row.rank_change }}
                         </span>
                     {% else %}
                         <span class="text-muted">-</span>
