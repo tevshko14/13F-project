@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-16 (Heatmap market-cap weighting, retail heat meter, macro subtab reorder, FX chart reorder, indicator chart grid, BETA badge removal)
+> Last updated: 2026-03-16 (Performance: Brotli compression, CSS minification, connection pooling, CLS fix, font centralization, retail L1 cache; SEO: FAQ expansion, data citations, llms.txt enrichment; Fix: investor.html duplicate DOM IDs)
 
 ---
 
@@ -2029,6 +2029,11 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Economic indicators: responsive chart grid (1/2/3 columns based on chart count), chart height 140→160px
 - [x] Macro page: removed BETA badge from nav, removed WIP disclaimer from earnings scorecard
 - [x] Earnings scorecard: reaction % y-axis clamped to ±3% for readability
+- [x] Performance: Brotli compression middleware (~15-20% better than GZip), inline CSS minification (~34% reduction), HTTP connection pooling (global httpx.AsyncClient), retail data L1 cache (120s TTL), stock price CLS fix (visibility:hidden)
+- [x] Font loading: centralized Google Fonts to base.html (async preload+onload pattern, removed from ~15 child templates), crossorigin attribute to prevent double-fetch
+- [x] SEO: WebApplication JSON-LD moved from base.html to home.html, 5 new FAQ entries with structured data, data source citations on congress/insider/funds pages, expanded llms.txt with macro/stock/data-source sections
+- [x] Fix: investor.html duplicate DOM IDs (portfolio-donut, holdings-table-wrap) causing portfolio concentration chart to not render in tab
+- [x] Static asset cache headers: 1yr immutable for images/fonts, 1hr for CSS/JS (SecurityHeadersMiddleware)
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
@@ -2074,7 +2079,7 @@ seed script with verified wallet addresses from Etherscan labels + Arkham.
       now reads from cached data instead of calling SEC API + compare_quarters()
 - [ ] Add proper logging (currently all errors are silently caught with `pass`)
 - [ ] Add error handling for malformed SEC data (corrupt DataFrames, missing columns)
-- [ ] Unit tests (none exist currently)
+- [x] Unit tests: `test_web.py` (12 route/integration tests), `test_perf.py` (34 performance tests covering cache, compression, CLS, fonts, CSS minification, JSON-LD)
 - [ ] Type checking with mypy (type hints are used but not enforced)
 
 ---

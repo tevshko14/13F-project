@@ -21,9 +21,6 @@
 {% block extra_head_scripts %}
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" as="script">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js" defer></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
 {% endblock %}
 {% block content %}
 <section class="insider-shell">
@@ -802,4 +799,8 @@
         }
     }
 </style>
+<div class="pp-data-citation">
+    Data sourced from <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=4" target="_blank" rel="noopener">SEC EDGAR Form 4 filings</a>.
+    Insiders must file within 2 business days per <a href="https://www.sec.gov/answers/form4.htm" target="_blank" rel="noopener">Section 16(a)</a> of the Securities Exchange Act of 1934.
+</div>
 {% endblock %}

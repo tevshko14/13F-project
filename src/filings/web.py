@@ -38,6 +38,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+import httpx
 
 from filings import (
     client,
@@ -192,6 +193,8 @@ _logo_set: set[str] = set()  # exposed to templates as Jinja global
 _headshot_cache: dict[str, bytes] = {}
 _headshot_set: set[str] = set()  # exposed to templates as Jinja global
 
+_http_pool: httpx.AsyncClient | None = None
+
 _analyst_photo_cache: dict[str, bytes] = {}
 _analyst_photo_set: set[str] = set()  # exposed to templates as Jinja global
 
@@ -231,11 +234,20 @@ async def _safe_fetch(coro, label: str, timeout: int = 10):
         return None
 
 
+_retail_data_cache: tuple[float, tuple[list, dict | None]] | None = None
+_RETAIL_DATA_TTL = 120  # 2 minutes — ApeWisdom updates every ~5 min
+
+
 async def _fetch_retail_data() -> tuple[list[dict], dict | None]:
     """Fetch ApeWisdom + CNN Fear&Greed for leaderboard endpoints.
 
     Returns (all_data, fear_greed) — both degrade gracefully to empty/None.
+    Cached in-memory for 2 minutes to avoid hammering external APIs.
     """
+    global _retail_data_cache
+    now = time_module.time()
+    if _retail_data_cache and now - _retail_data_cache[0] < _RETAIL_DATA_TTL:
+        return _retail_data_cache[1]
     try:
         all_data, fear_greed = await asyncio.wait_for(
             asyncio.gather(
@@ -247,7 +259,9 @@ async def _fetch_retail_data() -> tuple[list[dict], dict | None]:
     except Exception:
         logger.warning("_fetch_retail_data: data fetch failed", exc_info=True)
         all_data, fear_greed = [], None
-    return all_data or [], fear_greed
+    result = (all_data or [], fear_greed)
+    _retail_data_cache = (now, result)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -282,6 +296,14 @@ async def lifespan(app: FastAPI):
         thread_name_prefix="heavy",
     )
     _heavy_sem = asyncio.Semaphore(int(os.environ.get("HEAVY_CONCURRENCY", "12")))
+
+    global _http_pool
+    _http_pool = httpx.AsyncClient(
+        timeout=10.0,
+        follow_redirects=True,
+        limits=httpx.Limits(max_connections=30, max_keepalive_connections=15),
+        headers={"User-Agent": "PaperPanda/1.0 (+https://paperpanda.io)"},
+    )
 
     # ── Load all startup data concurrently ──────────────────────────
     # Previously 5 sequential Supabase loads; now runs them in parallel
@@ -455,9 +477,76 @@ async def lifespan(app: FastAPI):
     if _bg_tasks:
         await asyncio.gather(*_bg_tasks, return_exceptions=True)
 
+    if _http_pool is not None:
+        await _http_pool.aclose()
+        _http_pool = None
+
     if _heavy_pool is not None:
         _heavy_pool.shutdown(wait=False)
         _heavy_pool = None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Inline CSS minification (defined before app so middleware can be registered)
+# ═══════════════════════════════════════════════════════════════════════
+_CSS_COMMENT_RE = _re.compile(r"/\*.*?\*/", _re.DOTALL)
+_CSS_WHITESPACE_RE = _re.compile(r"\s+")
+_CSS_PUNCT_RE = _re.compile(r"\s*([{}:;,>~+])\s*")
+_CSS_TRAILING_SEMI_RE = _re.compile(r";}")
+
+
+def _minify_css_block(css: str) -> str:
+    """Strip comments, collapse whitespace, remove unnecessary chars."""
+    css = _CSS_COMMENT_RE.sub("", css)
+    css = _CSS_WHITESPACE_RE.sub(" ", css)
+    css = _CSS_PUNCT_RE.sub(r"\1", css)
+    css = _CSS_TRAILING_SEMI_RE.sub("}", css)
+    return css.strip()
+
+
+_STYLE_BLOCK_RE = _re.compile(
+    r"(<style[^>]*>)(.*?)(</style>)", _re.DOTALL | _re.IGNORECASE
+)
+
+
+def _minify_inline_styles(html: str) -> str:
+    """Find all <style>...</style> blocks in HTML and minify their CSS."""
+    def _repl(m):
+        return m.group(1) + _minify_css_block(m.group(2)) + m.group(3)
+    return _STYLE_BLOCK_RE.sub(_repl, html)
+
+
+class CSSMinifyMiddleware(BaseHTTPMiddleware):
+    """Minify inline <style> blocks in HTML responses."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        ct = response.headers.get("content-type", "")
+        if "text/html" not in ct:
+            return response
+        body_chunks = []
+        async for chunk in response.body_iterator:
+            if isinstance(chunk, str):
+                body_chunks.append(chunk.encode("utf-8"))
+            else:
+                body_chunks.append(chunk)
+        body = b"".join(body_chunks)
+        if b"<style" in body:
+            minified = _minify_inline_styles(body.decode("utf-8", errors="replace"))
+            headers = dict(response.headers)
+            headers.pop("content-length", None)
+            return Response(
+                content=minified,
+                status_code=response.status_code,
+                headers=headers,
+                media_type=response.media_type,
+            )
+        return Response(
+            content=body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -466,7 +555,54 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="PaperPanda", lifespan=lifespan)
 
-# ── GZip compression — ~20-35% reduction on HTML/JSON/CSS responses ──
+# ── Middleware stack (LIFO: last added = outermost) ──
+# Registration order determines nesting: first = innermost, last = outermost.
+# Response flow: App → CSSMinify → Brotli → GZip(fallback) → client
+app.add_middleware(CSSMinifyMiddleware)
+
+try:
+    import brotli as _brotli_mod
+
+    class BrotliMiddleware(BaseHTTPMiddleware):
+        """Compress responses with Brotli when the client supports it."""
+
+        async def dispatch(self, request: Request, call_next):
+            accept = request.headers.get("accept-encoding", "")
+            if "br" not in accept:
+                return await call_next(request)
+            response = await call_next(request)
+            # Skip if already compressed (e.g. by inner middleware)
+            if response.headers.get("content-encoding"):
+                return response
+            # Only compress text-based responses above 1 KB
+            ct = response.headers.get("content-type", "")
+            if not any(t in ct for t in ("text/", "json", "javascript", "xml")):
+                return response
+            if hasattr(response, "body"):
+                body = response.body
+                if len(body) < 1000:
+                    return response
+                compressed = _brotli_mod.compress(body, quality=4)
+                if len(compressed) < len(body):
+                    headers = dict(response.headers)
+                    headers["content-encoding"] = "br"
+                    headers["content-length"] = str(len(compressed))
+                    headers["vary"] = "Accept-Encoding"
+                    return Response(
+                        content=compressed,
+                        status_code=response.status_code,
+                        headers=headers,
+                        media_type=response.media_type,
+                    )
+                return response
+            return response
+
+    app.add_middleware(BrotliMiddleware)
+    logger.info("Brotli compression enabled")
+except ImportError:
+    logger.info("Brotli not available, using GZip only")
+
+# GZip outermost — catches anything Brotli didn't handle (non-br clients)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -1476,7 +1612,9 @@ async def _populate_logos_task(limit: int = 200):
     Processes at most ``limit`` new tickers per invocation.
     Insert-only — existing rows in ticker_logos are NEVER modified.
     """
-    import httpx
+    if _http_pool is None:
+        logger.warning("_populate_logos_task: _http_pool not initialized, skipping")
+        return
 
     status = _logo_populate_status
     status.update({"phase": "collecting", "downloaded": 0, "failed": 0, "total": 0})
@@ -1531,50 +1669,49 @@ async def _populate_logos_task(limit: int = 200):
         downloaded = 0
         failed = 0
 
-        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as http:
-            for ticker in new_tickers:
-                issuer = ticker_names.get(ticker, "")
-                domains_to_try = _guess_domains(issuer, ticker=ticker)
+        for ticker in new_tickers:
+            issuer = ticker_names.get(ticker, "")
+            domains_to_try = _guess_domains(issuer, ticker=ticker)
 
-                found = False
-                for domain in domains_to_try:
-                    try:
-                        resp = await http.get(_FAVICON_URL.format(domain=domain))
-                        if resp.status_code == 200 and len(resp.content) > _MIN_LOGO_BYTES:
-                            b64 = _b64.b64encode(resp.content).decode("ascii")
-                            ct = resp.headers.get("content-type", "image/png")
-                            rows_to_insert.append({
-                                "ticker": ticker,
-                                "logo_b64": b64,
-                                "content_type": ct,
-                                "logo_domain": domain,
-                            })
-                            _logo_cache[ticker] = resp.content
-                            _logo_set.add(ticker)
-                            downloaded += 1
-                            found = True
-                            break
-                        elif downloaded == 0 and failed < 3:
-                            # Log first few failures for debugging
-                            logger.info(
-                                "Logo miss: %s domain=%s status=%s size=%d",
-                                ticker, domain, resp.status_code, len(resp.content),
-                            )
-                    except Exception as exc:
-                        if downloaded == 0 and failed < 3:
-                            logger.warning("Logo fetch error: %s domain=%s: %s", ticker, domain, exc)
-                    await asyncio.sleep(0.05)
-
-                if not found:
-                    failed += 1
-
-                # Batch insert every 25 (insert-only, never overwrites)
-                if len(rows_to_insert) >= 25:
-                    await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
-                    rows_to_insert.clear()
-
-                status.update({"downloaded": downloaded, "failed": failed})
+            found = False
+            for domain in domains_to_try:
+                try:
+                    resp = await _http_pool.get(_FAVICON_URL.format(domain=domain))
+                    if resp.status_code == 200 and len(resp.content) > _MIN_LOGO_BYTES:
+                        b64 = _b64.b64encode(resp.content).decode("ascii")
+                        ct = resp.headers.get("content-type", "image/png")
+                        rows_to_insert.append({
+                            "ticker": ticker,
+                            "logo_b64": b64,
+                            "content_type": ct,
+                            "logo_domain": domain,
+                        })
+                        _logo_cache[ticker] = resp.content
+                        _logo_set.add(ticker)
+                        downloaded += 1
+                        found = True
+                        break
+                    elif downloaded == 0 and failed < 3:
+                        # Log first few failures for debugging
+                        logger.info(
+                            "Logo miss: %s domain=%s status=%s size=%d",
+                            ticker, domain, resp.status_code, len(resp.content),
+                        )
+                except Exception as exc:
+                    if downloaded == 0 and failed < 3:
+                        logger.warning("Logo fetch error: %s domain=%s: %s", ticker, domain, exc)
                 await asyncio.sleep(0.05)
+
+            if not found:
+                failed += 1
+
+            # Batch insert every 25 (insert-only, never overwrites)
+            if len(rows_to_insert) >= 25:
+                await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
+                rows_to_insert.clear()
+
+            status.update({"downloaded": downloaded, "failed": failed})
+            await asyncio.sleep(0.05)
 
         if rows_to_insert:
             await asyncio.to_thread(supabase_cache.insert_logos, rows_to_insert)
@@ -1797,7 +1934,9 @@ async def _populate_headshots_task(limit: int = 200):
     Processes at most ``limit`` new members per invocation.
     Insert-only — existing rows in congress_headshots are NEVER modified.
     """
-    import httpx
+    if _http_pool is None:
+        logger.warning("_populate_headshots_task: _http_pool not initialized, skipping")
+        return
 
     status = _headshot_populate_status
     status.update({"phase": "collecting", "downloaded": 0, "failed": 0, "total": 0})
@@ -1844,71 +1983,69 @@ async def _populate_headshots_task(limit: int = 200):
         failed = 0
         wiki_hits = 0
 
-        _HEADERS = {"User-Agent": "PaperPanda/1.0 (headshot-fetcher; +https://paperpanda.io)"}
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True, headers=_HEADERS) as http:
-            for member_id in new_members:
-                photo_bytes: bytes | None = None
-                source = ""
+        for member_id in new_members:
+            photo_bytes: bytes | None = None
+            source = ""
 
-                # Try GitHub Pages 225x275
+            # Try GitHub Pages 225x275
+            try:
+                resp = await _http_pool.get(_GH_225.format(member_id=member_id))
+                if resp.status_code == 200 and len(resp.content) > _MIN_PHOTO_BYTES:
+                    photo_bytes = resp.content
+                    source = "github-225"
+            except Exception:
+                pass
+
+            # Try GitHub Pages original
+            if not photo_bytes:
                 try:
-                    resp = await http.get(_GH_225.format(member_id=member_id))
+                    resp = await _http_pool.get(_GH_ORIG.format(member_id=member_id))
                     if resp.status_code == 200 and len(resp.content) > _MIN_PHOTO_BYTES:
                         photo_bytes = resp.content
-                        source = "github-225"
+                        source = "github-orig"
                 except Exception:
                     pass
 
-                # Try GitHub Pages original
-                if not photo_bytes:
-                    try:
-                        resp = await http.get(_GH_ORIG.format(member_id=member_id))
-                        if resp.status_code == 200 and len(resp.content) > _MIN_PHOTO_BYTES:
-                            photo_bytes = resp.content
-                            source = "github-orig"
-                    except Exception:
-                        pass
+            # Try Wikipedia API by full name + chamber/state
+            if not photo_bytes:
+                member_data = member_lookup.get(member_id, {})
+                full_name = member_data.get("full_name", "")
+                if full_name:
+                    photo_bytes = await _fetch_wikipedia_headshot(
+                        _http_pool, full_name, _MIN_PHOTO_BYTES,
+                        chamber=member_data.get("chamber", ""),
+                        state=member_data.get("state", ""),
+                    )
+                    if photo_bytes:
+                        source = "wikipedia"
+                        wiki_hits += 1
 
-                # Try Wikipedia API by full name + chamber/state
-                if not photo_bytes:
-                    member_data = member_lookup.get(member_id, {})
-                    full_name = member_data.get("full_name", "")
-                    if full_name:
-                        photo_bytes = await _fetch_wikipedia_headshot(
-                            http, full_name, _MIN_PHOTO_BYTES,
-                            chamber=member_data.get("chamber", ""),
-                            state=member_data.get("state", ""),
-                        )
-                        if photo_bytes:
-                            source = "wikipedia"
-                            wiki_hits += 1
+            if photo_bytes:
+                b64 = _b64.b64encode(photo_bytes).decode("ascii")
+                ct = "image/jpeg"
+                rows_to_insert.append({
+                    "member_id": member_id,
+                    "photo_b64": b64,
+                    "content_type": ct,
+                })
+                _headshot_cache[member_id] = photo_bytes
+                _headshot_set.add(member_id)
+                downloaded += 1
+                if downloaded <= 5 or source == "wikipedia":
+                    logger.info("Headshot OK: %s source=%s", member_id, source)
+            else:
+                failed += 1
+                if failed <= 5:
+                    name = member_lookup.get(member_id, {}).get("full_name", "?")
+                    logger.info("Headshot miss (all sources): %s (%s)", member_id, name)
 
-                if photo_bytes:
-                    b64 = _b64.b64encode(photo_bytes).decode("ascii")
-                    ct = "image/jpeg"
-                    rows_to_insert.append({
-                        "member_id": member_id,
-                        "photo_b64": b64,
-                        "content_type": ct,
-                    })
-                    _headshot_cache[member_id] = photo_bytes
-                    _headshot_set.add(member_id)
-                    downloaded += 1
-                    if downloaded <= 5 or source == "wikipedia":
-                        logger.info("Headshot OK: %s source=%s", member_id, source)
-                else:
-                    failed += 1
-                    if failed <= 5:
-                        name = member_lookup.get(member_id, {}).get("full_name", "?")
-                        logger.info("Headshot miss (all sources): %s (%s)", member_id, name)
+            # Batch insert every 25
+            if len(rows_to_insert) >= 25:
+                await asyncio.to_thread(supabase_cache.insert_headshots, rows_to_insert)
+                rows_to_insert.clear()
 
-                # Batch insert every 25
-                if len(rows_to_insert) >= 25:
-                    await asyncio.to_thread(supabase_cache.insert_headshots, rows_to_insert)
-                    rows_to_insert.clear()
-
-                status.update({"downloaded": downloaded, "failed": failed, "wiki_hits": wiki_hits})
-                await asyncio.sleep(0.05)
+            status.update({"downloaded": downloaded, "failed": failed, "wiki_hits": wiki_hits})
+            await asyncio.sleep(0.05)
 
         if rows_to_insert:
             await asyncio.to_thread(supabase_cache.insert_headshots, rows_to_insert)
@@ -6006,8 +6143,34 @@ async def llms_txt():
         "- Monitors over 1,000 stocks with real-time insider trading from SEC Form 4\n"
         "- Unusual options scanner covers S&P 500 plus top superinvestor holdings\n"
         "- Convergence engine cross-references 5 signal types: options, insider buys, congress trades, short interest, and 13F adds\n"
-        "- Data sourced from SEC EDGAR, Tiingo, Tradier, Yahoo Finance, FRED, and Reddit\n"
+        "- Data sourced from SEC EDGAR (sec.gov), Tiingo, Tradier, FRED (fred.stlouisfed.org), and Reddit\n"
         "- Free and open-source project\n"
+        "\n"
+        "## Macro Dashboard\n"
+        "- Earnings scorecard: EPS and revenue beat rates for S&P 500 and NASDAQ 100, with stock price reactions\n"
+        "- Market performance: advance/decline ratios, new highs vs. lows, 50-day MA participation\n"
+        "- Economic indicators from FRED: GDP, CPI, unemployment, consumer sentiment, industrial production, retail sales\n"
+        "- Treasury yield curves: 2s10s spread tracking, historical curve comparison\n"
+        "- CBOE volatility: VIX term structure, SKEW index, put/call ratios\n"
+        "- FX rates: EUR, GBP, JPY, CNY with 30-day sparkline charts (ECB reference rates via Frankfurter)\n"
+        "\n"
+        "## Stock Pages (per-ticker)\n"
+        "- 8 tabs: Overview, Financials, Holdings, Insider Trades, Congressional Trades, Analyst Ratings, Sentiment, Options\n"
+        "- SEC XBRL financial statements (income, balance sheet, cash flow) with insight charts\n"
+        "- Superinvestor ownership table with quarter-over-quarter changes\n"
+        "- Interactive candlestick chart with 1M-5Y timeframes\n"
+        "- Short interest tracking: % of float shorted, days to cover, trend\n"
+        "- Google Trends search interest with 12-month sparklines\n"
+        "\n"
+        "## Data Sources\n"
+        "- SEC EDGAR (sec.gov): 13F filings, Form 4 insider trades, XBRL financial statements\n"
+        "- Capitol Trades: Congressional STOCK Act disclosures\n"
+        "- Tiingo (tiingo.com): Real-time IEX stock quotes, EOD history\n"
+        "- Tradier (tradier.com): Options chains with ORATS greeks\n"
+        "- FRED (fred.stlouisfed.org): Federal Reserve macroeconomic data\n"
+        "- Frankfurter (frankfurter.app): ECB foreign exchange reference rates\n"
+        "- ApeWisdom: Reddit mention aggregation (r/wallstreetbets, r/stocks, r/investing)\n"
+        "- FINRA: Short interest data\n"
         "\n"
         "## Contact\n"
         "- Website: https://paperpanda.io\n"

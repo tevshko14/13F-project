@@ -8,9 +8,6 @@
 {% block twitter_description %}Track 13F holdings of 85 superinvestors. See portfolio values, top holdings & recent changes.{% endblock %}
 {% block extra_head_scripts %}
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
 {% endblock %}
 {% block json_ld_extra %}
 <script type="application/ld+json">
@@ -1000,4 +997,8 @@ window.toggleGrandPortfolio = function(btn) {
         }
     }
 </style>
+<div class="pp-data-citation">
+    Data sourced from <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=13F" target="_blank" rel="noopener">SEC EDGAR 13F filings</a>.
+    Investment managers with $100M+ in qualifying assets must file quarterly per <a href="https://www.sec.gov/divisions/investment/13ffaq" target="_blank" rel="noopener">Section 13(f)</a> of the Securities Exchange Act.
+</div>
 {% endblock %}

@@ -1,12 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Support the Panda - PaperPanda{% endblock %}
 {% block meta_description %}Help keep PaperPanda free. See exactly where your support goes — API costs, infrastructure, and monthly funding progress.{% endblock %}
-{% block extra_head_scripts %}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
-{% endblock %}
-
 {% block content %}
 {# Stripe Embedded Checkout — loaded async #}
 <script async src="https://js.stripe.com/v3/"></script>

@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "macros/skeleton.html" import skeleton_rows, skeleton_chart, skeleton_fund_row, skeleton_cards %}
-{% block title %}PaperPanda — Free Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard{% endblock %}
-{% block meta_description %}PaperPanda is a free 13F portfolio tracker that monitors superinvestor holdings, insider trading (SEC Form 4), congressional stock trades, S&P 500 heatmaps, and analyst ratings. Track what Warren Buffett, Bill Ackman, Michael Burry, and 80+ hedge fund managers are buying and selling in real time.{% endblock %}
-{% block og_title %}PaperPanda — Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard{% endblock %}
+{% block title %}PaperPanda — Free 13F Portfolio Tracker{% endblock %}
+{% block meta_description %}Free 13F tracker — monitor 85+ superinvestor holdings, insider trades, congressional stock activity, and S&P 500 heatmaps in real time.{% endblock %}
+{% block og_title %}PaperPanda — Free 13F Portfolio Tracker{% endblock %}
 {% block og_description %}Free superinvestor 13F portfolio tracker. Monitor hedge fund holdings, insider trades, congressional stock activity, and market sentiment — all in one dashboard.{% endblock %}
-{% block twitter_title %}PaperPanda — Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard{% endblock %}
-{% block twitter_description %}Free 13F portfolio tracker. See what Buffett, Ackman, Burry & 80+ hedge fund managers are buying and selling.{% endblock %}
+{% block twitter_title %}PaperPanda — Free 13F Portfolio Tracker{% endblock %}
+{% block twitter_description %}Free 13F tracker — monitor 85+ superinvestor holdings, insider trades, and congressional stock activity.{% endblock %}
 {% block canonical_url %}https://paperpanda.io/{% endblock %}
 {% block og_url %}https://paperpanda.io/{% endblock %}
 {% block json_ld_extra %}
@@ -16,7 +16,7 @@
     "@id": "https://paperpanda.io/#webpage",
     "url": "https://paperpanda.io/",
     "name": "PaperPanda — Free Superinvestor 13F Portfolio Tracker & Insider Trading Dashboard",
-    "description": "Free 13F portfolio tracker that monitors superinvestor holdings, insider trading, congressional stock trades, S&P 500 heatmaps, and analyst ratings. Track what Warren Buffett, Bill Ackman, Michael Burry, and 80+ hedge fund managers are buying and selling.",
+    "description": "Free 13F portfolio tracker that monitors superinvestor holdings, insider trading, congressional stock trades, S&P 500 heatmaps, and analyst ratings. Track what Warren Buffett, Bill Ackman, Michael Burry, and 85+ hedge fund managers are buying and selling.",
     "isPartOf": { "@id": "https://paperpanda.io/#website" },
     "about": [
         { "@type": "Thing", "name": "13F filings", "description": "Quarterly SEC filings disclosing institutional investment manager equity holdings" },
@@ -45,12 +45,26 @@
     "isAccessibleForFree": true
 }
 </script>
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "PaperPanda",
+    "url": "https://paperpanda.io",
+    "description": "Free 13F portfolio tracker & insider trading dashboard",
+    "applicationCategory": "FinanceApplication",
+    "operatingSystem": "All",
+    "browserRequirements": "Requires JavaScript",
+    "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+    }
+}
+</script>
 {% endblock %}
 {% block extra_head_scripts %}
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
 {% endblock %}
 {% block content %}
 <section class="home-shell">
@@ -61,7 +75,7 @@
         <p class="hero-kicker">PaperPanda Intelligence</p>
         <h1 class="hero-title">A sharper market dashboard for modern investors.</h1>
         <p class="hero-copy">
-            Real-time insider trades, congressional stock activity, S&amp;P 500 heatmaps, analyst ratings, and market sentiment — all in one free dashboard.
+            Track 85 superinvestor funds, 201 members of Congress, and thousands of insider trades — powered by SEC EDGAR, STOCK Act filings, and Federal Reserve data.
         </p>
 
         <div class="hero-search-wrapper">
@@ -86,23 +100,19 @@
 
         <div class="home-cards">
             <a href="/retail" class="home-card">
-                <span class="home-card-icon">📈</span>
-                <strong>Retail Pulse</strong>
+                <strong><svg class="home-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Retail Pulse</strong>
                 <span class="text-small">Sentiment, trending names, and social momentum.</span>
             </a>
             <a href="/funds" class="home-card">
-                <span class="home-card-icon">🧾</span>
-                <strong>13F Funds</strong>
+                <strong><svg class="home-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> 13F Funds</strong>
                 <span class="text-small">Conviction shifts from top allocators.</span>
             </a>
             <a href="/insider-trading" class="home-card">
-                <span class="home-card-icon">🔍</span>
-                <strong>Insider Flow</strong>
+                <strong><svg class="home-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Insider Flow</strong>
                 <span class="text-small">Live Form 4 buying and selling signals.</span>
             </a>
             <a href="/congress" class="home-card">
-                <span class="home-card-icon">🏛️</span>
-                <strong>Congress Watch</strong>
+                <strong><svg class="home-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20"/><path d="M5 20V8l7-5 7 5v12"/><path d="M9 20v-4h6v4"/><path d="M9 12h.01M15 12h.01"/></svg> Congress Watch</strong>
                 <span class="text-small">STOCK Act activity across House and Senate.</span>
             </a>
         </div>
@@ -512,6 +522,7 @@ document.addEventListener('keydown', function(e) {
         border-radius: 16px;
         padding: 0.85rem 0.8rem;
         border: 1px solid rgba(15, 23, 42, 0.08);
+        border-left: 3px solid rgba(13, 148, 136, 0.4);
         text-decoration: none;
         color: var(--home-ink);
         text-align: left;
@@ -523,17 +534,22 @@ document.addEventListener('keydown', function(e) {
     .home-card:hover {
         transform: translateY(-3px);
         border-color: rgba(13, 148, 136, 0.35);
+        border-left-color: rgba(13, 148, 136, 0.8);
         box-shadow: 0 14px 30px rgba(15, 23, 42, 0.14);
     }
 
     .home-card-icon {
-        display: inline-flex;
-        margin-bottom: 0.38rem;
-        font-size: 1.35rem;
+        width: 16px;
+        height: 16px;
+        color: #0d9488;
+        vertical-align: -2px;
+        flex-shrink: 0;
     }
 
     .home-card strong {
-        display: block;
+        display: flex;
+        align-items: center;
+        gap: 0.35em;
         font-size: 0.9rem;
         margin-bottom: 0.14rem;
     }
@@ -974,9 +990,16 @@ document.addEventListener('keydown', function(e) {
 
     :root[data-theme="dark"] .home-card {
         border-color: rgba(148, 163, 184, 0.22);
+        border-left-color: rgba(45, 212, 191, 0.4);
         background: rgba(15, 23, 42, 0.66);
         color: #e2e8f0;
         box-shadow: 0 16px 32px rgba(2, 6, 23, 0.38);
+    }
+    :root[data-theme="dark"] .home-card:hover {
+        border-left-color: rgba(45, 212, 191, 0.8);
+    }
+    :root[data-theme="dark"] .home-card-icon {
+        color: #2dd4bf;
     }
 
     :root[data-theme="dark"] .ticker-tape-shell {

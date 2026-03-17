@@ -142,7 +142,8 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Ear
 | Vitals | People Data Labs, Glassdoor (RapidAPI), Apple iTunes |
 | Insider Data | OpenInsider (scraped, full history) + SEC Form 4 XML (title resolution) + Supabase `insider_trades` table |
 | Congress Data | Capitol Trades (scraped, STOCK Act disclosures) + Supabase cold archive (~35K trades, 200+ politicians) |
-| Caching | Supabase Postgres (L2, survives deploys) + disk JSON (L3 fallback) |
+| Compression | Brotli (primary) + GZip (fallback) + inline CSS minification |
+| Caching | In-memory L1 (TTL) + Supabase Postgres L2 (survives deploys) + disk JSON L3 |
 | Hosting | Railway (auto-deploy from main) |
 | Domain | [paperpanda.io](https://paperpanda.io) |
 

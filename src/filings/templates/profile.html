@@ -1,11 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Profile — PaperPanda{% endblock %}
-
-{% block extra_head_scripts %}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
-{% endblock %}
+{% block meta_description %}Manage your PaperPanda account — view your profile, preferences, and subscription status.{% endblock %}
 
 {% block content %}
 <style>
@@ -315,7 +310,7 @@
 <div class="profile-hero">
   <div class="profile-hero-left">
     {% if request.state.profile and request.state.profile.avatar_url %}
-    <img src="{{ request.state.profile.avatar_url }}" alt="Avatar" class="profile-hero-avatar">
+    <img src="{{ request.state.profile.avatar_url }}" alt="Avatar" class="profile-hero-avatar" width="80" height="80" loading="lazy">
     {% else %}
     <div class="profile-hero-avatar-placeholder">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -350,7 +345,7 @@
     <div class="profile-card">
         <div class="profile-user">
             {% if request.state.profile and request.state.profile.avatar_url %}
-            <img src="{{ request.state.profile.avatar_url }}" alt="Avatar" class="profile-avatar">
+            <img src="{{ request.state.profile.avatar_url }}" alt="Avatar" class="profile-avatar" width="48" height="48" loading="lazy">
             {% else %}
             <div class="profile-avatar-placeholder">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>

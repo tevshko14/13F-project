@@ -23,7 +23,7 @@
             "name": "What is a 13F filing?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "A 13F filing is a quarterly report required by the SEC from institutional investment managers who manage over $100 million in qualifying assets. It discloses their U.S. equity holdings, providing transparency into what stocks top hedge funds and superinvestors like Warren Buffett, Bill Ackman, and Seth Klarman are buying and selling. PaperPanda tracks 84 of these filers."
+                "text": "A 13F filing is a quarterly report required by the SEC from institutional investment managers who manage over $100 million in qualifying assets. It discloses their U.S. equity holdings, providing transparency into what stocks top hedge funds and superinvestors like Warren Buffett, Bill Ackman, and Seth Klarman are buying and selling. PaperPanda tracks 85 of these filers."
             }
         },
         {
@@ -71,7 +71,39 @@
             "name": "Where does PaperPanda get its data?",
             "acceptedAnswer": {
                 "@type": "Answer",
-                "text": "PaperPanda sources data from SEC EDGAR for 13F filings and Form 4 insider trades, the STOCK Act for congressional disclosures, Tiingo for real-time IEX stock prices, Tradier for options chains with ORATS greeks, Yahoo Finance as a market data fallback, FRED (Federal Reserve Economic Data) for macroeconomic indicators, and Reddit for retail sentiment analysis. All data comes from public, authoritative sources."
+                "text": "PaperPanda sources data from SEC EDGAR (sec.gov) for 13F filings and Form 4 insider trades, Capitol Trades for congressional STOCK Act disclosures, Tiingo for real-time IEX stock prices, Tradier for options chains with ORATS greeks, FRED (Federal Reserve Economic Data at fred.stlouisfed.org) for macroeconomic indicators, Frankfurter (frankfurter.app) for ECB foreign exchange rates, FINRA for short interest data, and ApeWisdom for Reddit mention aggregation. All data comes from public, authoritative government and financial data sources."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "How many superinvestors does PaperPanda track?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "PaperPanda tracks 85 superinvestor funds including Warren Buffett (Berkshire Hathaway), Bill Ackman (Pershing Square), Michael Burry (Scion Asset Management), Ray Dalio (Bridgewater Associates), David Tepper (Appaloosa Management), and Seth Klarman (Baupost Group). These funds collectively manage hundreds of billions in assets and their 13F filings are updated quarterly via SEC EDGAR."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "How often is the data updated?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "13F filings are updated quarterly, within days of the SEC's 45-day filing deadline. Insider trades (SEC Form 4) are synced every 30 minutes from SEC EDGAR. Congressional trade disclosures are synced daily from STOCK Act filings. Market data including stock prices, options flow, and macroeconomic indicators are refreshed in real time or on 30-minute intervals depending on the data source."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What is SEC Form 4?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "SEC Form 4 is a document filed with the Securities and Exchange Commission (sec.gov) when a company insider — officer, director, or 10% beneficial owner — buys or sells shares in their own company. Under Section 16(a) of the Securities Exchange Act of 1934, insiders must file Form 4 within two business days of the transaction. PaperPanda monitors these filings in real time and flags notable purchases over $100,000 and sales over $1,000,000."
+            }
+        },
+        {
+            "@type": "Question",
+            "name": "What macroeconomic indicators does PaperPanda track?",
+            "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "PaperPanda's Macro Dashboard tracks key economic indicators from FRED (Federal Reserve Economic Data) including GDP growth rate, CPI inflation, unemployment rate, consumer sentiment, industrial production, and retail sales. It also provides Treasury yield curves with 2s10s spread tracking, CBOE VIX volatility term structure, SKEW index, foreign exchange rates for major currency pairs (EUR, GBP, JPY, CNY), and an earnings scorecard with EPS and revenue beat rates across the S&P 500 and NASDAQ 100."
             }
         }
     ]
@@ -185,7 +217,7 @@
             <svg class="faq-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
         <div class="faq-answer">
-            A 13F filing is a quarterly report required by the SEC from institutional investment managers who manage over $100 million in qualifying assets. It discloses their U.S. equity holdings, providing transparency into what stocks top hedge funds and superinvestors like Warren Buffett, Bill Ackman, and Seth Klarman are buying and selling. PaperPanda tracks 84 of these filers.
+            A <a href="https://www.sec.gov/divisions/investment/13ffaq" target="_blank" rel="noopener">13F filing</a> is a quarterly report required by the SEC from institutional investment managers who manage over $100 million in qualifying assets. It discloses their U.S. equity holdings, providing transparency into what stocks top hedge funds and superinvestors like Warren Buffett, Bill Ackman, and Seth Klarman are buying and selling. PaperPanda tracks <strong>85</strong> of these filers.
         </div>
     </div>
 
@@ -245,7 +277,68 @@
             <svg class="faq-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
         <div class="faq-answer">
-            PaperPanda sources data from SEC EDGAR for 13F filings and Form 4 insider trades, the STOCK Act for congressional disclosures, Yahoo Finance for real-time market data and options chains, FRED (Federal Reserve Economic Data) for macroeconomic indicators, and Reddit for retail sentiment analysis. All data comes from public, authoritative sources.
+            PaperPanda sources data exclusively from public, authoritative sources:
+            <ul style="margin-top: 0.5em;">
+                <li><a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=13F" target="_blank" rel="noopener">SEC EDGAR</a> for 13F filings and Form 4 insider trades</li>
+                <li><a href="https://www.capitoltrades.com/" target="_blank" rel="noopener">Capitol Trades</a> for congressional STOCK Act disclosures</li>
+                <li><a href="https://www.tiingo.com/" target="_blank" rel="noopener">Tiingo</a> for real-time IEX stock prices</li>
+                <li><a href="https://www.tradier.com/" target="_blank" rel="noopener">Tradier</a> for options chains with ORATS greeks</li>
+                <li><a href="https://fred.stlouisfed.org/" target="_blank" rel="noopener">FRED</a> (Federal Reserve Economic Data) for macroeconomic indicators</li>
+                <li><a href="https://www.frankfurter.app/" target="_blank" rel="noopener">Frankfurter</a> for ECB foreign exchange reference rates</li>
+                <li>FINRA for short interest data</li>
+                <li><a href="https://apewisdom.io/" target="_blank" rel="noopener">ApeWisdom</a> for Reddit mention aggregation (r/wallstreetbets, r/stocks, r/investing)</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="faq-item">
+        <button class="faq-question" onclick="toggleFaq(this)">
+            How many superinvestors does PaperPanda track?
+            <svg class="faq-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer">
+            PaperPanda tracks <strong>85 superinvestor funds</strong> including Warren Buffett (Berkshire Hathaway), Bill Ackman (Pershing Square), Michael Burry (Scion Asset Management), Ray Dalio (Bridgewater Associates), David Tepper (Appaloosa Management), and Seth Klarman (Baupost Group). These funds collectively manage hundreds of billions in assets and their <a href="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&type=13F" target="_blank" rel="noopener">13F filings</a> are updated quarterly via SEC EDGAR.
+        </div>
+    </div>
+
+    <div class="faq-item">
+        <button class="faq-question" onclick="toggleFaq(this)">
+            How often is the data updated?
+            <svg class="faq-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer">
+            <ul>
+                <li><strong>13F filings:</strong> Updated quarterly, within days of the SEC's 45-day filing deadline</li>
+                <li><strong>Insider trades (Form 4):</strong> Synced every 30 minutes from SEC EDGAR</li>
+                <li><strong>Congressional trades:</strong> Synced daily from STOCK Act disclosures</li>
+                <li><strong>Market data:</strong> Stock prices, options flow, and macroeconomic indicators refresh in real time or on 30-minute intervals</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="faq-item">
+        <button class="faq-question" onclick="toggleFaq(this)">
+            What is SEC Form 4?
+            <svg class="faq-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer">
+            <a href="https://www.sec.gov/about/forms/form4.pdf" target="_blank" rel="noopener">SEC Form 4</a> is a document filed with the Securities and Exchange Commission when a company insider &mdash; officer, director, or 10% beneficial owner &mdash; buys or sells shares in their own company. Under Section 16(a) of the Securities Exchange Act of 1934, insiders must file Form 4 within two business days of the transaction. PaperPanda monitors these filings in real time and flags notable purchases over $100,000 and sales over $1,000,000.
+        </div>
+    </div>
+
+    <div class="faq-item">
+        <button class="faq-question" onclick="toggleFaq(this)">
+            What macroeconomic indicators does PaperPanda track?
+            <svg class="faq-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="faq-answer">
+            The <a href="/macro">Macro Dashboard</a> tracks key indicators from <a href="https://fred.stlouisfed.org/" target="_blank" rel="noopener">FRED</a> (Federal Reserve Economic Data) including GDP growth, CPI inflation, unemployment, consumer sentiment, industrial production, and retail sales. It also provides:
+            <ul style="margin-top: 0.5em;">
+                <li>Treasury yield curves with 2s10s spread tracking</li>
+                <li>CBOE VIX volatility term structure and SKEW index</li>
+                <li>Foreign exchange rates for major pairs (EUR, GBP, JPY, CNY)</li>
+                <li>Earnings scorecard with EPS and revenue beat rates across S&amp;P 500 and NASDAQ 100</li>
+            </ul>
         </div>
     </div>
 

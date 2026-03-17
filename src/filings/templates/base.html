@@ -105,12 +105,22 @@
     {# ── Resource hints for critical CDNs ── #}
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
     <link rel="preconnect" href="https://unpkg.com" crossorigin>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="dns-prefetch" href="https://www.google.com">
     <link rel="dns-prefetch" href="https://finnhub.io">
+    {# ── Pico CSS: synchronous (base framework must block to avoid FOUC) ── #}
     <link rel="stylesheet"
           href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
           integrity="sha384-L1dWfspMTHU/ApYnFiMz2QID/PlP1xCW9visvBdbEkOLkSSWsP6ZJWhPw6apiXxU"
           crossorigin="anonymous">
+    {# ── Google Fonts: centralized, non-blocking (display=swap) ── #}
+    <link rel="preload"
+          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"
+          as="style"
+          crossorigin="anonymous"
+          onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"></noscript>
     <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"
             integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
             crossorigin="anonymous" defer></script>
@@ -1702,6 +1712,13 @@
             border-radius: 16px !important;
             box-shadow: var(--pp-glass-shadow) !important;
         }
+
+        /* ── Data citation footers ── */
+        .pp-data-citation {
+            font-size: 0.78em; color: var(--pp-text-muted); text-align: center;
+            padding: 1.5em 1em 0.5em; border-top: 1px solid var(--pp-border-light, rgba(0,0,0,0.06)); margin-top: 2em;
+        }
+        .pp-data-citation a { color: var(--pp-text-muted); text-decoration: underline; text-decoration-style: dotted; }
 
         /* Tables wrapped in <figure> — give them the glass treatment */
         main.container > figure,

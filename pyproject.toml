@@ -21,6 +21,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "stripe>=9.0",
     "pytrends>=4.9",
+    "brotli>=1.1",
 ]
 
 [project.optional-dependencies]

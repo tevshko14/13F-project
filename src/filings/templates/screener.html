@@ -2,10 +2,6 @@
 {% block title %}Stock Valuation Screener — DCF & Monte Carlo | PaperPanda{% endblock %}
 {% block meta_description %}Interactive stock valuation tool with DCF, Monte Carlo simulation, and peer comparison analysis.{% endblock %}
 
-{% block extra_head_scripts %}
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
-{% endblock %}
-
 {% block content %}
 <style>
 /* ── Screener Layout ─────────────────────────────────────────────── */
@@ -624,14 +620,14 @@
     <div id="scr-empty" class="scr-empty">
         <p class="scr-quick-label">Quick start</p>
         <div class="scr-quick-picks">
-            <div class="scr-quick-pick" onclick="SCR.loadTicker('AAPL')"><img src="/api/logo/AAPL.png" alt="" onerror="this.style.display='none'"> AAPL</div>
-            <div class="scr-quick-pick" onclick="SCR.loadTicker('MSFT')"><img src="/api/logo/MSFT.png" alt="" onerror="this.style.display='none'"> MSFT</div>
-            <div class="scr-quick-pick" onclick="SCR.loadTicker('GOOGL')"><img src="/api/logo/GOOGL.png" alt="" onerror="this.style.display='none'"> GOOGL</div>
-            <div class="scr-quick-pick" onclick="SCR.loadTicker('AMZN')"><img src="/api/logo/AMZN.png" alt="" onerror="this.style.display='none'"> AMZN</div>
-            <div class="scr-quick-pick" onclick="SCR.loadTicker('NVDA')"><img src="/api/logo/NVDA.png" alt="" onerror="this.style.display='none'"> NVDA</div>
-            <div class="scr-quick-pick" onclick="SCR.loadTicker('TSLA')"><img src="/api/logo/TSLA.png" alt="" onerror="this.style.display='none'"> TSLA</div>
-            <div class="scr-quick-pick" onclick="SCR.loadTicker('META')"><img src="/api/logo/META.png" alt="" onerror="this.style.display='none'"> META</div>
-            <div class="scr-quick-pick" onclick="SCR.loadTicker('JPM')"><img src="/api/logo/JPM.png" alt="" onerror="this.style.display='none'"> JPM</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('AAPL')"><img src="/api/logo/AAPL.png" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'"> AAPL</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('MSFT')"><img src="/api/logo/MSFT.png" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'"> MSFT</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('GOOGL')"><img src="/api/logo/GOOGL.png" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'"> GOOGL</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('AMZN')"><img src="/api/logo/AMZN.png" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'"> AMZN</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('NVDA')"><img src="/api/logo/NVDA.png" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'"> NVDA</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('TSLA')"><img src="/api/logo/TSLA.png" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'"> TSLA</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('META')"><img src="/api/logo/META.png" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'"> META</div>
+            <div class="scr-quick-pick" onclick="SCR.loadTicker('JPM')"><img src="/api/logo/JPM.png" alt="" width="20" height="20" loading="lazy" onerror="this.style.display='none'"> JPM</div>
         </div>
 
         <div class="scr-features">

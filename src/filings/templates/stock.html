@@ -40,12 +40,6 @@
 </script>
 {% endif %}
 {% endblock %}
-{% block extra_head_scripts %}
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
-{# Chart.js loaded on-demand via requireChartJS() — works with hx-boost navigation #}
-{% endblock %}
 {% block content %}
 <section class="stock-shell">
 <div class="stock-aurora stock-aurora-one" aria-hidden="true"></div>
@@ -67,7 +61,7 @@
             {% endif %}
             {{ stock_info.issuer_name or "Unknown Company" }}
         </h1>
-        <div id="pp-header-price" style="display: none; flex-direction: column; align-items: flex-end; white-space: nowrap; padding-top: 0.15em;"></div>
+        <div id="pp-header-price" style="display: flex; flex-direction: column; align-items: flex-end; white-space: nowrap; padding-top: 0.15em; min-height: 3.2em; visibility: hidden;"></div>
     </div>
     <p>
         {% if stock_info.cusip %}CUSIP: {{ stock_info.cusip }} &middot; {% endif %}
@@ -848,7 +842,7 @@
                     '<span style="font-size: 1.9em; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em;">$' + data.price.toFixed(2) + '</span>' +
                     '<span style="font-size: 0.85em; font-weight: 600; color:' + color + ';">' +
                     arrow + ' ' + sign + pct.toFixed(2) + '% <span style="opacity:0.6; font-weight:500;">(' + _currentPeriod + ')</span></span>';
-                el.style.display = 'flex';
+                el.style.visibility = 'visible';
             }
 
             function renderChart(data) {

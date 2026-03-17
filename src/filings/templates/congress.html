@@ -20,9 +20,6 @@
 {% endblock %}
 {% block extra_head_scripts %}
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap" rel="stylesheet">
 {% endblock %}
 {% block content %}
 <section class="congress-shell">
@@ -1208,5 +1205,9 @@
 })();
 </script>
 
+    <div class="pp-data-citation">
+        Data sourced from <a href="https://efts.sec.gov/LATEST/search-index?q=%22STOCK+Act%22" target="_blank" rel="noopener">STOCK Act disclosures</a>.
+        Members of Congress must report trades within 45 days per the <a href="https://www.congress.gov/bill/112th-congress/senate-bill/2038" target="_blank" rel="noopener">STOCK Act of 2012</a>.
+    </div>
     </section>
 {% endblock %}
