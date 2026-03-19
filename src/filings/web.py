@@ -218,24 +218,53 @@ async def _to_heavy(fn, *args):
     return await loop.run_in_executor(pool, fn, *args)
 
 
-async def _safe_fetch(coro, label: str, timeout: int = 10):
-    """Await *coro* with a timeout; return None on any failure.
+async def _safe_fetch(coro, label: str, timeout: int = 10, default=None):
+    """Await *coro* with a timeout; return *default* on any failure.
 
-    Used by /retail endpoints to ensure no single data source can block
-    the page render.  Failures are logged but never bubble up.
+    Prevents a single slow/broken data source from blocking the page
+    render.  Failures are logged but never bubble up.
     """
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
     except asyncio.TimeoutError:
-        logger.warning("/retail: %s timed out (%ds)", label, timeout)
-        return None
+        logger.warning("%s timed out (%ds)", label, timeout)
+        return default
     except Exception:
-        logger.warning("/retail: %s failed", label, exc_info=True)
-        return None
+        logger.warning("%s failed", label, exc_info=True)
+        return default
 
 
 _retail_data_cache: tuple[float, tuple[list, dict | None]] | None = None
 _RETAIL_DATA_TTL = 120  # 2 minutes — ApeWisdom updates every ~5 min
+
+_SIGNALS_TIMEOUT = 8  # seconds per source in /api/signals/{ticker}
+
+
+class _HtmlCache:
+    """Lightweight TTL cache for rendered HTML responses.
+
+    Avoids re-fetching + re-rendering when the same page is requested
+    within the TTL window.  Keyed by an optional string (e.g. view name);
+    single-entry caches use key="".
+    """
+
+    __slots__ = ("_ttl", "_store")
+
+    def __init__(self, ttl: int):
+        self._ttl = ttl
+        self._store: dict[str, tuple[float, bytes]] = {}
+
+    def get(self, key: str = "") -> Response | None:
+        entry = self._store.get(key)
+        if entry and time_module.time() - entry[0] < self._ttl:
+            return Response(content=entry[1], media_type="text/html")
+        return None
+
+    def set(self, resp, key: str = "") -> None:  # noqa: ANN001
+        try:
+            self._store[key] = (time_module.time(), resp.body)
+        except Exception:
+            logger.warning("HTML cache write failed (key=%s)", key, exc_info=True)
 
 
 async def _fetch_retail_data() -> tuple[list[dict], dict | None]:
@@ -2973,13 +3002,12 @@ async def signals_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
 
-    # Fetch all three data sources in parallel
-    sentiment_coro = _to_heavy(sentiment.get_sentiment_data, ticker)
-    webtraffic_coro = _to_heavy(web_traffic.get_web_traffic_data, ticker)
-    gt_coro = _to_heavy(google_trends.get_trends_summary, ticker)
-
+    # Fetch all three data sources in parallel with per-source timeouts
+    # to prevent one hung source (e.g. Google Trends) from blocking the tab
     sent_data, wt_data, gt_data = await asyncio.gather(
-        sentiment_coro, webtraffic_coro, gt_coro
+        _safe_fetch(_to_heavy(sentiment.get_sentiment_data, ticker), f"signals/{ticker}/sentiment", timeout=_SIGNALS_TIMEOUT, default={}),
+        _safe_fetch(_to_heavy(web_traffic.get_web_traffic_data, ticker), f"signals/{ticker}/webtraffic", timeout=_SIGNALS_TIMEOUT),
+        _safe_fetch(_to_heavy(google_trends.get_trends_summary, ticker), f"signals/{ticker}/gtrends", timeout=_SIGNALS_TIMEOUT),
     )
 
     return templates.TemplateResponse(
@@ -4152,11 +4180,13 @@ async def macro_scorecard_api(
     if index not in earnings_scorecard.INDEX_CHOICES:
         index = "all"
 
-    data = await _to_heavy(
-        earnings_scorecard.fetch_earnings_data,
-        index, quarter or None, sector or None,
+    data, trend = await asyncio.gather(
+        _to_heavy(
+            earnings_scorecard.fetch_earnings_data,
+            index, quarter or None, sector or None,
+        ),
+        _to_heavy(earnings_scorecard.fetch_historical_beat_rates, index),
     )
-    trend = await _to_heavy(earnings_scorecard.fetch_historical_beat_rates, index)
 
     quarters = earnings_scorecard.get_available_quarters()
     current_quarter = data.get("quarter", quarter or quarters[0])
@@ -4583,10 +4613,17 @@ async def earnings_calendar_day_api(
     )
 
 
+_retail_cache = _HtmlCache(90)  # 90s — shorter than data cache TTL to pick up refreshes
+
+
 @app.get("/retail", response_class=HTMLResponse)
 async def retail_page(request: Request, view: str = "sentiment"):
     if view not in ("sentiment", "leaderboard", "calendar"):
         view = "sentiment"
+
+    # Return cached HTML if fresh (avoids blocking on external APIs)
+    if (cached := _retail_cache.get(view)) is not None:
+        return cached
 
     # Fetch all three data sources independently — any failure returns None,
     # never blocks the page.  10-second overall timeout prevents Railway kill.
@@ -4616,7 +4653,7 @@ async def retail_page(request: Request, view: str = "sentiment"):
 
     has_guru_data = bool(_fund_cache())
 
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         "retail.html",
         {
             "request": request,
@@ -4629,6 +4666,9 @@ async def retail_page(request: Request, view: str = "sentiment"):
             "high_impact_events": high_impact_events or [],
         },
     )
+
+    _retail_cache.set(resp, view)
+    return resp
 
 
 @app.get("/api/retail/leaderboard", response_class=HTMLResponse)
@@ -5502,15 +5542,12 @@ _MEGA_CAP_NAMES = {
 }
 
 
-_overview_html_cache: tuple[float, bytes] | None = None
-_OVERVIEW_HTML_TTL = 300  # 5 minutes
+_overview_cache = _HtmlCache(300)  # 5 minutes
 
 
 @app.get("/api/market-overview", response_class=HTMLResponse)
 async def market_overview_api(request: Request):
     """Lazy-loaded custom Market Overview widget."""
-    global _overview_html_cache
-
     if not getattr(app.state, "market_data_ready", False):
         return HTMLResponse(
             '<div hx-get="/api/market-overview" hx-trigger="load delay:5s" '
@@ -5520,10 +5557,8 @@ async def market_overview_api(request: Request):
         )
 
     # Return cached HTML if fresh (avoids re-fetching + re-rendering)
-    if _overview_html_cache is not None:
-        ts, cached_body = _overview_html_cache
-        if time_module.time() - ts < _OVERVIEW_HTML_TTL:
-            return Response(content=cached_body, media_type="text/html")
+    if (cached := _overview_cache.get()) is not None:
+        return cached
 
     # Fetch all data concurrently
     idx_task = _to_heavy(market_data.get_index_market_data)
@@ -5601,12 +5636,7 @@ async def market_overview_api(request: Request):
         },
     )
 
-    # Cache rendered HTML for subsequent requests
-    try:
-        _overview_html_cache = (time_module.time(), resp.body)
-    except Exception:
-        pass
-
+    _overview_cache.set(resp)
     return resp
 
 
@@ -5738,6 +5768,9 @@ async def heatmap_data_api(request: Request, period: str = "1D"):
     })
 
 
+_most_added_cache = _HtmlCache(900)  # 15 minutes — data changes infrequently
+
+
 @app.get("/api/most-added", response_class=HTMLResponse)
 async def most_added(request: Request):
     cache_data = _fund_cache()
@@ -5748,6 +5781,10 @@ async def most_added(request: Request):
             '</article>'
             '<div hx-get="/api/most-added" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
         )
+
+    # Return cached HTML if fresh
+    if (cached := _most_added_cache.get()) is not None:
+        return cached
 
     entries = await asyncio.to_thread(
         market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK
@@ -5811,13 +5848,16 @@ async def most_added(request: Request):
             entry["range_low"] = None
             entry["range_high"] = None
 
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         "partials/most_added.html",
         {
             "request": request,
             "entries": entries,
         },
     )
+
+    _most_added_cache.set(resp)
+    return resp
 
 
 # ═══════════════════════════════════════════════════════════════════════
