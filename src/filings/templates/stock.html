@@ -1279,14 +1279,6 @@ window.toggleHolders = function(btn) {
 {# ── Tab & Pill Switching Logic ── #}
 <script>
 (function() {
-    function activateScripts(container) {
-        container.querySelectorAll('script').forEach(function(old) {
-            var s = document.createElement('script');
-            s.textContent = old.textContent;
-            old.parentNode.replaceChild(s, old);
-        });
-    }
-
     var analystLoaded = false, signalsLoaded = false, shortInterestLoaded = false;
     var vitalsLoaded = false, earningsLoaded = false, estimatesLoaded = false;
     var filingsLoaded = false, insiderLoaded = false, congressLoaded = false;

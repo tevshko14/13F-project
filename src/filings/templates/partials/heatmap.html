@@ -1,12 +1,9 @@
 {# S&P 500 heatmap partial — loaded asynchronously via HTMX #}
 {% set period_label = metadata.get("period_label", "today") if metadata.get("period_label") else "today" %}
 <article id="heatmap-article" class="heatmap-fadein">
-    <header>
-        <strong>S&P 500 Market Heatmap</strong>
-        <span class="text-muted" style="margin-left: 0.5em; font-weight: normal;">
-            {{ metadata.count }} stocks &middot; Change {{ period_label }} &middot; Updated {{ metadata.fetched_at }}
-        </span>
-    </header>
+    <div class="heatmap-meta">
+        {{ metadata.count }} stocks · Change {{ period_label }} · Updated {{ metadata.fetched_at }}
+    </div>
     <div id="heatmap-container" style="width: 100%; height: 500px;"></div>
 </article>
 

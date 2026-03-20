@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-18 (Homepage: Live Activity feed + Sectors/Companies heatmap toggle; YouTube: multi-factor impact scoring; Congress: persistent notification watermark; Performance: live-activity HTML cache, pill-toggle helper DRY refactor)
+> Last updated: 2026-03-19 (Homepage: bug fixes, perf optimizations, code cleanup — activateScripts consolidation, _HtmlCache on market-news & retail-sentiment, Stripe deferred loading, HTMX waterfall removed, inline styles → CSS classes)
 
 ---
 

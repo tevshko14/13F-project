@@ -64,7 +64,7 @@
 </script>
 {% endblock %}
 {% block extra_head_scripts %}
-<link rel="preload" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
+<link rel="prefetch" href="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" as="script">
 {% endblock %}
 {% block content %}
 <section class="home-shell">
@@ -120,18 +120,13 @@
 
     <div id="ticker-tape-wrap" class="ticker-tape-shell"
          hx-get="/api/ticker-tape" hx-trigger="load" hx-swap="innerHTML">
-        <div style="display:flex;gap:1em;justify-content:center;padding:0.5em 0;">
+        <div class="skeleton-row">
             <div class="pp-skeleton" style="width:80px;height:16px;"></div>
             <div class="pp-skeleton" style="width:60px;height:16px;"></div>
             <div class="pp-skeleton" style="width:90px;height:16px;"></div>
             <div class="pp-skeleton" style="width:70px;height:16px;"></div>
             <div class="pp-skeleton" style="width:85px;height:16px;"></div>
         </div>
-    </div>
-
-    <div class="section-head">
-        <p class="section-eyebrow">Live Terminal</p>
-        <h2>Market context in one glance</h2>
     </div>
 
     <div class="bento-grid">
@@ -154,33 +149,30 @@
                 </div>
             </div>
             <div class="bento-card-body bento-card-body-flex" id="bento-feed-body"
-                 hx-get="/api/live-activity" hx-trigger="load delay:0.3s" hx-swap="innerHTML">
-                <div style="padding:1em;">{{ skeleton_rows(5) }}</div>
+                 hx-get="/api/live-activity" hx-trigger="load" hx-swap="innerHTML">
+                <div class="bento-skeleton-wrap">{{ skeleton_rows(5) }}</div>
             </div>
         </div>
 
         <div class="glass-card bento-heatmap">
-            <div class="bento-card-header">
-                <h3 class="bento-card-title">S&amp;P 500 Heatmap</h3>
-                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                    <div class="heatmap-toggle" role="group" aria-label="Heatmap view mode">
-                        <button class="heatmap-pill active" data-view="sectors" aria-pressed="true"
-                                onclick="switchHeatmapView('sectors', this)">Sectors</button>
-                        <button class="heatmap-pill" data-view="companies" aria-pressed="false"
-                                onclick="switchHeatmapView('companies', this)">Companies</button>
-                    </div>
-                    <div class="heatmap-toggle" id="heatmap-toggle" role="group" aria-label="Heatmap time period">
-                        <button class="heatmap-pill active" data-period="1D" aria-pressed="true"
-                                onclick="switchHeatmapPeriod('1D', this)">1D</button>
-                        <button class="heatmap-pill" data-period="1W" aria-pressed="false"
-                                onclick="switchHeatmapPeriod('1W', this)">1W</button>
-                        <button class="heatmap-pill" data-period="1M" aria-pressed="false"
-                                onclick="switchHeatmapPeriod('1M', this)">1M</button>
-                    </div>
+            <div class="bento-card-header bento-card-header--start">
+                <div class="heatmap-toggle" role="group" aria-label="Heatmap view mode">
+                    <button class="heatmap-pill active" data-view="sectors" aria-pressed="true"
+                            onclick="switchHeatmapView('sectors', this)">Sectors</button>
+                    <button class="heatmap-pill" data-view="companies" aria-pressed="false"
+                            onclick="switchHeatmapView('companies', this)">Companies</button>
+                </div>
+                <div class="heatmap-period-toggle" id="heatmap-toggle" role="group" aria-label="Heatmap time period">
+                    <button class="heatmap-period active" data-period="1D" aria-pressed="true"
+                            onclick="switchHeatmapPeriod('1D', this)">1D</button>
+                    <button class="heatmap-period" data-period="1W" aria-pressed="false"
+                            onclick="switchHeatmapPeriod('1W', this)">1W</button>
+                    <button class="heatmap-period" data-period="1M" aria-pressed="false"
+                            onclick="switchHeatmapPeriod('1M', this)">1M</button>
                 </div>
             </div>
-            <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML">
-                <div style="margin:1em;">{{ skeleton_chart('300px') }}</div>
+            <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:0.3s" hx-swap="innerHTML">
+                <div class="bento-skeleton-wrap">{{ skeleton_chart('300px') }}</div>
             </div>
         </div>
 
@@ -188,14 +180,14 @@
             <div class="bento-card-header">
                 <h3 class="bento-card-title">Retail Sentiment</h3>
             </div>
-            <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
-                <div style="padding:1em;">{{ skeleton_chart('150px') }}</div>
+            <div class="bento-card-body" hx-get="/api/retail-sentiment" hx-trigger="load delay:0.3s" hx-swap="innerHTML">
+                <div class="bento-skeleton-wrap">{{ skeleton_chart('150px') }}</div>
             </div>
         </div>
 
         <div class="glass-card bento-trending">
-            <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load delay:1.5s" hx-swap="innerHTML">
-                <div style="padding:1em;">{{ skeleton_rows(3) }}</div>
+            <div class="bento-card-body" hx-get="/api/trending-combined" hx-trigger="load delay:0.3s" hx-swap="innerHTML">
+                <div class="bento-skeleton-wrap">{{ skeleton_rows(3) }}</div>
             </div>
         </div>
 
@@ -246,8 +238,8 @@
 </section>
 
 {# ── FAQ link — full FAQ lives at /faq ── #}
-<div style="text-align:center; margin: 2rem auto 1.5rem; font-size: 0.9rem;">
-    <a href="/faq" style="color: var(--pp-accent, #0d9488); font-weight: 600; text-decoration: none;">Frequently Asked Questions &rarr;</a>
+<div class="faq-link-wrap">
+    <a href="/faq" class="faq-link">Frequently Asked Questions &rarr;</a>
 </div>
 
 <script>
@@ -259,7 +251,7 @@ if (_feedBody) _feedBody.addEventListener('htmx:afterSettle', function() {
 });
 // Shared pill-toggle helper — activates btn, deactivates siblings
 function _setActivePill(btn) {
-    btn.parentElement.querySelectorAll('[class*=pill]').forEach(function(b) { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+    btn.parentElement.querySelectorAll('button').forEach(function(b) { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
     btn.classList.add('active');
     btn.setAttribute('aria-pressed', 'true');
 }
@@ -270,7 +262,6 @@ function switchFeed(feed, btn) {
     var url = feed === 'news' ? '/api/market-news' : '/api/live-activity';
     if (_feedCache[feed]) {
         body.innerHTML = _feedCache[feed];
-        activateScripts(body);
         return;
     }
     body.innerHTML = '<div style="padding:1em;text-align:center;" aria-busy="true"><span class="spinner"></span></div>';
@@ -306,14 +297,13 @@ function switchHeatmapPeriod(period, btn) {
         .catch(function() {
             if (body) {
                 body.style.opacity = '';
-                body.innerHTML = '<div class="pp-section-error"><span>Unable to load heatmap data.</span><button onclick="switchHeatmapPeriod(\'' + period + '\', document.querySelector(\'.heatmap-pill.active\'))">Retry</button></div>';
+                body.innerHTML = '<div class="pp-section-error"><span>Unable to load heatmap data.</span><button onclick="switchHeatmapPeriod(\'' + period + '\', document.querySelector(\'.heatmap-period.active\'))">Retry</button></div>';
             }
         });
 }
 </script>
 
 {% if stripe_configured %}
-<script async src="https://js.stripe.com/v3/"></script>
 <div class="checkout-overlay" id="home-checkout-overlay" onclick="closeHomeCheckout(event)">
     <div class="checkout-overlay-inner" onclick="event.stopPropagation()">
         <button class="checkout-close" onclick="closeHomeCheckout()" aria-label="Close">&times;</button>
@@ -324,6 +314,15 @@ function switchHeatmapPeriod(period, btn) {
 <script>
 var _homeStripe = null;
 var _homeCheckout = null;
+var _stripeLoaded = false;
+
+function _ensureStripe(cb) {
+    if (_stripeLoaded) { cb(); return; }
+    var s = document.createElement('script');
+    s.src = 'https://js.stripe.com/v3/';
+    s.onload = function() { _stripeLoaded = true; cb(); };
+    document.head.appendChild(s);
+}
 
 function openHomeCheckout(priceId, mode) {
     if (!priceId) return;
@@ -340,27 +339,29 @@ function openHomeCheckout(priceId, mode) {
         _homeCheckout.destroy();
         _homeCheckout = null;
     }
-    if (!_homeStripe) {
-        _homeStripe = Stripe('{{ stripe_publishable_key }}');
-    }
 
-    fetch('/api/create-checkout-session', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({price_id: priceId, mode: mode})
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (data.error) { loadingEl.textContent = 'Error: ' + data.error; return; }
-        return _homeStripe.initEmbeddedCheckout({clientSecret: data.clientSecret});
-    })
-    .then(function(checkout) {
-        if (!checkout) return;
-        _homeCheckout = checkout;
-        loadingEl.style.display = 'none';
-        checkout.mount('#home-checkout-mount');
-    })
-    .catch(function() { loadingEl.textContent = 'Something went wrong. Please try again.'; });
+    _ensureStripe(function() {
+        if (!_homeStripe) {
+            _homeStripe = Stripe('{{ stripe_publishable_key }}');
+        }
+        fetch('/api/create-checkout-session', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({price_id: priceId, mode: mode})
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.error) { loadingEl.textContent = 'Error: ' + data.error; return; }
+            return _homeStripe.initEmbeddedCheckout({clientSecret: data.clientSecret});
+        })
+        .then(function(checkout) {
+            if (!checkout) return;
+            _homeCheckout = checkout;
+            loadingEl.style.display = 'none';
+            checkout.mount('#home-checkout-mount');
+        })
+        .catch(function() { loadingEl.textContent = 'Something went wrong. Please try again.'; });
+    });
 }
 
 function closeHomeCheckout(e) {
@@ -609,6 +610,29 @@ document.addEventListener('keydown', function(e) {
         line-height: 1.3;
     }
 
+    .skeleton-row {
+        display: flex;
+        gap: 1em;
+        justify-content: center;
+        padding: 0.5em 0;
+    }
+
+    .bento-skeleton-wrap {
+        padding: 1em;
+    }
+
+    .faq-link-wrap {
+        text-align: center;
+        margin: 2rem auto 1.5rem;
+        font-size: 0.9rem;
+    }
+
+    .faq-link {
+        color: var(--pp-accent, #0d9488);
+        font-weight: 600;
+        text-decoration: none;
+    }
+
     .ticker-tape-shell {
         position: relative;
         z-index: 0;
@@ -620,32 +644,6 @@ document.addEventListener('keydown', function(e) {
         background: rgba(255, 255, 255, 0.45);
         backdrop-filter: blur(10px);
         -webkit-backdrop-filter: blur(10px);
-    }
-
-    .section-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: end;
-        gap: 1rem;
-        margin: 0 auto 0.9rem;
-        max-width: 1180px;
-    }
-
-    .section-eyebrow {
-        margin: 0;
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.16em;
-        color: rgba(15, 23, 42, 0.52);
-        font-weight: 700;
-    }
-
-    .section-head h2 {
-        margin: 0.2rem 0 0;
-        font-family: "Fraunces", Georgia, serif;
-        letter-spacing: -0.02em;
-        font-size: clamp(1.3rem, 3vw, 2rem);
-        color: var(--home-ink);
     }
 
     .bento-grid {
@@ -688,6 +686,16 @@ document.addEventListener('keydown', function(e) {
         gap: 0.7rem;
     }
 
+    .bento-card-header--start {
+        justify-content: flex-start;
+    }
+
+    .heatmap-meta {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.72rem;
+        color: rgba(148, 163, 184, 0.7);
+    }
+
     .bento-card-title {
         margin: 0;
         font-size: 0.95rem;
@@ -699,8 +707,7 @@ document.addEventListener('keydown', function(e) {
         transition: opacity 0.2s ease;
     }
 
-    .bento-card-body.htmx-request,
-    #heatmap-body.htmx-request {
+    .bento-card-body.htmx-request {
         opacity: 0.45;
         pointer-events: none;
     }
@@ -764,8 +771,6 @@ document.addEventListener('keydown', function(e) {
     .live-activity-feed {
         display: flex;
         flex-direction: column;
-        overflow-y: auto;
-        max-height: 420px;
     }
     .live-activity-feed .pp-notif-item {
         padding: 0.55rem 0.8rem;
@@ -816,6 +821,38 @@ document.addEventListener('keydown', function(e) {
         background: #ffffff;
         color: #0f766e;
         box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+    }
+
+    .heatmap-period-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 0;
+        border-left: 1px solid rgba(15, 23, 42, 0.12);
+        padding-left: 0.5rem;
+        margin-left: 0.25rem;
+    }
+
+    .heatmap-period {
+        margin: 0;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: rgba(15, 23, 42, 0.42);
+        padding: 0.18rem 0.44rem;
+        font-size: 0.68rem;
+        font-weight: 600;
+        line-height: 1.2;
+        cursor: pointer;
+        letter-spacing: 0.02em;
+    }
+
+    .heatmap-period:hover {
+        color: rgba(15, 23, 42, 0.68);
+    }
+
+    .heatmap-period.active {
+        background: rgba(15, 23, 42, 0.07);
+        color: rgba(15, 23, 42, 0.78);
     }
 
     .bento-support .pw-body {
@@ -1054,10 +1091,6 @@ document.addEventListener('keydown', function(e) {
             font-size: 0.82rem;
         }
 
-        .section-head {
-            margin-bottom: 0.7rem;
-        }
-
         .bento-grid {
             grid-template-columns: 1fr;
             gap: 0.9rem;
@@ -1092,8 +1125,7 @@ document.addEventListener('keydown', function(e) {
 
     :root[data-theme="dark"] .hero-kicker,
     :root[data-theme="dark"] .hero-copy,
-    :root[data-theme="dark"] .home-card .text-small,
-    :root[data-theme="dark"] .section-eyebrow {
+    :root[data-theme="dark"] .home-card .text-small {
         color: rgba(226, 232, 240, 0.72);
     }
 
@@ -1128,6 +1160,23 @@ document.addEventListener('keydown', function(e) {
     :root[data-theme="dark"] .heatmap-pill.active {
         background: rgba(30, 41, 59, 0.86);
         color: #5eead4;
+    }
+
+    :root[data-theme="dark"] .heatmap-period-toggle {
+        border-left-color: rgba(226, 232, 240, 0.15);
+    }
+
+    :root[data-theme="dark"] .heatmap-period {
+        color: rgba(226, 232, 240, 0.4);
+    }
+
+    :root[data-theme="dark"] .heatmap-period:hover {
+        color: rgba(226, 232, 240, 0.65);
+    }
+
+    :root[data-theme="dark"] .heatmap-period.active {
+        background: rgba(226, 232, 240, 0.08);
+        color: rgba(226, 232, 240, 0.72);
     }
 
     :root[data-theme="dark"] .pw-tier-pill {

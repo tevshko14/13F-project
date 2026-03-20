@@ -5692,7 +5692,7 @@ async def live_activity_api(request: Request):
     if cached:
         return cached
     notifs = await asyncio.to_thread(
-        supabase_cache.get_recent_notifications, 12
+        supabase_cache.get_recent_notifications, 6
     )
     for n in notifs:
         n["time_ago"] = _time_ago(n.get("created_at", ""))
@@ -5704,9 +5704,15 @@ async def live_activity_api(request: Request):
     return resp
 
 
+_market_news_cache = _HtmlCache(300)  # 5-min TTL
+
+
 @app.get("/api/market-news", response_class=HTMLResponse)
 async def market_news_api(request: Request):
     """Return market news HTML partial (lazy-loaded via HTMX)."""
+    cached = _market_news_cache.get()
+    if cached:
+        return cached
     articles = await _to_heavy(market_data.get_market_news)
     if not articles:
         return HTMLResponse(
@@ -5715,15 +5721,23 @@ async def market_news_api(request: Request):
             "</article>"
             '<div hx-get="/api/market-news" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
         )
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         "partials/market_news.html",
         {"request": request, "articles": articles},
     )
+    _market_news_cache.set(resp)
+    return resp
+
+
+_retail_sentiment_cache = _HtmlCache(300)  # 5-min TTL
 
 
 @app.get("/api/retail-sentiment", response_class=HTMLResponse)
 async def retail_sentiment_api(request: Request):
     """Return retail sentiment HTML partial (lazy-loaded via HTMX)."""
+    cached = _retail_sentiment_cache.get()
+    if cached:
+        return cached
     data = await _to_heavy(sentiment.get_retail_sentiment_overview)
     if not data or (data.get("fear_greed") is None and not data.get("top_movers")):
         return HTMLResponse(
@@ -5731,10 +5745,12 @@ async def retail_sentiment_api(request: Request):
             "Sentiment data temporarily unavailable.</p>"
             '<div hx-get="/api/retail-sentiment" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
         )
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         "partials/retail_sentiment.html",
         {"request": request, **data},
     )
+    _retail_sentiment_cache.set(resp)
+    return resp
 
 
 @app.get("/api/heatmap", response_class=HTMLResponse)
