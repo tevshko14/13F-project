@@ -267,6 +267,25 @@ class _HtmlCache:
             logger.warning("HTML cache write failed (key=%s)", key, exc_info=True)
 
 
+def _l2_get_html(cache_key: str) -> str | None:
+    """Load stale HTML from Supabase L2 cache (returns raw HTML string or None)."""
+    try:
+        data, _fresh = supabase_cache.get_cached_with_stale(cache_key)
+        return data.get("html") if isinstance(data, dict) else None
+    except Exception:
+        return None
+
+
+def _l2_set_html(cache_key: str, category: str, html: bytes, ttl: int) -> None:
+    """Persist rendered HTML to Supabase L2 cache."""
+    try:
+        supabase_cache.set_cached(
+            cache_key, category, {"html": html.decode()}, ttl
+        )
+    except Exception:
+        logger.debug("L2 HTML cache write failed: %s", cache_key, exc_info=True)
+
+
 async def _fetch_retail_data() -> tuple[list[dict], dict | None]:
     """Fetch ApeWisdom + CNN Fear&Greed for leaderboard endpoints.
 
@@ -5571,7 +5590,9 @@ _MEGA_CAP_NAMES = {
 }
 
 
-_overview_cache = _HtmlCache(300)  # 5 minutes
+_overview_cache = _HtmlCache(300)  # 5-min L1 TTL
+_L2_OVERVIEW_KEY = "homepage:market_overview"
+_L2_OVERVIEW_TTL = 3600  # 1h L2 fallback
 
 
 @app.get("/api/market-overview", response_class=HTMLResponse)
@@ -5589,66 +5610,82 @@ async def market_overview_api(request: Request):
     if (cached := _overview_cache.get()) is not None:
         return cached
 
-    # Fetch all data concurrently
-    idx_task = _to_heavy(market_data.get_index_market_data)
-    sp_task = _to_heavy(market_data.get_sp500_market_data, "1D")
-    spark_task = asyncio.to_thread(
-        market_data.get_sparkline_points, _MEGA_CAP_SYMBOLS, 20
-    )
-    idx_data, sp_data, spark_data = await asyncio.gather(
-        idx_task, sp_task, spark_task
-    )
+    try:
+        # Fetch all data concurrently
+        idx_task = _to_heavy(market_data.get_index_market_data)
+        sp_task = _to_heavy(market_data.get_sp500_market_data, "1D")
+        spark_task = asyncio.to_thread(
+            market_data.get_sparkline_points, _MEGA_CAP_SYMBOLS, 20
+        )
+        idx_data, sp_data, spark_data = await asyncio.gather(
+            idx_task, sp_task, spark_task
+        )
 
-    # Build tabs data
-    indices = []
-    commodities = []
-    for sym, entry in (idx_data or {}).items():
-        item = {
-            "symbol": sym,
-            "name": entry["name"],
-            "price": entry["price"],
-            "pct_change": entry["pct_change"],
-            "point_change": entry.get("point_change", 0),
-            "spark": entry.get("spark", []),
-            "history": entry.get("history", []),
-        }
-        if entry["tab"] == "indices":
-            indices.append(item)
-        else:
-            commodities.append(item)
+        # Build tabs data
+        indices = []
+        commodities = []
+        for sym, entry in (idx_data or {}).items():
+            item = {
+                "symbol": sym,
+                "name": entry["name"],
+                "price": entry["price"],
+                "pct_change": entry["pct_change"],
+                "point_change": entry.get("point_change", 0),
+                "spark": entry.get("spark", []),
+                "history": entry.get("history", []),
+            }
+            if entry["tab"] == "indices":
+                indices.append(item)
+            else:
+                commodities.append(item)
 
-    # Fetch all mega-cap chart data concurrently (was sequential)
-    _valid_mega = [
-        (sym, (sp_data or {}).get(sym))
-        for sym in _MEGA_CAP_SYMBOLS
-        if isinstance((sp_data or {}).get(sym), dict)
-    ]
-    chart_tasks = [
-        _to_heavy(market_data.get_overview_chart_data, sym)
-        for sym, _ in _valid_mega
-    ]
-    chart_results = await asyncio.gather(*chart_tasks) if chart_tasks else []
+        # Fetch all mega-cap chart data concurrently (was sequential)
+        _valid_mega = [
+            (sym, (sp_data or {}).get(sym))
+            for sym in _MEGA_CAP_SYMBOLS
+            if isinstance((sp_data or {}).get(sym), dict)
+        ]
+        chart_tasks = [
+            _to_heavy(market_data.get_overview_chart_data, sym)
+            for sym, _ in _valid_mega
+        ]
+        chart_results = await asyncio.gather(*chart_tasks) if chart_tasks else []
 
-    mega_caps = []
-    for (sym, entry), chart_data in zip(_valid_mega, chart_results):
-        mega_caps.append({
-            "symbol": sym,
-            "name": _MEGA_CAP_NAMES.get(sym, sym),
-            "price": entry["price"],
-            "pct_change": entry["pct_change"],
-            "point_change": round(
-                entry["price"] * entry["pct_change"] / 100, 2
-            ),
-            "spark": spark_data.get(sym, []),
-            "history": chart_data["history"] if chart_data else [],
-            "link": f"/stock/{sym}",
-        })
+        mega_caps = []
+        for (sym, entry), chart_data in zip(_valid_mega, chart_results):
+            mega_caps.append({
+                "symbol": sym,
+                "name": _MEGA_CAP_NAMES.get(sym, sym),
+                "price": entry["price"],
+                "pct_change": entry["pct_change"],
+                "point_change": round(
+                    entry["price"] * entry["pct_change"] / 100, 2
+                ),
+                "spark": spark_data.get(sym, []),
+                "history": chart_data["history"] if chart_data else [],
+                "link": f"/stock/{sym}",
+            })
 
-    # Preserve order: indices follow _INDEX_SYMBOLS key order
-    idx_order = [s for s in market_data._INDEX_SYMBOLS if market_data._INDEX_SYMBOLS[s]["tab"] == "indices"]
-    indices.sort(key=lambda x: idx_order.index(x["symbol"]) if x["symbol"] in idx_order else 99)
-    cmd_order = [s for s in market_data._INDEX_SYMBOLS if market_data._INDEX_SYMBOLS[s]["tab"] == "commodities"]
-    commodities.sort(key=lambda x: cmd_order.index(x["symbol"]) if x["symbol"] in cmd_order else 99)
+        # Preserve order: indices follow _INDEX_SYMBOLS key order
+        idx_order = [s for s in market_data._INDEX_SYMBOLS if market_data._INDEX_SYMBOLS[s]["tab"] == "indices"]
+        indices.sort(key=lambda x: idx_order.index(x["symbol"]) if x["symbol"] in idx_order else 99)
+        cmd_order = [s for s in market_data._INDEX_SYMBOLS if market_data._INDEX_SYMBOLS[s]["tab"] == "commodities"]
+        commodities.sort(key=lambda x: cmd_order.index(x["symbol"]) if x["symbol"] in cmd_order else 99)
+
+        if not indices and not mega_caps and not commodities:
+            raise ValueError("All market data sources returned empty")
+
+    except Exception:
+        logger.warning("market_overview_api: fetch failed, trying L2", exc_info=True)
+        stale = await asyncio.to_thread(_l2_get_html, _L2_OVERVIEW_KEY)
+        if stale:
+            return HTMLResponse(stale)
+        return HTMLResponse(
+            '<div hx-get="/api/market-overview" hx-trigger="load delay:5s" '
+            'hx-swap="outerHTML">'
+            '<article><p aria-busy="true"><span class="spinner"></span> '
+            "Loading market data...</p></article></div>"
+        )
 
     tabs = {
         "indices": indices,
@@ -5666,6 +5703,7 @@ async def market_overview_api(request: Request):
     )
 
     _overview_cache.set(resp)
+    asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_OVERVIEW_KEY, "homepage", resp.body, _L2_OVERVIEW_TTL))
     return resp
 
 
@@ -5692,7 +5730,7 @@ async def live_activity_api(request: Request):
     if cached:
         return cached
     notifs = await asyncio.to_thread(
-        supabase_cache.get_recent_notifications, 6
+        supabase_cache.get_recent_notifications, 7
     )
     for n in notifs:
         n["time_ago"] = _time_ago(n.get("created_at", ""))
@@ -5704,7 +5742,9 @@ async def live_activity_api(request: Request):
     return resp
 
 
-_market_news_cache = _HtmlCache(300)  # 5-min TTL
+_market_news_cache = _HtmlCache(300)  # 5-min L1 TTL
+_L2_NEWS_KEY = "homepage:market_news"
+_L2_NEWS_TTL = 7200  # 2h L2 fallback
 
 
 @app.get("/api/market-news", response_class=HTMLResponse)
@@ -5715,6 +5755,10 @@ async def market_news_api(request: Request):
         return cached
     articles = await _to_heavy(market_data.get_market_news)
     if not articles:
+        # Try L2 stale fallback before showing error
+        stale = await asyncio.to_thread(_l2_get_html, _L2_NEWS_KEY)
+        if stale:
+            return HTMLResponse(stale)
         return HTMLResponse(
             "<article>"
             '<p class="text-muted" style="text-align:center;">Market news temporarily unavailable.</p>'
@@ -5726,10 +5770,11 @@ async def market_news_api(request: Request):
         {"request": request, "articles": articles},
     )
     _market_news_cache.set(resp)
+    asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_NEWS_KEY, "homepage", resp.body, _L2_NEWS_TTL))
     return resp
 
 
-_retail_sentiment_cache = _HtmlCache(300)  # 5-min TTL
+_retail_sentiment_cache = _HtmlCache(1800)  # 30-min HTML TTL — data changes ~once/day
 
 
 @app.get("/api/retail-sentiment", response_class=HTMLResponse)
@@ -5753,6 +5798,10 @@ async def retail_sentiment_api(request: Request):
     return resp
 
 
+_L2_HEATMAP_KEY = "homepage:heatmap"
+_L2_HEATMAP_TTL = 3600  # 1h L2 fallback
+
+
 @app.get("/api/heatmap", response_class=HTMLResponse)
 async def heatmap(request: Request, period: str = "1D"):
     # Validate period
@@ -5760,6 +5809,10 @@ async def heatmap(request: Request, period: str = "1D"):
         period = "1D"
 
     if not getattr(app.state, "market_data_ready", False):
+        # Cold start — try L2 before showing spinner
+        stale = await asyncio.to_thread(_l2_get_html, f"{_L2_HEATMAP_KEY}:{period}")
+        if stale:
+            return HTMLResponse(stale)
         return HTMLResponse(
             "<article>"
             '<p aria-busy="true">Loading S&P 500 market data (first load takes ~30s)...</p>'
@@ -5772,6 +5825,9 @@ async def heatmap(request: Request, period: str = "1D"):
         _to_heavy(market_data.get_sp500_constituents),
     )
     if not mkt or "_metadata" not in mkt:
+        stale = await asyncio.to_thread(_l2_get_html, f"{_L2_HEATMAP_KEY}:{period}")
+        if stale:
+            return HTMLResponse(stale)
         return HTMLResponse(
             '<article>'
             '<p class="text-muted" aria-busy="true">Market data loading...</p>'
@@ -5787,7 +5843,7 @@ async def heatmap(request: Request, period: str = "1D"):
     )
     metadata = mkt.get("_metadata", {})
 
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         "partials/heatmap.html",
         {
             "request": request,
@@ -5796,6 +5852,8 @@ async def heatmap(request: Request, period: str = "1D"):
             "period": period,
         },
     )
+    asyncio.create_task(asyncio.to_thread(_l2_set_html, f"{_L2_HEATMAP_KEY}:{period}", "homepage", resp.body, _L2_HEATMAP_TTL))
+    return resp
 
 
 @app.get("/api/heatmap-data")

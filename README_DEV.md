@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-19 (Homepage: bug fixes, perf optimizations, code cleanup — activateScripts consolidation, _HtmlCache on market-news & retail-sentiment, Stripe deferred loading, HTMX waterfall removed, inline styles → CSS classes)
+> Last updated: 2026-03-20 (Homepage: L2 Supabase stale-fallback caching for market overview/news/heatmap/sentiment, activateScripts fix for cached feed toggle, sentiment "Data as of" timestamp, live activity 6→7 items)
 
 ---
 
@@ -2037,6 +2037,9 @@ the cache — every CLI command makes live SEC API calls.
 - [x] SEO: WebApplication JSON-LD moved from base.html to home.html, 5 new FAQ entries with structured data, data source citations on congress/insider/funds pages, expanded llms.txt with macro/stock/data-source sections
 - [x] Fix: investor.html duplicate DOM IDs (portfolio-donut, holdings-table-wrap) causing portfolio concentration chart to not render in tab
 - [x] Static asset cache headers: 1yr immutable for images/fonts, 1hr for CSS/JS (SecurityHeadersMiddleware)
+- [x] Homepage L2 stale-fallback caching: market overview (1h), market news (2h), heatmap (1h per period), retail sentiment (24h) — serves last-known-good HTML from Supabase when external APIs fail
+- [x] Retail sentiment "Data as of" timestamp disclaimer, pretty-formatted (e.g. "Mar 20, 2026 3:22 PM UTC")
+- [x] Feed toggle fix: `activateScripts()` called on cached HTML restore (market news scripts now execute on tab switch-back)
 - [ ] Congress price backfill: run `scripts/backfill_congress_prices.py` to populate forward returns
 - [ ] Custom donor fields: name + opt-in to feature on support page (Phase 2, requires FastAPI endpoint + Stripe Checkout Sessions)
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)

@@ -96,6 +96,10 @@
         </div>
     </div>
     {% endif %}
+
+    {% if metadata and metadata.timestamp %}
+    <div class="rs-updated">Data as of {{ metadata.timestamp }}</div>
+    {% endif %}
 </div>
 
 <style>
@@ -238,6 +242,14 @@
 
     /* ── Mentioned section divider ── */
     .rs-mentioned-section {
+        border-top: 1px solid var(--pp-border-light);
+    }
+
+    .rs-updated {
+        font-size: 0.65em;
+        color: var(--pp-text-faint, rgba(148,163,184,0.6));
+        text-align: center;
+        padding: 0.5em 0.8em 0.6em;
         border-top: 1px solid var(--pp-border-light);
     }
 </style>

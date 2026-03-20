@@ -262,6 +262,7 @@ function switchFeed(feed, btn) {
     var url = feed === 'news' ? '/api/market-news' : '/api/live-activity';
     if (_feedCache[feed]) {
         body.innerHTML = _feedCache[feed];
+        activateScripts(body);
         return;
     }
     body.innerHTML = '<div style="padding:1em;text-align:center;" aria-busy="true"><span class="spinner"></span></div>';

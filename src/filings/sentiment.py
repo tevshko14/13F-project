@@ -907,7 +907,7 @@ def build_retail_leaderboard_data(
         "leaderboard_rows": rows,
         "metadata": {
             "count": len(rows),
-            "timestamp": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+            "timestamp": time.strftime("%b %-d, %Y %-I:%M %p UTC", time.gmtime()),
             "market_mood": fear_greed.get("rating") if fear_greed else None,
             "market_score": fear_greed.get("score") if fear_greed else None,
         },
@@ -924,7 +924,11 @@ def build_retail_leaderboard_data(
 # ═══════════════════════════════════════════════════════════════════
 
 _sentiment_overview_cache: tuple[float, dict] | None = None
-_SENTIMENT_OVERVIEW_TTL = 900  # 15 minutes
+_SENTIMENT_OVERVIEW_TTL = 3600  # 1 hour — data changes ~once/day
+
+
+_L2_SENTIMENT_KEY = "retail_sentiment_overview"
+_L2_SENTIMENT_TTL = 86400  # 24h in Supabase — data changes ~once/day
 
 
 def get_retail_sentiment_overview() -> dict:
@@ -935,9 +939,15 @@ def get_retail_sentiment_overview() -> dict:
         top_movers: top 5 tickers by 24h velocity change
         top_mentioned: top 5 tickers by total mentions
         metadata: {timestamp}
+
+    Uses 3-tier caching: L1 in-memory (1h) → L2 Supabase (24h) → live fetch.
+    On live fetch failure, serves stale L2 data instead of empty.
     """
+    from filings import supabase_cache  # deferred to avoid circular import at module load
+
     global _sentiment_overview_cache
 
+    # L1: in-memory cache
     now = time.time()
     with _lock:
         if _sentiment_overview_cache is not None:
@@ -945,17 +955,30 @@ def get_retail_sentiment_overview() -> dict:
             if now - ts < _SENTIMENT_OVERVIEW_TTL:
                 return data
 
+    # Live fetch from external APIs
+    fear_greed = None
+    ape_all = []
     try:
         fear_greed = _get_cnn_fear_greed()
     except Exception:
         logger.warning("Failed to fetch CNN Fear & Greed for overview card")
-        fear_greed = None
 
     try:
-        ape_all = _get_apewisdom_all()
+        ape_all = _get_apewisdom_all() or []
     except Exception:
         logger.warning("Failed to fetch ApeWisdom for overview card")
-        ape_all = []
+
+    # If both external sources failed, fall back to L2 stale data
+    if fear_greed is None and not ape_all:
+        try:
+            l2_data, _ = supabase_cache.get_cached_with_stale(_L2_SENTIMENT_KEY)
+            if isinstance(l2_data, dict):
+                logger.info("Serving stale L2 sentiment data (external APIs unavailable)")
+                with _lock:
+                    _sentiment_overview_cache = (now, l2_data)
+                return l2_data
+        except Exception:
+            pass
 
     # ── Build enriched rows with velocity ──
     rows: list[dict] = []
@@ -994,11 +1017,16 @@ def get_retail_sentiment_overview() -> dict:
         "top_movers": top_movers,
         "top_mentioned": top_mentioned,
         "metadata": {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
+            "timestamp": time.strftime("%b %-d, %Y %-I:%M %p UTC", time.gmtime()),
         },
     }
 
+    # Persist to L1 + L2
     with _lock:
         _sentiment_overview_cache = (now, result)
+    try:
+        supabase_cache.set_cached(_L2_SENTIMENT_KEY, "sentiment", result, _L2_SENTIMENT_TTL)
+    except Exception:
+        logger.debug("Failed to write sentiment L2 cache", exc_info=True)
 
     return result
