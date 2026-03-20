@@ -1,0 +1,746 @@
+{% extends "base.html" %}
+{% block title %}My Watchlist — PaperPanda{% endblock %}
+{% block meta_description %}Your personalized stock watchlist — track superinvestor activity, insider trades, and congressional trading on your watched tickers.{% endblock %}
+{% block content %}
+<style>
+  main.container {
+    max-width: 1240px !important;
+    width: 100% !important;
+    padding-left: 1.5rem !important;
+    padding-right: 1.5rem !important;
+  }
+  .wl-shell {
+    --wl-ink: #0f172a;
+    position: relative;
+    isolation: isolate;
+    font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+    padding-bottom: 2rem;
+  }
+  .wl-aurora {
+    position: absolute;
+    border-radius: 999px;
+    filter: blur(56px);
+    opacity: 0.54;
+    pointer-events: none;
+    z-index: -1;
+  }
+  .wl-aurora-one {
+    width: min(35vw, 450px);
+    height: min(31vw, 390px);
+    top: -80px;
+    left: -90px;
+    background: radial-gradient(circle at 35% 30%, rgba(239, 68, 68, 0.18), rgba(220, 38, 38, 0.06) 72%);
+  }
+  .wl-aurora-two {
+    width: min(32vw, 420px);
+    height: min(28vw, 350px);
+    top: 32px;
+    right: -82px;
+    background: radial-gradient(circle at 60% 40%, rgba(13, 148, 136, 0.22), rgba(15, 118, 110, 0.08) 72%);
+  }
+
+  @keyframes wlFadeIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Hero header card ── */
+  .wl-hero {
+    margin-bottom: 1.5em;
+    border-radius: 24px;
+    padding: 1.4rem 1.5rem 1.2rem;
+    border: 1px solid rgba(255, 255, 255, 0.34);
+    background:
+      linear-gradient(132deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.5)),
+      radial-gradient(circle at 8% 12%, rgba(239, 68, 68, 0.12), transparent 50%),
+      radial-gradient(circle at 92% 16%, rgba(13, 148, 136, 0.1), transparent 48%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.1);
+    animation: wlFadeIn 0.4s ease both;
+  }
+  .wl-hero-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1em;
+  }
+  .wl-kicker {
+    margin: 0 0 0.35rem;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: rgba(15, 23, 42, 0.55);
+  }
+  .wl-hero h1 {
+    font-family: "Fraunces", Georgia, serif;
+    font-size: clamp(1.5rem, 3.5vw, 2.2rem);
+    letter-spacing: -0.03em;
+    margin: 0;
+    line-height: 1.1;
+    color: var(--wl-ink);
+  }
+  .wl-hero-sub {
+    margin: 0.45rem 0 0;
+    color: rgba(15, 23, 42, 0.65);
+    font-size: 0.88rem;
+  }
+  .wl-hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex-shrink: 0;
+  }
+  .wl-gear-btn {
+    background: rgba(15, 23, 42, 0.05);
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    border-radius: 10px;
+    padding: 0.5em 0.85em;
+    cursor: pointer;
+    color: rgba(15, 23, 42, 0.6);
+    transition: all 0.15s;
+    font-size: 0.82em;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+  }
+  .wl-gear-btn:hover { background: rgba(15, 23, 42, 0.1); color: var(--wl-ink); }
+
+  /* ── Stats ribbon ── */
+  .wl-stats {
+    display: flex;
+    gap: 1em;
+    margin-top: 1em;
+    flex-wrap: wrap;
+  }
+  .wl-stat {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.4em 0.75em;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(15, 23, 42, 0.06);
+    font-size: 0.78em;
+    font-weight: 600;
+    color: rgba(15, 23, 42, 0.6);
+  }
+  .wl-stat strong {
+    color: var(--wl-ink);
+    font-size: 1.15em;
+  }
+  .wl-stat svg { opacity: 0.5; }
+
+  /* ── Settings panel ── */
+  .wl-settings {
+    display: none;
+    margin-bottom: 1.5em;
+    animation: wlFadeIn 0.3s ease both;
+  }
+  .wl-settings.open { display: block; }
+
+  /* ── Card grid ── */
+  .wl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1em;
+  }
+  .wl-card {
+    border-radius: 18px;
+    border: 1px solid var(--pp-glass-border, rgba(15, 23, 42, 0.08));
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.66));
+    backdrop-filter: blur(var(--pp-glass-blur, 10px));
+    -webkit-backdrop-filter: blur(var(--pp-glass-blur, 10px));
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+    animation: wlFadeIn 0.45s ease both;
+  }
+  .wl-card:nth-child(1) { animation-delay: 0.03s; }
+  .wl-card:nth-child(2) { animation-delay: 0.08s; }
+  .wl-card:nth-child(3) { animation-delay: 0.13s; }
+  .wl-card:nth-child(4) { animation-delay: 0.18s; }
+  .wl-card:nth-child(5) { animation-delay: 0.23s; }
+  .wl-card:nth-child(6) { animation-delay: 0.28s; }
+  .wl-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 20px 40px rgba(15, 23, 42, 0.14);
+    border-color: rgba(13, 148, 136, 0.28);
+  }
+  .wl-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.9em 1em 0;
+  }
+  .wl-card-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.55em;
+    min-width: 0;
+  }
+  .wl-card-logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    object-fit: contain;
+    flex-shrink: 0;
+    background: rgba(15, 23, 42, 0.04);
+    border: 1px solid rgba(15, 23, 42, 0.06);
+  }
+  .wl-card-info { min-width: 0; }
+  .wl-card-ticker {
+    font-family: "Space Grotesk", monospace;
+    font-weight: 800;
+    font-size: 1.1em;
+    letter-spacing: 0.02em;
+  }
+  .wl-card-ticker a {
+    color: var(--wl-ink);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .wl-card-ticker a:hover { color: #0d9488; }
+  .wl-card-added {
+    font-size: 0.68em;
+    color: rgba(15, 23, 42, 0.42);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+  .wl-card-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: rgba(15, 23, 42, 0.25);
+    padding: 0.35em;
+    border-radius: 8px;
+    transition: all 0.15s;
+  }
+  .wl-card-remove:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.08);
+  }
+
+  /* ── Signal feed inside card ── */
+  .wl-card-body {
+    padding: 0.6em 1em 0.85em;
+  }
+  .wl-card-divider {
+    height: 1px;
+    margin: 0 1em;
+    background: linear-gradient(90deg, transparent, rgba(15, 23, 42, 0.08) 20%, rgba(15, 23, 42, 0.08) 80%, transparent);
+  }
+  .wl-signal-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4em;
+  }
+  .wl-signal {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5em;
+    padding: 0.35em 0.5em;
+    border-radius: 8px;
+    transition: background 0.12s;
+    text-decoration: none;
+    color: inherit;
+  }
+  .wl-signal:hover {
+    background: rgba(13, 148, 136, 0.06);
+  }
+  .wl-signal-icon {
+    flex-shrink: 0;
+    font-size: 0.9em;
+    margin-top: 0.1em;
+  }
+  .wl-signal-text {
+    font-size: 0.8em;
+    line-height: 1.35;
+    color: rgba(15, 23, 42, 0.7);
+    font-weight: 500;
+  }
+  .wl-signal-time {
+    font-size: 0.68em;
+    color: rgba(15, 23, 42, 0.38);
+    font-weight: 500;
+    margin-top: 0.1em;
+  }
+  .wl-signal-empty {
+    font-size: 0.8em;
+    color: rgba(15, 23, 42, 0.35);
+    padding: 0.5em 0;
+    text-align: center;
+    font-style: italic;
+  }
+  .wl-card-footer {
+    padding: 0 1em 0.7em;
+    text-align: right;
+  }
+  .wl-view-link {
+    font-size: 0.75em;
+    font-weight: 700;
+    color: #0d9488;
+    text-decoration: none;
+    letter-spacing: 0.02em;
+    transition: opacity 0.12s;
+  }
+  .wl-view-link:hover { opacity: 0.7; }
+
+  /* ── Empty state ── */
+  .wl-empty {
+    text-align: center;
+    padding: 4em 2em;
+    border-radius: 24px;
+    border: 1px solid var(--pp-glass-border, rgba(15, 23, 42, 0.08));
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.66));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 18px 32px rgba(15, 23, 42, 0.08);
+    animation: wlFadeIn 0.4s ease both;
+  }
+  .wl-empty-icon {
+    font-size: 3em;
+    margin-bottom: 0.3em;
+    opacity: 0.6;
+  }
+  .wl-empty h2 {
+    font-family: "Fraunces", Georgia, serif;
+    font-size: 1.4em;
+    margin: 0 0 0.4em;
+    letter-spacing: -0.02em;
+  }
+  .wl-empty p {
+    color: rgba(15, 23, 42, 0.6);
+    font-size: 0.92em;
+    margin: 0 0 1.5em;
+    max-width: 28em;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.5;
+  }
+  .wl-empty-cards {
+    display: flex;
+    gap: 0.7em;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .wl-empty-card {
+    display: flex;
+    align-items: center;
+    gap: 0.45em;
+    padding: 0.6em 1.1em;
+    border-radius: 12px;
+    background: rgba(13, 148, 136, 0.08);
+    border: 1px solid rgba(13, 148, 136, 0.18);
+    color: #0f766e;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.85em;
+    transition: all 0.15s;
+  }
+  .wl-empty-card:hover {
+    background: rgba(13, 148, 136, 0.14);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(13, 148, 136, 0.12);
+  }
+  .wl-empty-card svg { opacity: 0.7; }
+
+  /* ── Auth gate ── */
+  .wl-auth-gate {
+    text-align: center;
+    padding: 5em 1.5em;
+    animation: wlFadeIn 0.4s ease both;
+  }
+  .wl-auth-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 1em;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.12), rgba(13, 148, 136, 0.12));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ef4444;
+  }
+  .wl-auth-gate h2 {
+    font-family: "Fraunces", Georgia, serif;
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    margin: 0 0 0.5em;
+    letter-spacing: -0.02em;
+  }
+  .wl-auth-gate p {
+    color: rgba(15, 23, 42, 0.6);
+    margin: 0 0 1.5em;
+    font-size: 0.95em;
+    max-width: 30em;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.5;
+  }
+  .wl-auth-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.7em 1.8em;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #0d9488, #0f766e);
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.95em;
+    letter-spacing: 0.01em;
+    transition: all 0.15s;
+    box-shadow: 0 4px 14px rgba(13, 148, 136, 0.25);
+  }
+  .wl-auth-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 8px 20px rgba(13, 148, 136, 0.3);
+  }
+
+  /* ── Loading state ── */
+  .wl-loading {
+    text-align: center;
+    padding: 4em 1em;
+    color: rgba(15, 23, 42, 0.45);
+    font-size: 0.9em;
+  }
+  .wl-loading .spinner {
+    display: inline-block;
+    width: 24px;
+    height: 24px;
+    border: 2.5px solid rgba(13, 148, 136, 0.2);
+    border-top-color: #0d9488;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-bottom: 0.8em;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Dark mode ── */
+  :root[data-theme="dark"] .wl-shell { --wl-ink: #e2e8f0; }
+  :root[data-theme="dark"] .wl-hero {
+    border-color: rgba(148, 163, 184, 0.18);
+    background:
+      linear-gradient(130deg, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.68)),
+      radial-gradient(circle at 8% 12%, rgba(239, 68, 68, 0.08), transparent 50%),
+      radial-gradient(circle at 92% 16%, rgba(13, 148, 136, 0.08), transparent 48%);
+  }
+  :root[data-theme="dark"] .wl-kicker { color: rgba(226, 232, 240, 0.5); }
+  :root[data-theme="dark"] .wl-hero-sub { color: rgba(226, 232, 240, 0.6); }
+  :root[data-theme="dark"] .wl-gear-btn {
+    background: rgba(226, 232, 240, 0.06);
+    border-color: rgba(226, 232, 240, 0.1);
+    color: rgba(226, 232, 240, 0.6);
+  }
+  :root[data-theme="dark"] .wl-gear-btn:hover {
+    background: rgba(226, 232, 240, 0.1);
+    color: #e2e8f0;
+  }
+  :root[data-theme="dark"] .wl-stat {
+    background: rgba(226, 232, 240, 0.05);
+    border-color: rgba(226, 232, 240, 0.08);
+    color: rgba(226, 232, 240, 0.5);
+  }
+  :root[data-theme="dark"] .wl-stat strong { color: #e2e8f0; }
+  :root[data-theme="dark"] .wl-card {
+    background: linear-gradient(165deg, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.68));
+    border-color: rgba(148, 163, 184, 0.12);
+    box-shadow: 0 12px 28px rgba(2, 6, 23, 0.35);
+  }
+  :root[data-theme="dark"] .wl-card:hover {
+    box-shadow: 0 20px 40px rgba(2, 6, 23, 0.5);
+    border-color: rgba(45, 212, 191, 0.25);
+  }
+  :root[data-theme="dark"] .wl-card-logo {
+    background: rgba(226, 232, 240, 0.06);
+    border-color: rgba(226, 232, 240, 0.08);
+  }
+  :root[data-theme="dark"] .wl-card-ticker a { color: #e2e8f0; }
+  :root[data-theme="dark"] .wl-card-added { color: rgba(226, 232, 240, 0.35); }
+  :root[data-theme="dark"] .wl-card-remove { color: rgba(226, 232, 240, 0.2); }
+  :root[data-theme="dark"] .wl-card-remove:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+  }
+  :root[data-theme="dark"] .wl-card-divider {
+    background: linear-gradient(90deg, transparent, rgba(226, 232, 240, 0.08) 20%, rgba(226, 232, 240, 0.08) 80%, transparent);
+  }
+  :root[data-theme="dark"] .wl-signal-text { color: rgba(226, 232, 240, 0.65); }
+  :root[data-theme="dark"] .wl-signal-time { color: rgba(226, 232, 240, 0.3); }
+  :root[data-theme="dark"] .wl-signal:hover { background: rgba(45, 212, 191, 0.06); }
+  :root[data-theme="dark"] .wl-signal-empty { color: rgba(226, 232, 240, 0.25); }
+  :root[data-theme="dark"] .wl-view-link { color: #5eead4; }
+  :root[data-theme="dark"] .wl-empty {
+    background: linear-gradient(165deg, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.68));
+    border-color: rgba(148, 163, 184, 0.12);
+    box-shadow: 0 18px 32px rgba(2, 6, 23, 0.35);
+  }
+  :root[data-theme="dark"] .wl-empty p { color: rgba(226, 232, 240, 0.55); }
+  :root[data-theme="dark"] .wl-empty-card {
+    background: rgba(45, 212, 191, 0.08);
+    border-color: rgba(45, 212, 191, 0.18);
+    color: #5eead4;
+  }
+  :root[data-theme="dark"] .wl-empty-card:hover {
+    background: rgba(45, 212, 191, 0.14);
+    box-shadow: 0 4px 12px rgba(45, 212, 191, 0.1);
+  }
+  :root[data-theme="dark"] .wl-auth-gate p { color: rgba(226, 232, 240, 0.55); }
+  :root[data-theme="dark"] .wl-auth-icon { background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(45, 212, 191, 0.15)); }
+  :root[data-theme="dark"] .wl-auth-btn {
+    background: linear-gradient(135deg, #14b8a6, #0d9488);
+    box-shadow: 0 4px 14px rgba(20, 184, 166, 0.3);
+  }
+  :root[data-theme="dark"] .wl-loading { color: rgba(226, 232, 240, 0.35); }
+
+  /* ── Responsive ── */
+  @media (max-width: 700px) {
+    .wl-grid { grid-template-columns: 1fr; }
+    .wl-hero { padding: 1rem; border-radius: 20px; }
+    .wl-hero-top { flex-direction: column; }
+    .wl-hero h1 { font-size: 1.4rem; }
+    .wl-stats { gap: 0.5em; }
+    .wl-empty-cards { flex-direction: column; align-items: center; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wl-card, .wl-hero, .wl-empty, .wl-auth-gate, .wl-settings { animation: none !important; }
+    .wl-card:hover { transform: none; }
+  }
+</style>
+
+<section class="wl-shell">
+<div class="wl-aurora wl-aurora-one" aria-hidden="true"></div>
+<div class="wl-aurora wl-aurora-two" aria-hidden="true"></div>
+
+{# ── Auth gate ── #}
+{% if not request.state.user %}
+<div class="wl-auth-gate">
+    <div class="wl-auth-icon">
+        <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" stroke="currentColor" stroke-width="1">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+        </svg>
+    </div>
+    <h2>Sign in to use your Watchlist</h2>
+    <p>Track your favorite stocks and get personalized alerts when superinvestors, insiders, or congress members trade them.</p>
+    <button onclick="if(typeof ppOpenSignIn==='function')ppOpenSignIn()" class="wl-auth-btn">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        Sign In to Get Started
+    </button>
+</div>
+{% else %}
+
+{# ── Hero header ── #}
+<div class="wl-hero">
+    <div class="wl-hero-top">
+        <div>
+            <p class="wl-kicker">PaperPanda Watchlist</p>
+            <h1>My Watchlist</h1>
+            <p class="wl-hero-sub">Your personalized signal feed — superinvestor moves, insider trades, and congressional activity on stocks you care about.</p>
+        </div>
+        <div class="wl-hero-actions">
+            <button class="wl-gear-btn" onclick="document.querySelector('.wl-settings').classList.toggle('open')" title="Notification settings">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+                Settings
+            </button>
+        </div>
+    </div>
+    <div class="wl-stats" id="wl-stats"></div>
+</div>
+
+{# ── Settings panel (inline, toggled) ── #}
+<div class="wl-settings" id="wl-settings">
+    {% include "partials/watchlist_preferences.html" %}
+</div>
+
+{# ── Content area ── #}
+<div id="wl-content">
+    <div class="wl-loading">
+        <div class="spinner"></div>
+        <div>Loading your watchlist...</div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var SIGNAL_ICONS = {
+        '13f_change': '📊',
+        'superinvestor_activity': '📊',
+        'insider_trade': '👤',
+        'congress_trade': '🏛️',
+        'reddit_velocity': '🔥',
+        'youtube': '🎬',
+        'options_activity': '📈',
+        'convergence': '🎯',
+    };
+    var SIGNAL_LABELS = {
+        '13f_change': '13F',
+        'insider_trade': 'Insider',
+        'congress_trade': 'Congress',
+        'reddit_velocity': 'Reddit',
+        'youtube': 'YouTube',
+    };
+
+    function timeAgo(dateStr) {
+        if (!dateStr) return '';
+        var diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
+        if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+        if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+        return Math.floor(diff / 86400) + 'd ago';
+    }
+
+    function escHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function renderWatchlist(data) {
+        var el = document.getElementById('wl-content');
+        var statsEl = document.getElementById('wl-stats');
+        var tickers = data.tickers || [];
+        var signals = data.signals || {};
+
+        // Stats ribbon
+        var totalSignals = 0;
+        var typeCounts = {};
+        tickers.forEach(function(t) {
+            (signals[t.ticker] || []).forEach(function(s) {
+                totalSignals++;
+                var type = s.type || 'other';
+                typeCounts[type] = (typeCounts[type] || 0) + 1;
+            });
+        });
+
+        var statsHtml = '<div class="wl-stat"><svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg><strong>' + tickers.length + '</strong> stock' + (tickers.length !== 1 ? 's' : '') + '</div>';
+        statsHtml += '<div class="wl-stat"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg><strong>' + totalSignals + '</strong> signal' + (totalSignals !== 1 ? 's' : '') + ' (7d)</div>';
+        statsEl.innerHTML = statsHtml;
+
+        if (!tickers.length) {
+            el.innerHTML =
+                '<div class="wl-empty">' +
+                '  <div class="wl-empty-icon">&#x2764;&#xFE0F;</div>' +
+                '  <h2>Your watchlist is empty</h2>' +
+                '  <p>Click the heart icon on any stock page to start tracking it. You\'ll see superinvestor moves, insider trades, and congressional activity here.</p>' +
+                '  <div class="wl-empty-cards">' +
+                '    <a href="/funds" class="wl-empty-card"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Superinvestors</a>' +
+                '    <a href="/insider-trading" class="wl-empty-card"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Insider Trading</a>' +
+                '    <a href="/congress" class="wl-empty-card"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 20h20"/><path d="M5 20V8l7-5 7 5v12"/></svg>Congress Trading</a>' +
+                '  </div>' +
+                '</div>';
+            return;
+        }
+
+        // Cards
+        var gridHtml = '<div class="wl-grid">';
+        tickers.forEach(function(t) {
+            var ticker = t.ticker;
+            var added = new Date(t.added_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            var tickerSignals = signals[ticker] || [];
+
+            gridHtml += '<div class="wl-card" data-ticker="' + ticker + '">';
+
+            // Header
+            gridHtml += '<div class="wl-card-header">';
+            gridHtml += '  <div class="wl-card-identity">';
+            gridHtml += '    <img src="/api/logo/' + ticker + '.png" class="wl-card-logo" loading="lazy" onerror="this.style.display=\'none\'">';
+            gridHtml += '    <div class="wl-card-info">';
+            gridHtml += '      <div class="wl-card-ticker"><a href="/stock/' + ticker + '">' + ticker + '</a></div>';
+            gridHtml += '      <div class="wl-card-added">Added ' + added + '</div>';
+            gridHtml += '    </div>';
+            gridHtml += '  </div>';
+            gridHtml += '  <button class="wl-card-remove" onclick="ppRemoveWatch(\'' + ticker + '\', this)" title="Remove from watchlist">';
+            gridHtml += '    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+            gridHtml += '  </button>';
+            gridHtml += '</div>';
+
+            // Divider
+            gridHtml += '<div class="wl-card-divider"></div>';
+
+            // Signals
+            gridHtml += '<div class="wl-card-body"><div class="wl-signal-list">';
+            if (tickerSignals.length) {
+                tickerSignals.forEach(function(s) {
+                    var icon = SIGNAL_ICONS[s.type] || '📌';
+                    var link = s.link || '/stock/' + ticker;
+                    gridHtml += '<a href="' + link + '" class="wl-signal">';
+                    gridHtml += '  <span class="wl-signal-icon">' + icon + '</span>';
+                    gridHtml += '  <div>';
+                    gridHtml += '    <div class="wl-signal-text">' + escHtml(s.title || s.message || 'Signal') + '</div>';
+                    gridHtml += '    <div class="wl-signal-time">' + timeAgo(s.created_at) + '</div>';
+                    gridHtml += '  </div>';
+                    gridHtml += '</a>';
+                });
+            } else {
+                gridHtml += '<div class="wl-signal-empty">No recent signals</div>';
+            }
+            gridHtml += '</div></div>';
+
+            // Footer link
+            gridHtml += '<div class="wl-card-footer">';
+            gridHtml += '  <a href="/stock/' + ticker + '" class="wl-view-link">View full terminal &rarr;</a>';
+            gridHtml += '</div>';
+
+            gridHtml += '</div>';
+        });
+        gridHtml += '</div>';
+
+        el.innerHTML = gridHtml;
+    }
+
+    function loadWatchlist() {
+        fetch('/api/watchlist')
+            .then(function(r) { return r.json(); })
+            .then(renderWatchlist)
+            .catch(function() {
+                document.getElementById('wl-content').innerHTML =
+                    '<div class="wl-empty"><div class="wl-empty-icon">&#x26A0;&#xFE0F;</div><h2>Unable to load watchlist</h2><p>Something went wrong. Please try refreshing the page.</p></div>';
+            });
+    }
+
+    window.ppRemoveWatch = function(ticker, btn) {
+        var card = btn.closest('.wl-card');
+        if (card) {
+            card.style.transform = 'scale(0.95)';
+            card.style.opacity = '0.4';
+        }
+        fetch('/api/watchlist/' + encodeURIComponent(ticker), { method: 'DELETE' })
+            .then(function(r) {
+                if (!r.ok) throw new Error(r.status);
+                if (card) {
+                    card.style.transition = 'all 0.3s ease';
+                    card.style.transform = 'scale(0.9)';
+                    card.style.opacity = '0';
+                    setTimeout(function() {
+                        card.remove();
+                        var remaining = document.querySelectorAll('.wl-card').length;
+                        // Update stats
+                        var statsEl = document.getElementById('wl-stats');
+                        if (statsEl) {
+                            var statDivs = statsEl.querySelectorAll('.wl-stat strong');
+                            if (statDivs[0]) statDivs[0].textContent = remaining;
+                        }
+                        if (remaining === 0) loadWatchlist();
+                    }, 300);
+                }
+            })
+            .catch(function() {
+                if (card) {
+                    card.style.transform = '';
+                    card.style.opacity = '1';
+                }
+            });
+    };
+
+    loadWatchlist();
+})();
+</script>
+
+{% endif %}
+</section>
+{% endblock %}

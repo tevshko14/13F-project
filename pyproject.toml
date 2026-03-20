@@ -22,6 +22,7 @@ dependencies = [
     "stripe>=9.0",
     "pytrends>=4.9",
     "brotli>=1.1",
+    "resend>=1.0",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +43,7 @@ filings-insider-backfill = "filings.insider_backfill:main"
 filings-insider-returns = "filings.insider_returns:main"
 filings-short-interest-sync = "filings.short_interest_sync:main"
 filings-options-sync = "filings.options_sync:main"
+filings-digest = "filings.digest_worker:main"
 
 [build-system]
 requires = ["hatchling"]

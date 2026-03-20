@@ -2716,6 +2716,15 @@ async def stock_detail(request: Request, ticker: str):
         stock_info.cusip = detail.cusip or stock_info.cusip
         stock_info.ticker = detail.ticker or stock_info.ticker
 
+    # Check if user is watching this ticker (point query — no full set fetch)
+    watching = False
+    if request.state.user:
+        uid = request.state.user.get("sub", "")
+        if uid:
+            watching = await asyncio.to_thread(
+                supabase_cache.is_ticker_watched, uid, ticker
+            )
+
     # Build related stocks for internal linking (top holdings of this stock's holders)
     related_stocks: list[dict] = []
     if detail and cache_data:
@@ -2742,6 +2751,7 @@ async def stock_detail(request: Request, ticker: str):
             "stock": detail,
             "history": history,
             "related_stocks": related_stocks,
+            "watching": watching,
         },
     )
 
@@ -3864,15 +3874,33 @@ async def notifications_page(
     # Inject "Support the Panda" CTAs every 10th notification
     page_notifs = _inject_support_ctas(page_notifs, interval=10)
 
+    # Get user's watchlist tickers for heart badges
+    wl_tickers: set[str] = set()
+    is_watchlist_filter = types.strip() == "watchlist"
+    if request.state.user:
+        uid = request.state.user.get("sub", "")
+        if uid:
+            wl_tickers = await asyncio.to_thread(
+                supabase_cache.get_user_watchlist_tickers, uid
+            )
+    # If watchlist filter active, post-filter by ticker
+    if is_watchlist_filter and wl_tickers:
+        page_notifs = [
+            n for n in page_notifs
+            if not n.get("is_cta") and (n.get("metadata") or {}).get("ticker", "").upper() in wl_tickers
+        ]
+
     return templates.TemplateResponse(
         "notifications.html",
         {
             "request": request,
             "notifications": page_notifs,
             "page": page,
-            "has_next": has_next,
+            "has_next": has_next and not is_watchlist_filter,
             "all_types": _NOTIF_TYPES,
             "active_types": active_types,
+            "watchlist_tickers": wl_tickers,
+            "is_watchlist_filter": is_watchlist_filter,
         },
     )
 
@@ -6102,6 +6130,236 @@ async def clerk_webhook(request: Request):
                 return JSONResponse({"error": "Database error"}, status_code=500)
 
     return JSONResponse({"status": "ok"}, status_code=200)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Watchlist API (authenticated)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _require_user(request: Request) -> str | None:
+    """Return user_id from Clerk auth, or None if not authenticated."""
+    if not request.state.user:
+        return None
+    return request.state.user.get("sub", "") or None
+
+
+@app.post("/api/watchlist", response_class=JSONResponse)
+async def api_watchlist_add(request: Request):
+    """Add a ticker to the user's watchlist."""
+    user_id = _require_user(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+        ticker = body.get("ticker", "").strip().upper()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    if not ticker or not _valid_ticker(ticker):
+        return JSONResponse({"error": "Invalid ticker"}, status_code=400)
+    ok = await asyncio.to_thread(supabase_cache.add_to_watchlist, user_id, ticker)
+    if not ok:
+        return JSONResponse({"error": "Failed to add"}, status_code=500)
+    return JSONResponse({"ok": True, "ticker": ticker})
+
+
+@app.delete("/api/watchlist/{ticker}", response_class=JSONResponse)
+async def api_watchlist_remove(request: Request, ticker: str):
+    """Remove a ticker from the user's watchlist."""
+    user_id = _require_user(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    ticker = ticker.strip().upper()
+    if not ticker or not _valid_ticker(ticker):
+        return JSONResponse({"error": "Invalid ticker"}, status_code=400)
+    ok = await asyncio.to_thread(supabase_cache.remove_from_watchlist, user_id, ticker)
+    if not ok:
+        return JSONResponse({"error": "Failed to remove"}, status_code=500)
+    return JSONResponse({"ok": True, "ticker": ticker})
+
+
+@app.get("/api/watchlist", response_class=JSONResponse)
+async def api_watchlist_list(request: Request):
+    """Return the user's full watchlist with enrichment data."""
+    user_id = _require_user(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    watchlist = await asyncio.to_thread(supabase_cache.get_user_watchlist, user_id)
+    if not watchlist:
+        return JSONResponse({"tickers": [], "signals": {}})
+
+    tickers = [w["ticker"] for w in watchlist]
+
+    # Enrich with recent notifications (last 7 days) for watched tickers
+    signals: dict[str, list[dict]] = {t: [] for t in tickers}
+    try:
+        all_notifs = await asyncio.to_thread(
+            supabase_cache.get_recent_notifications, 200
+        )
+        for n in all_notifs:
+            meta = n.get("metadata") or {}
+            nticker = (meta.get("ticker") or "").upper()
+            if nticker in signals:
+                signals[nticker].append({
+                    "type": n.get("type"),
+                    "title": n.get("title"),
+                    "message": n.get("message"),
+                    "link": n.get("link"),
+                    "created_at": n.get("created_at"),
+                })
+        # Keep only last 3 per ticker
+        for t in signals:
+            signals[t] = signals[t][:3]
+    except Exception:
+        pass  # Enrichment is best-effort
+
+    return JSONResponse({
+        "tickers": [
+            {"ticker": w["ticker"], "added_at": w["added_at"]}
+            for w in watchlist
+        ],
+        "signals": signals,
+    })
+
+
+@app.get("/api/watchlist/check/{ticker}", response_class=JSONResponse)
+async def api_watchlist_check(request: Request, ticker: str):
+    """Check if a ticker is on the user's watchlist."""
+    user_id = _require_user(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    ticker = ticker.strip().upper()
+    watched = await asyncio.to_thread(
+        supabase_cache.is_ticker_watched, user_id, ticker
+    )
+    return JSONResponse({"watched": watched})
+
+
+@app.get("/api/watchlist/preferences", response_class=JSONResponse)
+async def api_watchlist_prefs_get(request: Request):
+    """Get the user's notification preferences."""
+    user_id = _require_user(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    prefs = await asyncio.to_thread(
+        supabase_cache.get_notification_preferences, user_id
+    )
+    return JSONResponse({"preferences": prefs})
+
+
+@app.put("/api/watchlist/preferences", response_class=JSONResponse)
+async def api_watchlist_prefs_update(request: Request):
+    """Update the user's notification preferences (partial update)."""
+    user_id = _require_user(request)
+    if not user_id:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    # Allowlist of updatable fields
+    allowed = {
+        "notify_superinvestor_activity", "notify_insider_trading",
+        "notify_congress_trading", "notify_options_activity",
+        "notify_convergence_signals", "insider_min_value",
+        "insider_title_filter", "digest_enabled", "digest_time",
+        "digest_timezone", "realtime_email_enabled",
+        "telegram_enabled", "telegram_chat_id",
+    }
+    prefs = {k: v for k, v in body.items() if k in allowed}
+    if not prefs:
+        return JSONResponse({"error": "No valid fields"}, status_code=400)
+
+    ok = await asyncio.to_thread(
+        supabase_cache.upsert_notification_preferences, user_id, prefs
+    )
+    if not ok:
+        return JSONResponse({"error": "Failed to save"}, status_code=500)
+    return JSONResponse({"ok": True})
+
+
+@app.get("/watchlist", response_class=HTMLResponse)
+async def watchlist_page(request: Request):
+    """Watchlist dashboard page."""
+    return templates.TemplateResponse("watchlist.html", {"request": request})
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Admin panel (private — returns 404 for non-admin users)
+# ═══════════════════════════════════════════════════════════════════════
+
+# In-memory admin check cache (avoids DB hit on every admin page load)
+_admin_cache: dict[str, tuple[float, bool]] = {}
+_ADMIN_CACHE_TTL = 300  # 5 minutes
+
+
+def _check_admin(user_id: str) -> bool:
+    """Return True if user_id is in admin_users table (cached)."""
+    now = time_module.monotonic()
+    cached = _admin_cache.get(user_id)
+    if cached and (now - cached[0]) < _ADMIN_CACHE_TTL:
+        return cached[1]
+    result = supabase_cache.is_admin_user(user_id)
+    # Don't cache connection failures (None) — only cache definitive True/False
+    if result is None:
+        return False
+    _admin_cache[user_id] = (now, result)
+    return result
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request):
+    """Admin dashboard — returns 404 for non-admin users."""
+    if not request.state.user:
+        raise HTTPException(status_code=404)
+    user_id = request.state.user.get("sub", "")
+    is_admin = await asyncio.to_thread(_check_admin, user_id)
+    if not is_admin:
+        raise HTTPException(status_code=404)
+
+    # Fetch all admin data in parallel
+    summary, leaderboard, recent, prefs_stats, users, digest = await asyncio.gather(
+        asyncio.to_thread(supabase_cache.admin_watchlist_summary),
+        asyncio.to_thread(supabase_cache.admin_watchlist_leaderboard, 50),
+        asyncio.to_thread(supabase_cache.admin_recent_hearts, 100),
+        asyncio.to_thread(supabase_cache.admin_notification_prefs_stats),
+        asyncio.to_thread(supabase_cache.admin_user_list),
+        asyncio.to_thread(supabase_cache.admin_digest_stats),
+    )
+
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "summary": summary,
+        "leaderboard": leaderboard,
+        "recent_hearts": recent,
+        "prefs_stats": prefs_stats,
+        "users": users,
+        "digest": digest,
+        "is_admin": True,
+    })
+
+
+@app.get("/admin/user/{user_id}", response_class=HTMLResponse)
+async def admin_user_detail_page(request: Request, user_id: str):
+    """Admin user detail view — returns 404 for non-admin users."""
+    if not request.state.user:
+        raise HTTPException(status_code=404)
+    admin_id = request.state.user.get("sub", "")
+    is_admin = await asyncio.to_thread(_check_admin, admin_id)
+    if not is_admin:
+        raise HTTPException(status_code=404)
+
+    detail = await asyncio.to_thread(supabase_cache.admin_user_detail, user_id)
+    if not detail:
+        raise HTTPException(status_code=404)
+
+    return templates.TemplateResponse("admin_user.html", {
+        "request": request,
+        "detail": detail,
+        "is_admin": True,
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════

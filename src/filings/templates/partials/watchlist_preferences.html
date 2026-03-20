@@ -1,0 +1,601 @@
+{# Watchlist Notification Preferences — inline settings panel #}
+<style>
+    .wlp-panel {
+        border-radius: 20px;
+        border: 1px solid var(--pp-glass-border, rgba(15, 23, 42, 0.08));
+        background: linear-gradient(160deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.7));
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+        overflow: hidden;
+    }
+
+    /* ── Panel header ── */
+    .wlp-header {
+        padding: 1.1em 1.5em 0.9em;
+        border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .wlp-header-left {
+        display: flex;
+        align-items: center;
+        gap: 0.6em;
+    }
+    .wlp-header-icon {
+        width: 34px;
+        height: 34px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, rgba(13, 148, 136, 0.12), rgba(13, 148, 136, 0.06));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #0d9488;
+        flex-shrink: 0;
+    }
+    .wlp-title {
+        font-weight: 700;
+        font-size: 1em;
+        margin: 0;
+        letter-spacing: -0.01em;
+    }
+    .wlp-title-sub {
+        font-size: 0.75em;
+        color: rgba(15, 23, 42, 0.45);
+        font-weight: 500;
+        margin-top: 0.1em;
+    }
+
+    /* ── Grid layout for sections ── */
+    .wlp-body {
+        display: grid;
+        grid-template-columns: 0.9fr 1.1fr;
+        gap: 0;
+    }
+    .wlp-col {
+        padding: 1.1em 1.5em;
+    }
+    .wlp-col:first-child {
+        border-right: 1px solid rgba(15, 23, 42, 0.06);
+    }
+    .wlp-col-full {
+        grid-column: 1 / -1;
+        padding: 0.9em 1.5em 1.1em;
+        border-top: 1px solid rgba(15, 23, 42, 0.06);
+    }
+
+    /* ── Section labels ── */
+    .wlp-section { margin-bottom: 0.6em; }
+    .wlp-section:last-child { margin-bottom: 0; }
+    .wlp-section-label {
+        font-size: 0.68em;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: rgba(15, 23, 42, 0.4);
+        margin-bottom: 0.7em;
+        display: flex;
+        align-items: center;
+        gap: 0.4em;
+    }
+    .wlp-section-label svg { opacity: 0.5; }
+
+    /* ── Toggle rows ── */
+    .wlp-toggles {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+    .wlp-toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.8em;
+        padding: 0.6em 0.65em;
+        border-radius: 10px;
+        transition: background 0.12s;
+    }
+    .wlp-toggle-row:hover {
+        background: rgba(13, 148, 136, 0.04);
+    }
+    .wlp-toggle-info { flex: 1; min-width: 0; }
+    .wlp-toggle-label {
+        font-size: 0.84em;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.85);
+        line-height: 1.2;
+    }
+    .wlp-toggle-sub {
+        font-size: 0.7em;
+        color: rgba(15, 23, 42, 0.4);
+        font-weight: 500;
+        margin-top: 0.15em;
+    }
+
+    /* ── Toggle switch — full Pico CSS override ── */
+    .wlp-switch {
+        position: relative;
+        width: 42px !important;
+        min-width: 42px !important;
+        height: 24px !important;
+        flex-shrink: 0;
+        display: inline-block !important;
+        cursor: pointer;
+    }
+    .wlp-panel input[type="checkbox"].wlp-cb {
+        /* Hide the native/Pico checkbox completely */
+        position: absolute !important;
+        width: 1px !important;
+        height: 1px !important;
+        padding: 0 !important;
+        margin: -1px !important;
+        overflow: hidden !important;
+        clip: rect(0, 0, 0, 0) !important;
+        white-space: nowrap !important;
+        border: 0 !important;
+        -webkit-appearance: none !important;
+        -moz-appearance: none !important;
+        appearance: none !important;
+        background: none !important;
+        background-image: none !important;
+        box-shadow: none !important;
+        outline: none !important;
+    }
+    .wlp-slider {
+        position: absolute;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.18);
+        border-radius: 24px;
+        cursor: pointer;
+        transition: background 0.25s ease;
+        pointer-events: none;
+    }
+    .wlp-slider::before {
+        content: "";
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        left: 3px;
+        top: 3px;
+        background: #fff;
+        border-radius: 50%;
+        transition: transform 0.25s ease;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.22);
+    }
+    .wlp-panel input[type="checkbox"].wlp-cb:checked + .wlp-slider {
+        background: linear-gradient(135deg, #0d9488, #14b8a6) !important;
+    }
+    .wlp-panel input[type="checkbox"].wlp-cb:checked + .wlp-slider::before {
+        transform: translateX(18px);
+    }
+
+    /* ── Select dropdowns — full Pico CSS reset ── */
+    .wlp-panel select.wlp-select {
+        font-size: 0.82em !important;
+        font-weight: 500 !important;
+        font-family: inherit !important;
+        padding: 0.5em 2.2em 0.5em 0.75em !important;
+        border-radius: 8px !important;
+        border: 1px solid rgba(15, 23, 42, 0.14) !important;
+        background-color: #fff !important;
+        color: rgba(15, 23, 42, 0.8) !important;
+        cursor: pointer;
+        transition: border-color 0.15s;
+        -webkit-appearance: none !important;
+        -moz-appearance: none !important;
+        appearance: none !important;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 0.6em center !important;
+        background-size: 12px !important;
+        margin: 0 !important;
+        margin-bottom: 0 !important;
+        line-height: 1.3 !important;
+        min-width: 0;
+        max-width: 100%;
+        box-shadow: none !important;
+        outline-offset: 0;
+        height: auto !important;
+        /* Pico sets a large padding and --pico colors — override all */
+        --pico-form-element-background-color: #fff;
+        --pico-form-element-border-color: rgba(15, 23, 42, 0.14);
+        --pico-form-element-color: rgba(15, 23, 42, 0.8);
+    }
+    .wlp-panel select.wlp-select:focus {
+        outline: none !important;
+        border-color: #0d9488 !important;
+        box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.12) !important;
+        --pico-form-element-focus-color: #0d9488;
+    }
+
+    /* ── Inline row with label + select ── */
+    .wlp-row-inline {
+        display: flex;
+        align-items: center;
+        gap: 0.7em;
+        padding: 0.5em 0.65em;
+        border-radius: 10px;
+        transition: background 0.12s;
+    }
+    .wlp-row-inline:hover {
+        background: rgba(13, 148, 136, 0.04);
+    }
+    .wlp-row-inline label {
+        font-size: 0.84em;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.85);
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin: 0;
+        padding: 0;
+    }
+    .wlp-row-inline .wlp-select {
+        flex: 1;
+        min-width: 0;
+    }
+    /* Time + timezone row: give each select roughly equal space */
+    .wlp-row-time {
+        display: flex;
+        align-items: center;
+        gap: 0.5em;
+        padding: 0.5em 0.65em;
+        border-radius: 10px;
+        transition: background 0.12s;
+    }
+    .wlp-row-time:hover {
+        background: rgba(13, 148, 136, 0.04);
+    }
+    .wlp-row-time label {
+        font-size: 0.84em;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.85);
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin: 0;
+        padding: 0;
+    }
+    .wlp-row-time .wlp-select-time {
+        flex: 1.1;
+        min-width: 100px;
+    }
+    .wlp-row-time .wlp-select-tz {
+        flex: 1;
+        min-width: 90px;
+    }
+
+    /* ── Locked / Coming Soon ── */
+    .wlp-locked {
+        opacity: 0.45;
+        pointer-events: none;
+        filter: grayscale(0.3);
+    }
+    .wlp-soon-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 0.58em;
+        font-weight: 800;
+        padding: 0.15em 0.45em;
+        border-radius: 4px;
+        background: linear-gradient(135deg, #64748b, #475569);
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-left: 0.4em;
+        vertical-align: middle;
+        line-height: 1.4;
+    }
+    .wlp-pro-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 0.58em;
+        font-weight: 800;
+        padding: 0.15em 0.45em;
+        border-radius: 4px;
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        color: #fff;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-left: 0.4em;
+        vertical-align: middle;
+        line-height: 1.4;
+    }
+
+    /* ── Footer with save button ── */
+    .wlp-footer {
+        padding: 0.9em 1.5em 1.1em;
+        border-top: 1px solid rgba(15, 23, 42, 0.06);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .wlp-save-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4em;
+        padding: 0.6em 1.5em;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #0d9488, #0f766e);
+        color: #fff;
+        border: none;
+        cursor: pointer;
+        font-weight: 700;
+        font-size: 0.84em;
+        letter-spacing: 0.01em;
+        transition: all 0.15s;
+        box-shadow: 0 2px 8px rgba(13, 148, 136, 0.2);
+    }
+    .wlp-save-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(13, 148, 136, 0.28);
+    }
+    .wlp-save-btn:active {
+        transform: translateY(0);
+    }
+    .wlp-save-status {
+        font-size: 0.8em;
+        font-weight: 600;
+        color: rgba(15, 23, 42, 0.5);
+        transition: color 0.2s;
+    }
+    .wlp-save-status.success { color: #0d9488; }
+    .wlp-save-status.error { color: #ef4444; }
+
+    /* ── Dark mode ── */
+    :root[data-theme="dark"] .wlp-panel {
+        background: linear-gradient(165deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.72));
+        border-color: rgba(148, 163, 184, 0.12);
+        box-shadow: 0 14px 32px rgba(2, 6, 23, 0.35);
+    }
+    :root[data-theme="dark"] .wlp-header { border-color: rgba(226, 232, 240, 0.06); }
+    :root[data-theme="dark"] .wlp-header-icon {
+        background: linear-gradient(135deg, rgba(45, 212, 191, 0.15), rgba(45, 212, 191, 0.06));
+        color: #5eead4;
+    }
+    :root[data-theme="dark"] .wlp-title { color: #e2e8f0; }
+    :root[data-theme="dark"] .wlp-title-sub { color: rgba(226, 232, 240, 0.35); }
+    :root[data-theme="dark"] .wlp-col:first-child { border-color: rgba(226, 232, 240, 0.06); }
+    :root[data-theme="dark"] .wlp-col-full { border-color: rgba(226, 232, 240, 0.06); }
+    :root[data-theme="dark"] .wlp-section-label { color: rgba(226, 232, 240, 0.35); }
+    :root[data-theme="dark"] .wlp-toggle-label { color: rgba(226, 232, 240, 0.85); }
+    :root[data-theme="dark"] .wlp-toggle-sub { color: rgba(226, 232, 240, 0.35); }
+    :root[data-theme="dark"] .wlp-toggle-row:hover { background: rgba(45, 212, 191, 0.04); }
+    :root[data-theme="dark"] .wlp-row-inline:hover { background: rgba(45, 212, 191, 0.04); }
+    :root[data-theme="dark"] .wlp-row-time:hover { background: rgba(45, 212, 191, 0.04); }
+    :root[data-theme="dark"] .wlp-row-inline label { color: rgba(226, 232, 240, 0.85); }
+    :root[data-theme="dark"] .wlp-row-time label { color: rgba(226, 232, 240, 0.85); }
+    :root[data-theme="dark"] .wlp-slider { background: rgba(226, 232, 240, 0.15); }
+    :root[data-theme="dark"] .wlp-slider::before { background: #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+    :root[data-theme="dark"] .wlp-panel input[type="checkbox"].wlp-cb:checked + .wlp-slider {
+        background: linear-gradient(135deg, #14b8a6, #2dd4bf) !important;
+    }
+    :root[data-theme="dark"] .wlp-panel select.wlp-select {
+        background-color: rgba(15, 23, 42, 0.65) !important;
+        border-color: rgba(226, 232, 240, 0.12) !important;
+        color: #e2e8f0 !important;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") !important;
+        background-repeat: no-repeat !important;
+        background-position: right 0.6em center !important;
+        background-size: 12px !important;
+        --pico-form-element-background-color: rgba(15, 23, 42, 0.65);
+        --pico-form-element-border-color: rgba(226, 232, 240, 0.12);
+        --pico-form-element-color: #e2e8f0;
+    }
+    :root[data-theme="dark"] .wlp-panel select.wlp-select:focus {
+        border-color: #5eead4 !important;
+        box-shadow: 0 0 0 2px rgba(45, 212, 191, 0.12) !important;
+    }
+    :root[data-theme="dark"] .wlp-footer { border-color: rgba(226, 232, 240, 0.06); }
+    :root[data-theme="dark"] .wlp-save-btn {
+        background: linear-gradient(135deg, #14b8a6, #0d9488);
+        box-shadow: 0 2px 8px rgba(20, 184, 166, 0.25);
+    }
+    :root[data-theme="dark"] .wlp-save-status { color: rgba(226, 232, 240, 0.4); }
+    :root[data-theme="dark"] .wlp-save-status.success { color: #5eead4; }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+        .wlp-body {
+            grid-template-columns: 1fr;
+        }
+        .wlp-col:first-child {
+            border-right: none;
+            border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+        }
+        :root[data-theme="dark"] .wlp-col:first-child {
+            border-bottom-color: rgba(226, 232, 240, 0.06);
+        }
+    }
+</style>
+
+<div class="wlp-panel" id="wlp-panel">
+
+    {# ── Header ── #}
+    <div class="wlp-header">
+        <div class="wlp-header-left">
+            <div class="wlp-header-icon">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            </div>
+            <div>
+                <div class="wlp-title">Notification Preferences</div>
+                <div class="wlp-title-sub">Choose what signals you want to track</div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Two-column body ── #}
+    <div class="wlp-body">
+
+        {# ── Left column: Signal types ── #}
+        <div class="wlp-col">
+            <div class="wlp-section">
+                <div class="wlp-section-label">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                    Signal Types
+                </div>
+                <div class="wlp-toggles">
+                    <div class="wlp-toggle-row">
+                        <div class="wlp-toggle-info">
+                            <div class="wlp-toggle-label">Superinvestor Activity</div>
+                            <div class="wlp-toggle-sub">13F filing changes from tracked funds</div>
+                        </div>
+                        <label class="wlp-switch"><input type="checkbox" class="wlp-cb" id="wlp-superinvestor" checked><span class="wlp-slider"></span></label>
+                    </div>
+                    <div class="wlp-toggle-row">
+                        <div class="wlp-toggle-info">
+                            <div class="wlp-toggle-label">Insider Trading</div>
+                            <div class="wlp-toggle-sub">SEC Form 4 filings from company insiders</div>
+                        </div>
+                        <label class="wlp-switch"><input type="checkbox" class="wlp-cb" id="wlp-insider" checked><span class="wlp-slider"></span></label>
+                    </div>
+                    <div class="wlp-toggle-row">
+                        <div class="wlp-toggle-info">
+                            <div class="wlp-toggle-label">Congress Trading</div>
+                            <div class="wlp-toggle-sub">Congressional stock transactions</div>
+                        </div>
+                        <label class="wlp-switch"><input type="checkbox" class="wlp-cb" id="wlp-congress" checked><span class="wlp-slider"></span></label>
+                    </div>
+                    <div class="wlp-toggle-row">
+                        <div class="wlp-toggle-info">
+                            <div class="wlp-toggle-label">Options Activity</div>
+                            <div class="wlp-toggle-sub">Unusual options volume and flow</div>
+                        </div>
+                        <label class="wlp-switch"><input type="checkbox" class="wlp-cb" id="wlp-options"><span class="wlp-slider"></span></label>
+                    </div>
+                    <div class="wlp-toggle-row">
+                        <div class="wlp-toggle-info">
+                            <div class="wlp-toggle-label">Convergence Signals</div>
+                            <div class="wlp-toggle-sub">Multi-signal convergence alerts</div>
+                        </div>
+                        <label class="wlp-switch"><input type="checkbox" class="wlp-cb" id="wlp-convergence" checked><span class="wlp-slider"></span></label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {# ── Right column: Filters + Digest ── #}
+        <div class="wlp-col">
+            <div class="wlp-section">
+                <div class="wlp-section-label">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                    Insider Filters
+                </div>
+                <div class="wlp-row-inline">
+                    <label for="wlp-insider-min">Min value</label>
+                    <select id="wlp-insider-min" class="wlp-select">
+                        <option value="0">Any</option>
+                        <option value="50000">$50K+</option>
+                        <option value="100000" selected>$100K+</option>
+                        <option value="500000">$500K+</option>
+                        <option value="1000000">$1M+</option>
+                    </select>
+                </div>
+                <div class="wlp-row-inline">
+                    <label for="wlp-insider-title">Title filter</label>
+                    <select id="wlp-insider-title" class="wlp-select">
+                        <option value="all" selected>All insiders</option>
+                        <option value="ceo">CEO only</option>
+                        <option value="c_suite">C-Suite</option>
+                        <option value="director">Directors</option>
+                        <option value="10pct">10% Owners</option>
+                    </select>
+                </div>
+            </div>
+
+        </div>
+
+        {# ── Full-width: Coming Soon ── #}
+        <div class="wlp-col-full">
+            <div class="wlp-section">
+                <div class="wlp-section-label">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>
+                    Coming Soon
+                </div>
+                <div style="display:flex;gap:0.6em;flex-wrap:wrap;">
+                    <div class="wlp-toggle-row wlp-locked" style="flex:1;min-width:220px;">
+                        <div class="wlp-toggle-info">
+                            <div class="wlp-toggle-label">Daily Digest Email <span class="wlp-soon-badge">Soon</span></div>
+                            <div class="wlp-toggle-sub">Daily summary of all watchlist activity</div>
+                        </div>
+                        <label class="wlp-switch"><input type="checkbox" class="wlp-cb" disabled><span class="wlp-slider"></span></label>
+                    </div>
+                    <div class="wlp-toggle-row wlp-locked" style="flex:1;min-width:220px;">
+                        <div class="wlp-toggle-info">
+                            <div class="wlp-toggle-label">Real-time Email Alerts <span class="wlp-pro-badge">Pro</span></div>
+                            <div class="wlp-toggle-sub">Instant email when a signal fires</div>
+                        </div>
+                        <label class="wlp-switch"><input type="checkbox" class="wlp-cb" disabled><span class="wlp-slider"></span></label>
+                    </div>
+                    <div class="wlp-toggle-row wlp-locked" style="flex:1;min-width:220px;">
+                        <div class="wlp-toggle-info">
+                            <div class="wlp-toggle-label">Telegram Alerts <span class="wlp-pro-badge">Pro</span></div>
+                            <div class="wlp-toggle-sub">Push notifications via Telegram bot</div>
+                        </div>
+                        <label class="wlp-switch"><input type="checkbox" class="wlp-cb" disabled><span class="wlp-slider"></span></label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ── Footer ── #}
+    <div class="wlp-footer">
+        <button class="wlp-save-btn" onclick="ppSavePrefs()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Save Preferences
+        </button>
+        <span class="wlp-save-status" id="wlp-save-status"></span>
+    </div>
+</div>
+
+<script>
+(function() {
+    fetch('/api/watchlist/preferences')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var p = data.preferences;
+            if (!p) return;
+            document.getElementById('wlp-superinvestor').checked = p.notify_superinvestor_activity !== false;
+            document.getElementById('wlp-insider').checked = p.notify_insider_trading !== false;
+            document.getElementById('wlp-congress').checked = p.notify_congress_trading !== false;
+            document.getElementById('wlp-options').checked = !!p.notify_options_activity;
+            document.getElementById('wlp-convergence').checked = p.notify_convergence_signals !== false;
+            document.getElementById('wlp-insider-min').value = String(p.insider_min_value || 100000);
+            document.getElementById('wlp-insider-title').value = p.insider_title_filter || 'all';
+        })
+        .catch(function() {});
+
+    window.ppSavePrefs = function() {
+        var status = document.getElementById('wlp-save-status');
+        status.className = 'wlp-save-status';
+        status.textContent = 'Saving...';
+        var prefs = {
+            notify_superinvestor_activity: document.getElementById('wlp-superinvestor').checked,
+            notify_insider_trading: document.getElementById('wlp-insider').checked,
+            notify_congress_trading: document.getElementById('wlp-congress').checked,
+            notify_options_activity: document.getElementById('wlp-options').checked,
+            notify_convergence_signals: document.getElementById('wlp-convergence').checked,
+            insider_min_value: parseInt(document.getElementById('wlp-insider-min').value) || 100000,
+            insider_title_filter: document.getElementById('wlp-insider-title').value,
+        };
+        fetch('/api/watchlist/preferences', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(prefs),
+        })
+            .then(function(r) {
+                if (!r.ok) throw new Error(r.status);
+                status.className = 'wlp-save-status success';
+                status.textContent = 'Saved!';
+                setTimeout(function() { status.textContent = ''; status.className = 'wlp-save-status'; }, 2500);
+            })
+            .catch(function() {
+                status.className = 'wlp-save-status error';
+                status.textContent = 'Failed to save';
+                setTimeout(function() { status.textContent = ''; status.className = 'wlp-save-status'; }, 3000);
+            });
+    };
+})();
+</script>

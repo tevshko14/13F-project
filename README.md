@@ -74,8 +74,16 @@ Top nav: **Home** | **Retail** | **Funds** | **Insiders** | **Congress** | **Ear
 - **Fuzzy Ticker Search** - Fuse.js-powered autocomplete with ~8,000 NYSE/NASDAQ listings, weighted by superinvestor holdings and S&P 500 membership
 - **Fund Manager Search** - Search SEC EDGAR for any institutional investor by name
 
+### Watchlist & Notifications (`/watchlist`)
+- **Heart Button** - Click the heart on any stock page to add it to your watchlist (optimistic toggle, Clerk auth)
+- **Watchlist Dashboard** - View all watched stocks with recent signal enrichment (superinvestor, insider, congress activity)
+- **Notification Preferences** - Configure signal type toggles, insider trade minimum value, daily digest time/timezone
+- **Watchlist Filter on /notifications** - "My Watchlist" filter tab shows only notifications for watched tickers, with heart badges
+- **Daily Digest Email** - Personalized email with last 24h signals for your watchlist (Coming Soon — Resend integration built)
+- **Admin Panel** (`/admin`) - Owner-only dashboard: watchlist overview, notification prefs stats, user list, digest monitoring
+
 ### Stock Pages (8 Tabs)
-- **Overview** - Which superinvestors hold this stock, quarterly activity chart (Chart.js), star/watchlist button
+- **Overview** - Which superinvestors hold this stock, quarterly activity chart (Chart.js), heart/watchlist button
 - **Ownership** - Detailed holder list with position sizes and portfolio percentages
 - **Analyst Ratings** - Wall Street consensus with firm-level upgrades/downgrades (Finnhub + yfinance)
 - **Signals** - Unified alternative data tab combining sentiment, search interest, and web traffic:

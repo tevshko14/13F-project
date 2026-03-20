@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}User Detail — Admin — PaperPanda{% endblock %}
+{% block meta_description %}Admin user detail view{% endblock %}
+{% block extra_head_scripts %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+
+{% block content %}
+<style>
+    .adu-wrap { max-width: 900px; margin: 0 auto; padding: 1.5em 1em 3em; }
+    .adu-back { font-size: 0.8em; color: #0d9488; text-decoration: none; display: inline-flex; align-items: center; gap: 0.3em; margin-bottom: 1em; }
+    .adu-back:hover { text-decoration: underline; }
+    .adu-header { margin-bottom: 1.5em; }
+    .adu-header h1 { font-size: 1.2em; font-weight: 800; margin: 0 0 0.15em; }
+    .adu-header p { font-size: 0.78em; color: var(--pp-text-muted, #64748b); margin: 0; }
+    .adu-section { margin-bottom: 1.5em; }
+    .adu-section-title {
+        font-size: 0.72em; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.06em; color: var(--pp-text-muted, #64748b); margin-bottom: 0.6em;
+    }
+    .adu-table { width: 100%; border-collapse: collapse; font-size: 0.8em; }
+    .adu-table th {
+        text-align: left; padding: 0.5em 0.7em; font-weight: 700; font-size: 0.72em;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        color: var(--pp-text-muted, #64748b);
+        border-bottom: 1px solid var(--pp-border-light, rgba(15,23,42,0.08));
+    }
+    .adu-table td {
+        padding: 0.5em 0.7em;
+        border-bottom: 1px solid var(--pp-border-light, rgba(15,23,42,0.06));
+        color: var(--pp-text, #0f172a);
+    }
+    .adu-table .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.92em; }
+    .adu-table .muted { color: var(--pp-text-muted, #64748b); }
+    .adu-table .ticker-link { font-weight: 700; color: #0d9488; text-decoration: none; }
+    .adu-table .ticker-link:hover { text-decoration: underline; }
+    .adu-prefs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5em 1.5em; font-size: 0.82em; }
+    .adu-pref-row { display: flex; justify-content: space-between; padding: 0.4em 0; border-bottom: 1px solid var(--pp-border-light, rgba(15,23,42,0.04)); }
+    .adu-pref-label { color: var(--pp-text-muted, #64748b); font-weight: 500; }
+    .adu-pref-val { font-weight: 600; }
+    .adu-badge { display: inline-block; font-size: 0.72em; font-weight: 700; padding: 0.15em 0.5em; border-radius: 4px; }
+    .adu-badge-on { background: rgba(13,148,136,0.12); color: #0d9488; }
+    .adu-badge-off { background: rgba(100,116,139,0.1); color: #64748b; }
+    .adu-badge-sent { background: rgba(13,148,136,0.12); color: #0d9488; }
+    .adu-badge-failed { background: rgba(239,68,68,0.12); color: #ef4444; }
+    .adu-badge-skipped { background: rgba(234,179,8,0.12); color: #b45309; }
+    @media (max-width: 600px) { .adu-prefs-grid { grid-template-columns: 1fr; } }
+</style>
+
+<div class="adu-wrap">
+    <a href="/admin" class="adu-back">&larr; Back to Admin</a>
+
+    <div class="adu-header">
+        <h1>{{ detail.email or detail.display_name or 'Unknown User' }}</h1>
+        <p>ID: {{ detail.user_id }} &middot; Joined: {{ detail.joined[:10] if detail.joined else 'Unknown' }}</p>
+    </div>
+
+    {# ── Watchlist ── #}
+    <div class="adu-section">
+        <div class="adu-section-title">Watchlist ({{ detail.watchlist|length }} stocks)</div>
+        <div style="overflow-x:auto;">
+            <table class="adu-table">
+                <thead><tr><th>Ticker</th><th>Added At</th></tr></thead>
+                <tbody>
+                    {% for w in detail.watchlist %}
+                    <tr>
+                        <td><a href="/stock/{{ w.ticker }}" class="ticker-link">{{ w.ticker }}</a></td>
+                        <td class="muted mono">{{ w.added_at[:19]|replace('T', ' ') if w.added_at else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not detail.watchlist %}
+                    <tr><td colspan="2" class="muted" style="text-align:center;padding:1.5em;">Empty watchlist</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ── Notification Preferences ── #}
+    <div class="adu-section">
+        <div class="adu-section-title">Notification Preferences</div>
+        {% if detail.preferences %}
+        {% set p = detail.preferences %}
+        <div class="adu-prefs-grid">
+            <div class="adu-pref-row">
+                <span class="adu-pref-label">Superinvestor</span>
+                <span class="adu-pref-val">{% if p.notify_superinvestor_activity %}<span class="adu-badge adu-badge-on">ON</span>{% else %}<span class="adu-badge adu-badge-off">OFF</span>{% endif %}</span>
+            </div>
+            <div class="adu-pref-row">
+                <span class="adu-pref-label">Insider Trading</span>
+                <span class="adu-pref-val">{% if p.notify_insider_trading %}<span class="adu-badge adu-badge-on">ON</span>{% else %}<span class="adu-badge adu-badge-off">OFF</span>{% endif %}</span>
+            </div>
+            <div class="adu-pref-row">
+                <span class="adu-pref-label">Congress Trading</span>
+                <span class="adu-pref-val">{% if p.notify_congress_trading %}<span class="adu-badge adu-badge-on">ON</span>{% else %}<span class="adu-badge adu-badge-off">OFF</span>{% endif %}</span>
+            </div>
+            <div class="adu-pref-row">
+                <span class="adu-pref-label">Options Activity</span>
+                <span class="adu-pref-val">{% if p.notify_options_activity %}<span class="adu-badge adu-badge-on">ON</span>{% else %}<span class="adu-badge adu-badge-off">OFF</span>{% endif %}</span>
+            </div>
+            <div class="adu-pref-row">
+                <span class="adu-pref-label">Convergence</span>
+                <span class="adu-pref-val">{% if p.notify_convergence_signals %}<span class="adu-badge adu-badge-on">ON</span>{% else %}<span class="adu-badge adu-badge-off">OFF</span>{% endif %}</span>
+            </div>
+            <div class="adu-pref-row">
+                <span class="adu-pref-label">Insider Min Value</span>
+                <span class="adu-pref-val">${{ '{:,}'.format(p.insider_min_value or 100000) }}</span>
+            </div>
+            <div class="adu-pref-row">
+                <span class="adu-pref-label">Title Filter</span>
+                <span class="adu-pref-val">{{ p.insider_title_filter or 'all' }}</span>
+            </div>
+            <div class="adu-pref-row">
+                <span class="adu-pref-label">Daily Digest</span>
+                <span class="adu-pref-val">{% if p.digest_enabled %}<span class="adu-badge adu-badge-on">{{ (p.digest_time or '18:00')[:5] }} {{ p.digest_timezone or 'ET' }}</span>{% else %}<span class="adu-badge adu-badge-off">OFF</span>{% endif %}</span>
+            </div>
+        </div>
+        {% else %}
+        <p style="font-size:0.82em;color:var(--pp-text-muted);">No preferences configured (using defaults)</p>
+        {% endif %}
+    </div>
+
+    {# ── Digest History ── #}
+    <div class="adu-section">
+        <div class="adu-section-title">Digest History ({{ detail.digest_log|length }} entries)</div>
+        <div style="overflow-x:auto;">
+            <table class="adu-table">
+                <thead><tr><th>Sent At</th><th>Status</th><th>Events</th><th>Date</th></tr></thead>
+                <tbody>
+                    {% for d in detail.digest_log %}
+                    <tr{% if d.status == 'failed' %} style="background:rgba(239,68,68,0.06);"{% endif %}>
+                        <td class="muted mono">{{ d.sent_at[:19]|replace('T', ' ') if d.sent_at else '—' }}</td>
+                        <td>
+                            {% if d.status == 'sent' %}<span class="adu-badge adu-badge-sent">Sent</span>
+                            {% elif d.status == 'failed' %}<span class="adu-badge adu-badge-failed">Failed</span>
+                            {% elif 'skipped' in d.status %}<span class="adu-badge adu-badge-skipped">Skipped</span>
+                            {% else %}<span class="adu-badge">{{ d.status }}</span>{% endif %}
+                        </td>
+                        <td>{{ d.event_count or 0 }}</td>
+                        <td class="muted mono">{{ d.digest_date or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not detail.digest_log %}
+                    <tr><td colspan="4" class="muted" style="text-align:center;padding:1.5em;">No digests sent yet</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

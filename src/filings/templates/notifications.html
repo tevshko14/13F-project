@@ -310,9 +310,16 @@
   {% set type_labels = {"13f_change": "📊 13F Filings", "youtube": "🎬 YouTube", "reddit_velocity": "🔥 Reddit", "congress_trade": "🏛️ Congress", "insider_trade": "📈 Insider Trades", "feature_release": "🐼 New Features"} %}
   {% set type_css = {"13f_change": "13f", "youtube": "youtube", "reddit_velocity": "reddit", "congress_trade": "congress", "insider_trade": "insider", "feature_release": "feature"} %}
   <a href="/notifications"
-     class="notif-chip{% if not active_types %} notif-chip--active{% endif %}">
+     class="notif-chip{% if not active_types and not is_watchlist_filter %} notif-chip--active{% endif %}">
     All
   </a>
+  {% if watchlist_tickers %}
+  <a href="/notifications?types=watchlist"
+     class="notif-chip{% if is_watchlist_filter %} notif-chip--active{% endif %}"
+     style="{% if is_watchlist_filter %}border-color:#ef4444;background:#ef4444;{% else %}--chip-color:#ef4444;{% endif %}">
+    &#x2764;&#xFE0F; My Watchlist
+  </a>
+  {% endif %}
   {% for t in all_types %}
     <a href="/notifications?types={{ t }}"
        class="notif-chip notif-chip--{{ type_css[t] }}{% if active_types and t in active_types %} notif-chip--active{% endif %}">
@@ -356,6 +363,9 @@
           <span class="notif-page-type">{{ n.type }}</span>
         {% endif %}
         <span>{{ n.time_ago }}</span>
+        {% if watchlist_tickers and n.metadata and n.metadata.ticker and n.metadata.ticker|upper in watchlist_tickers %}
+        <span style="color:#ef4444;font-size:1.15em;line-height:1;" title="On your watchlist">&#x2764;</span>
+        {% endif %}
       </div>
     </div>
   </a>

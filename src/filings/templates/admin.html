@@ -1,0 +1,458 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — PaperPanda{% endblock %}
+{% block meta_description %}Internal admin dashboard{% endblock %}
+{% block extra_head_scripts %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+
+{% block content %}
+<style>
+    .adm-wrap { max-width: 1100px; margin: 0 auto; padding: 1.5em 1em 3em; }
+    .adm-header { margin-bottom: 1.5em; }
+    .adm-header h1 { font-size: 1.4em; font-weight: 800; margin: 0 0 0.2em; }
+    .adm-header p { font-size: 0.82em; color: var(--pp-text-muted, #64748b); margin: 0; }
+
+    /* Stat cards */
+    .adm-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.8em; margin-bottom: 1.5em; }
+    .adm-stat {
+        padding: 1em;
+        border-radius: 12px;
+        border: 1px solid var(--pp-border-light, rgba(15,23,42,0.08));
+        background: var(--pp-overlay-5, rgba(255,255,255,0.6));
+    }
+    .adm-stat-value { font-size: 1.6em; font-weight: 800; color: var(--pp-text, #0f172a); line-height: 1.2; }
+    .adm-stat-label { font-size: 0.7em; font-weight: 600; color: var(--pp-text-muted, #64748b); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.3em; }
+
+    /* Tabs */
+    .adm-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--pp-border-light, rgba(15,23,42,0.08)); margin-bottom: 1.2em; overflow-x: auto; }
+    .adm-tab {
+        padding: 0.7em 1.2em;
+        font-size: 0.82em;
+        font-weight: 600;
+        color: var(--pp-text-muted, #64748b);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        white-space: nowrap;
+        background: none;
+        border-top: none;
+        border-left: none;
+        border-right: none;
+    }
+    .adm-tab:hover { color: var(--pp-text, #0f172a); }
+    .adm-tab.active { color: #0d9488; border-bottom-color: #0d9488; }
+    .adm-panel { display: none; }
+    .adm-panel.active { display: block; }
+
+    /* Tables */
+    .adm-table-wrap { overflow-x: auto; margin-bottom: 1.2em; }
+    .adm-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8em;
+    }
+    .adm-table th {
+        text-align: left;
+        padding: 0.6em 0.8em;
+        font-weight: 700;
+        font-size: 0.72em;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--pp-text-muted, #64748b);
+        border-bottom: 1px solid var(--pp-border-light, rgba(15,23,42,0.08));
+        white-space: nowrap;
+    }
+    .adm-table td {
+        padding: 0.55em 0.8em;
+        border-bottom: 1px solid var(--pp-border-light, rgba(15,23,42,0.06));
+        color: var(--pp-text, #0f172a);
+        vertical-align: middle;
+    }
+    .adm-table tr:hover td { background: var(--pp-overlay-5, rgba(13,148,136,0.03)); }
+    .adm-table .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.92em; }
+    .adm-table .muted { color: var(--pp-text-muted, #64748b); }
+    .adm-table .ticker-link { font-weight: 700; color: #0d9488; text-decoration: none; }
+    .adm-table .ticker-link:hover { text-decoration: underline; }
+
+    /* Section titles */
+    .adm-section-title {
+        font-size: 0.78em;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--pp-text-muted, #64748b);
+        margin: 1.2em 0 0.6em;
+    }
+
+    /* Status badges */
+    .adm-badge {
+        display: inline-block;
+        font-size: 0.72em;
+        font-weight: 700;
+        padding: 0.15em 0.5em;
+        border-radius: 4px;
+    }
+    .adm-badge-sent { background: rgba(13,148,136,0.12); color: #0d9488; }
+    .adm-badge-failed { background: rgba(239,68,68,0.12); color: #ef4444; }
+    .adm-badge-skipped { background: rgba(234,179,8,0.12); color: #b45309; }
+    .adm-badge-on { background: rgba(13,148,136,0.12); color: #0d9488; }
+    .adm-badge-off { background: rgba(100,116,139,0.1); color: #64748b; }
+
+    /* Bar chart (CSS only) */
+    .adm-bar-wrap { display: flex; align-items: center; gap: 0.5em; }
+    .adm-bar { height: 8px; border-radius: 4px; background: linear-gradient(90deg, #0d9488, #14b8a6); min-width: 2px; }
+    .adm-bar-label { font-size: 0.78em; color: var(--pp-text-muted, #64748b); white-space: nowrap; }
+
+    /* Pct bar */
+    .adm-pct-bar { width: 60px; height: 6px; border-radius: 3px; background: var(--pp-border-light, rgba(15,23,42,0.08)); display: inline-block; vertical-align: middle; margin-right: 0.4em; }
+    .adm-pct-fill { height: 100%; border-radius: 3px; background: #0d9488; }
+
+    /* View button */
+    .adm-view-btn {
+        font-size: 0.72em;
+        font-weight: 600;
+        padding: 0.3em 0.7em;
+        border-radius: 6px;
+        background: rgba(13,148,136,0.1);
+        color: #0d9488;
+        text-decoration: none;
+        border: none;
+        cursor: pointer;
+    }
+    .adm-view-btn:hover { background: rgba(13,148,136,0.18); }
+
+    /* Refresh button */
+    .adm-refresh {
+        font-size: 0.78em;
+        font-weight: 600;
+        padding: 0.4em 0.8em;
+        border-radius: 8px;
+        background: var(--pp-overlay-5, rgba(15,23,42,0.05));
+        color: var(--pp-text-muted, #64748b);
+        border: 1px solid var(--pp-border-light, rgba(15,23,42,0.08));
+        cursor: pointer;
+    }
+    .adm-refresh:hover { background: var(--pp-overlay-10, rgba(15,23,42,0.08)); }
+
+    /* Dark mode */
+    :root[data-theme="dark"] .adm-stat {
+        background: rgba(15,23,42,0.5);
+        border-color: rgba(148,163,184,0.1);
+    }
+    :root[data-theme="dark"] .adm-table tr:hover td { background: rgba(45,212,191,0.04); }
+</style>
+
+<div class="adm-wrap">
+    <div class="adm-header">
+        <h1>Admin Dashboard</h1>
+        <p>Watchlist & notification monitoring — <a href="#" class="adm-refresh" onclick="location.reload()">Refresh</a></p>
+    </div>
+
+    {# ── Summary stat cards ── #}
+    <div class="adm-stats">
+        <div class="adm-stat">
+            <div class="adm-stat-value">{{ summary.total_users or 0 }}</div>
+            <div class="adm-stat-label">Users with watchlists</div>
+        </div>
+        <div class="adm-stat">
+            <div class="adm-stat-value">{{ summary.total_hearts or 0 }}</div>
+            <div class="adm-stat-label">Total hearts</div>
+        </div>
+        <div class="adm-stat">
+            <div class="adm-stat-value">{{ summary.avg_per_user or 0 }}</div>
+            <div class="adm-stat-label">Avg stocks/user</div>
+        </div>
+        <div class="adm-stat">
+            <div class="adm-stat-value">{{ summary.hearts_today or 0 }}</div>
+            <div class="adm-stat-label">Hearts today</div>
+        </div>
+        <div class="adm-stat">
+            {% if summary.most_active_user %}
+            <div class="adm-stat-value">{{ summary.most_active_user.count }}</div>
+            <div class="adm-stat-label">Most active: {{ summary.most_active_user.email or summary.most_active_user.user_id[:12] }}</div>
+            {% else %}
+            <div class="adm-stat-value">—</div>
+            <div class="adm-stat-label">Most active user</div>
+            {% endif %}
+        </div>
+    </div>
+
+    {# ── Tabs ── #}
+    <div class="adm-tabs">
+        <button class="adm-tab active" onclick="admTab('watchlist', this)">Watchlist</button>
+        <button class="adm-tab" onclick="admTab('prefs', this)">Notification Prefs</button>
+        <button class="adm-tab" onclick="admTab('users', this)">Users</button>
+        <button class="adm-tab" onclick="admTab('digest', this)">Digest Monitor</button>
+    </div>
+
+    {# ═══════ Tab 1: Watchlist Overview ═══════ #}
+    <div class="adm-panel active" id="adm-watchlist">
+        <div class="adm-section-title">Most Hearted Stocks</div>
+        <div class="adm-table-wrap">
+            <table class="adm-table">
+                <thead>
+                    <tr><th>#</th><th>Ticker</th><th>Hearts</th><th></th><th>First Hearted</th><th>Most Recent</th></tr>
+                </thead>
+                <tbody>
+                    {% for s in leaderboard %}
+                    <tr>
+                        <td class="muted">{{ s.rank }}</td>
+                        <td><a href="/stock/{{ s.ticker }}" class="ticker-link">{{ s.ticker }}</a></td>
+                        <td><strong>{{ s.heart_count }}</strong></td>
+                        <td>
+                            {% set max_hearts = leaderboard[0].heart_count if leaderboard else 1 %}
+                            <div class="adm-bar" style="width: {{ (s.heart_count / max_hearts * 80)|int }}px;"></div>
+                        </td>
+                        <td class="muted mono">{{ s.first_hearted[:10] if s.first_hearted else '—' }}</td>
+                        <td class="muted mono">{{ s.most_recent[:10] if s.most_recent else '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not leaderboard %}
+                    <tr><td colspan="6" class="muted" style="text-align:center;padding:2em;">No watchlist data yet</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="adm-section-title">Recent Hearts (Last 100)</div>
+        <div class="adm-table-wrap">
+            <table class="adm-table">
+                <thead>
+                    <tr><th>Time</th><th>User</th><th>Ticker</th></tr>
+                </thead>
+                <tbody>
+                    {% for h in recent_hearts %}
+                    <tr>
+                        <td class="muted mono">{{ h.added_at[:19]|replace('T', ' ') if h.added_at else '—' }}</td>
+                        <td>{{ h.email }}</td>
+                        <td><a href="/stock/{{ h.ticker }}" class="ticker-link">{{ h.ticker }}</a></td>
+                    </tr>
+                    {% endfor %}
+                    {% if not recent_hearts %}
+                    <tr><td colspan="3" class="muted" style="text-align:center;padding:2em;">No recent hearts</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ═══════ Tab 2: Notification Preferences ═══════ #}
+    <div class="adm-panel" id="adm-prefs">
+        <div class="adm-section-title">Signal Toggle Adoption ({{ prefs_stats.total or 0 }} users with prefs)</div>
+        <div class="adm-table-wrap">
+            <table class="adm-table">
+                <thead>
+                    <tr><th>Setting</th><th>Enabled</th><th>Disabled</th><th>% Enabled</th><th></th></tr>
+                </thead>
+                <tbody>
+                    {% for label, data in (prefs_stats.toggles or {}).items() %}
+                    <tr>
+                        <td><strong>{{ label }}</strong></td>
+                        <td>{{ data.enabled }}</td>
+                        <td>{{ data.disabled }}</td>
+                        <td>
+                            <span class="adm-pct-bar"><span class="adm-pct-fill" style="width:{{ data.pct }}%;"></span></span>
+                            {{ data.pct }}%
+                        </td>
+                        <td>
+                            {% if data.pct >= 80 %}
+                            <span class="adm-badge adm-badge-sent">Popular</span>
+                            {% elif data.pct <= 10 %}
+                            <span class="adm-badge adm-badge-skipped">Low</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="adm-section-title">Delivery Channels</div>
+        <div class="adm-table-wrap">
+            <table class="adm-table">
+                <thead><tr><th>Channel</th><th>Users</th><th></th></tr></thead>
+                <tbody>
+                    {% set ch = prefs_stats.channels or {} %}
+                    {% set ch_total = prefs_stats.total or 1 %}
+                    <tr>
+                        <td>Daily Digest Email</td>
+                        <td><strong>{{ ch.digest or 0 }}</strong> <span class="muted">({{ ((ch.digest or 0) / ch_total * 100)|round|int }}%)</span></td>
+                        <td><span class="adm-badge adm-badge-on">Active</span></td>
+                    </tr>
+                    <tr>
+                        <td>Real-time Email</td>
+                        <td><strong>{{ ch.realtime or 0 }}</strong></td>
+                        <td><span class="adm-badge adm-badge-off">v2</span></td>
+                    </tr>
+                    <tr>
+                        <td>Telegram</td>
+                        <td><strong>{{ ch.telegram or 0 }}</strong></td>
+                        <td><span class="adm-badge adm-badge-off">v2</span></td>
+                    </tr>
+                    <tr>
+                        <td>No notifications</td>
+                        <td><strong>{{ ch.none or 0 }}</strong> <span class="muted">({{ ((ch.none or 0) / ch_total * 100)|round|int }}%)</span></td>
+                        <td></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="adm-section-title">Insider Threshold Distribution</div>
+        <div class="adm-table-wrap">
+            <table class="adm-table">
+                <thead><tr><th>Threshold</th><th>Users</th><th></th><th>%</th></tr></thead>
+                <tbody>
+                    {% set th_total = prefs_stats.total or 1 %}
+                    {% set th_max = (prefs_stats.thresholds or {}).values()|max if prefs_stats.thresholds else 1 %}
+                    {% for val, count in (prefs_stats.thresholds or {}).items() %}
+                    <tr>
+                        <td class="mono">
+                            {% if val == 0 %}Any
+                            {% elif val >= 1000000 %}${{ (val / 1000000)|round(1) }}M+
+                            {% elif val >= 1000 %}${{ (val / 1000)|int }}K+
+                            {% else %}${{ val }}+
+                            {% endif %}
+                            {% if val == 100000 %}<span class="muted"> (default)</span>{% endif %}
+                        </td>
+                        <td><strong>{{ count }}</strong></td>
+                        <td><div class="adm-bar" style="width:{{ (count / th_max * 100)|int }}px;"></div></td>
+                        <td class="muted">{{ (count / th_total * 100)|round|int }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="adm-section-title">Digest Time Distribution</div>
+        <div class="adm-table-wrap">
+            <table class="adm-table">
+                <thead><tr><th>Time</th><th>Users</th><th></th></tr></thead>
+                <tbody>
+                    {% set dt_max = (prefs_stats.digest_times or {}).values()|max if prefs_stats.digest_times else 1 %}
+                    {% for t, count in (prefs_stats.digest_times or {}).items() %}
+                    <tr>
+                        <td class="mono">{{ t }}{% if t == '18:00' %} <span class="muted">(default)</span>{% endif %}</td>
+                        <td><strong>{{ count }}</strong></td>
+                        <td><div class="adm-bar" style="width:{{ (count / dt_max * 120)|int }}px;"></div></td>
+                    </tr>
+                    {% endfor %}
+                    {% if not prefs_stats.digest_times %}
+                    <tr><td colspan="3" class="muted" style="text-align:center;padding:1em;">No digest users yet</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ═══════ Tab 3: Users ═══════ #}
+    <div class="adm-panel" id="adm-users">
+        <div class="adm-section-title">All Watchlist Users ({{ users|length }})</div>
+        <div style="margin-bottom:0.8em;">
+            <input type="text" id="adm-user-search" placeholder="Search by email or ticker..."
+                   style="font-size:0.82em;padding:0.5em 0.8em;border-radius:8px;border:1px solid var(--pp-border-light,rgba(15,23,42,0.1));background:var(--pp-overlay-5);color:var(--pp-text);width:100%;max-width:320px;"
+                   oninput="admFilterUsers(this.value)">
+        </div>
+        <div class="adm-table-wrap">
+            <table class="adm-table" id="adm-user-table">
+                <thead>
+                    <tr><th>User</th><th>Hearts</th><th>Digest</th><th>First Heart</th><th>Last Active</th><th></th></tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr data-search="{{ (u.email or '')|lower }} {{ u.tickers|join(' ')|lower }}">
+                        <td>{{ u.email or u.user_id[:16] + '...' }}</td>
+                        <td><strong>{{ u.hearts }}</strong></td>
+                        <td>
+                            {% if u.digest_enabled %}
+                            <span class="adm-badge adm-badge-on">{{ u.digest_time or '18:00' }}</span>
+                            {% else %}
+                            <span class="adm-badge adm-badge-off">Off</span>
+                            {% endif %}
+                        </td>
+                        <td class="muted mono">{{ u.first_heart[:10] if u.first_heart else '—' }}</td>
+                        <td class="muted mono">{{ u.last_active[:10] if u.last_active else '—' }}</td>
+                        <td><a href="/admin/user/{{ u.user_id }}" class="adm-view-btn">View</a></td>
+                    </tr>
+                    {% endfor %}
+                    {% if not users %}
+                    <tr><td colspan="6" class="muted" style="text-align:center;padding:2em;">No users yet</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {# ═══════ Tab 4: Digest Monitoring ═══════ #}
+    <div class="adm-panel" id="adm-digest">
+        <div class="adm-stats" style="margin-bottom:1em;">
+            <div class="adm-stat">
+                <div class="adm-stat-value">{{ digest.sent_today or 0 }}</div>
+                <div class="adm-stat-label">Sent today</div>
+            </div>
+            <div class="adm-stat">
+                <div class="adm-stat-value">{{ digest.sent_week or 0 }}</div>
+                <div class="adm-stat-label">Sent this week</div>
+            </div>
+            <div class="adm-stat">
+                <div class="adm-stat-value" style="{% if digest.failed_week %}color:#ef4444;{% endif %}">{{ digest.failed_week or 0 }}</div>
+                <div class="adm-stat-label">Failed this week</div>
+            </div>
+            <div class="adm-stat">
+                <div class="adm-stat-value">{{ digest.skipped_today or 0 }}</div>
+                <div class="adm-stat-label">Skipped today</div>
+            </div>
+            <div class="adm-stat">
+                <div class="adm-stat-value">{{ digest.avg_events or 0 }}</div>
+                <div class="adm-stat-label">Avg events/digest</div>
+            </div>
+        </div>
+
+        <div class="adm-section-title">Recent Digest Log</div>
+        <div class="adm-table-wrap">
+            <table class="adm-table">
+                <thead>
+                    <tr><th>Time</th><th>User</th><th>Status</th><th>Events</th><th>Date</th></tr>
+                </thead>
+                <tbody>
+                    {% for d in digest.recent_logs or [] %}
+                    <tr{% if d.status == 'failed' %} style="background:rgba(239,68,68,0.06);"{% endif %}>
+                        <td class="muted mono">{{ d.sent_at[:19]|replace('T', ' ') if d.sent_at else '—' }}</td>
+                        <td>{{ d.email }}</td>
+                        <td>
+                            {% if d.status == 'sent' %}<span class="adm-badge adm-badge-sent">Sent</span>
+                            {% elif d.status == 'failed' %}<span class="adm-badge adm-badge-failed">Failed</span>
+                            {% elif 'skipped' in d.status %}<span class="adm-badge adm-badge-skipped">Skipped</span>
+                            {% else %}<span class="adm-badge">{{ d.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ d.event_count or 0 }}</td>
+                        <td class="muted mono">{{ d.digest_date or '—' }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not digest.recent_logs %}
+                    <tr><td colspan="5" class="muted" style="text-align:center;padding:2em;">No digest logs yet</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    window.admTab = function(id, btn) {
+        document.querySelectorAll('.adm-tab').forEach(function(t) { t.classList.remove('active'); });
+        document.querySelectorAll('.adm-panel').forEach(function(p) { p.classList.remove('active'); });
+        document.getElementById('adm-' + id).classList.add('active');
+        btn.classList.add('active');
+    };
+
+    window.admFilterUsers = function(q) {
+        q = q.toLowerCase().trim();
+        var rows = document.querySelectorAll('#adm-user-table tbody tr');
+        rows.forEach(function(r) {
+            var search = r.getAttribute('data-search') || '';
+            r.style.display = !q || search.indexOf(q) !== -1 ? '' : 'none';
+        });
+    };
+})();
+</script>
+{% endblock %}

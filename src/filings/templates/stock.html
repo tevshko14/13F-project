@@ -60,6 +60,15 @@
             <span class="ticker">{{ stock_info.ticker }}</span> &mdash;
             {% endif %}
             {{ stock_info.issuer_name or "Unknown Company" }}
+            <button class="pp-watch-heart{% if watching %} active{% endif %}"
+                    id="pp-watch-btn"
+                    onclick="ppToggleWatch('{{ stock_info.ticker }}')"
+                    title="{{ 'Remove from watchlist' if watching else 'Add to watchlist' }}"
+                    aria-label="{{ 'Remove from watchlist' if watching else 'Add to watchlist' }}">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="{% if watching %}currentColor{% else %}none{% endif %}" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                </svg>
+            </button>
         </h1>
         <div id="pp-header-price" style="display: flex; flex-direction: column; align-items: flex-end; white-space: nowrap; padding-top: 0.15em; min-height: 3.2em; visibility: hidden;"></div>
     </div>
@@ -191,6 +200,36 @@
     .stock-hero h1 {
         font-family: "Fraunces", Georgia, serif;
         letter-spacing: -0.02em;
+    }
+
+    /* ── Watchlist heart button ── */
+    .pp-watch-heart {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.15em;
+        color: var(--pp-text-muted, #94a3b8);
+        transition: color 0.2s, transform 0.2s;
+        flex-shrink: 0;
+        line-height: 1;
+    }
+    .pp-watch-heart:hover {
+        color: #ef4444;
+        transform: scale(1.12);
+    }
+    .pp-watch-heart.active {
+        color: #ef4444;
+    }
+    .pp-watch-heart.active svg {
+        fill: currentColor;
+    }
+    @keyframes pp-heart-pop {
+        0%   { transform: scale(1); }
+        40%  { transform: scale(1.25); }
+        100% { transform: scale(1); }
+    }
+    .pp-watch-heart.pp-pop {
+        animation: pp-heart-pop 0.35s ease;
     }
 
     /* ── Glass tab nav ── */
@@ -1757,4 +1796,43 @@ window.toggleHolders = function(btn) {
 {% endif %}
 
 </section>
+
+<script>
+(function() {
+    window.ppToggleWatch = function(ticker) {
+        var btn = document.getElementById('pp-watch-btn');
+        if (!btn) return;
+
+        // Check if user is signed in (Clerk)
+        if (typeof Clerk !== 'undefined' && !Clerk.user) {
+            if (typeof ppOpenSignIn === 'function') ppOpenSignIn();
+            return;
+        }
+
+        var isActive = btn.classList.contains('active');
+        var method = isActive ? 'DELETE' : 'POST';
+        var url = isActive ? '/api/watchlist/' + encodeURIComponent(ticker) : '/api/watchlist';
+        var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+        if (!isActive) opts.body = JSON.stringify({ ticker: ticker });
+
+        // Optimistic toggle
+        btn.classList.toggle('active');
+        var svg = btn.querySelector('svg');
+        if (svg) svg.setAttribute('fill', btn.classList.contains('active') ? 'currentColor' : 'none');
+        btn.title = btn.classList.contains('active') ? 'Remove from watchlist' : 'Add to watchlist';
+        btn.classList.remove('pp-pop');
+        void btn.offsetWidth;  // force reflow
+        btn.classList.add('pp-pop');
+
+        fetch(url, opts)
+            .then(function(r) { if (!r.ok) throw new Error(r.status); })
+            .catch(function() {
+                // Revert on failure
+                btn.classList.toggle('active');
+                if (svg) svg.setAttribute('fill', btn.classList.contains('active') ? 'currentColor' : 'none');
+                btn.title = btn.classList.contains('active') ? 'Remove from watchlist' : 'Add to watchlist';
+            });
+    };
+})();
+</script>
 {% endblock %}

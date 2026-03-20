@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-20 (Homepage: L2 Supabase stale-fallback caching for market overview/news/heatmap/sentiment, activateScripts fix for cached feed toggle, sentiment "Data as of" timestamp, live activity 6→7 items)
+> Last updated: 2026-03-20 (Watchlist & notifications: heart button on stock pages, watchlist dashboard, notification preferences, admin panel, daily digest worker, Resend email integration)
 
 ---
 
@@ -47,7 +47,8 @@ web dashboard. All data comes from SEC EDGAR (public, free, no API key needed).
 | Vitals        | People Data Labs, Glassdoor (RapidAPI), Apple iTunes Search |
 | Caching       | 3-tier: in-memory (L1) → Supabase Postgres (L2) → disk JSON (L3) |
 | Hosting       | Railway (auto-deploy from main) at [paperpanda.io](https://paperpanda.io) |
-| Entry points  | `filings` (CLI), `filings-web` (web, port 8000) |
+| Email         | Resend (transactional email for watchlist digests) |
+| Entry points  | `filings` (CLI), `filings-web` (web, port 8000), `filings-digest` (digest cron) |
 
 ### How to Run
 
@@ -217,7 +218,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 85 hardcoded funds + CIK lookup dict
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
-    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications tables)
+    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications, user_watchlist, user_notification_preferences, watchlist_digest_log, admin_users tables)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification creators (13F, YouTube, Reddit, Congress trades) + filing season detection
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
@@ -249,6 +250,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── earnings.py                   # Per-ticker earnings history (yfinance + Finnhub + FMP via fmp_cache, 3-tier cache) + shared fetch_finnhub_calendar_raw()
     ├── earnings_scorecard.py         # Macro earnings season metrics (Supabase 5-tier L1→L5 cache) + build_company_lookup()
     ├── earnings_calendar.py          # Earnings calendar page (Finnhub + FMP via fmp_cache, week/month views, 1h in-memory cache)
+    ├── digest_worker.py              # Cron worker: daily watchlist digest emails via Resend (hourly check, per-user timezone)
     ├── auth.py                       # Authentication (sign-in, sessions)
     ├── client.py                     # SEC EDGAR client (13 functions)
     ├── display.py                    # CLI Rich formatters (3 functions)
@@ -1540,6 +1542,15 @@ When both `FINNHUB_API_KEY` and `FMP_API_KEY` are unset, the calendar generates 
 | GET | `/api/earnings-calendar/day` | `earnings_calendar_day_api` | Same as grid (from cached calendar data) | `partials/earnings_calendar_day.html` |
 | GET | `/api/logo/{ticker}.png` | `logo_proxy` | Logo cache / external fetch | PNG image |
 | POST | `/refresh` | `trigger_refresh` | SEC API (background) | Raw HTML response |
+| GET | `/watchlist` | `watchlist_page` | — (JS lazy-loads) | `watchlist.html` |
+| POST | `/api/watchlist` | `api_watchlist_add` | Supabase `user_watchlist` | JSON response |
+| DELETE | `/api/watchlist/{ticker}` | `api_watchlist_remove` | Supabase `user_watchlist` | JSON response |
+| GET | `/api/watchlist` | `api_watchlist_list` | Supabase + notifications enrichment | JSON response |
+| GET | `/api/watchlist/check/{ticker}` | `api_watchlist_check` | Supabase `user_watchlist` (point query) | JSON response |
+| GET | `/api/watchlist/preferences` | `api_watchlist_prefs_get` | Supabase `user_notification_preferences` | JSON response |
+| PUT | `/api/watchlist/preferences` | `api_watchlist_prefs_update` | Supabase `user_notification_preferences` | JSON response |
+| GET | `/admin` | `admin_dashboard` | Supabase (6 parallel queries, admin-only, 404 for non-admin) | `admin.html` |
+| GET | `/admin/user/{user_id}` | `admin_user_detail_page` | Supabase (admin-only, 404 for non-admin) | `admin_user.html` |
 
 **Key patterns:**
 - All endpoints are cache-first. SEC EDGAR is only called on cache miss or during background refresh.
@@ -1547,7 +1558,9 @@ When both `FINNHUB_API_KEY` and `FMP_API_KEY` are unset, the calendar generates 
 - Fund data endpoints trigger self-healing background refresh when stale data is detected (request-triggered via `_trigger_single_refresh`).
 - Insider trade endpoints use 4-tier fallback: L1 fresh → L2 Supabase → L3 scrape → L4 stale L1 (never empty).
 - Backward-compat redirects: `/grand-portfolio` → `/funds` (301), `/superinvestors` → `/funds?view=funds` (301).
-- Watchlist routes read/write to `~/.13f-cache/watchlist.json` (separate from fund cache).
+- Old CLI watchlist routes read/write to `~/.13f-cache/watchlist.json` (legacy, separate from fund cache).
+- New watchlist API routes use Supabase `user_watchlist` table (Clerk auth required, user_id from JWT `sub` claim).
+- Admin routes return 404 for non-admin users (checked via `admin_users` table, 5-min in-memory TTL cache).
 - Exception handlers detect HTMX requests (`HX-Request` header) and API paths to return inline `data_error.html` partial instead of full error pages.
 - `/support` and homepage widget use Stripe OOTB web components (Buy Button + Pricing Table) -- zero backend Stripe SDK needed.
 - `/health` endpoint is a fast probe (no DB calls) returning `"status": "ok"` for UptimeRobot. `/health/detail` includes `stale_funds`, `refresh_status`, `refresh_progress`, `vitals_cache`, and `congress_sync` diagnostics.
@@ -1687,6 +1700,7 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   ├── activity.html
   │     └── imports partials/ticker_link.html (macro)
   ├── stock.html (8 Tabs: Overview, Ownership, Analysts, Signals, Vitals, Filings, Insider, Congress)
+  │     ├── Heart button (.pp-watch-heart): optimistic toggle, Clerk auth check, POST/DELETE /api/watchlist
   │     ├── includes partials/watchlist_star.html
   │     ├── lazy-loads partials/analyst_ratings.html via fetch(/api/analysts/{ticker})
   │     ├── lazy-loads partials/signals.html via fetch(/api/signals/{ticker}) — parallel fetch of sentiment + Google Trends + web traffic
@@ -1703,7 +1717,11 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   │     ├── Cost breakdown (line items, no dollar amounts), funding history ECharts bar chart
   │     ├── YouTube @funofinvesting section + feedback CTA
   │     └── Auto-switches to monthly tab when linked from homepage (#monthly hash)
-  ├── notifications.html (notification history)
+  ├── notifications.html (notification history, ♥ My Watchlist filter tab, heart badges on watched tickers)
+  ├── watchlist.html (URL: /watchlist, auth-gated dashboard with stock cards, signal enrichment, settings panel)
+  │     └── includes partials/watchlist_preferences.html (notification preferences form: signal toggles, insider filters, digest settings)
+  ├── admin.html (URL: /admin, admin-only dashboard: watchlist overview, notification prefs stats, user list, digest monitor)
+  ├── admin_user.html (URL: /admin/user/{id}, admin-only user detail: watchlist, prefs, digest history)
   └── error.html
 ```
 
@@ -2045,7 +2063,9 @@ the cache — every CLI command makes live SEC API calls.
 - [ ] User-configurable superinvestor list (currently hardcoded in superinvestors.py)
 - [ ] Export to CSV / PDF
 - [ ] Comparison across multiple funds on the same page
-- [ ] Email notification automation (extend notification system with email delivery)
+- [x] Watchlist system: heart button on stock pages, `/watchlist` dashboard, notification preferences UI, daily digest email worker (Resend), admin panel (`/admin`) with user monitoring
+- [x] Email notification automation: `filings-digest` cron worker sends personalized daily digest emails via Resend, grouped by ticker, timezone-aware scheduling
+- [ ] Activate daily digest emails: set up `filings-digest` cron on Railway, add `RESEND_API_KEY` env var
 
 ### Shelved: Crypto Whale Tracker (branch: `feature/crypto-whale-tracker`)
 

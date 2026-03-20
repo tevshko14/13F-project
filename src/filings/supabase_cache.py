@@ -25,6 +25,7 @@ import logging
 import os
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
@@ -2467,6 +2468,243 @@ def cleanup_old_notifications(days: int = 2) -> int:
         return 0
 
 
+# ── Watchlist ────────────────────────────────────────────────────────
+
+_WATCHLIST_COLS = "id,user_id,ticker,added_at"
+
+
+def get_user_watchlist(user_id: str) -> list[dict]:
+    """Return all watchlist rows for *user_id*, newest first."""
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        resp = (
+            client.table("user_watchlist")
+            .select(_WATCHLIST_COLS)
+            .eq("user_id", user_id)
+            .order("added_at", desc=True)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as exc:
+        logger.warning("get_user_watchlist failed: %s", exc)
+        return []
+
+
+def get_user_watchlist_tickers(user_id: str) -> set[str]:
+    """Return just the set of tickers on the user's watchlist."""
+    client = _get_client()
+    if client is None:
+        return set()
+    try:
+        resp = (
+            client.table("user_watchlist")
+            .select("ticker")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return {r["ticker"] for r in (resp.data or [])}
+    except Exception as exc:
+        logger.warning("get_user_watchlist_tickers failed: %s", exc)
+        return set()
+
+
+def is_ticker_watched(user_id: str, ticker: str) -> bool:
+    """Check if a single ticker is on the user's watchlist (point query)."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        resp = (
+            client.table("user_watchlist")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("ticker", ticker.upper())
+            .maybe_single()
+            .execute()
+        )
+        return resp.data is not None
+    except Exception as exc:
+        logger.warning("is_ticker_watched failed: %s", exc)
+        return False
+
+
+def add_to_watchlist(user_id: str, ticker: str) -> bool:
+    """Add *ticker* to the user's watchlist. Returns True on success."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        client.table("user_watchlist").upsert(
+            {"user_id": user_id, "ticker": ticker.upper()},
+            on_conflict="user_id,ticker",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.warning("add_to_watchlist failed: %s", exc)
+        return False
+
+
+def remove_from_watchlist(user_id: str, ticker: str) -> bool:
+    """Remove *ticker* from the user's watchlist. Returns True on success."""
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        client.table("user_watchlist").delete().eq(
+            "user_id", user_id
+        ).eq("ticker", ticker.upper()).execute()
+        return True
+    except Exception as exc:
+        logger.warning("remove_from_watchlist failed: %s", exc)
+        return False
+
+
+def get_notification_preferences(user_id: str) -> dict | None:
+    """Return the global notification prefs row (ticker IS NULL) for *user_id*."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("user_notification_preferences")
+            .select("*")
+            .eq("user_id", user_id)
+            .is_("ticker", "null")
+            .maybe_single()
+            .execute()
+        )
+        return resp.data
+    except Exception as exc:
+        logger.warning("get_notification_preferences failed: %s", exc)
+        return None
+
+
+def upsert_notification_preferences(user_id: str, prefs: dict) -> bool:
+    """Upsert global notification preferences for *user_id*.
+
+    *prefs* is a partial dict — only the keys present are updated.
+    """
+    client = _get_client()
+    if client is None:
+        return False
+    row = {
+        "user_id": user_id,
+        "ticker": None,
+        **prefs,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Remove keys that aren't real columns
+    row.pop("id", None)
+    row.pop("created_at", None)
+    try:
+        client.table("user_notification_preferences").upsert(
+            row, on_conflict="user_id,ticker",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.warning("upsert_notification_preferences failed: %s", exc)
+        return False
+
+
+def get_watchlist_users_for_digest() -> list[dict]:
+    """Return users who have digest_enabled and a non-empty watchlist.
+
+    Each dict has: user_id, digest_time, digest_timezone, email, tickers.
+    """
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        # Get users with digest enabled
+        prefs_resp = (
+            client.table("user_notification_preferences")
+            .select("user_id,digest_time,digest_timezone")
+            .eq("digest_enabled", True)
+            .is_("ticker", "null")
+            .execute()
+        )
+        if not prefs_resp.data:
+            return []
+
+        user_ids = [p["user_id"] for p in prefs_resp.data]
+
+        # Batch fetch all watchlist rows for these users (1 query instead of N)
+        wl_resp = (
+            client.table("user_watchlist")
+            .select("user_id,ticker")
+            .in_("user_id", user_ids)
+            .execute()
+        )
+        user_tickers: dict[str, list[str]] = {}
+        for r in (wl_resp.data or []):
+            user_tickers.setdefault(r["user_id"], []).append(r["ticker"])
+
+        # Batch fetch emails (1 query instead of N)
+        uids_with_tickers = [uid for uid in user_ids if user_tickers.get(uid)]
+        email_map = _batch_fetch_emails(client, uids_with_tickers)
+
+        results = []
+        for pref in prefs_resp.data:
+            uid = pref["user_id"]
+            tickers = user_tickers.get(uid, [])
+            if not tickers:
+                continue
+            email = email_map.get(uid)
+            if not email:
+                continue
+            results.append({
+                "user_id": uid,
+                "digest_time": pref.get("digest_time", "18:00"),
+                "digest_timezone": pref.get("digest_timezone", "America/New_York"),
+                "email": email,
+                "tickers": tickers,
+            })
+        return results
+    except Exception as exc:
+        logger.warning("get_watchlist_users_for_digest failed: %s", exc)
+        return []
+
+
+def check_digest_sent_today(user_id: str, today_date: str) -> bool:
+    """Check if a digest was already sent for *user_id* on *today_date* (YYYY-MM-DD)."""
+    client = _get_client()
+    if not client:
+        return False
+    try:
+        resp = (
+            client.table("watchlist_digest_log")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("digest_date", today_date)
+            .maybe_single()
+            .execute()
+        )
+        return resp.data is not None
+    except Exception:
+        return False
+
+
+def log_digest_result(user_id: str, today_date: str, event_count: int, status: str = "sent") -> None:
+    """Upsert a row in watchlist_digest_log."""
+    client = _get_client()
+    if not client:
+        return
+    try:
+        client.table("watchlist_digest_log").upsert(
+            {
+                "user_id": user_id,
+                "digest_date": today_date,
+                "event_count": event_count,
+                "status": status,
+            },
+            on_conflict="user_id,digest_date",
+        ).execute()
+    except Exception as exc:
+        logger.warning("log_digest_result failed for %s: %s", user_id, exc)
+
+
 # ── Feature announcements ────────────────────────────────────────────
 
 _FEATURE_ANNOUNCEMENT_COLS = "id,title,message,icon,toast_type,link,created_at"
@@ -3848,3 +4086,408 @@ def get_previous_oi_snapshots(
             logger.warning("get_previous_oi_snapshots chunk %d failed: %s", i, exc)
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Admin panel queries (read-only, service-role key)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def is_admin_user(user_id: str) -> bool | None:
+    """Check if *user_id* exists in admin_users table.
+
+    Returns True/False on success, None on connection failure
+    (so callers can distinguish "not admin" from "DB unreachable").
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("admin_users")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if resp is None:
+            return None
+        return resp.data is not None
+    except Exception as exc:
+        logger.warning("is_admin_user failed: %s", exc)
+        return None
+
+
+def _batch_fetch_emails(client, user_ids: list[str]) -> dict[str, str]:
+    """Fetch emails for a list of user_ids in a single query. Returns {user_id: email}."""
+    if not user_ids:
+        return {}
+    try:
+        resp = (
+            client.table("profiles")
+            .select("id,email")
+            .in_("id", user_ids)
+            .execute()
+        )
+        return {r["id"]: r["email"] for r in (resp.data or []) if r.get("email")}
+    except Exception as exc:
+        logger.warning("_batch_fetch_emails failed: %s", exc)
+        return {}
+
+
+def admin_watchlist_summary() -> dict:
+    """Return aggregate watchlist stats for admin dashboard."""
+    client = _get_client()
+    if client is None:
+        return {}
+    try:
+        all_rows = (
+            client.table("user_watchlist")
+            .select("user_id,ticker,added_at")
+            .order("added_at", desc=True)
+            .execute()
+        ).data or []
+
+        if not all_rows:
+            return {
+                "total_users": 0, "total_hearts": 0, "avg_per_user": 0,
+                "hearts_today": 0, "most_active_user": None,
+            }
+
+        user_counts: dict[str, int] = {}
+        hearts_today = 0
+        now = datetime.now(timezone.utc)
+        day_ago = (now - timedelta(hours=24)).isoformat()
+
+        for r in all_rows:
+            uid = r["user_id"]
+            user_counts[uid] = user_counts.get(uid, 0) + 1
+            if r.get("added_at", "") > day_ago:
+                hearts_today += 1
+
+        total_users = len(user_counts)
+        total_hearts = len(all_rows)
+        avg_per_user = round(total_hearts / total_users, 1) if total_users else 0
+
+        most_active_uid = max(user_counts, key=user_counts.get) if user_counts else None
+        most_active_count = user_counts.get(most_active_uid, 0) if most_active_uid else 0
+
+        most_active_email = None
+        if most_active_uid:
+            emails = _batch_fetch_emails(client, [most_active_uid])
+            most_active_email = emails.get(most_active_uid)
+
+        return {
+            "total_users": total_users,
+            "total_hearts": total_hearts,
+            "avg_per_user": avg_per_user,
+            "hearts_today": hearts_today,
+            "most_active_user": {
+                "user_id": most_active_uid,
+                "email": most_active_email,
+                "count": most_active_count,
+            } if most_active_uid else None,
+        }
+    except Exception as exc:
+        logger.warning("admin_watchlist_summary failed: %s", exc)
+        return {}
+
+
+def admin_watchlist_leaderboard(limit: int = 50) -> list[dict]:
+    """Return most-hearted stocks sorted by heart count."""
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        rows = (
+            client.table("user_watchlist")
+            .select("ticker,added_at")
+            .order("added_at", desc=True)
+            .execute()
+        ).data or []
+
+        ticker_counts: Counter = Counter()
+        ticker_first: dict[str, str] = {}
+        ticker_latest: dict[str, str] = {}
+
+        for r in rows:
+            t = r["ticker"]
+            added = r.get("added_at", "")
+            ticker_counts[t] += 1
+            if t not in ticker_first or added < ticker_first[t]:
+                ticker_first[t] = added
+            if t not in ticker_latest or added > ticker_latest[t]:
+                ticker_latest[t] = added
+
+        result = []
+        for rank, (ticker, count) in enumerate(ticker_counts.most_common(limit), 1):
+            result.append({
+                "rank": rank,
+                "ticker": ticker,
+                "heart_count": count,
+                "first_hearted": ticker_first.get(ticker, ""),
+                "most_recent": ticker_latest.get(ticker, ""),
+            })
+        return result
+    except Exception as exc:
+        logger.warning("admin_watchlist_leaderboard failed: %s", exc)
+        return []
+
+
+def admin_recent_hearts(limit: int = 100) -> list[dict]:
+    """Return the most recent heart actions with user emails."""
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        rows = (
+            client.table("user_watchlist")
+            .select("user_id,ticker,added_at")
+            .order("added_at", desc=True)
+            .limit(limit)
+            .execute()
+        ).data or []
+
+        user_ids = list({r["user_id"] for r in rows})
+        email_map = _batch_fetch_emails(client, user_ids)
+
+        for r in rows:
+            r["email"] = email_map.get(r["user_id"], r["user_id"][:12] + "...")
+        return rows
+    except Exception as exc:
+        logger.warning("admin_recent_hearts failed: %s", exc)
+        return []
+
+
+def admin_notification_prefs_stats() -> dict:
+    """Return aggregate notification preference statistics."""
+    client = _get_client()
+    if client is None:
+        return {}
+    _PREFS_COLS = (
+        "user_id,notify_superinvestor_activity,notify_insider_trading,"
+        "notify_congress_trading,notify_options_activity,notify_convergence_signals,"
+        "digest_enabled,realtime_email_enabled,telegram_enabled,"
+        "insider_min_value,digest_time"
+    )
+    try:
+        rows = (
+            client.table("user_notification_preferences")
+            .select(_PREFS_COLS)
+            .is_("ticker", "null")
+            .execute()
+        ).data or []
+
+        if not rows:
+            return {"total": 0, "toggles": {}, "thresholds": {}, "digest_times": {}, "channels": {}}
+
+        total = len(rows)
+
+        toggle_fields = [
+            ("notify_superinvestor_activity", "Superinvestor Activity"),
+            ("notify_insider_trading", "Insider Trading"),
+            ("notify_congress_trading", "Congress Trading"),
+            ("notify_options_activity", "Options Activity"),
+            ("notify_convergence_signals", "Convergence Signals"),
+            ("digest_enabled", "Daily Digest Email"),
+            ("realtime_email_enabled", "Real-time Email (v2)"),
+            ("telegram_enabled", "Telegram (v2)"),
+        ]
+        toggles = {}
+        for field, label in toggle_fields:
+            enabled = sum(1 for r in rows if r.get(field))
+            disabled = total - enabled
+            pct = round(100 * enabled / total) if total else 0
+            toggles[label] = {"enabled": enabled, "disabled": disabled, "pct": pct}
+
+        threshold_counts = Counter(r.get("insider_min_value", 100000) for r in rows)
+        thresholds = dict(sorted(threshold_counts.items()))
+
+        time_counts: Counter = Counter()
+        for r in rows:
+            if r.get("digest_enabled"):
+                t = r.get("digest_time", "18:00")
+                if t:
+                    time_counts[str(t)[:5]] += 1
+        digest_times = dict(sorted(time_counts.items()))
+
+        digest_users = sum(1 for r in rows if r.get("digest_enabled"))
+        realtime_users = sum(1 for r in rows if r.get("realtime_email_enabled"))
+        telegram_users = sum(1 for r in rows if r.get("telegram_enabled"))
+        no_notif = sum(1 for r in rows if not r.get("digest_enabled") and not r.get("realtime_email_enabled") and not r.get("telegram_enabled"))
+
+        channels = {
+            "digest": digest_users,
+            "realtime": realtime_users,
+            "telegram": telegram_users,
+            "none": no_notif,
+        }
+
+        return {
+            "total": total,
+            "toggles": toggles,
+            "thresholds": thresholds,
+            "digest_times": digest_times,
+            "channels": channels,
+        }
+    except Exception as exc:
+        logger.warning("admin_notification_prefs_stats failed: %s", exc)
+        return {}
+
+
+def admin_user_list() -> list[dict]:
+    """Return all users with watchlists + their prefs summary."""
+    client = _get_client()
+    if client is None:
+        return []
+    try:
+        wl_rows = (
+            client.table("user_watchlist")
+            .select("user_id,ticker,added_at")
+            .order("added_at", desc=True)
+            .execute()
+        ).data or []
+
+        if not wl_rows:
+            return []
+
+        user_data: dict[str, dict] = {}
+        for r in wl_rows:
+            uid = r["user_id"]
+            if uid not in user_data:
+                user_data[uid] = {
+                    "user_id": uid,
+                    "hearts": 0,
+                    "tickers": [],
+                    "first_heart": r["added_at"],
+                    "last_active": r["added_at"],
+                }
+            user_data[uid]["hearts"] += 1
+            user_data[uid]["tickers"].append(r["ticker"])
+            if r["added_at"] < user_data[uid]["first_heart"]:
+                user_data[uid]["first_heart"] = r["added_at"]
+            if r["added_at"] > user_data[uid]["last_active"]:
+                user_data[uid]["last_active"] = r["added_at"]
+
+        prefs_rows = (
+            client.table("user_notification_preferences")
+            .select("user_id,digest_enabled,digest_time,digest_timezone")
+            .is_("ticker", "null")
+            .execute()
+        ).data or []
+        prefs_map = {r["user_id"]: r for r in prefs_rows}
+
+        # Batch fetch all emails in one query
+        email_map = _batch_fetch_emails(client, list(user_data.keys()))
+
+        for uid, ud in user_data.items():
+            ud["email"] = email_map.get(uid)
+            p = prefs_map.get(uid, {})
+            ud["digest_enabled"] = p.get("digest_enabled", False)
+            ud["digest_time"] = str(p.get("digest_time", "18:00"))[:5] if p.get("digest_enabled") else None
+            ud["digest_tz"] = p.get("digest_timezone", "America/New_York") if p.get("digest_enabled") else None
+
+        return sorted(user_data.values(), key=lambda x: x["hearts"], reverse=True)
+    except Exception as exc:
+        logger.warning("admin_user_list failed: %s", exc)
+        return []
+
+
+def admin_user_detail(user_id: str) -> dict | None:
+    """Return full detail for a single user (watchlist, prefs, digest log)."""
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        wl = (
+            client.table("user_watchlist")
+            .select("ticker,added_at")
+            .eq("user_id", user_id)
+            .order("added_at", desc=True)
+            .execute()
+        ).data or []
+
+        prefs = (
+            client.table("user_notification_preferences")
+            .select("*")
+            .eq("user_id", user_id)
+            .is_("ticker", "null")
+            .maybe_single()
+            .execute()
+        ).data
+
+        digest_log = (
+            client.table("watchlist_digest_log")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("sent_at", desc=True)
+            .limit(50)
+            .execute()
+        ).data or []
+
+        prof = (
+            client.table("profiles")
+            .select("email,display_name,created_at")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        ).data
+
+        return {
+            "user_id": user_id,
+            "email": prof.get("email") if prof else None,
+            "display_name": prof.get("display_name") if prof else None,
+            "joined": prof.get("created_at") if prof else None,
+            "watchlist": wl,
+            "preferences": prefs,
+            "digest_log": digest_log,
+        }
+    except Exception as exc:
+        logger.warning("admin_user_detail failed for %s: %s", user_id, exc)
+        return None
+
+
+def admin_digest_stats() -> dict:
+    """Return digest monitoring stats."""
+    client = _get_client()
+    if client is None:
+        return {}
+    try:
+        now = datetime.now(timezone.utc)
+        today = now.date().isoformat()
+        week_ago = (now - timedelta(days=7)).date().isoformat()
+
+        all_logs = (
+            client.table("watchlist_digest_log")
+            .select("*")
+            .gte("digest_date", week_ago)
+            .order("sent_at", desc=True)
+            .execute()
+        ).data or []
+
+        sent_today = sum(1 for r in all_logs if r.get("digest_date") == today and r.get("status") == "sent")
+        sent_week = sum(1 for r in all_logs if r.get("status") == "sent")
+        failed_week = sum(1 for r in all_logs if r.get("status") == "failed")
+        skipped_today = sum(1 for r in all_logs if r.get("digest_date") == today and r.get("status") == "skipped_empty")
+
+        sent_events = [r.get("event_count", 0) for r in all_logs if r.get("status") == "sent"]
+        avg_events = round(sum(sent_events) / len(sent_events), 1) if sent_events else 0
+
+        recent = all_logs[:50]
+        user_ids = list({r["user_id"] for r in recent})
+        email_map = _batch_fetch_emails(client, user_ids)
+
+        for r in recent:
+            r["email"] = email_map.get(r["user_id"], r["user_id"][:12] + "...")
+
+        return {
+            "sent_today": sent_today,
+            "sent_week": sent_week,
+            "failed_week": failed_week,
+            "skipped_today": skipped_today,
+            "avg_events": avg_events,
+            "recent_logs": recent,
+        }
+    except Exception as exc:
+        logger.warning("admin_digest_stats failed: %s", exc)
+        return {}
