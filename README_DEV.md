@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-20 (Watchlist & notifications: heart button on stock pages, watchlist dashboard, notification preferences, admin panel, daily digest worker, Resend email integration)
+> Last updated: 2026-03-20 (L2 stale-fallback caching on 22 endpoints, CSS minifier calc() fix)
 
 ---
 
@@ -2066,6 +2066,8 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Watchlist system: heart button on stock pages, `/watchlist` dashboard, notification preferences UI, daily digest email worker (Resend), admin panel (`/admin`) with user monitoring
 - [x] Email notification automation: `filings-digest` cron worker sends personalized daily digest emails via Resend, grouped by ticker, timezone-aware scheduling
 - [ ] Activate daily digest emails: set up `filings-digest` cron on Railway, add `RESEND_API_KEY` env var
+- [x] L2 stale-fallback caching: `_with_l2_fallback` decorator applied to 22 HTML endpoints (11 stock tabs, 9 macro tabs, 1 options, 1 filings). On API timeout/failure, serves last-known-good HTML from Supabase instead of error. L1 5–10min, L2 1–4h TTLs.
+- [x] CSS minifier bug fix: removed `+` from `_CSS_PUNCT_RE` regex — was breaking `calc()` expressions by collapsing required spaces (e.g. `calc(100% + 10px)` → `calc(100%+10px)`, invalid CSS). Fixed homepage search dropdown appearing above input.
 
 ### Shelved: Crypto Whale Tracker (branch: `feature/crypto-whale-tracker`)
 

@@ -13,6 +13,7 @@ _os.environ.setdefault("EDGAR_RATE_LIMIT_PER_SEC", "5")
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import functools
 import json as json_module
 import logging
 import os
@@ -286,6 +287,89 @@ def _l2_set_html(cache_key: str, category: str, html: bytes, ttl: int) -> None:
         logger.debug("L2 HTML cache write failed: %s", cache_key, exc_info=True)
 
 
+# ---------------------------------------------------------------------------
+# L2 stale-fallback decorator — wraps HTML endpoints with 3-tier caching
+# ---------------------------------------------------------------------------
+#   L1 (in-memory, fast) → live fetch + render → L2 fallback (Supabase)
+#
+# Usage:
+#   @app.get("/api/foo/{ticker}", response_class=HTMLResponse)
+#   @_with_l2_fallback("stock:foo:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
+#   async def foo_endpoint(request, ticker):
+#       ...  # normal handler, returns TemplateResponse
+# ---------------------------------------------------------------------------
+
+_l2_caches: dict[str, _HtmlCache] = {}  # auto-created per category
+
+
+def _with_l2_fallback(
+    key_template: str,
+    *,
+    category: str = "page",
+    l1_ttl: int = 300,
+    l2_ttl: int = 7200,
+):
+    """Decorator: L1 in-memory → handler → L2 Supabase stale-fallback.
+
+    *key_template* may contain ``{ticker}`` or other kwargs that will be
+    substituted from the decorated function's arguments at call-time.
+    """
+
+    def decorator(fn):  # noqa: ANN001
+        # Lazily create one _HtmlCache per (category, l1_ttl) pair
+        cache_id = f"{category}:{l1_ttl}"
+        if cache_id not in _l2_caches:
+            _l2_caches[cache_id] = _HtmlCache(l1_ttl)
+        l1 = _l2_caches[cache_id]
+
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):  # noqa: ANN002, ANN003
+            # Build cache key from route params
+            cache_key = key_template.format(**kwargs)
+
+            # ── L1 hit ──
+            cached = l1.get(cache_key)
+            if cached is not None:
+                return cached
+
+            # ── Live fetch + render ──
+            try:
+                resp = await fn(*args, **kwargs)
+                # Save to L1
+                l1.set(resp, cache_key)
+                # Async save to L2 (non-blocking)
+                if hasattr(resp, "body") and resp.body:
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            _l2_set_html, cache_key, category, resp.body, l2_ttl
+                        )
+                    )
+                return resp
+            except Exception:
+                logger.warning("L2 fallback triggered for %s", cache_key, exc_info=True)
+
+            # ── L2 stale fallback ──
+            try:
+                stale_html = await asyncio.to_thread(_l2_get_html, cache_key)
+                if stale_html:
+                    logger.info("Serving stale L2 for %s", cache_key)
+                    body = stale_html.encode()
+                    l1.set(Response(content=body, media_type="text/html"), cache_key)
+                    return Response(content=body, media_type="text/html")
+            except Exception:
+                pass
+
+            # ── Final fallback ──
+            return HTMLResponse(
+                '<p class="text-muted" style="text-align:center;padding:2em 0;">'
+                "Data temporarily unavailable. Please try again shortly.</p>"
+            )
+
+        return wrapper
+
+    return decorator
+
+
 async def _fetch_retail_data() -> tuple[list[dict], dict | None]:
     """Fetch ApeWisdom + CNN Fear&Greed for leaderboard endpoints.
 
@@ -539,7 +623,7 @@ async def lifespan(app: FastAPI):
 # ═══════════════════════════════════════════════════════════════════════
 _CSS_COMMENT_RE = _re.compile(r"/\*.*?\*/", _re.DOTALL)
 _CSS_WHITESPACE_RE = _re.compile(r"\s+")
-_CSS_PUNCT_RE = _re.compile(r"\s*([{}:;,>~+])\s*")
+_CSS_PUNCT_RE = _re.compile(r"\s*([{}:;,>~])\s*")
 _CSS_TRAILING_SEMI_RE = _re.compile(r";}")
 
 
@@ -2760,6 +2844,7 @@ async def stock_detail(request: Request, ticker: str):
 
 
 @app.get("/api/analysts/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:analysts:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def analyst_ratings(request: Request, ticker: str):
     ticker = ticker.upper().strip()
     if not _valid_ticker(ticker):
@@ -2818,6 +2903,7 @@ async def analyst_ratings(request: Request, ticker: str):
 
 
 @app.get("/api/sentiment/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:sentiment:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def sentiment_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
@@ -2841,6 +2927,7 @@ async def sentiment_data(request: Request, ticker: str):
 
 
 @app.get("/api/vitals/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:vitals:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def vitals_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
@@ -2918,6 +3005,7 @@ def _extract_chart_data(data: dict) -> dict:
 
 
 @app.get("/api/financials/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:financials:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def api_financials(request: Request, ticker: str):
     """Financial statements (Income, Balance Sheet, Cash Flow, Ratios) from SEC XBRL."""
     if not _valid_ticker(ticker):
@@ -2939,6 +3027,7 @@ async def api_financials(request: Request, ticker: str):
 
 
 @app.get("/api/financials/{ticker}/history", response_class=HTMLResponse)
+@_with_l2_fallback("stock:financials_history:{ticker}", category="stock", l1_ttl=600, l2_ttl=14400)
 async def api_financials_history(request: Request, ticker: str):
     """Full historical financial statements from cold storage."""
     if not _valid_ticker(ticker):
@@ -2960,6 +3049,7 @@ async def api_financials_history(request: Request, ticker: str):
 
 
 @app.get("/api/earnings/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:earnings:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def earnings_data(request: Request, ticker: str):
     """Earnings history tab: quarterly EPS results + forward estimates."""
     ticker = ticker.upper().strip()
@@ -2984,6 +3074,7 @@ async def earnings_data(request: Request, ticker: str):
 
 
 @app.get("/api/estimates/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:estimates:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def forward_estimates(request: Request, ticker: str):
     """Forward analyst estimates (EPS + Revenue) for the Estimates pill."""
     ticker = ticker.upper().strip()
@@ -3006,6 +3097,7 @@ async def forward_estimates(request: Request, ticker: str):
 
 
 @app.get("/api/web-traffic/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:webtraffic:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def web_traffic_data(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
@@ -3026,6 +3118,7 @@ async def web_traffic_data(request: Request, ticker: str):
 
 
 @app.get("/api/signals/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:signals:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def signals_data(request: Request, ticker: str):
     """Combined signals tab: sentiment + web traffic + Google Trends."""
     if not _valid_ticker(ticker):
@@ -3078,6 +3171,7 @@ async def signals_short_interest(request: Request, ticker: str):
 
 
 @app.get("/api/company-filings/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:filings:{ticker}", category="stock", l1_ttl=600, l2_ttl=14400)
 async def company_filings_tab(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
@@ -3209,6 +3303,7 @@ async def options_clusters_api(request: Request, limit: int = 25):
 
 
 @app.get("/api/options/ivrank", response_class=HTMLResponse)
+@_with_l2_fallback("options:ivrank", category="options", l1_ttl=300, l2_ttl=3600)
 async def options_ivrank_api(request: Request):
     """HTMX partial: IV Rank table for most-active options tickers + market P/C ratios."""
     from filings import cboe_data
@@ -4018,6 +4113,7 @@ async def gt_trending_api(request: Request):
 
 
 @app.get("/api/macro/indicators", response_class=HTMLResponse)
+@_with_l2_fallback("macro:indicators", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_indicators_api(request: Request):
     """FRED macro indicators snapshot — sparkline cards + historical charts."""
     if not _screener_authed(request):
@@ -4212,6 +4308,7 @@ async def macro_auth(request: Request):
 
 
 @app.get("/api/macro/scorecard", response_class=HTMLResponse)
+@_with_l2_fallback("macro:scorecard:{index}:{quarter}:{sector}", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_scorecard_api(
     request: Request,
     index: str = "all",
@@ -4254,6 +4351,7 @@ async def macro_scorecard_api(
 
 
 @app.get("/api/macro/breadth", response_class=HTMLResponse)
+@_with_l2_fallback("macro:breadth:{index}:{period}", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_breadth_api(
     request: Request,
     index: str = "sp500",
@@ -4290,6 +4388,7 @@ async def macro_breadth_api(
 
 
 @app.get("/api/macro/calendar", response_class=HTMLResponse)
+@_with_l2_fallback("macro:calendar:{index}:{period}", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_calendar_api(
     request: Request,
     index: str = "all",
@@ -4339,6 +4438,7 @@ async def macro_calendar_api(
 
 
 @app.get("/api/macro/economic", response_class=HTMLResponse)
+@_with_l2_fallback("macro:economic:{period}:{country}:{impact}", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_economic_api(
     request: Request,
     period: str = "this_week",
@@ -4370,6 +4470,7 @@ async def macro_economic_api(
 
 
 @app.get("/api/macro/volatility", response_class=HTMLResponse)
+@_with_l2_fallback("macro:volatility:{type}", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_volatility_api(
     request: Request,
     type: str = "total",
@@ -4406,6 +4507,7 @@ async def macro_volatility_api(
 
 # ─── FRED Economic Indicators ───────────────────────────────────────
 @app.get("/api/macro/fred", response_class=HTMLResponse)
+@_with_l2_fallback("macro:fred", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_fred_api(request: Request):
     """HTMX endpoint — FRED economic indicators (GDP, CPI, unemployment, rates)."""
     if not _screener_authed(request):
@@ -4426,6 +4528,7 @@ async def macro_fred_api(request: Request):
 
 # ─── Treasury Yield Curve ───────────────────────────────────────────
 @app.get("/api/macro/treasury", response_class=HTMLResponse)
+@_with_l2_fallback("macro:treasury", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_treasury_api(request: Request):
     """HTMX endpoint — Treasury yield curve + national debt."""
     if not _screener_authed(request):
@@ -4448,6 +4551,7 @@ async def macro_treasury_api(request: Request):
 
 # ─── FX Rates ───────────────────────────────────────────────────────
 @app.get("/api/macro/fx", response_class=HTMLResponse)
+@_with_l2_fallback("macro:fx", category="macro", l1_ttl=600, l2_ttl=14400)
 async def macro_fx_api(request: Request):
     """HTMX endpoint — FX rates dashboard."""
     if not _screener_authed(request):
@@ -4468,6 +4572,7 @@ async def macro_fx_api(request: Request):
 
 # ─── WSB Sentiment (per-ticker) ─────────────────────────────────────
 @app.get("/api/stock/{ticker}/wsb", response_class=HTMLResponse)
+@_with_l2_fallback("stock:wsb:{ticker}", category="stock", l1_ttl=300, l2_ttl=3600)
 async def stock_wsb_api(request: Request, ticker: str):
     """HTMX endpoint — WSB sentiment badge for a stock."""
     if not _valid_ticker(ticker):
