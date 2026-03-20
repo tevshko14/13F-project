@@ -273,25 +273,59 @@ def classify_sentiment(title: str) -> str:
 # ── Impact Score ─────────────────────────────────────────────────────
 
 
-def compute_impact_score(subscriber_count: int, avg_views: int) -> int:
-    """Compute Retail-Impact score 1-10.
+_OWNER_CHANNEL_ID = "UChvd7RCRJS50RWlwbfcwr3A"  # Tevis (FunOfInvesting)
 
-    Log-scaled: 100K subs ~ 5, 1M ~ 7, 5M ~ 9, 10M = 10.
-    Weighted 50/50 between subscriber reach and view engagement.
+
+def compute_impact_score(
+    subscriber_count: int,
+    avg_views: int,
+    *,
+    channel_id: str = "",
+    tickers: list | None = None,
+    sentiment: str = "",
+    frequency_alert: bool = False,
+) -> int:
+    """Compute content-quality-weighted impact score 1-10.
+
+    Factors in content signals (tickers, sentiment, engagement ratio)
+    alongside reach, so smaller channels with actionable content can
+    score high enough to trigger notifications (threshold: 7).
+
+    Owner channel always returns 10.
     """
-    if subscriber_count <= 0 and avg_views <= 0:
-        return 1
+    # Owner channel — always max priority
+    if channel_id == _OWNER_CHANNEL_ID:
+        return 10
 
-    sub_score = 0.0
+    score = 0.0
+
+    # ── Base reach (0-3 pts) — gentler log scale ──
     if subscriber_count > 0:
-        sub_score = max(0.0, min(10.0, (math.log10(subscriber_count) - 4) * 2.5))
+        # 10K→1, 100K→2, 1M→3
+        score += max(0.0, min(3.0, math.log10(subscriber_count) - 4))
 
-    view_score = 0.0
-    if avg_views > 0:
-        view_score = max(0.0, min(10.0, (math.log10(avg_views) - 3.5) * 2.5))
+    # ── Engagement ratio (0-2 pts) — rewards quality over size ──
+    if subscriber_count > 0 and avg_views > 0:
+        ratio = avg_views / subscriber_count
+        # ratio 0.05→0.5, 0.10→1.0, 0.20→2.0
+        score += max(0.0, min(2.0, ratio * 10))
 
-    combined = 0.5 * sub_score + 0.5 * view_score
-    return max(1, min(10, round(combined)))
+    # ── Ticker mentions (0-3 pts) — specific stock coverage ──
+    n_tickers = len(tickers) if tickers else 0
+    if n_tickers >= 3:
+        score += 3.0
+    elif n_tickers >= 1:
+        score += 2.0
+
+    # ── Sentiment signal (0-1 pt) — clear bullish/bearish call ──
+    if sentiment in ("bullish", "bearish"):
+        score += 1.0
+
+    # ── Frequency alert (0-1 pt) — unusual posting cadence ──
+    if frequency_alert:
+        score += 1.0
+
+    return max(1, min(10, round(score)))
 
 
 # ── Frequency Alert ──────────────────────────────────────────────────
@@ -607,7 +641,11 @@ def sync_youtube_events() -> dict:
 
             tickers = parse_tickers(title)
             sent = classify_sentiment(title)
-            impact = compute_impact_score(sub_count, avg_views)
+            impact = compute_impact_score(
+                sub_count, avg_views,
+                channel_id=cid, tickers=tickers,
+                sentiment=sent, frequency_alert=freq_alert,
+            )
 
             all_event_rows.append(
                 {
@@ -640,7 +678,11 @@ def sync_youtube_events() -> dict:
             details = video_details.get(vid, {})
             tickers = parse_tickers(title)
             sent = classify_sentiment(title)
-            impact = compute_impact_score(sub_count, avg_views)
+            impact = compute_impact_score(
+                sub_count, avg_views,
+                channel_id=cid, tickers=tickers,
+                sentiment=sent, frequency_alert=freq_alert,
+            )
 
             all_upload_rows.append(
                 {

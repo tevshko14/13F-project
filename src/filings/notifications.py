@@ -191,7 +191,7 @@ def detect_13f_changes(
 def create_youtube_notification(event: dict) -> dict | None:
     """Create a notification dict for a high-impact YouTube event.
 
-    Returns ``None`` if the event doesn't qualify (impact_score < 7).
+    Returns ``None`` if the event doesn't qualify (impact_score < 5).
 
     Args:
         event: A youtube_events row dict (from youtube_sync).
@@ -200,7 +200,7 @@ def create_youtube_notification(event: dict) -> dict | None:
         A notification dict matching the Supabase schema, or None.
     """
     impact = event.get("impact_score", 0)
-    if impact < 7:
+    if impact < 5:
         return None
 
     video_id = event.get("video_id", "")

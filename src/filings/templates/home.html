@@ -146,9 +146,15 @@
 
         <div class="glass-card bento-news">
             <div class="bento-card-header">
-                <h3 class="bento-card-title">Market News</h3>
+                <div class="bento-feed-toggle" role="group" aria-label="Feed toggle">
+                    <button class="feed-pill active" data-feed="activity" aria-pressed="true"
+                            onclick="switchFeed('activity', this)">Live Activity</button>
+                    <button class="feed-pill" data-feed="news" aria-pressed="false"
+                            onclick="switchFeed('news', this)">Market News</button>
+                </div>
             </div>
-            <div class="bento-card-body bento-card-body-flex" hx-get="/api/market-news" hx-trigger="load delay:0.5s" hx-swap="innerHTML">
+            <div class="bento-card-body bento-card-body-flex" id="bento-feed-body"
+                 hx-get="/api/live-activity" hx-trigger="load delay:0.3s" hx-swap="innerHTML">
                 <div style="padding:1em;">{{ skeleton_rows(5) }}</div>
             </div>
         </div>
@@ -156,13 +162,21 @@
         <div class="glass-card bento-heatmap">
             <div class="bento-card-header">
                 <h3 class="bento-card-title">S&amp;P 500 Heatmap</h3>
-                <div class="heatmap-toggle" id="heatmap-toggle" role="group" aria-label="Heatmap time period">
-                    <button class="heatmap-pill active" data-period="1D" aria-pressed="true"
-                            onclick="switchHeatmapPeriod('1D', this)">1D</button>
-                    <button class="heatmap-pill" data-period="1W" aria-pressed="false"
-                            onclick="switchHeatmapPeriod('1W', this)">1W</button>
-                    <button class="heatmap-pill" data-period="1M" aria-pressed="false"
-                            onclick="switchHeatmapPeriod('1M', this)">1M</button>
+                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                    <div class="heatmap-toggle" role="group" aria-label="Heatmap view mode">
+                        <button class="heatmap-pill active" data-view="sectors" aria-pressed="true"
+                                onclick="switchHeatmapView('sectors', this)">Sectors</button>
+                        <button class="heatmap-pill" data-view="companies" aria-pressed="false"
+                                onclick="switchHeatmapView('companies', this)">Companies</button>
+                    </div>
+                    <div class="heatmap-toggle" id="heatmap-toggle" role="group" aria-label="Heatmap time period">
+                        <button class="heatmap-pill active" data-period="1D" aria-pressed="true"
+                                onclick="switchHeatmapPeriod('1D', this)">1D</button>
+                        <button class="heatmap-pill" data-period="1W" aria-pressed="false"
+                                onclick="switchHeatmapPeriod('1W', this)">1W</button>
+                        <button class="heatmap-pill" data-period="1M" aria-pressed="false"
+                                onclick="switchHeatmapPeriod('1M', this)">1M</button>
+                    </div>
                 </div>
             </div>
             <div class="bento-card-body" id="heatmap-body" hx-get="/api/heatmap?period=1D" hx-trigger="load delay:1s" hx-swap="innerHTML">
@@ -237,10 +251,45 @@
 </div>
 
 <script>
-function switchHeatmapPeriod(period, btn) {
-    document.querySelectorAll('.heatmap-pill').forEach(function(b) { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+var _feedCache = {};
+// Capture initial HTMX-loaded activity feed into cache (scoped to feed element only)
+var _feedBody = document.getElementById('bento-feed-body');
+if (_feedBody) _feedBody.addEventListener('htmx:afterSettle', function() {
+    if (!_feedCache['activity']) _feedCache['activity'] = this.innerHTML;
+});
+// Shared pill-toggle helper — activates btn, deactivates siblings
+function _setActivePill(btn) {
+    btn.parentElement.querySelectorAll('[class*=pill]').forEach(function(b) { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
     btn.classList.add('active');
     btn.setAttribute('aria-pressed', 'true');
+}
+function switchFeed(feed, btn) {
+    _setActivePill(btn);
+    var body = document.getElementById('bento-feed-body');
+    if (!body) return;
+    var url = feed === 'news' ? '/api/market-news' : '/api/live-activity';
+    if (_feedCache[feed]) {
+        body.innerHTML = _feedCache[feed];
+        activateScripts(body);
+        return;
+    }
+    body.innerHTML = '<div style="padding:1em;text-align:center;" aria-busy="true"><span class="spinner"></span></div>';
+    fetch(url).then(function(r) { return r.text(); }).then(function(html) {
+        _feedCache[feed] = html;
+        body.innerHTML = html;
+        activateScripts(body);
+    }).catch(function() {
+        body.innerHTML = '<p class="text-muted" style="padding:1em;text-align:center;">Failed to load feed.</p>';
+    });
+}
+
+function switchHeatmapView(view, btn) {
+    _setActivePill(btn);
+    if (window._ppSwitchHeatmapView) window._ppSwitchHeatmapView(view);
+}
+
+function switchHeatmapPeriod(period, btn) {
+    _setActivePill(btn);
     var body = document.getElementById('heatmap-body');
     if (body) body.style.opacity = '0.4';
     fetch('/api/heatmap-data?period=' + period)
@@ -676,6 +725,66 @@ document.addEventListener('keydown', function(e) {
     .bento-sentiment { grid-column: span 4; }
     .bento-trending { grid-column: span 12; }
     .bento-support { grid-column: span 12; }
+
+    /* Feed toggle (Live Activity / Market News) */
+    .bento-feed-toggle {
+        display: inline-flex;
+        border: 1px solid rgba(13, 148, 136, 0.22);
+        border-radius: 999px;
+        padding: 3px;
+        background: var(--home-accent-soft);
+        gap: 0;
+    }
+    .feed-pill {
+        margin: 0;
+        border: none;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--home-ink);
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 0.25em 0.8em;
+        cursor: pointer;
+        opacity: 0.6;
+        transition: all 0.2s;
+        line-height: 1.6;
+    }
+    .feed-pill:hover { opacity: 0.85; }
+    .feed-pill.active {
+        background: rgba(13, 148, 136, 0.18);
+        color: #0d9488;
+        opacity: 1;
+    }
+    :root[data-theme="dark"] .feed-pill.active {
+        background: rgba(45, 212, 191, 0.15);
+        color: #2dd4bf;
+    }
+
+    /* Live Activity feed in bento card */
+    .live-activity-feed {
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        max-height: 420px;
+    }
+    .live-activity-feed .pp-notif-item {
+        padding: 0.55rem 0.8rem;
+        border-bottom: 1px solid var(--pp-border-light, rgba(0,0,0,0.06));
+    }
+    .live-activity-feed .pp-notif-item:last-child { border-bottom: none; }
+    .live-activity-feed .pp-notif-icon { font-size: 1.1rem; }
+    .live-activity-feed .pp-notif-title { font-size: 0.8rem; }
+    .live-activity-feed .pp-notif-msg { font-size: 0.73rem; }
+    .live-activity-feed .pp-notif-meta { font-size: 0.68rem; }
+    .live-activity-feed .pp-notif-footer {
+        text-align: center;
+        padding: 0.6rem;
+        font-size: 0.78rem;
+        color: #0d9488;
+        font-weight: 600;
+        border-top: 1px solid var(--pp-border-light, rgba(0,0,0,0.06));
+    }
+    :root[data-theme="dark"] .live-activity-feed .pp-notif-footer { color: #2dd4bf; }
 
     .heatmap-toggle {
         display: inline-flex;

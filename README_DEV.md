@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-16 (Performance: Brotli compression, CSS minification, connection pooling, CLS fix, font centralization, retail L1 cache; SEO: FAQ expansion, data citations, llms.txt enrichment; Fix: investor.html duplicate DOM IDs)
+> Last updated: 2026-03-18 (Homepage: Live Activity feed + Sectors/Companies heatmap toggle; YouTube: multi-factor impact scoring; Congress: persistent notification watermark; Performance: live-activity HTML cache, pill-toggle helper DRY refactor)
 
 ---
 
@@ -285,7 +285,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── watchlist_response.html  # OOB response: star + sidebar update
             ├── notification_bell.html   # Navbar bell icon with red dot indicator (HTMX-polled every 120s)
             ├── notification_dropdown.html # Notification dropdown (latest 8, "View all" footer)
-            ├── heatmap.html            # S&P 500 ECharts treemap (lazy-loaded via HTMX)
+            ├── live_activity.html      # Live activity feed for homepage bento card (notifications stream)
+            ├── heatmap.html            # S&P 500 ECharts treemap with Sectors/Companies toggle (lazy-loaded via HTMX)
             ├── most_added.html         # Most-added-by-superinvestors table (lazy-loaded)
             ├── ticker_search.html      # Nav autocomplete search input (Fuse.js fuzzy search)
             ├── analyst_ratings.html    # Analyst consensus + ratings table (lazy-loaded)
@@ -1495,6 +1496,7 @@ When both `FINNHUB_API_KEY` and `FMP_API_KEY` are unset, the calendar generates 
 | GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | Hot→OI screener→Cold→stale L1 + title resolution | `partials/stock_insider_trades.html` |
 | GET | `/api/retail/leaderboard` | `retail_leaderboard_api` | ApeWisdom + CNN Fear & Greed | `partials/retail_leaderboard.html` |
 | GET | `/api/ticker-search-index` | `ticker_search_index` | NASDAQ Trader + S&P 500 + cache | JSON response |
+| GET | `/api/live-activity` | `live_activity_api` | Supabase `notifications` (5-min HTML cache) | `partials/live_activity.html` |
 | GET | `/api/heatmap` | `heatmap` | yfinance (30-min cache) + Wikipedia | `partials/heatmap.html` |
 | GET | `/api/most-added` | `most_added` | Cache + analysts + yfinance | `partials/most_added.html` |
 | POST | `/api/watchlist/{ticker}` | `watchlist_add` | Watchlist JSON | `partials/watchlist_response.html` |
@@ -1648,9 +1650,10 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   ├── includes partials/notification_dropdown.html (loaded on bell click via HTMX)
   ├── includes partials/ticker_search.html (in <nav>, Fuse.js fuzzy autocomplete)
   ├── home.html (homepage)
-  │     ├── lazy-loads partials/heatmap.html via HTMX (/api/heatmap)
+  │     ├── Live Activity / Market News feed toggle (lazy-loads partials/live_activity.html via /api/live-activity)
+  │     ├── lazy-loads partials/heatmap.html via HTMX (/api/heatmap) — Sectors/Companies + 1D/1W/1M toggles
   │     ├── lazy-loads partials/most_added.html via HTMX (/api/most-added)
-  │     ├── 3 quick-access cards: Retail, Funds, Insiders
+  │     ├── 4 quick-access cards: Retail, Funds, Insiders, Congress
   │     └── Panda Fund support widget: progress bar + Stripe Pricing Table embed
   ├── retail.html (sub-tabs: Sentiment | Leaderboard | Calendar)
   │     ├── Sentiment tab: CNN Fear & Greed gauge + summary cards (server-rendered)

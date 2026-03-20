@@ -4929,32 +4929,51 @@ async def stock_congress_api(request: Request, ticker: str):
 _congress_page_cache: dict = {"data": None, "ts": 0.0}
 _CONGRESS_PAGE_TTL = 900  # 15 minutes
 
-# Congress notification tracking — set to today on first boot to avoid
-# retroactively flooding notifications from the entire cold archive.
+# Congress notification tracking — persisted to api_cache so deploys
+# don't reset the watermark and miss filings.
 _congress_last_notified_filing: str = ""
 _CONGRESS_NOTIF_MAX = 10  # cap per refresh cycle
+_CONGRESS_WATERMARK_KEY = "congress_notif_watermark"
 
 
 async def _emit_congress_notifications(recent_trades: list[dict]) -> None:
     """Check for new congress filings and create notifications.
 
     Compares ``filing_date`` of recent trades against the last filing
-    date we already notified about.  On first call, initialises the
-    watermark to today so old archive data doesn't trigger alerts.
+    date we already notified about.  Watermark persisted to Supabase
+    api_cache so it survives deploys.
     """
     global _congress_last_notified_filing
 
     if not recent_trades:
         return
 
-    # First boot: seed watermark to today (no retroactive flood)
+    # Load watermark from Supabase on first call (survives deploys)
     if not _congress_last_notified_filing:
-        _congress_last_notified_filing = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        logger.info(
-            "Congress notifications: initialised watermark to %s",
-            _congress_last_notified_filing,
-        )
-        return
+        try:
+            cached = await asyncio.to_thread(
+                supabase_cache.get_cached, _CONGRESS_WATERMARK_KEY
+            )
+            if cached and cached.get("watermark"):
+                _congress_last_notified_filing = cached["watermark"]
+                logger.info(
+                    "Congress notifications: loaded watermark from cache: %s",
+                    _congress_last_notified_filing,
+                )
+            else:
+                # True first boot — seed to 7 days ago to catch recent filings
+                _congress_last_notified_filing = (
+                    datetime.now(timezone.utc) - timedelta(days=7)
+                ).strftime("%Y-%m-%d")
+                logger.info(
+                    "Congress notifications: no saved watermark, seeding to %s",
+                    _congress_last_notified_filing,
+                )
+        except Exception:
+            _congress_last_notified_filing = (
+                datetime.now(timezone.utc) - timedelta(days=7)
+            ).strftime("%Y-%m-%d")
+            logger.warning("Congress notifications: failed to load watermark, seeding to %s", _congress_last_notified_filing)
 
     # Filter trades filed after our watermark, with a real ticker
     new_trades = [
@@ -4988,6 +5007,16 @@ async def _emit_congress_notifications(recent_trades: list[dict]) -> None:
     max_filing = max(t.get("filing_date", "") for t in new_trades)
     if max_filing > _congress_last_notified_filing:
         _congress_last_notified_filing = max_filing
+        # Persist to Supabase so it survives deploys
+        try:
+            await asyncio.to_thread(
+                supabase_cache.set_cached,
+                _CONGRESS_WATERMARK_KEY,
+                {"watermark": max_filing},
+                ttl_hours=24 * 365,  # effectively permanent
+            )
+        except Exception:
+            logger.warning("Failed to persist congress watermark")
 
 # Per-politician profile cache (LRU-bounded, 15-min TTL)
 # OrderedDict gives O(1) eviction via move_to_end + popitem
@@ -5651,6 +5680,28 @@ async def market_overview_chart_api(
     if chart is None:
         return JSONResponse({"error": "Symbol not found"}, status_code=404)
     return JSONResponse(chart)
+
+
+_live_activity_cache = _HtmlCache(300)  # 5-min TTL
+
+
+@app.get("/api/live-activity", response_class=HTMLResponse)
+async def live_activity_api(request: Request):
+    """Return live activity feed HTML partial for homepage bento card."""
+    cached = _live_activity_cache.get()
+    if cached:
+        return cached
+    notifs = await asyncio.to_thread(
+        supabase_cache.get_recent_notifications, 12
+    )
+    for n in notifs:
+        n["time_ago"] = _time_ago(n.get("created_at", ""))
+    resp = templates.TemplateResponse(
+        "partials/live_activity.html",
+        {"request": request, "notifications": notifs},
+    )
+    _live_activity_cache.set(resp)
+    return resp
 
 
 @app.get("/api/market-news", response_class=HTMLResponse)

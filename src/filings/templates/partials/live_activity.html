@@ -1,0 +1,26 @@
+{# Live Activity feed — homepage bento card #}
+<div class="live-activity-feed">
+  {% if notifications %}
+    {% for n in notifications %}
+    <a href="{{ n.link or '/notifications' }}" class="pp-notif-item{% if n.type == 'feature_release' %} pp-notif-item--feature{% endif %}">
+      <span class="pp-notif-icon">{% if n.metadata and n.metadata.ticker and logo_tickers is defined and n.metadata.ticker in logo_tickers %}<img src="/api/logo/{{ n.metadata.ticker }}.png" width="20" height="20" loading="lazy" decoding="async" onerror="this.outerHTML='{{ n.icon }}';" class="ticker-logo" style="border-radius: 4px;">{% else %}{{ n.icon }}{% endif %}</span>
+      <div class="pp-notif-content">
+        <div class="pp-notif-title">{{ n.title }}</div>
+        <div class="pp-notif-msg">{{ n.message }}</div>
+        <div class="pp-notif-meta">
+          <span class="pp-notif-kind">{{ n.type | replace('_', ' ') | title }}</span>
+          <span class="pp-notif-time">{{ n.time_ago }}</span>
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+    <a href="/notifications" class="pp-notif-footer">
+      View all activity &rarr;
+    </a>
+  {% else %}
+    <div style="padding: 2em 1em; text-align: center; color: var(--pp-text-muted);">
+      <p style="font-size: 1.5rem; margin-bottom: 0.5rem;">🐼</p>
+      <p style="font-size: 0.85rem; margin: 0;">No recent activity. Check back soon!</p>
+    </div>
+  {% endif %}
+</div>
