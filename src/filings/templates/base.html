@@ -3080,14 +3080,14 @@
                 '</div>';
         }
 
-        function activateScripts(container) {
+        window.activateScripts = function(container) {
             container.querySelectorAll('script').forEach(function(old) {
                 var s = document.createElement('script');
                 if (old.src) s.src = old.src; else s.textContent = old.textContent;
                 old.parentNode.replaceChild(s, old);
             });
-        }
-        var _activateScripts = activateScripts;
+        };
+        var _activateScripts = window.activateScripts;
 
         /* ── HTMX global error handling ── */
         if (!window._ppHtmxErrorBound) {
