@@ -59,8 +59,8 @@ _sector_cache: dict[str, tuple[float, dict | None]] = {}
 _SECTOR_TTL = 604_800  # 7 days
 
 # ── Cache size limits (prevent unbounded memory growth) ───────────
-_MAX_INTEREST_CACHE = 500
-_MAX_SECTOR_CACHE = 500
+_MAX_INTEREST_CACHE = 200
+_MAX_SECTOR_CACHE = 200
 
 
 def _evict_oldest_gt(cache: dict, max_size: int) -> None:

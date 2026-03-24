@@ -46,7 +46,7 @@ _chain_cache: dict[str, tuple[float, dict]] = {}
 # {TICKER: (timestamp, quote_dict)}
 _quote_cache: dict[str, tuple[float, dict]] = {}
 
-_MAX_CACHE_ENTRIES = 2000
+_MAX_CACHE_ENTRIES = 500
 
 
 # ── Public helpers ───────────────────────────────────────────────────────────

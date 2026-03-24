@@ -39,7 +39,7 @@ _XBRL_BASE = "https://data.sec.gov/api/xbrl/companyfacts"
 # ── Cache config ─────────────────────────────────────────────────────
 _L1_TTL = 3_600                  # 1 hour in-memory
 _L2_TTL = 24 * 3_600             # 24 hours in Supabase
-_MAX_CACHE = 500
+_MAX_CACHE = 200
 _lock = threading.Lock()
 _mem_cache: dict[str, tuple[float, dict]] = {}   # ticker → (ts, result)
 _cik_cache: dict[str, str | None] = {}           # ticker → CIK

@@ -44,7 +44,7 @@ _JWKS_TTL = 3600  # 1 hour
 _profile_lock = threading.Lock()
 _profile_cache: dict[str, tuple[float, dict | None]] = {}
 _PROFILE_TTL = 60  # seconds
-_MAX_PROFILE_CACHE = 500  # LRU eviction threshold
+_MAX_PROFILE_CACHE = 200  # LRU eviction threshold
 
 
 # ── JWKS helpers ────────────────────────────────────────────────────

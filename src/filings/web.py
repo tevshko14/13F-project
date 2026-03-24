@@ -189,9 +189,9 @@ _heavy_sem: asyncio.Semaphore | None = None
 import base64 as _b64
 from collections import OrderedDict
 
-_LOGO_LRU_MAX = 500
-_HEADSHOT_LRU_MAX = 100
-_ANALYST_PHOTO_LRU_MAX = 100
+_LOGO_LRU_MAX = 200
+_HEADSHOT_LRU_MAX = 50
+_ANALYST_PHOTO_LRU_MAX = 50
 
 
 def _lru_put(cache: OrderedDict, key: str, value: bytes, maxsize: int) -> None:
@@ -908,7 +908,7 @@ try:
 except ImportError:
     _consensus_cache = {}  # type: ignore[assignment]
 _CONSENSUS_TTL = 1800   # 30 minutes in seconds
-_CONSENSUS_MAX = 2000   # ~2 MB worst-case; evict oldest when exceeded
+_CONSENSUS_MAX = 500    # ~0.5 MB worst-case; evict oldest when exceeded
 
 
 def _consensus_cache_set(key: str, value: tuple[float, dict | None]) -> None:
@@ -5309,7 +5309,7 @@ async def _emit_congress_notifications(recent_trades: list[dict]) -> None:
 from collections import OrderedDict as _OrderedDict
 _politician_cache: _OrderedDict[str, tuple[float, dict]] = _OrderedDict()
 _POLITICIAN_CACHE_TTL = 900  # 15 minutes
-_POLITICIAN_CACHE_MAX = 100  # max entries (LRU eviction)
+_POLITICIAN_CACHE_MAX = 50   # max entries (LRU eviction)
 
 
 _congress_page_lock = asyncio.Lock()
@@ -5523,7 +5523,7 @@ try:
 except Exception:
     _insights_cache = {}  # type: ignore[assignment]
 _INSIGHTS_TTL = 900     # 15 min — insights change at most daily
-_INSIGHTS_MAX = 100     # cap entries to bound memory (~0.4 MB at 4 KB/entry)
+_INSIGHTS_MAX = 50      # cap entries to bound memory (~0.2 MB at 4 KB/entry)
 
 
 def _insights_cache_set(key: str, html: str) -> None:

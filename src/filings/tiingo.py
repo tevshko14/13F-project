@@ -49,7 +49,7 @@ _eod_cache: dict[str, tuple[float, list[dict]]] = {}
 # S&P 500 close DataFrame cache: (timestamp, DataFrame) | None
 _close_df_cache: tuple[float, object] | None = None
 
-_MAX_CACHE_ENTRIES = 2000
+_MAX_CACHE_ENTRIES = 500
 
 
 # ── Public helpers ───────────────────────────────────────────────────────────

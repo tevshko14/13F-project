@@ -51,7 +51,7 @@ _GLASSDOOR_STALE_REFRESH_CAP = 80  # Only background-refresh stale entries below
 GLASSDOOR_CACHE_FILE = CACHE_DIR / "glassdoor_cache.json"
 
 # ── LRU max entries for per-ticker caches ─────────────────────────────
-_MAX_CACHE_ENTRIES = 2000
+_MAX_CACHE_ENTRIES = 500
 
 # ── Per-ticker caches: {TICKER: (timestamp, data | None)} ───────────
 _glassdoor_cache: dict[str, tuple[float, dict | None]] = {}

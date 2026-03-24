@@ -31,7 +31,7 @@ _analyst_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="analyst")
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, list[AnalystRating]]] = {}
 _CACHE_TTL = 300  # 5 minutes
-_MAX_CACHE_ENTRIES = 2000
+_MAX_CACHE_ENTRIES = 500
 
 # ── Supabase client (lazy-initialized) ───────────────────────────────
 _sb_client = None

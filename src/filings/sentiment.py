@@ -34,7 +34,7 @@ _APEWISDOM_TTL = 1800  # 30 minutes
 _ALPHAVANTAGE_TTL = 43200  # 12 hours
 
 # ── LRU max entries for per-ticker caches ─────────────────────────────
-_MAX_CACHE_ENTRIES = 2000
+_MAX_CACHE_ENTRIES = 500
 
 # ── Per-ticker caches: {TICKER: (timestamp, data)} ─────────────────
 _finnhub_cache: dict[str, tuple[float, dict | None]] = {}
