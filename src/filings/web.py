@@ -301,6 +301,10 @@ def _l2_set_html(cache_key: str, category: str, html: bytes, ttl: int) -> None:
 
 _l2_caches: dict[str, _HtmlCache] = {}  # auto-created per category
 
+# Registry: each decorated endpoint stores its key_template so the 429
+# handler can reconstruct cache keys without a separate hand-coded map.
+_l2_key_registry: list[tuple[str, str]] = []  # [(key_template, func_name), ...]
+
 
 def _with_l2_fallback(
     key_template: str,
@@ -365,6 +369,9 @@ def _with_l2_fallback(
                 "Data temporarily unavailable. Please try again shortly.</p>"
             )
 
+        # Register so the 429 handler can reconstruct cache keys dynamically
+        wrapper._l2_key_template = key_template  # type: ignore[attr-defined]
+        _l2_key_registry.append((key_template, fn.__name__))
         return wrapper
 
     return decorator
@@ -1127,6 +1134,78 @@ if auth.CLERK_DOMAIN:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Rate-limit L2 fallback — serves stale cache instead of blank errors
+# ═══════════════════════════════════════════════════════════════════════
+
+# Built lazily on first 429 from the route table + _l2_key_registry.
+_rate_limit_route_map: dict | None = None
+
+
+def _build_rate_limit_route_map() -> dict[str, str]:
+    """Build a map of {route_path: key_template} from FastAPI routes.
+
+    Matches routes whose endpoint has a ``_l2_key_template`` attribute
+    (set by ``_with_l2_fallback``).
+    """
+    result: dict[str, str] = {}
+    for route in app.routes:
+        if hasattr(route, "endpoint"):
+            tpl = getattr(route.endpoint, "_l2_key_template", None)
+            if tpl and hasattr(route, "path"):
+                result[route.path] = tpl
+    return result
+
+
+def _match_cache_key(request: Request) -> str | None:
+    """Try to resolve an L2 cache key for the given request URL."""
+    global _rate_limit_route_map
+    if _rate_limit_route_map is None:
+        _rate_limit_route_map = _build_rate_limit_route_map()
+
+    path = request.url.path
+    # Sort by route path length descending so /api/financials/{ticker}/history
+    # matches before /api/financials/{ticker}
+    for route_path, key_template in sorted(
+        _rate_limit_route_map.items(), key=lambda x: len(x[0]), reverse=True
+    ):
+        # Split route into segments: /api/analysts/{ticker} → ["api","analysts","{ticker}"]
+        route_parts = route_path.strip("/").split("/")
+        path_parts = path.strip("/").split("/")
+
+        if len(route_parts) != len(path_parts):
+            continue
+
+        params: dict[str, str] = {}
+        matched = True
+        for rp, pp in zip(route_parts, path_parts):
+            if rp.startswith("{") and rp.endswith("}"):
+                params[rp[1:-1]] = pp
+            elif rp != pp:
+                matched = False
+                break
+
+        if not matched:
+            continue
+
+        # Include query params (for macro endpoints like scorecard, breadth)
+        for k, v in request.query_params.items():
+            if k not in params:
+                params[k] = v
+
+        try:
+            return key_template.format(**params)
+        except KeyError:
+            continue
+
+    return None
+
+
+def _try_l2_for_rate_limited(cache_key: str) -> str | None:
+    """Attempt to serve stale L2 HTML (sync, run via to_thread)."""
+    return _l2_get_html(cache_key)
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Exception handlers
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -1137,7 +1216,20 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     is_htmx = request.headers.get("HX-Request") == "true"
 
     if exc.status_code == 429:
+        # For API/HTMX requests, try to serve stale L2 cached content instead
+        # of a blank error — 12-hour-old data is better than nothing.
         if is_htmx or request.url.path.startswith("/api/"):
+            cache_key = _match_cache_key(request)
+            if cache_key:
+                try:
+                    stale_html = await asyncio.to_thread(
+                        _try_l2_for_rate_limited, cache_key
+                    )
+                    if stale_html:
+                        logger.info("Serving stale L2 for rate-limited %s", request.url.path)
+                        return Response(content=stale_html.encode(), media_type="text/html")
+                except Exception:
+                    pass
             return templates.TemplateResponse(
                 "partials/data_error.html",
                 {
@@ -6883,51 +6975,51 @@ async def api_screener_data(request: Request, ticker: str):
 # ═══════════════════════════════════════════════════════════════════════
 
 if _has_limiter:
-    # Page routes (prevent scraping / DoS on expensive full-page renders)
-    homepage = limiter.limit("30/minute")(homepage)
-    funds_page = limiter.limit("20/minute")(funds_page)
-    holdings = limiter.limit("20/minute")(holdings)
-    stock_detail = limiter.limit("30/minute")(stock_detail)
-    stock_detail_by_cusip = limiter.limit("30/minute")(stock_detail_by_cusip)
-    insider_trading_page = limiter.limit("20/minute")(insider_trading_page)
-    # Per-ticker API endpoints
-    fund_row = limiter.limit("10/minute")(fund_row)
-    analyst_ratings = limiter.limit("30/minute")(analyst_ratings)
-    sentiment_data = limiter.limit("30/minute")(sentiment_data)
-    vitals_data = limiter.limit("30/minute")(vitals_data)
-    company_filings_tab = limiter.limit("30/minute")(company_filings_tab)
-    insider_trades_api = limiter.limit("20/minute")(insider_trades_api)
-    stock_insider_trades_api = limiter.limit("30/minute")(stock_insider_trades_api)
-    stock_congress_api = limiter.limit("30/minute")(stock_congress_api)
-    politician_page = limiter.limit("30/minute")(politician_page)
-    congress_page = limiter.limit("30/minute")(congress_page)
-    congress_activity_api = limiter.limit("30/minute")(congress_activity_api)
-    congress_trending_api = limiter.limit("30/minute")(congress_trending_api)
-    trending_combined_api = limiter.limit("15/minute")(trending_combined_api)
-    insider_insights_api = limiter.limit("30/minute")(insider_insights_api)
-    # Expensive aggregate / external-API endpoints
-    ticker_search_index = limiter.limit("20/minute")(ticker_search_index)
-    alt_signals_short_interest = limiter.limit("15/minute")(alt_signals_short_interest)
-    retail_leaderboard_api = limiter.limit("15/minute")(retail_leaderboard_api)
-    retail_leaderboard_data = limiter.limit("15/minute")(retail_leaderboard_data)
-    retail_calendar_api = limiter.limit("15/minute")(retail_calendar_api)
-    retail_calendar_data = limiter.limit("15/minute")(retail_calendar_data)
-    ticker_tape_api = limiter.limit("15/minute")(ticker_tape_api)
-    market_overview_api = limiter.limit("15/minute")(market_overview_api)
-    market_overview_chart_api = limiter.limit("30/minute")(market_overview_chart_api)
-    market_news_api = limiter.limit("15/minute")(market_news_api)
-    retail_sentiment_api = limiter.limit("15/minute")(retail_sentiment_api)
-    heatmap = limiter.limit("10/minute")(heatmap)
-    most_added = limiter.limit("10/minute")(most_added)
-    api_activity_feed = limiter.limit("15/minute")(api_activity_feed)
-    portfolio_chart_data = limiter.limit("15/minute")(portfolio_chart_data)
-    compare_api = limiter.limit("15/minute")(compare_api)
+    # Page routes — generous limits; these are full-page renders cached at L1/L2
+    homepage = limiter.limit("60/minute")(homepage)
+    funds_page = limiter.limit("30/minute")(funds_page)
+    holdings = limiter.limit("30/minute")(holdings)
+    stock_detail = limiter.limit("60/minute")(stock_detail)
+    stock_detail_by_cusip = limiter.limit("60/minute")(stock_detail_by_cusip)
+    insider_trading_page = limiter.limit("30/minute")(insider_trading_page)
+    # Per-ticker API endpoints (stock page tabs — L2 cached, serve fast)
+    fund_row = limiter.limit("30/minute")(fund_row)
+    analyst_ratings = limiter.limit("60/minute")(analyst_ratings)
+    sentiment_data = limiter.limit("60/minute")(sentiment_data)
+    vitals_data = limiter.limit("60/minute")(vitals_data)
+    company_filings_tab = limiter.limit("60/minute")(company_filings_tab)
+    insider_trades_api = limiter.limit("30/minute")(insider_trades_api)
+    stock_insider_trades_api = limiter.limit("60/minute")(stock_insider_trades_api)
+    stock_congress_api = limiter.limit("60/minute")(stock_congress_api)
+    politician_page = limiter.limit("60/minute")(politician_page)
+    congress_page = limiter.limit("60/minute")(congress_page)
+    congress_activity_api = limiter.limit("60/minute")(congress_activity_api)
+    congress_trending_api = limiter.limit("60/minute")(congress_trending_api)
+    trending_combined_api = limiter.limit("30/minute")(trending_combined_api)
+    insider_insights_api = limiter.limit("60/minute")(insider_insights_api)
+    # Homepage widget endpoints — L2 cached, cheap to serve, loaded together
+    ticker_search_index = limiter.limit("30/minute")(ticker_search_index)
+    alt_signals_short_interest = limiter.limit("30/minute")(alt_signals_short_interest)
+    retail_leaderboard_api = limiter.limit("60/minute")(retail_leaderboard_api)
+    retail_leaderboard_data = limiter.limit("60/minute")(retail_leaderboard_data)
+    retail_calendar_api = limiter.limit("60/minute")(retail_calendar_api)
+    retail_calendar_data = limiter.limit("60/minute")(retail_calendar_data)
+    ticker_tape_api = limiter.limit("60/minute")(ticker_tape_api)
+    market_overview_api = limiter.limit("60/minute")(market_overview_api)
+    market_overview_chart_api = limiter.limit("60/minute")(market_overview_chart_api)
+    market_news_api = limiter.limit("60/minute")(market_news_api)
+    retail_sentiment_api = limiter.limit("60/minute")(retail_sentiment_api)
+    heatmap = limiter.limit("60/minute")(heatmap)
+    most_added = limiter.limit("60/minute")(most_added)
+    api_activity_feed = limiter.limit("60/minute")(api_activity_feed)
+    portfolio_chart_data = limiter.limit("60/minute")(portfolio_chart_data)
+    compare_api = limiter.limit("30/minute")(compare_api)
     # Google Trends endpoints (GT rate-limits are strict, be conservative)
-    gt_trending_api = limiter.limit("10/minute")(gt_trending_api)
-    gt_macro_api = limiter.limit("10/minute")(gt_macro_api)
-    gt_ticker_api = limiter.limit("10/minute")(gt_ticker_api)
+    gt_trending_api = limiter.limit("15/minute")(gt_trending_api)
+    gt_macro_api = limiter.limit("15/minute")(gt_macro_api)
+    gt_ticker_api = limiter.limit("15/minute")(gt_ticker_api)
     # Convergence engine (aggregates multiple signal sources)
-    options_convergence_api = limiter.limit("10/minute")(options_convergence_api)
+    options_convergence_api = limiter.limit("20/minute")(options_convergence_api)
     # Auth pages (bot/scraper prevention)
     login_page = limiter.limit("10/minute")(login_page)
     signup_page = limiter.limit("10/minute")(signup_page)
