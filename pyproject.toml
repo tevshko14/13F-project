@@ -5,10 +5,10 @@ description = "CLI tool to view SEC 13F institutional holdings filings"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "edgartools>=5.13",
+    "edgartools>=5.13,<6",
     "rich>=13.0",
-    "fastapi[standard]>=0.115",
-    "jinja2==3.1.6",
+    "fastapi[standard]>=0.115,<1",
+    "jinja2>=3.1",
     "finnhub-python>=2.4",
     "yfinance>=0.2",
     "slowapi>=0.1.9",
