@@ -270,7 +270,7 @@ def _enrich_price_changes(results: list[dict]) -> list[dict]:
         return results
 
     reactions: dict[str, float | None] = {}
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
             pool.submit(_fetch_eod_around_date, tk, dt): tk
             for tk, dt in to_fetch.items()

@@ -50,7 +50,7 @@ _LEADERBOARD_TTL = 1800  # 30 minutes
 _apewisdom_index: dict[str, dict] | None = None
 
 # ── Shared thread pool for sentiment tasks (avoids per-call pool creation) ──
-_sentiment_executor = ThreadPoolExecutor(max_workers=7, thread_name_prefix="sentiment")
+_sentiment_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="sentiment")
 
 # ── Alpha Vantage daily budget tracker ──────────────────────────────
 _av_daily_count = 0

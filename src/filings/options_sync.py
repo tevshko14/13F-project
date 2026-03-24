@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-_BATCH_SIZE = 5             # concurrent yfinance calls per batch
+_BATCH_SIZE = 3             # concurrent yfinance calls per batch
 _BATCH_DELAY = 2.0          # seconds between batches (Yahoo rate limit)
 _MAX_EXPIRIES = 2           # only check nearest 2 expiration dates
 _NOTIF_MAX = 10             # max notifications per sync cycle

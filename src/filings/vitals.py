@@ -35,7 +35,7 @@ from filings.cache import CACHE_DIR
 logger = logging.getLogger(__name__)
 
 # ── Shared thread pool (avoids per-call pool creation) ────────────────
-_vitals_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="vitals")
+_vitals_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vitals")
 
 # ── Thread lock for all cache reads/writes ────────────────────────────
 _lock = threading.Lock()

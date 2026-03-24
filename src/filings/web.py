@@ -441,14 +441,14 @@ async def lifespan(app: FastAPI):
     #             default pool (which handles health checks + fast routes).
     # Semaphore: caps concurrent heavy-pool submissions to prevent
     #            cache-miss stampedes from saturating even the heavy pool.
-    _pool_size = int(os.environ.get("WORKER_THREADS", "32"))
+    _pool_size = int(os.environ.get("WORKER_THREADS", "8"))
     loop = asyncio.get_running_loop()
     loop.set_default_executor(ThreadPoolExecutor(max_workers=_pool_size))
     _heavy_pool = ThreadPoolExecutor(
-        max_workers=int(os.environ.get("HEAVY_THREADS", "16")),
+        max_workers=int(os.environ.get("HEAVY_THREADS", "8")),
         thread_name_prefix="heavy",
     )
-    _heavy_sem = asyncio.Semaphore(int(os.environ.get("HEAVY_CONCURRENCY", "12")))
+    _heavy_sem = asyncio.Semaphore(int(os.environ.get("HEAVY_CONCURRENCY", "6")))
 
     global _http_pool
     _http_pool = httpx.AsyncClient(

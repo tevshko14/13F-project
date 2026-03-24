@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────────
 
-_BATCH_SIZE = 5  # Concurrent yfinance calls per batch
+_BATCH_SIZE = 3  # Concurrent yfinance calls per batch
 _BATCH_DELAY = 1.5  # Seconds between batches (rate limiting)
 _MAX_RETRIES = 2
 _LEADERBOARD_TTL = 43200  # 12 hours

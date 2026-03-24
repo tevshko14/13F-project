@@ -546,7 +546,7 @@ def _compute_iv_rank_batch() -> list[dict]:
 
     results = []
 
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
             pool.submit(_compute_iv_rank_for_ticker, t["ticker"]): t
             for t in tickers

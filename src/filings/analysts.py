@@ -25,7 +25,7 @@ from filings.models import AnalystRating
 logger = logging.getLogger(__name__)
 
 # ── Shared thread pool (avoids per-call pool creation) ────────────────
-_analyst_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="analyst")
+_analyst_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="analyst")
 
 # ── Thread lock + in-memory cache ────────────────────────────────────
 _lock = threading.Lock()
