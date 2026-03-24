@@ -1044,16 +1044,14 @@ def get_market_news(category: str = "general", max_articles: int = 20) -> list[d
             if time.time() - ts < _NEWS_TTL:
                 return data
 
-    api_key = os.environ.get("FINNHUB_API_KEY", "")
-    if not api_key:
-        logger.warning("FINNHUB_API_KEY not set — market news unavailable")
-        return []
-
     try:
-        import finnhub
+        from filings.sentiment import get_finnhub_client
         from datetime import datetime, timezone
 
-        client = finnhub.Client(api_key=api_key)
+        client = get_finnhub_client()
+        if not client:
+            logger.warning("FINNHUB_API_KEY not set — market news unavailable")
+            return []
         raw = client.general_news(category, min_id=0)
 
         if not raw or not isinstance(raw, list):

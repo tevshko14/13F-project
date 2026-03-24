@@ -255,19 +255,24 @@ _RETAIL_DATA_TTL = 120  # 2 minutes — ApeWisdom updates every ~5 min
 _SIGNALS_TIMEOUT = 8  # seconds per source in /api/signals/{ticker}
 
 
+_HTML_CACHE_MAX = 300  # max entries per _HtmlCache instance (LRU eviction)
+
+
 class _HtmlCache:
     """Lightweight TTL cache for rendered HTML responses.
 
     Avoids re-fetching + re-rendering when the same page is requested
     within the TTL window.  Keyed by an optional string (e.g. view name);
-    single-entry caches use key="".
+    single-entry caches use key="".  Bounded to _HTML_CACHE_MAX entries
+    with oldest-first eviction to prevent unbounded memory growth.
     """
 
-    __slots__ = ("_ttl", "_store")
+    __slots__ = ("_ttl", "_store", "_max")
 
-    def __init__(self, ttl: int):
+    def __init__(self, ttl: int, maxsize: int = _HTML_CACHE_MAX):
         self._ttl = ttl
         self._store: dict[str, tuple[float, bytes]] = {}
+        self._max = maxsize
 
     def get(self, key: str = "") -> Response | None:
         entry = self._store.get(key)
@@ -275,9 +280,23 @@ class _HtmlCache:
             return Response(content=entry[1], media_type="text/html")
         return None
 
+    def get_stale(self, key: str = "") -> Response | None:
+        """Return cached content even if TTL has expired (for stampede fallback)."""
+        entry = self._store.get(key)
+        if entry:
+            return Response(content=entry[1], media_type="text/html")
+        return None
+
     def set(self, resp, key: str = "") -> None:  # noqa: ANN001
         try:
             self._store[key] = (time_module.time(), resp.body)
+            # Evict oldest entries if over limit
+            if len(self._store) > self._max:
+                sorted_keys = sorted(
+                    self._store, key=lambda k: self._store[k][0]
+                )
+                for k in sorted_keys[: len(self._store) - self._max]:
+                    del self._store[k]
         except Exception:
             logger.warning("HTML cache write failed (key=%s)", key, exc_info=True)
 
@@ -315,6 +334,11 @@ def _l2_set_html(cache_key: str, category: str, html: bytes, ttl: int) -> None:
 
 _l2_caches: dict[str, _HtmlCache] = {}  # auto-created per category
 
+# Stampede protection: tracks keys currently being refreshed.
+# While a key is in this set, other requests serve stale L1 or L2 instead
+# of all firing the handler simultaneously.
+_l2_refreshing: set[str] = set()
+
 # Registry: each decorated endpoint stores its key_template so the 429
 # handler can reconstruct cache keys without a separate hand-coded map.
 _l2_key_registry: list[tuple[str, str]] = []  # [(key_template, func_name), ...]
@@ -350,7 +374,25 @@ def _with_l2_fallback(
             if cached is not None:
                 return cached
 
+            # ── Stampede guard: if another request is already refreshing
+            #    this key, serve stale L1 or L2 instead of piling on ──
+            if cache_key in _l2_refreshing:
+                # Try stale L1 (expired but still in store)
+                stale = l1.get_stale(cache_key)
+                if stale:
+                    return stale
+                # Try L2
+                try:
+                    stale_html = await asyncio.to_thread(_l2_get_html, cache_key)
+                    if stale_html:
+                        return Response(content=stale_html.encode(), media_type="text/html")
+                except Exception:
+                    pass
+                # Fall through to handler as last resort
+                # (better to double-fetch than show nothing)
+
             # ── Live fetch + render ──
+            _l2_refreshing.add(cache_key)
             try:
                 resp = await fn(*args, **kwargs)
                 # Save to L1
@@ -365,6 +407,8 @@ def _with_l2_fallback(
                 return resp
             except Exception:
                 logger.warning("L2 fallback triggered for %s", cache_key, exc_info=True)
+            finally:
+                _l2_refreshing.discard(cache_key)
 
             # ── L2 stale fallback ──
             try:
@@ -4330,7 +4374,7 @@ async def gt_ticker_api(request: Request, ticker: str):
 @app.get("/api/alt-signals/short-interest", response_class=HTMLResponse)
 async def alt_signals_short_interest(request: Request):
     """HTMX partial: short interest leaderboard tables."""
-    data = supabase_cache.get_cached("short_interest_leaderboard")
+    data = await asyncio.to_thread(supabase_cache.get_cached, "short_interest_leaderboard")
     if not data:
         # Cron hasn't run yet — build leaderboard on-the-fly from the history table.
         # Also attach guru overlap so the table is fully populated.

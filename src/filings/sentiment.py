@@ -24,6 +24,44 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
+# ── Shared Finnhub client (reused across modules to avoid per-call session creation) ──
+_finnhub_client = None
+
+
+_FINNHUB_TIMEOUT = 15  # seconds — prevents indefinite thread blocking
+
+
+def get_finnhub_client():
+    """Return a shared Finnhub client, or None if no API key is set.
+
+    Reuses a single client across all modules (analysts, sentiment,
+    market_data) to avoid per-call session creation overhead.
+    Enforces a hard timeout on all requests to prevent thread starvation.
+    """
+    global _finnhub_client
+    if _finnhub_client is not None:
+        return _finnhub_client
+    api_key = os.environ.get("FINNHUB_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        import finnhub
+
+        _finnhub_client = finnhub.Client(api_key=api_key)
+        # Patch the underlying requests session to enforce a timeout
+        # (finnhub-python does not expose a timeout parameter)
+        _orig_request = _finnhub_client.session.request
+
+        def _timeout_request(*a, **kw):
+            kw.setdefault("timeout", _FINNHUB_TIMEOUT)
+            return _orig_request(*a, **kw)
+
+        _finnhub_client.session.request = _timeout_request
+        return _finnhub_client
+    except Exception:
+        return None
+
+
 # ── Thread lock for all cache reads/writes ────────────────────────────
 _lock = threading.Lock()
 
@@ -122,14 +160,11 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
             if time.time() - ts < _FINNHUB_TTL:
                 return data
 
-    api_key = os.environ.get("FINNHUB_API_KEY", "")
-    if not api_key:
+    client = get_finnhub_client()
+    if not client:
         return None
 
     try:
-        import finnhub
-
-        client = finnhub.Client(api_key=api_key)
         raw = client.news_sentiment(key)
     except Exception as exc:
         logger.warning("Finnhub news_sentiment(%s) failed: %s", key, exc)

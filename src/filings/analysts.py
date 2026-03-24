@@ -305,14 +305,11 @@ def _upsert_tipranks_to_db(ticker: str, analysts_data: list[dict]) -> None:
 
 def _fetch_finnhub(ticker: str) -> list[AnalystRating]:
     """Fetch upgrade/downgrade data from Finnhub free API."""
-    api_key = os.environ.get("FINNHUB_API_KEY", "")
-    if not api_key:
-        return []
-
     try:
-        import finnhub
-
-        client = finnhub.Client(api_key=api_key)
+        from filings.sentiment import get_finnhub_client
+        client = get_finnhub_client()
+        if not client:
+            return []
         data = client.upgrade_downgrade(symbol=ticker.upper())
     except Exception:
         return []
