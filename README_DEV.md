@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-20 (L2 stale-fallback caching on 22 endpoints, CSS minifier calc() fix)
+> Last updated: 2026-03-24 (rate limit relaxation + 429 L2 stale-fallback, Logo.dev logo backfill)
 
 ---
 
@@ -2068,6 +2068,9 @@ the cache — every CLI command makes live SEC API calls.
 - [ ] Activate daily digest emails: set up `filings-digest` cron on Railway, add `RESEND_API_KEY` env var
 - [x] L2 stale-fallback caching: `_with_l2_fallback` decorator applied to 22 HTML endpoints (11 stock tabs, 9 macro tabs, 1 options, 1 filings). On API timeout/failure, serves last-known-good HTML from Supabase instead of error. L1 5–10min, L2 1–4h TTLs.
 - [x] CSS minifier bug fix: removed `+` from `_CSS_PUNCT_RE` regex — was breaking `calc()` expressions by collapsing required spaces (e.g. `calc(100% + 10px)` → `calc(100%+10px)`, invalid CSS). Fixed homepage search dropdown appearing above input.
+- [x] Rate limit relaxation: bumped all L2-cached endpoints from 10-15/min → 60/min. Homepage loads fire ~10 API calls simultaneously; old limits caused 429s on normal browsing.
+- [x] 429 stale-fallback: rate-limited API requests now serve last-known-good HTML from L2 cache instead of blank error components. Dynamic route introspection via `_l2_key_registry` (no manual URL map). Covers all 21 `_with_l2_fallback`-decorated endpoints including query-param macro routes.
+- [x] Logo.dev backfill: fetched 2,670 missing ticker logos via Logo.dev ticker API (`scripts/fetch_logos_logodev.py`), 100% hit rate. Total coverage: 6,930/6,930 tickers.
 
 ### Shelved: Crypto Whale Tracker (branch: `feature/crypto-whale-tracker`)
 
