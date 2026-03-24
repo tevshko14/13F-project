@@ -3362,6 +3362,7 @@ async def signals_data(request: Request, ticker: str):
 
 
 @app.get("/api/signals/{ticker}/short-interest", response_class=HTMLResponse)
+@_with_l2_fallback("stock:short_interest:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def signals_short_interest(request: Request, ticker: str):
     """Per-ticker short interest history for the Signals tab pill."""
     ticker = ticker.upper().strip()
@@ -5193,6 +5194,7 @@ async def insider_trades_api(
 
 
 @app.get("/api/insider-trades/{ticker}", response_class=HTMLResponse)
+@_with_l2_fallback("stock:insider_trades:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def stock_insider_trades_api(request: Request, ticker: str):
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
@@ -5264,6 +5266,7 @@ async def stock_ohlcv_api(
 
 
 @app.get("/api/stock/{ticker}/congress", response_class=HTMLResponse)
+@_with_l2_fallback("stock:congress:{ticker}", category="stock", l1_ttl=300, l2_ttl=7200)
 async def stock_congress_api(request: Request, ticker: str):
     """Stock page Congress subtab — congressional trading for a ticker."""
     if not _valid_ticker(ticker):
@@ -5878,6 +5881,8 @@ TICKER_TAPE_SYMBOLS = [
 
 
 _ticker_tape_cache = _HtmlCache(120)  # 2-min L1 — matches browser SWR
+_L2_TICKER_TAPE_KEY = "homepage:ticker_tape"
+_L2_TICKER_TAPE_TTL = 3600  # 1h L2 fallback
 
 
 @app.get("/api/ticker-tape", response_class=HTMLResponse)
@@ -5887,6 +5892,10 @@ async def ticker_tape_api(request: Request):
     if cached:
         return cached
     if not getattr(app.state, "market_data_ready", False):
+        # Cold start — try L2 before showing spinner
+        stale = await asyncio.to_thread(_l2_get_html, _L2_TICKER_TAPE_KEY)
+        if stale:
+            return HTMLResponse(stale)
         return HTMLResponse(
             '<div hx-get="/api/ticker-tape" hx-trigger="load delay:5s" '
             'hx-swap="outerHTML">'
@@ -5899,6 +5908,10 @@ async def ticker_tape_api(request: Request):
         _to_heavy(market_data.get_sparkline_points, TICKER_TAPE_SYMBOLS, 20),
     )
     if not mkt or "_metadata" not in mkt:
+        # Fetch failed — try L2 before spinner
+        stale = await asyncio.to_thread(_l2_get_html, _L2_TICKER_TAPE_KEY)
+        if stale:
+            return HTMLResponse(stale)
         return HTMLResponse(
             '<div hx-get="/api/ticker-tape" hx-trigger="load delay:5s" '
             'hx-swap="outerHTML">'
@@ -5922,6 +5935,7 @@ async def ticker_tape_api(request: Request):
         {"request": request, "tickers": tickers},
     )
     _ticker_tape_cache.set(resp)
+    asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_TICKER_TAPE_KEY, "homepage", resp.body, _L2_TICKER_TAPE_TTL))
     return resp
 
 
@@ -6066,6 +6080,8 @@ async def market_overview_chart_api(
 
 
 _live_activity_cache = _HtmlCache(300)  # 5-min TTL
+_L2_LIVE_ACTIVITY_KEY = "homepage:live_activity"
+_L2_LIVE_ACTIVITY_TTL = 3600  # 1h L2 fallback
 
 
 @app.get("/api/live-activity", response_class=HTMLResponse)
@@ -6074,17 +6090,30 @@ async def live_activity_api(request: Request):
     cached = _live_activity_cache.get()
     if cached:
         return cached
-    notifs = await asyncio.to_thread(
-        supabase_cache.get_recent_notifications, 7
-    )
-    for n in notifs:
-        n["time_ago"] = _time_ago(n.get("created_at", ""))
-    resp = templates.TemplateResponse(
-        "partials/live_activity.html",
-        {"request": request, "notifications": notifs},
-    )
-    _live_activity_cache.set(resp)
-    return resp
+    try:
+        notifs = await asyncio.to_thread(
+            supabase_cache.get_recent_notifications, 7
+        )
+        if not notifs:
+            raise ValueError("empty notifications")
+        for n in notifs:
+            n["time_ago"] = _time_ago(n.get("created_at", ""))
+        resp = templates.TemplateResponse(
+            "partials/live_activity.html",
+            {"request": request, "notifications": notifs},
+        )
+        _live_activity_cache.set(resp)
+        asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_LIVE_ACTIVITY_KEY, "homepage", resp.body, _L2_LIVE_ACTIVITY_TTL))
+        return resp
+    except Exception:
+        logger.warning("live_activity_api: fetch failed, trying L2", exc_info=True)
+        stale = await asyncio.to_thread(_l2_get_html, _L2_LIVE_ACTIVITY_KEY)
+        if stale:
+            return HTMLResponse(stale)
+        return HTMLResponse(
+            '<p class="text-muted" style="text-align:center;padding:1em;">Activity feed temporarily unavailable.</p>'
+            '<div hx-get="/api/live-activity" hx-trigger="load delay:5s" hx-swap="outerHTML"></div>'
+        )
 
 
 _market_news_cache = _HtmlCache(300)  # 5-min L1 TTL
@@ -6120,6 +6149,8 @@ async def market_news_api(request: Request):
 
 
 _retail_sentiment_cache = _HtmlCache(1800)  # 30-min HTML TTL — data changes ~once/day
+_L2_RETAIL_SENTIMENT_KEY = "homepage:retail_sentiment"
+_L2_RETAIL_SENTIMENT_TTL = 7200  # 2h L2 fallback
 
 
 @app.get("/api/retail-sentiment", response_class=HTMLResponse)
@@ -6130,6 +6161,10 @@ async def retail_sentiment_api(request: Request):
         return cached
     data = await _to_heavy(sentiment.get_retail_sentiment_overview)
     if not data or (data.get("fear_greed") is None and not data.get("top_movers")):
+        # Try L2 stale fallback before showing error
+        stale = await asyncio.to_thread(_l2_get_html, _L2_RETAIL_SENTIMENT_KEY)
+        if stale:
+            return HTMLResponse(stale)
         return HTMLResponse(
             '<p class="text-muted" style="text-align:center;padding:2em 0.5em;">'
             "Sentiment data temporarily unavailable.</p>"
@@ -6140,6 +6175,7 @@ async def retail_sentiment_api(request: Request):
         {"request": request, **data},
     )
     _retail_sentiment_cache.set(resp)
+    asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_RETAIL_SENTIMENT_KEY, "homepage", resp.body, _L2_RETAIL_SENTIMENT_TTL))
     return resp
 
 
