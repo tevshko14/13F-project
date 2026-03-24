@@ -179,12 +179,10 @@
             }
         });
 
-        /* Responsive resize */
-        var resizeTimer;
-        window.addEventListener('resize', function() {
-            clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(function() { chart.resize(); }, 150);
-        });
+        /* Responsive resize — use _ppRegisterResize to avoid listener leaks on HTMX re-render */
+        if (window._ppRegisterResize) {
+            window._ppRegisterResize(function() { chart.resize(); });
+        }
     }
 
     /* Use requireECharts if available, otherwise check directly */

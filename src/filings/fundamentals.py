@@ -218,6 +218,9 @@ _EPS_LABELS = {"EPS (Basic)", "EPS (Diluted)"}
 # CIK Resolution
 # ═════════════════════════════════════════════════════════════════════
 
+_CIK_TIMEOUT = 15  # seconds — prevent indefinite blocking
+
+
 def _resolve_cik(ticker: str) -> str | None:
     """Map ticker → CIK string, cached in memory."""
     key = ticker.upper()
@@ -227,8 +230,11 @@ def _resolve_cik(ticker: str) -> str | None:
 
     try:
         from edgar import Company
-        company = Company(key)
-        cik = str(company.cik)
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(1) as pool:
+            future = pool.submit(lambda: str(Company(key).cik))
+            cik = future.result(timeout=_CIK_TIMEOUT)
     except Exception as exc:
         logger.debug("CIK resolution failed for %s: %s", key, exc)
         cik = None

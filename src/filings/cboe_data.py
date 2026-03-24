@@ -50,26 +50,8 @@ _TOTAL_PC_URL = "https://cdn.cboe.com/resources/options/volume_and_call_put_rati
 _INDEX_PC_URL = "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/indexpc.csv"
 _EQUITY_PC_URL = "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/equitypc.csv"
 
-# ── yfinance timeout session ────────────────────────────────────────────────
-_YF_TIMEOUT = 15
-
-
-def _make_yf_session():
-    """Create a curl_cffi Session that enforces a timeout on every request."""
-    try:
-        from curl_cffi.requests import Session
-
-        class _TimeoutSession(Session):
-            def request(self, *args, **kwargs):
-                kwargs.setdefault("timeout", _YF_TIMEOUT)
-                return super().request(*args, **kwargs)
-
-        return _TimeoutSession()
-    except Exception:
-        return None
-
-
-_yf_session = _make_yf_session()
+# ── yfinance timeout session (shared with market_data.py) ──────────────────
+from filings.market_data import _yf_session  # noqa: E402  # reuse single session
 
 
 def _cached_or_fetch(cache_key: str, fetcher, kind: str = "putcall"):
