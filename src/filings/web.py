@@ -184,19 +184,33 @@ _heavy_pool: ThreadPoolExecutor | None = None
 _heavy_sem: asyncio.Semaphore | None = None
 
 # ── Ticker logo cache ─────────────────────────────────────────────
-# Loaded from Supabase at startup.  Keyed by uppercase ticker.
-# Values are raw PNG bytes (decoded from base64 at load time).
+# Only the *set* of known IDs is loaded at startup (negligible memory).
+# Actual image bytes are fetched on-demand and held in a bounded LRU dict.
 import base64 as _b64
+from collections import OrderedDict
 
-_logo_cache: dict[str, bytes] = {}
+_LOGO_LRU_MAX = 500
+_HEADSHOT_LRU_MAX = 100
+_ANALYST_PHOTO_LRU_MAX = 100
+
+
+def _lru_put(cache: OrderedDict, key: str, value: bytes, maxsize: int) -> None:
+    """Insert into bounded OrderedDict, evicting oldest if over maxsize."""
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > maxsize:
+        cache.popitem(last=False)
+
+
+_logo_cache: OrderedDict[str, bytes] = OrderedDict()
 _logo_set: set[str] = set()  # exposed to templates as Jinja global
 
-_headshot_cache: dict[str, bytes] = {}
+_headshot_cache: OrderedDict[str, bytes] = OrderedDict()
 _headshot_set: set[str] = set()  # exposed to templates as Jinja global
 
 _http_pool: httpx.AsyncClient | None = None
 
-_analyst_photo_cache: dict[str, bytes] = {}
+_analyst_photo_cache: OrderedDict[str, bytes] = OrderedDict()
 _analyst_photo_set: set[str] = set()  # exposed to templates as Jinja global
 
 
@@ -466,52 +480,50 @@ async def lifespan(app: FastAPI):
         except Exception:
             return {}
 
-    async def _load_logos():
+    async def _load_logo_set():
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(supabase_cache.get_all_logos), timeout=120
+                asyncio.to_thread(supabase_cache.get_existing_logo_tickers),
+                timeout=30,
             )
         except Exception as exc:
-            logger.warning("Logo cache load failed (%s), logos disabled", exc)
+            logger.warning("Logo set load failed (%s), logos disabled", exc)
             return None
 
-    async def _load_headshots():
+    async def _load_headshot_set():
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(supabase_cache.get_all_headshots), timeout=120
+                asyncio.to_thread(supabase_cache.get_existing_headshot_members),
+                timeout=30,
             )
         except Exception as exc:
             logger.warning(
-                "Headshot cache load failed (%s), headshots disabled", exc
+                "Headshot set load failed (%s), headshots disabled", exc
             )
             return None
 
-    async def _load_analyst_photos():
+    async def _load_analyst_photo_set():
         try:
-            sb = supabase_cache._get_client()
-            if sb is None:
-                return None
-            from filings import analyst_scraper as _as
-
             return await asyncio.wait_for(
-                asyncio.to_thread(_as.get_all_analyst_photos, sb), timeout=60
+                asyncio.to_thread(supabase_cache.get_existing_analyst_photo_ids),
+                timeout=30,
             )
         except Exception as exc:
-            logger.warning("Analyst photo cache load failed (%s)", exc)
+            logger.warning("Analyst photo set load failed (%s)", exc)
             return None
 
     (
         fund_result,
         deploy_result,
-        logo_rows,
-        headshot_rows,
-        analyst_photo_rows,
+        logo_ids,
+        headshot_ids,
+        analyst_photo_ids,
     ) = await asyncio.gather(
         _load_funds(),
         _load_deploy(),
-        _load_logos(),
-        _load_headshots(),
-        _load_analyst_photos(),
+        _load_logo_set(),
+        _load_headshot_set(),
+        _load_analyst_photo_set(),
     )
 
     # ── Process results ──────────────────────────────────────────
@@ -543,42 +555,29 @@ async def lifespan(app: FastAPI):
 
         asyncio.create_task(_bg_deploy_sync())
 
-    if logo_rows:
-        for row in logo_rows:
-            t = row.get("ticker", "").upper()
-            b64 = row.get("logo_b64", "")
-            if t and b64:
-                _logo_cache[t] = _b64.b64decode(b64)
-        _logo_set.update(_logo_cache.keys())
+    if logo_ids:
+        _logo_set.update(logo_ids)
         templates.env.globals["logo_tickers"] = _logo_set
-        logger.info("Loaded %d ticker logos into memory", len(_logo_cache))
+        logger.info("Loaded %d ticker logo IDs (lazy-fetch on demand)", len(_logo_set))
     else:
         templates.env.globals["logo_tickers"] = set()
 
-    if headshot_rows:
-        for row in headshot_rows:
-            mid = row.get("member_id", "")
-            b64 = row.get("photo_b64", "")
-            if mid and b64:
-                _headshot_cache[mid] = _b64.b64decode(b64)
-        _headshot_set.update(_headshot_cache.keys())
+    if headshot_ids:
+        _headshot_set.update(headshot_ids)
         templates.env.globals["headshot_members"] = _headshot_set
         logger.info(
-            "Loaded %d congress headshots into memory", len(_headshot_cache)
+            "Loaded %d headshot member IDs (lazy-fetch on demand)",
+            len(_headshot_set),
         )
     else:
         templates.env.globals["headshot_members"] = set()
 
-    if analyst_photo_rows:
-        for row in analyst_photo_rows:
-            aid = row.get("analyst_id", "")
-            b64 = row.get("photo_b64", "")
-            if aid and b64:
-                _analyst_photo_cache[aid] = _b64.b64decode(b64)
-        _analyst_photo_set.update(_analyst_photo_cache.keys())
+    if analyst_photo_ids:
+        _analyst_photo_set.update(analyst_photo_ids)
     templates.env.globals["analyst_photo_set"] = _analyst_photo_set
     logger.info(
-        "Loaded %d analyst headshots into memory", len(_analyst_photo_cache)
+        "Loaded %d analyst photo IDs (lazy-fetch on demand)",
+        len(_analyst_photo_set),
     )
 
     # Track background tasks for clean shutdown
@@ -1616,15 +1615,30 @@ async def health_check():
 
 @app.get("/api/logo/{ticker}.png")
 async def serve_logo(ticker: str):
-    """Serve a company logo PNG from the in-memory cache.
+    """Serve a company logo PNG.
 
-    Browser caches for 1 year (immutable).  Returns 404 if logo not found.
+    Checks bounded LRU first, then fetches single row from Supabase on
+    cache miss.  Browser caches for 1 year (immutable).
     """
-    data = _logo_cache.get(ticker.upper())
-    if not data:
+    t = ticker.upper()
+    data = _logo_cache.get(t)
+    if data:
+        _logo_cache.move_to_end(t)  # touch for LRU
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+    # Not in LRU — check if it exists in DB at all
+    if t not in _logo_set:
         return Response(status_code=404)
+    # On-demand fetch from Supabase
+    fetched = await asyncio.to_thread(supabase_cache.get_single_logo, t)
+    if not fetched:
+        return Response(status_code=404)
+    _lru_put(_logo_cache, t, fetched, _LOGO_LRU_MAX)
     return Response(
-        content=data,
+        content=fetched,
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
@@ -1910,7 +1924,7 @@ async def _populate_logos_task(limit: int = 200):
                             "content_type": ct,
                             "logo_domain": domain,
                         })
-                        _logo_cache[ticker] = resp.content
+                        _lru_put(_logo_cache, ticker, resp.content, _LOGO_LRU_MAX)
                         _logo_set.add(ticker)
                         downloaded += 1
                         found = True
@@ -1994,15 +2008,27 @@ async def logo_status():
 
 @app.get("/api/headshot/{member_id}.jpg")
 async def serve_headshot(member_id: str):
-    """Serve a congress member headshot JPEG from the in-memory cache.
+    """Serve a congress member headshot JPEG.
 
-    Browser caches for 1 year (immutable).  Returns 404 if not found.
+    Checks bounded LRU first, then fetches from Supabase on miss.
+    Browser caches for 1 year (immutable).
     """
     data = _headshot_cache.get(member_id)
-    if not data:
+    if data:
+        _headshot_cache.move_to_end(member_id)
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+    if member_id not in _headshot_set:
         return Response(status_code=404)
+    fetched = await asyncio.to_thread(supabase_cache.get_single_headshot, member_id)
+    if not fetched:
+        return Response(status_code=404)
+    _lru_put(_headshot_cache, member_id, fetched, _HEADSHOT_LRU_MAX)
     return Response(
-        content=data,
+        content=fetched,
         media_type="image/jpeg",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
@@ -2010,26 +2036,42 @@ async def serve_headshot(member_id: str):
 
 @app.get("/api/analyst-photo/{analyst_id}.jpg")
 async def serve_analyst_photo(analyst_id: str):
-    """Serve an analyst headshot JPEG from the in-memory cache.
+    """Serve an analyst headshot JPEG.
 
-    Falls through to TipRanks CDN download on cache miss, then persists.
+    Checks bounded LRU → Supabase → TipRanks CDN fallback.
     Browser caches for 1 year (immutable).
     """
     data = _analyst_photo_cache.get(analyst_id)
     if data:
+        _analyst_photo_cache.move_to_end(analyst_id)
         return Response(
             content=data,
             media_type="image/jpeg",
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
 
-    # Cache miss — try to download from TipRanks CDN on-demand
+    # LRU miss — try Supabase first (fast)
+    if analyst_id in _analyst_photo_set:
+        fetched = await asyncio.to_thread(
+            supabase_cache.get_single_analyst_photo, analyst_id
+        )
+        if fetched:
+            _lru_put(_analyst_photo_cache, analyst_id, fetched, _ANALYST_PHOTO_LRU_MAX)
+            return Response(
+                content=fetched,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            )
+
+    # Supabase miss — try to download from TipRanks CDN on-demand
     try:
         from filings import analyst_scraper as _as
 
         photo_bytes = await asyncio.to_thread(_as.download_analyst_photo, analyst_id)
         if photo_bytes:
-            _analyst_photo_cache[analyst_id] = photo_bytes
+            _lru_put(
+                _analyst_photo_cache, analyst_id, photo_bytes, _ANALYST_PHOTO_LRU_MAX
+            )
             _analyst_photo_set.add(analyst_id)
             # Persist to DB in background
             _sb = supabase_cache._get_client()
@@ -2252,7 +2294,7 @@ async def _populate_headshots_task(limit: int = 200):
                     "photo_b64": b64,
                     "content_type": ct,
                 })
-                _headshot_cache[member_id] = photo_bytes
+                _lru_put(_headshot_cache, member_id, photo_bytes, _HEADSHOT_LRU_MAX)
                 _headshot_set.add(member_id)
                 downloaded += 1
                 if downloaded <= 5 or source == "wikipedia":

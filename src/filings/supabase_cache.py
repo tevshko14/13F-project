@@ -3335,6 +3335,122 @@ def insert_headshots(rows: list[dict]) -> int:
     return inserted
 
 
+# ── Single-image fetchers (on-demand, for lazy-load cache) ─────────
+
+
+def get_single_logo(ticker: str) -> bytes | None:
+    """Fetch a single ticker logo from ``ticker_logos`` by primary key.
+
+    Returns decoded PNG bytes, or None if not found.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("ticker_logos")
+            .select("logo_b64")
+            .eq("ticker", ticker.upper())
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if rows and rows[0].get("logo_b64"):
+            import base64
+
+            return base64.b64decode(rows[0]["logo_b64"])
+    except Exception as exc:
+        logger.warning("get_single_logo(%s) failed: %s", ticker, exc)
+    return None
+
+
+def get_single_headshot(member_id: str) -> bytes | None:
+    """Fetch a single congress headshot from ``congress_headshots`` by member_id.
+
+    Returns decoded JPEG bytes, or None if not found.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("congress_headshots")
+            .select("photo_b64")
+            .eq("member_id", member_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if rows and rows[0].get("photo_b64"):
+            import base64
+
+            return base64.b64decode(rows[0]["photo_b64"])
+    except Exception as exc:
+        logger.warning("get_single_headshot(%s) failed: %s", member_id, exc)
+    return None
+
+
+def get_single_analyst_photo(analyst_id: str) -> bytes | None:
+    """Fetch a single analyst photo from ``analyst_profiles`` by analyst_id.
+
+    Returns decoded JPEG bytes, or None if not found.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        resp = (
+            client.table("analyst_profiles")
+            .select("photo_b64")
+            .eq("analyst_id", analyst_id)
+            .limit(1)
+            .execute()
+        )
+        rows = resp.data or []
+        if rows and rows[0].get("photo_b64"):
+            import base64
+
+            return base64.b64decode(rows[0]["photo_b64"])
+    except Exception as exc:
+        logger.warning("get_single_analyst_photo(%s) failed: %s", analyst_id, exc)
+    return None
+
+
+def get_existing_analyst_photo_ids() -> set[str]:
+    """Return the set of analyst_ids that have a photo stored.
+
+    Paginates in pages of 1000 to work around Supabase PostgREST
+    default row limit.
+    """
+    client = _get_client()
+    if client is None:
+        return set()
+    try:
+        result: set[str] = set()
+        page_size = 1000
+        offset = 0
+        while True:
+            resp = (
+                client.table("analyst_profiles")
+                .select("analyst_id")
+                .not_.is_("photo_b64", "null")
+                .neq("photo_b64", "")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            rows = resp.data or []
+            result.update(
+                row["analyst_id"] for row in rows if row.get("analyst_id")
+            )
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return result
+    except Exception as exc:
+        logger.warning("get_existing_analyst_photo_ids failed: %s", exc)
+        return set()
+
+
 # ── Short Interest History ──────────────────────────────────────────
 
 
