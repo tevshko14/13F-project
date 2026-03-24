@@ -793,6 +793,12 @@ def get_all_content_hashes(category: str) -> dict[str, str]:
         return {}
 
 
+# L1 hash cache: avoids a Supabase SELECT on every set_cached() call.
+# Maps cache_key → content_hash. Bounded to prevent unbounded growth.
+_hash_cache: dict[str, str] = {}
+_HASH_CACHE_MAX = 2000
+
+
 def set_cached(
     cache_key: str,
     category: str,
@@ -804,6 +810,9 @@ def set_cached(
     Computes a SHA-256 hash of *data* and compares it to the stored
     ``content_hash``.  If identical, only the TTL / timestamps are
     bumped (no JSONB rewrite) — saving significant Supabase egress.
+
+    Uses an in-memory hash cache to skip the Supabase round-trip for
+    the hash check (~20-50ms savings per write).
 
     Args:
         cache_key:   e.g. ``"glassdoor:AAPL"``
@@ -819,8 +828,8 @@ def set_cached(
 
     new_hash = _compute_hash(data)
 
-    # Check if data actually changed (lightweight: fetches only the hash)
-    existing_hash = get_content_hash(cache_key)
+    # Check L1 hash cache first, fall back to Supabase SELECT
+    existing_hash = _hash_cache.get(cache_key) or get_content_hash(cache_key)
     if existing_hash and existing_hash == new_hash:
         # Data unchanged — just bump the TTL and sync timestamp
         expires_at = None
@@ -854,6 +863,13 @@ def set_cached(
 
     try:
         client.table(_TABLE).upsert(row, on_conflict="cache_key").execute()
+        # Update L1 hash cache (avoid Supabase SELECT on next write)
+        _hash_cache[cache_key] = new_hash
+        if len(_hash_cache) > _HASH_CACHE_MAX:
+            # Evict oldest half to avoid repeated eviction overhead
+            keys = list(_hash_cache.keys())
+            for k in keys[: len(keys) // 2]:
+                del _hash_cache[k]
         logger.debug("Cache updated for %s (new hash=%s)", cache_key, new_hash)
         return True
     except Exception as exc:

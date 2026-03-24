@@ -38,7 +38,6 @@ from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
-from starlette.middleware.trustedhost import TrustedHostMiddleware
 import httpx
 
 from filings import (
@@ -1069,6 +1068,12 @@ _HTMX_PARTIAL_CACHE: dict[str, int] = {
     "/api/trending-combined": 120,
     "/api/google-trends/trending": 300,
 }
+# Prefix-based cache for stock tab HTMX partials (e.g. /api/stock/AAPL/analysts)
+_HTMX_PREFIX_CACHE: list[tuple[str, int]] = [
+    ("/api/stock/", 120),       # all stock tabs: analysts, sentiment, vitals, etc.
+    ("/api/signals/", 120),     # alt signals per-ticker
+    ("/api/insider-trades/", 120),
+]
 
 
 class TrailingSlashMiddleware(BaseHTTPMiddleware):
@@ -1104,6 +1109,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Cache-Control"] = (
                 f"public, max-age={ttl}, stale-while-revalidate={ttl * 2}"
             )
+        else:
+            for prefix, ttl in _HTMX_PREFIX_CACHE:
+                if request.url.path.startswith(prefix):
+                    response.headers["Cache-Control"] = (
+                        f"public, max-age={ttl}, stale-while-revalidate={ttl * 2}"
+                    )
+                    break
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "strict-origin"
@@ -1159,12 +1171,8 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Trust Railway's reverse-proxy headers so X-Forwarded-For reaches our rate
-# limiter and request.client reflects the real client IP.
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=["*"],  # Railway terminates TLS; actual host validation not needed
-)
+# Note: TrustedHostMiddleware was removed — allowed_hosts=["*"] did nothing
+# useful, and Railway terminates TLS upstream. Saves ~0.5ms per request.
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TrailingSlashMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
@@ -2936,12 +2944,14 @@ async def stock_detail_by_cusip(request: Request, cusip: str):
     detail = None
     history = []
     if cache_data:
-        detail = client.build_stock_detail(
-            cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True
+        detail = await _to_heavy(
+            client.build_stock_detail,
+            cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True,
         )
         if detail:
-            history = client.build_stock_history(
-                cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True
+            history = await _to_heavy(
+                client.build_stock_history,
+                cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True,
             )
 
     # Build stock identity from detail or minimal CUSIP info
@@ -2975,10 +2985,12 @@ async def stock_detail(request: Request, ticker: str):
     detail = None
     history = []
     if cache_data:
-        detail = client.build_stock_detail(ticker, cache_data, SUPERINVESTORS_BY_CIK)
+        detail = await _to_heavy(
+            client.build_stock_detail, ticker, cache_data, SUPERINVESTORS_BY_CIK
+        )
         if detail:
-            history = client.build_stock_history(
-                ticker, cache_data, SUPERINVESTORS_BY_CIK
+            history = await _to_heavy(
+                client.build_stock_history, ticker, cache_data, SUPERINVESTORS_BY_CIK
             )
 
     # Resolve basic stock identity (works for any ticker)
@@ -5865,9 +5877,15 @@ TICKER_TAPE_SYMBOLS = [
 ]
 
 
+_ticker_tape_cache = _HtmlCache(120)  # 2-min L1 — matches browser SWR
+
+
 @app.get("/api/ticker-tape", response_class=HTMLResponse)
 async def ticker_tape_api(request: Request):
     """Lazy-loaded scrolling ticker tape for the homepage."""
+    cached = _ticker_tape_cache.get()
+    if cached:
+        return cached
     if not getattr(app.state, "market_data_ready", False):
         return HTMLResponse(
             '<div hx-get="/api/ticker-tape" hx-trigger="load delay:5s" '
@@ -5899,10 +5917,12 @@ async def ticker_tape_api(request: Request):
                 "spark": sparklines.get(sym, []),
             })
 
-    return templates.TemplateResponse(
+    resp = templates.TemplateResponse(
         "partials/ticker_tape.html",
         {"request": request, "tickers": tickers},
     )
+    _ticker_tape_cache.set(resp)
+    return resp
 
 
 # ── Market Overview (custom replacement for TradingView) ──────────────
@@ -6125,6 +6145,7 @@ async def retail_sentiment_api(request: Request):
 
 _L2_HEATMAP_KEY = "homepage:heatmap"
 _L2_HEATMAP_TTL = 3600  # 1h L2 fallback
+_heatmap_cache = _HtmlCache(120)  # 2-min L1 — keyed by period
 
 
 @app.get("/api/heatmap", response_class=HTMLResponse)
@@ -6132,6 +6153,10 @@ async def heatmap(request: Request, period: str = "1D"):
     # Validate period
     if period not in ("1D", "1W", "1M"):
         period = "1D"
+
+    cached = _heatmap_cache.get(period)
+    if cached:
+        return cached
 
     if not getattr(app.state, "market_data_ready", False):
         # Cold start — try L2 before showing spinner
@@ -6177,6 +6202,7 @@ async def heatmap(request: Request, period: str = "1D"):
             "period": period,
         },
     )
+    _heatmap_cache.set(resp, period)
     asyncio.create_task(asyncio.to_thread(_l2_set_html, f"{_L2_HEATMAP_KEY}:{period}", "homepage", resp.body, _L2_HEATMAP_TTL))
     return resp
 
