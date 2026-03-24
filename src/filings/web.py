@@ -448,7 +448,7 @@ async def lifespan(app: FastAPI):
         max_workers=int(os.environ.get("HEAVY_THREADS", "8")),
         thread_name_prefix="heavy",
     )
-    _heavy_sem = asyncio.Semaphore(int(os.environ.get("HEAVY_CONCURRENCY", "6")))
+    _heavy_sem = asyncio.Semaphore(int(os.environ.get("HEAVY_CONCURRENCY", "10")))
 
     global _http_pool
     _http_pool = httpx.AsyncClient(
@@ -1334,6 +1334,20 @@ async def _prefetch_market_data(app: FastAPI):
         logger.warning("yfinance prefetch failed: %s", e)
         if not app.state.market_data_ready:
             app.state.market_data_ready = False
+
+    # ── Phase 3: Warm remaining homepage widgets (parallel, best-effort) ──
+    # Prevents cold-cache stampede when first user hits homepage after deploy.
+    try:
+        await asyncio.gather(
+            _to_heavy(sentiment.get_retail_sentiment_overview),
+            asyncio.to_thread(
+                supabase_cache.get_recent_notifications, 7
+            ),
+            return_exceptions=True,
+        )
+        logger.info("Phase 3 complete: homepage widgets pre-warmed")
+    except Exception as e:
+        logger.debug("Homepage widget prefetch (non-critical): %s", e)
 
 
 # ── Background 13F Refresh ────────────────────────────────────────────
