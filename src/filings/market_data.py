@@ -7,6 +7,7 @@ configurable TTLs to avoid repeated downloads.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -76,6 +77,16 @@ _HEATMAP_BUILT_TTL = 1_800  # 30 minutes — same as market data
 
 _sparkline_cache: dict[str, tuple[float, dict[str, list[float]]]] = {}
 _SPARKLINE_TTL = 1_800  # 30 minutes
+_SPARKLINE_MAX = 20     # bounded — keyed by ticker-set:num_points
+
+
+def _evict_oldest(cache: dict, max_size: int) -> None:
+    """Evict oldest entries if cache exceeds max_size. Must hold _lock."""
+    if len(cache) <= max_size:
+        return
+    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
+    for k in sorted_keys[: len(cache) - max_size]:
+        del cache[k]
 
 
 # ── Supabase warm-load (survive redeploys) ───────────────────────────
@@ -536,7 +547,8 @@ def get_sparkline_points(tickers: list[str], num_points: int = 20) -> dict[str, 
     Returns {ticker: [0.0, 0.15, 0.42, ..., 1.0]} with `num_points` values.
     Missing tickers are silently omitted.  Results are cached for 30 min.
     """
-    cache_key = f"{','.join(sorted(tickers))}:{num_points}"
+    key_body = ",".join(sorted(tickers))
+    cache_key = f"{hashlib.md5(key_body.encode()).hexdigest()}:{num_points}"
     with _lock:
         cached = _sparkline_cache.get(cache_key)
         if cached is not None:
@@ -576,6 +588,7 @@ def get_sparkline_points(tickers: list[str], num_points: int = 20) -> dict[str, 
 
     with _lock:
         _sparkline_cache[cache_key] = (time.time(), result)
+        _evict_oldest(_sparkline_cache, _SPARKLINE_MAX)
 
     return result
 
@@ -735,7 +748,7 @@ _PERIOD_TRADING_DAYS = {"1D": 2, "1W": 5, "1M": 22, "3M": 66, "1Y": 253}
 # Per-symbol on-demand chart cache for extended stock history (LRU-bounded)
 _overview_chart_cache: OrderedDict[str, tuple[float, list]] = OrderedDict()
 _OVERVIEW_CHART_TTL = 1_800  # 30 min
-_OVERVIEW_CHART_MAX = 200    # max entries — prevent unbounded growth
+_OVERVIEW_CHART_MAX = 100    # max entries — prevent unbounded growth
 
 
 def _slice_history(history: list, period: str) -> list:
@@ -885,7 +898,7 @@ def get_overview_chart_data(symbol: str, period: str = "1M") -> dict | None:
 
 _ohlcv_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _OHLCV_TTL = 1_800   # 30 min
-_OHLCV_MAX = 200      # max entries
+_OHLCV_MAX = 100      # max entries
 
 _OHLCV_YF_PERIODS = {
     "1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "5Y": "5y",
