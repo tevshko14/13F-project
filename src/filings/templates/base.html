@@ -178,6 +178,56 @@
         }, { rootMargin: '200px' });
         observer.observe(container);
     };
+    /* ECharts factory — unified init + dispose-old + resize wiring.
+       Replaces the ~41 hand-rolled `echarts.getInstanceByDom / dispose /
+       init / addEventListener('resize')` blocks across templates.
+
+       Usage (no options — caller sets them itself):
+         window.ppInitChart(el, function(chart) { chart.setOption({...}); });
+       Usage (options dict):
+         window.ppInitChart(el, {title: {...}, series: [...]});
+       Returns the chart instance synchronously if ECharts is already
+       loaded, otherwise returns undefined and defers init.  Callers that
+       need the instance async can pass a callback.
+
+       Existing hand-rolled chart blocks continue to work unchanged —
+       migrate to this factory incrementally. */
+    window.ppInitChart = function(container, optionsOrCb) {
+        if (typeof container === 'string') {
+            container = document.getElementById(container);
+        }
+        if (!container) return undefined;
+
+        function _doInit() {
+            /* Dispose previous instance (HTMX re-render safety) */
+            var existing = echarts.getInstanceByDom(container);
+            if (existing) existing.dispose();
+            var chart = echarts.init(container);
+            /* Register under the global resize registry so the debounced
+               window resize listener in the lifecycle block can call it. */
+            if (window._ppRegisterResize) {
+                window._ppRegisterResize(function() {
+                    var live = echarts.getInstanceByDom(container);
+                    if (live) live.resize();
+                });
+            }
+            if (typeof optionsOrCb === 'function') {
+                optionsOrCb(chart);
+            } else if (optionsOrCb && typeof optionsOrCb === 'object') {
+                chart.setOption(optionsOrCb);
+            }
+            return chart;
+        }
+
+        if (typeof echarts !== 'undefined') return _doInit();
+        if (window.requireECharts) {
+            window.requireECharts(function(err) {
+                if (err) return;
+                _doInit();
+            });
+        }
+        return undefined;
+    };
     </script>
     <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"
             integrity="sha384-PCSoOZTpbkikBEtd/+uV3WNdc676i9KUf01KOA8CnJotvlx8rRrETbDuwdjqTYvt"
