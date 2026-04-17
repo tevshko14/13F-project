@@ -22,6 +22,8 @@ import time
 import urllib.request
 from datetime import date, timedelta
 
+from filings.caching import TTLCache
+
 logger = logging.getLogger(__name__)
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -38,18 +40,20 @@ _CLOSE_DF_TTL = 3600      # 1 hour for S&P 500 close matrix
 
 # ── Thread-safe in-memory cache ──────────────────────────────────────────────
 
+# Lock covers the single-entry _close_df_cache below; per-ticker caches
+# manage their own locking via TTLCache.
 _lock = threading.Lock()
 
-# Per-ticker quote cache: {TICKER: (timestamp, data)}
-_quote_cache: dict[str, tuple[float, dict]] = {}
+_MAX_CACHE_ENTRIES = 500
 
-# Per-ticker EOD cache: {TICKER: (timestamp, data)}
-_eod_cache: dict[str, tuple[float, list[dict]]] = {}
+# Per-ticker quote cache
+_quote_cache = TTLCache(ttl=_QUOTE_TTL, max_size=_MAX_CACHE_ENTRIES)
+
+# Per-ticker EOD cache
+_eod_cache = TTLCache(ttl=_EOD_TTL, max_size=_MAX_CACHE_ENTRIES)
 
 # S&P 500 close DataFrame cache: (timestamp, DataFrame) | None
 _close_df_cache: tuple[float, object] | None = None
-
-_MAX_CACHE_ENTRIES = 500
 
 
 # ── Public helpers ───────────────────────────────────────────────────────────
@@ -84,15 +88,6 @@ def _tiingo_get(url: str, timeout: int = _TIMEOUT) -> dict | list | None:
         return None
 
 
-def _evict_oldest(cache: dict, max_size: int = _MAX_CACHE_ENTRIES) -> None:
-    """Evict oldest entries if cache exceeds max_size. Must hold _lock."""
-    if len(cache) <= max_size:
-        return
-    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
-    for k in sorted_keys[: len(cache) - max_size]:
-        del cache[k]
-
-
 # ── Real-time IEX Quotes ────────────────────────────────────────────────────
 
 
@@ -106,10 +101,9 @@ def get_quote(ticker: str) -> dict | None:
     """
     key = ticker.upper()
 
-    with _lock:
-        cached = _quote_cache.get(key)
-        if cached and time.time() - cached[0] < _QUOTE_TTL:
-            return cached[1]
+    cached = _quote_cache.get(key)
+    if cached is not None:
+        return cached
 
     url = f"{_IEX_BASE}/{key}"
     data = _tiingo_get(url)
@@ -122,9 +116,7 @@ def get_quote(ticker: str) -> dict | None:
     if not isinstance(quote, dict):
         return None
 
-    with _lock:
-        _quote_cache[key] = (time.time(), quote)
-        _evict_oldest(_quote_cache)
+    _quote_cache.set(key, quote)
 
     return quote
 
@@ -138,19 +130,17 @@ def get_quotes_batch(tickers: list[str]) -> dict[str, dict]:
     if not tickers or not has_tiingo_key():
         return {}
 
-    now = time.time()
     result: dict[str, dict] = {}
     needed: list[str] = []
 
-    # Check cache first
-    with _lock:
-        for tk in tickers:
-            key = tk.upper()
-            cached = _quote_cache.get(key)
-            if cached and now - cached[0] < _BATCH_QUOTE_TTL:
-                result[key] = cached[1]
-            else:
-                needed.append(key)
+    # Check cache first (BATCH_QUOTE_TTL matches QUOTE_TTL, so reuse _quote_cache)
+    for tk in tickers:
+        key = tk.upper()
+        cached = _quote_cache.get(key)
+        if cached is not None:
+            result[key] = cached
+        else:
+            needed.append(key)
 
     if not needed:
         return result
@@ -166,13 +156,11 @@ def get_quotes_batch(tickers: list[str]) -> dict[str, dict]:
         if not data or not isinstance(data, list):
             continue
 
-        with _lock:
-            for item in data:
-                tk = (item.get("ticker") or "").upper()
-                if tk:
-                    _quote_cache[tk] = (time.time(), item)
-                    result[tk] = item
-            _evict_oldest(_quote_cache)
+        for item in data:
+            tk = (item.get("ticker") or "").upper()
+            if tk:
+                _quote_cache.set(tk, item)
+                result[tk] = item
 
     return result
 
@@ -212,10 +200,9 @@ def get_eod_history(
     """
     key = ticker.upper()
 
-    with _lock:
-        cached = _eod_cache.get(key)
-        if cached and time.time() - cached[0] < _EOD_TTL:
-            return cached[1]
+    cached = _eod_cache.get(key)
+    if cached is not None:
+        return cached
 
     if not start:
         start = (date.today() - timedelta(days=period_days)).isoformat()
@@ -231,9 +218,7 @@ def get_eod_history(
     if not data or not isinstance(data, list):
         return None
 
-    with _lock:
-        _eod_cache[key] = (time.time(), data)
-        _evict_oldest(_eod_cache)
+    _eod_cache.set(key, data)
 
     return data
 

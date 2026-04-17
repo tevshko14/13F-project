@@ -15,6 +15,8 @@ import time
 from collections import OrderedDict
 from datetime import datetime
 
+from filings.caching import TTLCache
+
 logger = logging.getLogger(__name__)
 
 # ── Global yfinance timeout ──────────────────────────────────────────
@@ -50,8 +52,8 @@ _lock = threading.Lock()
 _constituents_cache: tuple[float, list[dict]] | None = None
 _CONSTITUENTS_TTL = 86_400  # 24 hours
 
-_market_data_cache: dict[str, tuple[float, dict]] = {}
 _MARKET_DATA_TTL = 1_800  # 30 minutes
+_market_data_cache = TTLCache(ttl=_MARKET_DATA_TTL, max_size=500)
 
 # Stores the raw close DataFrame for multi-timeframe % change
 _close_df_cache: tuple[float, object] | None = None  # (ts, DataFrame)
@@ -72,21 +74,12 @@ _INDEX_TTL = 1_800  # 30 minutes
 _news_cache: tuple[float, list[dict]] | None = None
 _NEWS_TTL = 1_800  # 30 minutes
 
-_heatmap_built_cache: dict[str, tuple[float, list[dict]]] = {}
 _HEATMAP_BUILT_TTL = 1_800  # 30 minutes — same as market data
+_heatmap_built_cache = TTLCache(ttl=_HEATMAP_BUILT_TTL, max_size=500)
 
-_sparkline_cache: dict[str, tuple[float, dict[str, list[float]]]] = {}
 _SPARKLINE_TTL = 1_800  # 30 minutes
 _SPARKLINE_MAX = 20     # bounded — keyed by ticker-set:num_points
-
-
-def _evict_oldest(cache: dict, max_size: int) -> None:
-    """Evict oldest entries if cache exceeds max_size. Must hold _lock."""
-    if len(cache) <= max_size:
-        return
-    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
-    for k in sorted_keys[: len(cache) - max_size]:
-        del cache[k]
+_sparkline_cache = TTLCache(ttl=_SPARKLINE_TTL, max_size=_SPARKLINE_MAX)
 
 
 # ── Supabase warm-load (survive redeploys) ───────────────────────────
@@ -476,12 +469,9 @@ def get_sp500_market_data(period: str = "1D") -> dict:
     Uses 30-min TTL cache per period. Returns empty dict on failure.
     """
     # Cache lookup by period key — each period cached independently
-    with _lock:
-        cached = _market_data_cache.get(period)
-        if cached is not None:
-            ts, data = cached
-            if time.time() - ts < _MARKET_DATA_TTL:
-                return data
+    cached = _market_data_cache.get(period)
+    if cached is not None:
+        return cached
 
     close_data = _ensure_close_df()
     if close_data is None:
@@ -532,8 +522,7 @@ def get_sp500_market_data(period: str = "1D") -> dict:
     }
 
     logger.info("Computed %s market data for %d tickers", period, len(result) - 1)
-    with _lock:
-        _market_data_cache[period] = (time.time(), result)
+    _market_data_cache.set(period, result)
     return result
 
 
@@ -549,12 +538,9 @@ def get_sparkline_points(tickers: list[str], num_points: int = 20) -> dict[str, 
     """
     key_body = ",".join(sorted(tickers))
     cache_key = f"{hashlib.md5(key_body.encode()).hexdigest()}:{num_points}"
-    with _lock:
-        cached = _sparkline_cache.get(cache_key)
-        if cached is not None:
-            ts, data = cached
-            if time.time() - ts < _SPARKLINE_TTL:
-                return data
+    cached = _sparkline_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     close_data = _ensure_close_df()
     if close_data is None:
@@ -586,9 +572,7 @@ def get_sparkline_points(tickers: list[str], num_points: int = 20) -> dict[str, 
         except Exception:
             continue
 
-    with _lock:
-        _sparkline_cache[cache_key] = (time.time(), result)
-        _evict_oldest(_sparkline_cache, _SPARKLINE_MAX)
+    _sparkline_cache.set(cache_key, result)
 
     return result
 
@@ -1309,12 +1293,9 @@ def build_heatmap_data(
 
     Results are cached per-period for _HEATMAP_BUILT_TTL seconds.
     """
-    with _lock:
-        cached = _heatmap_built_cache.get(period)
-        if cached is not None:
-            ts, data = cached
-            if time.time() - ts < _HEATMAP_BUILT_TTL:
-                return data
+    cached = _heatmap_built_cache.get(period)
+    if cached is not None:
+        return cached
 
     # ── L2: Try Supabase (survives redeploys) ──
     try:
@@ -1323,8 +1304,7 @@ def build_heatmap_data(
         sb_cached, is_fresh = supabase_cache.get_cached_with_stale(f"heatmap:built:{period}")
         if sb_cached and isinstance(sb_cached, list) and len(sb_cached) > 3:
             logger.info("Warm-loaded heatmap:%s from Supabase (%d sectors, %s)", period, len(sb_cached), "fresh" if is_fresh else "stale")
-            with _lock:
-                _heatmap_built_cache[period] = (time.time(), sb_cached)
+            _heatmap_built_cache.set(period, sb_cached)
             return sb_cached
     except Exception:
         pass
@@ -1373,8 +1353,7 @@ def build_heatmap_data(
             }
         )
 
-    with _lock:
-        _heatmap_built_cache[period] = (time.time(), result)
+    _heatmap_built_cache.set(period, result)
 
     # ── Write back to Supabase L2 ──
     try:

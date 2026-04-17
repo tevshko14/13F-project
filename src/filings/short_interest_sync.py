@@ -10,31 +10,14 @@ Usage:
 """
 
 import logging
-import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date as _date
 
 from filings import cache, client, supabase_cache
+from filings.log_config import setup_worker_logging
 from filings.superinvestors import SUPERINVESTORS_BY_CIK
-
-# ── Logging ──────────────────────────────────────────────────────────
-
-
-def _setup_logging() -> None:
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    if os.environ.get("RAILWAY_ENVIRONMENT"):
-        fmt = '{"time":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}'
-    else:
-        fmt = "%(asctime)s %(levelname)-8s %(name)s -- %(message)s"
-    logging.basicConfig(level=log_level, format=fmt, force=True)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("yfinance").setLevel(logging.WARNING)
-    logging.getLogger("peewee").setLevel(logging.WARNING)
-    logging.getLogger("urllib3").setLevel(logging.WARNING)
-
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +251,7 @@ def sync_all_short_interest() -> dict:
 
 
 def main() -> None:
-    _setup_logging()
+    setup_worker_logging()
     logger.info("=== Short Interest Sync starting ===")
     t0 = time.time()
     result = sync_all_short_interest()

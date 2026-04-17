@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-03-24 (rate limit relaxation + 429 L2 stale-fallback, Logo.dev logo backfill)
+> Last updated: 2026-04-16 (Sprint 1: shared TTLCache + worker log setup — consolidated 8 duplicate cache implementations and 7 duplicate log setups)
 
 ---
 
@@ -217,7 +217,9 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── __init__.py                   # version = "0.1.0"
     ├── models.py                     # 13 dataclasses (data contracts)
     ├── superinvestors.py             # 85 hardcoded funds + CIK lookup dict
-    ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk
+    ├── caching.py                    # Shared TTLCache primitive: thread-safe dict cache w/ TTL + LRU eviction. Replaces the duplicated `_lock + _cache + _evict_oldest` pattern across 8 data modules. Exports `TTLCache` and `MISS` sentinel (for negative caching).
+    ├── log_config.py                 # Shared `setup_worker_logging()` for CLI/cron workers — Railway JSON format + default quiet loggers. Replaces the duplicated `_setup_logging()` in 7 worker files.
+    ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk (filing data only)
     ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications, user_watchlist, user_notification_preferences, watchlist_digest_log, admin_users tables)
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification creators (13F, YouTube, Reddit, Congress trades) + filing season detection

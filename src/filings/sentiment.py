@@ -22,6 +22,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import urllib.request
 
+from filings.caching import TTLCache, MISS
+
 logger = logging.getLogger(__name__)
 
 # ── Shared Finnhub client (reused across modules to avoid per-call session creation) ──
@@ -74,9 +76,9 @@ _ALPHAVANTAGE_TTL = 43200  # 12 hours
 # ── LRU max entries for per-ticker caches ─────────────────────────────
 _MAX_CACHE_ENTRIES = 500
 
-# ── Per-ticker caches: {TICKER: (timestamp, data)} ─────────────────
-_finnhub_cache: dict[str, tuple[float, dict | None]] = {}
-_alphavantage_cache: dict[str, tuple[float, dict | None]] = {}
+# ── Per-ticker caches (TTLCache has its own internal lock) ─────────
+_finnhub_cache = TTLCache(ttl=_FINNHUB_TTL, max_size=_MAX_CACHE_ENTRIES)
+_alphavantage_cache = TTLCache(ttl=_ALPHAVANTAGE_TTL, max_size=_MAX_CACHE_ENTRIES)
 
 # ── Global caches: (timestamp, data) ───────────────────────────────
 _cnn_cache: tuple[float, dict | None] | None = None
@@ -94,15 +96,6 @@ _sentiment_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="sent
 _av_daily_count = 0
 _av_daily_reset: float = 0.0
 _AV_DAILY_MAX = 20  # leave 5-call buffer from the 25/day limit
-
-
-def _evict_oldest(cache: dict, max_size: int = _MAX_CACHE_ENTRIES) -> None:
-    """Evict oldest entries if cache exceeds max_size. Must hold _lock."""
-    if len(cache) <= max_size:
-        return
-    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
-    for k in sorted_keys[: len(cache) - max_size]:
-        del cache[k]
 
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -153,12 +146,10 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
     """
     key = ticker.upper()
 
-    # Check cache
-    with _lock:
-        if key in _finnhub_cache:
-            ts, data = _finnhub_cache[key]
-            if time.time() - ts < _FINNHUB_TTL:
-                return data
+    # Check cache (MISS sentinel — cache may store None as "asked and got nothing")
+    cached = _finnhub_cache.get(key, MISS)
+    if cached is not MISS:
+        return cached
 
     client = get_finnhub_client()
     if not client:
@@ -171,9 +162,7 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
         return None
 
     if not raw or not isinstance(raw, dict):
-        with _lock:
-            _finnhub_cache[key] = (time.time(), None)
-            _evict_oldest(_finnhub_cache)
+        _finnhub_cache.set(key, None)
         return None
 
     buzz = raw.get("buzz") or {}
@@ -190,9 +179,7 @@ def _get_finnhub_sentiment(ticker: str) -> dict | None:
         "sector_avg_news_score": raw.get("sectorAverageNewsScore", 0),
     }
 
-    with _lock:
-        _finnhub_cache[key] = (time.time(), result)
-        _evict_oldest(_finnhub_cache)
+    _finnhub_cache.set(key, result)
     return result
 
 
@@ -446,12 +433,10 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
 
     key = ticker.upper()
 
-    # Check cache
-    with _lock:
-        if key in _alphavantage_cache:
-            ts, data = _alphavantage_cache[key]
-            if time.time() - ts < _ALPHAVANTAGE_TTL:
-                return data
+    # Check cache (MISS sentinel — cache may store None as "asked and got nothing")
+    cached = _alphavantage_cache.get(key, MISS)
+    if cached is not MISS:
+        return cached
 
     api_key = os.environ.get("ALPHAVANTAGE_API_KEY", "")
     if not api_key:
@@ -472,9 +457,7 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
     raw = _http_get_json(url, timeout=15)
 
     if not raw or not isinstance(raw, dict):
-        with _lock:
-            _alphavantage_cache[key] = (time.time(), None)
-            _evict_oldest(_alphavantage_cache)
+        _alphavantage_cache.set(key, None)
         return None
 
     # Check for error/rate-limit responses
@@ -484,16 +467,12 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
             key,
             raw.get("Note") or raw.get("Error Message") or raw.get("Information"),
         )
-        with _lock:
-            _alphavantage_cache[key] = (time.time(), None)
-            _evict_oldest(_alphavantage_cache)
+        _alphavantage_cache.set(key, None)
         return None
 
     feed = raw.get("feed") or []
     if not feed:
-        with _lock:
-            _alphavantage_cache[key] = (time.time(), None)
-            _evict_oldest(_alphavantage_cache)
+        _alphavantage_cache.set(key, None)
         return None
 
     articles: list[dict] = []
@@ -543,9 +522,7 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
         "avg_sentiment_label": avg_label,
     }
 
-    with _lock:
-        _alphavantage_cache[key] = (time.time(), result)
-        _evict_oldest(_alphavantage_cache)
+    _alphavantage_cache.set(key, result)
     return result
 
 
@@ -554,7 +531,7 @@ def _get_alphavantage_sentiment(ticker: str) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════
 
 _GOOGLE_TRENDS_TTL = 14400  # 4 hours — trends don't change fast
-_google_trends_cache: dict[str, tuple[float, dict | None]] = {}
+_google_trends_cache = TTLCache(ttl=_GOOGLE_TRENDS_TTL, max_size=_MAX_CACHE_ENTRIES)
 
 
 def _get_google_trends(ticker: str) -> dict | None:
@@ -570,11 +547,9 @@ def _get_google_trends(ticker: str) -> dict | None:
     """
     key = ticker.upper()
 
-    with _lock:
-        if key in _google_trends_cache:
-            ts, data = _google_trends_cache[key]
-            if time.time() - ts < _GOOGLE_TRENDS_TTL:
-                return data
+    cached = _google_trends_cache.get(key, MISS)
+    if cached is not MISS:
+        return cached
 
     try:
         from pytrends.request import TrendReq
@@ -585,22 +560,16 @@ def _get_google_trends(ticker: str) -> dict | None:
         df = pt.interest_over_time()
     except Exception as exc:
         logger.warning("Google Trends fetch failed for %s: %s", key, exc)
-        with _lock:
-            _google_trends_cache[key] = (time.time(), None)
-            _evict_oldest(_google_trends_cache)
+        _google_trends_cache.set(key, None)
         return None
 
     if df is None or df.empty or key not in df.columns:
-        with _lock:
-            _google_trends_cache[key] = (time.time(), None)
-            _evict_oldest(_google_trends_cache)
+        _google_trends_cache.set(key, None)
         return None
 
     series = df[key].dropna()
     if len(series) < 2:
-        with _lock:
-            _google_trends_cache[key] = (time.time(), None)
-            _evict_oldest(_google_trends_cache)
+        _google_trends_cache.set(key, None)
         return None
 
     values = series.tolist()
@@ -618,9 +587,7 @@ def _get_google_trends(ticker: str) -> dict | None:
         "sparkline": sparkline,
     }
 
-    with _lock:
-        _google_trends_cache[key] = (time.time(), result)
-        _evict_oldest(_google_trends_cache)
+    _google_trends_cache.set(key, result)
     return result
 
 
@@ -629,7 +596,7 @@ def _get_google_trends(ticker: str) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════
 
 _SHORT_INTEREST_TTL = 43200  # 12 hours — FINRA updates only 2x/month
-_short_interest_cache: dict[str, tuple[float, dict | None]] = {}
+_short_interest_cache = TTLCache(ttl=_SHORT_INTEREST_TTL, max_size=_MAX_CACHE_ENTRIES)
 
 
 def _get_short_interest(ticker: str) -> dict | None:
@@ -648,11 +615,9 @@ def _get_short_interest(ticker: str) -> dict | None:
     """
     key = ticker.upper()
 
-    with _lock:
-        if key in _short_interest_cache:
-            ts, data = _short_interest_cache[key]
-            if time.time() - ts < _SHORT_INTEREST_TTL:
-                return data
+    cached = _short_interest_cache.get(key, MISS)
+    if cached is not MISS:
+        return cached
 
     try:
         from filings.client import get_yfinance_info
@@ -660,17 +625,13 @@ def _get_short_interest(ticker: str) -> dict | None:
         info = get_yfinance_info(key)
     except Exception as exc:
         logger.warning("Short interest fetch failed for %s: %s", key, exc)
-        with _lock:
-            _short_interest_cache[key] = (time.time(), None)
-            _evict_oldest(_short_interest_cache)
+        _short_interest_cache.set(key, None)
         return None
 
     shares_short = info.get("sharesShort")
     if not shares_short:
         # No short interest data available for this ticker
-        with _lock:
-            _short_interest_cache[key] = (time.time(), None)
-            _evict_oldest(_short_interest_cache)
+        _short_interest_cache.set(key, None)
         return None
 
     shares_short_prior = info.get("sharesShortPriorMonth") or 0
@@ -692,9 +653,7 @@ def _get_short_interest(ticker: str) -> dict | None:
         "prior_date": info.get("sharesShortPreviousMonthDate"),
     }
 
-    with _lock:
-        _short_interest_cache[key] = (time.time(), result)
-        _evict_oldest(_short_interest_cache)
+    _short_interest_cache.set(key, result)
 
     # Fire-and-forget: archive to Supabase for historical chart
     def _archive_short_interest() -> None:

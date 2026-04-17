@@ -30,21 +30,8 @@ import time
 import uuid
 
 from filings import cache, notifications, supabase_cache
+from filings.log_config import setup_worker_logging
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
-
-# ── Logging ──────────────────────────────────────────────────────────
-
-
-def _setup_logging() -> None:
-    log_level = _os.environ.get("LOG_LEVEL", "INFO").upper()
-    if _os.environ.get("RAILWAY_ENVIRONMENT"):
-        fmt = '{"time":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}'
-    else:
-        fmt = "%(asctime)s %(levelname)-8s %(name)s -- %(message)s"
-    logging.basicConfig(level=log_level, format=fmt, force=True)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +201,7 @@ def sync_deployment_data(*, force: bool = False) -> dict:
 
 def main() -> None:
     """Entry point for ``uv run filings-sync``."""
-    _setup_logging()
+    setup_worker_logging()
     mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 * 1024)
     logger.info("=== PaperPanda SEC Sync Worker starting (RSS: %.0f MB) ===", mem_mb)
     start = time.time()

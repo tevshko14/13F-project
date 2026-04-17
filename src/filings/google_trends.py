@@ -35,6 +35,8 @@ from urllib.parse import quote
 
 import httpx
 
+from filings.caching import TTLCache, MISS
+
 try:
     from pytrends.request import TrendReq
     _PYTRENDS_AVAILABLE = True
@@ -44,10 +46,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # ── Thread lock & caches ────────────────────────────────────────────
+# _lock protects the rate-limiter + single-entry _trending_cache/_macro_cache.
+# Per-ticker dict caches use TTLCache which has its own internal lock.
 _lock = threading.Lock()
 
-_interest_cache: dict[str, tuple[float, dict]] = {}
 _INTEREST_TTL = 86_400  # 24 h
+_interest_cache = TTLCache(ttl=_INTEREST_TTL, max_size=200)
 
 _trending_cache: tuple[float, list] | None = None
 _TRENDING_TTL = 3_600  # 1 h — trending searches change fast
@@ -55,21 +59,8 @@ _TRENDING_TTL = 3_600  # 1 h — trending searches change fast
 _macro_cache: dict[str, tuple[float, dict]] = {}
 _MACRO_TTL = 86_400  # 24 h
 
-_sector_cache: dict[str, tuple[float, dict | None]] = {}
 _SECTOR_TTL = 604_800  # 7 days
-
-# ── Cache size limits (prevent unbounded memory growth) ───────────
-_MAX_INTEREST_CACHE = 200
-_MAX_SECTOR_CACHE = 200
-
-
-def _evict_oldest_gt(cache: dict, max_size: int) -> None:
-    """Evict oldest entries from a ``(timestamp, data)`` cache. Must hold _lock."""
-    if len(cache) <= max_size:
-        return
-    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
-    for k in sorted_keys[: len(cache) - max_size]:
-        del cache[k]
+_sector_cache = TTLCache(ttl=_SECTOR_TTL, max_size=200)
 
 # ── Rate-limiter (shared across all Google Trends calls) ────────────
 _last_request_time: float = 0.0
@@ -301,10 +292,9 @@ _TICKER_PROFILES: dict[str, dict] = {
 
 def _get_yf_info(ticker: str) -> dict | None:
     """Fetch company name + sector from yfinance (cached 7 days locally, 1h in central cache)."""
-    with _lock:
-        cached = _sector_cache.get(ticker)
-        if cached and time.time() - cached[0] < _SECTOR_TTL:
-            return cached[1]
+    cached = _sector_cache.get(ticker, MISS)
+    if cached is not MISS:
+        return cached
 
     try:
         from filings.client import get_yfinance_info
@@ -319,9 +309,7 @@ def _get_yf_info(ticker: str) -> dict | None:
         logger.debug("yfinance lookup failed for %s: %s", ticker, e)
         result = None
 
-    with _lock:
-        _sector_cache[ticker] = (time.time(), result)
-        _evict_oldest_gt(_sector_cache, _MAX_SECTOR_CACHE)
+    _sector_cache.set(ticker, result)
     return result
 
 
@@ -471,10 +459,9 @@ def fetch_interest_over_time(
     keywords = keywords[:5]  # GT limit
 
     cache_key = f"{','.join(sorted(keywords))}|{timeframe}|{geo}"
-    with _lock:
-        cached = _interest_cache.get(cache_key)
-        if cached and time.time() - cached[0] < _INTEREST_TTL:
-            return cached[1]
+    cached = _interest_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     pt = _get_pytrends()
     if not pt:
@@ -527,9 +514,7 @@ def fetch_interest_over_time(
         "fetched_at": datetime.utcnow().isoformat(),
     }
 
-    with _lock:
-        _interest_cache[cache_key] = (time.time(), result)
-        _evict_oldest_gt(_interest_cache, _MAX_INTEREST_CACHE)
+    _interest_cache.set(cache_key, result)
     return result
 
 

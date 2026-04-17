@@ -19,18 +19,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from filings import supabase_cache
-
-# ── Logging ──────────────────────────────────────────────────────────
-
-
-def _setup_logging() -> None:
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    if os.environ.get("RAILWAY_ENVIRONMENT"):
-        fmt = '{"time":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}'
-    else:
-        fmt = "%(asctime)s %(levelname)-8s %(name)s -- %(message)s"
-    logging.basicConfig(level=log_level, format=fmt, force=True)
-
+from filings.log_config import setup_worker_logging
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +230,7 @@ def run_digest_cycle() -> None:
 
 def main() -> None:
     """Entry point for the digest worker."""
-    _setup_logging()
+    setup_worker_logging()
     logger.info("Watchlist digest worker starting")
 
     if not RESEND_API_KEY:

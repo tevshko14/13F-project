@@ -11,7 +11,6 @@ Usage:
 from __future__ import annotations
 
 import logging
-import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,22 +18,7 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from filings import convergence, notifications, supabase_cache, unusual_options
-
-# ── Logging ──────────────────────────────────────────────────────────────────
-
-
-def _setup_logging() -> None:
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    if os.environ.get("RAILWAY_ENVIRONMENT"):
-        fmt = '{"time":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}'
-    else:
-        fmt = "%(asctime)s %(levelname)-8s %(name)s -- %(message)s"
-    logging.basicConfig(level=log_level, format=fmt, force=True)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-    logging.getLogger("yfinance").setLevel(logging.WARNING)
-    logging.getLogger("peewee").setLevel(logging.WARNING)
-
+from filings.log_config import setup_worker_logging
 
 logger = logging.getLogger(__name__)
 
@@ -482,7 +466,7 @@ def _emit_options_notifications(
 
 def main() -> None:
     """Entry point for ``uv run filings-options-sync``."""
-    _setup_logging()
+    setup_worker_logging()
     logger.info("=== PaperPanda Unusual Options Sync starting ===")
 
     if not _is_market_hours():

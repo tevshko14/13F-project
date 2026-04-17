@@ -16,9 +16,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import threading
-import time
 import urllib.request
+
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +33,18 @@ _EXPIRY_TTL = 3600      # 1 hour for expiration list
 _CHAIN_TTL = 300         # 5 min for option chains
 _QUOTE_TTL = 300         # 5 min for stock quotes
 
-# ── Thread-safe in-memory cache ──────────────────────────────────────────────
-
-_lock = threading.Lock()
-
-# {TICKER: (timestamp, [expiry_dates])}
-_expiry_cache: dict[str, tuple[float, list[str]]] = {}
-
-# {TICKER:EXPIRY: (timestamp, chain_dict)}
-_chain_cache: dict[str, tuple[float, dict]] = {}
-
-# {TICKER: (timestamp, quote_dict)}
-_quote_cache: dict[str, tuple[float, dict]] = {}
+# ── Thread-safe in-memory cache (each TTLCache manages its own lock) ─────────
 
 _MAX_CACHE_ENTRIES = 500
+
+# {TICKER: [expiry_dates]}
+_expiry_cache = TTLCache(ttl=_EXPIRY_TTL, max_size=_MAX_CACHE_ENTRIES)
+
+# {TICKER:EXPIRY: chain_dict}
+_chain_cache = TTLCache(ttl=_CHAIN_TTL, max_size=_MAX_CACHE_ENTRIES)
+
+# {TICKER: quote_dict}
+_quote_cache = TTLCache(ttl=_QUOTE_TTL, max_size=_MAX_CACHE_ENTRIES)
 
 
 # ── Public helpers ───────────────────────────────────────────────────────────
@@ -94,15 +92,6 @@ def _tradier_get(path: str, params: dict | None = None, timeout: int = _TIMEOUT)
         return None
 
 
-def _evict_oldest(cache: dict, max_size: int = _MAX_CACHE_ENTRIES) -> None:
-    """Evict oldest entries if cache exceeds max_size. Must hold _lock."""
-    if len(cache) <= max_size:
-        return
-    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
-    for k in sorted_keys[: len(cache) - max_size]:
-        del cache[k]
-
-
 # ── Expirations ──────────────────────────────────────────────────────────────
 
 
@@ -114,10 +103,9 @@ def get_expirations(ticker: str) -> list[str]:
     """
     key = ticker.upper()
 
-    with _lock:
-        cached = _expiry_cache.get(key)
-        if cached and time.time() - cached[0] < _EXPIRY_TTL:
-            return cached[1]
+    cached = _expiry_cache.get(key)
+    if cached is not None:
+        return cached
 
     data = _tradier_get(f"/markets/options/expirations", params={
         "symbol": key,
@@ -134,9 +122,7 @@ def get_expirations(ticker: str) -> list[str]:
     if isinstance(dates, str):
         dates = [dates]
 
-    with _lock:
-        _expiry_cache[key] = (time.time(), dates)
-        _evict_oldest(_expiry_cache)
+    _expiry_cache.set(key, dates)
 
     return dates
 
@@ -161,10 +147,9 @@ def get_option_chain(
     """
     cache_key = f"{ticker.upper()}:{expiration}"
 
-    with _lock:
-        cached = _chain_cache.get(cache_key)
-        if cached and time.time() - cached[0] < _CHAIN_TTL:
-            return cached[1]
+    cached = _chain_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     data = _tradier_get("/markets/options/chains", params={
         "symbol": ticker.upper(),
@@ -175,9 +160,7 @@ def get_option_chain(
     if not data or not isinstance(data, dict):
         return None
 
-    with _lock:
-        _chain_cache[cache_key] = (time.time(), data)
-        _evict_oldest(_chain_cache)
+    _chain_cache.set(cache_key, data)
 
     return data
 
@@ -193,10 +176,9 @@ def get_quote(ticker: str) -> dict | None:
     """
     key = ticker.upper()
 
-    with _lock:
-        cached = _quote_cache.get(key)
-        if cached and time.time() - cached[0] < _QUOTE_TTL:
-            return cached[1]
+    cached = _quote_cache.get(key)
+    if cached is not None:
+        return cached
 
     data = _tradier_get("/markets/quotes", params={"symbols": key})
 
@@ -209,9 +191,7 @@ def get_quote(ticker: str) -> dict | None:
     if not quote or not isinstance(quote, dict):
         return None
 
-    with _lock:
-        _quote_cache[key] = (time.time(), quote)
-        _evict_oldest(_quote_cache)
+    _quote_cache.set(key, quote)
 
     return quote
 
@@ -295,7 +275,6 @@ def _safe_greek(val) -> float | None:
 
 def invalidate_cache() -> None:
     """Clear all L1 caches."""
-    with _lock:
-        _expiry_cache.clear()
-        _chain_cache.clear()
-        _quote_cache.clear()
+    _expiry_cache.clear()
+    _chain_cache.clear()
+    _quote_cache.clear()

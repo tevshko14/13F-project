@@ -11,27 +11,13 @@ Usage:
 """
 
 import logging
-import os
 import time
 import uuid
 
 import httpx
 
 from filings import insider_trading, notifications, supabase_cache
-
-# ── Logging ──────────────────────────────────────────────────────────
-
-
-def _setup_logging() -> None:
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    if os.environ.get("RAILWAY_ENVIRONMENT"):
-        fmt = '{"time":"%(asctime)s","level":"%(levelname)s","name":"%(name)s","msg":"%(message)s"}'
-    else:
-        fmt = "%(asctime)s %(levelname)-8s %(name)s -- %(message)s"
-    logging.basicConfig(level=log_level, format=fmt, force=True)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
-
+from filings.log_config import setup_worker_logging
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +209,7 @@ def _emit_insider_notifications(
 
 def main() -> None:
     """Entry point for ``uv run filings-insider-sync``."""
-    _setup_logging()
+    setup_worker_logging()
     logger.info("=== PaperPanda Insider Trading Sync starting ===")
     start = time.time()
 

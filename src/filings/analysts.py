@@ -16,10 +16,10 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from filings.caching import TTLCache
 from filings.models import AnalystRating
 
 logger = logging.getLogger(__name__)
@@ -27,11 +27,8 @@ logger = logging.getLogger(__name__)
 # ── Shared thread pool (avoids per-call pool creation) ────────────────
 _analyst_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="analyst")
 
-# ── Thread lock + in-memory cache ────────────────────────────────────
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, list[AnalystRating]]] = {}
-_CACHE_TTL = 300  # 5 minutes
-_MAX_CACHE_ENTRIES = 500
+# ── In-memory cache (TTL + LRU eviction) ──────────────────────────────
+_cache = TTLCache(ttl=300, max_size=500)  # 5 min TTL, max 500 tickers
 
 # ── Supabase client (lazy-initialized) ───────────────────────────────
 _sb_client = None
@@ -64,23 +61,11 @@ def _get_supabase_client():
 
 
 def _get_cached(ticker: str) -> list[AnalystRating] | None:
-    key = ticker.upper()
-    with _lock:
-        if key in _cache:
-            ts, data = _cache[key]
-            if time.time() - ts < _CACHE_TTL:
-                return data
-    return None
+    return _cache.get(ticker.upper())
 
 
 def _set_cached(ticker: str, data: list[AnalystRating]) -> None:
-    with _lock:
-        _cache[ticker.upper()] = (time.time(), data)
-        # Evict oldest if over limit
-        if len(_cache) > _MAX_CACHE_ENTRIES:
-            sorted_keys = sorted(_cache, key=lambda k: _cache[k][0])
-            for k in sorted_keys[: len(_cache) - _MAX_CACHE_ENTRIES]:
-                del _cache[k]
+    _cache.set(ticker.upper(), data)
 
 
 # ── Supabase DB layer ────────────────────────────────────────────────

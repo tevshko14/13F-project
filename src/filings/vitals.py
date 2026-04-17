@@ -31,13 +31,15 @@ from datetime import datetime
 
 from filings import supabase_cache
 from filings.cache import CACHE_DIR
+from filings.caching import MISS, TTLCache
 
 logger = logging.getLogger(__name__)
 
 # ── Shared thread pool (avoids per-call pool creation) ────────────────
 _vitals_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vitals")
 
-# ── Thread lock for all cache reads/writes ────────────────────────────
+# ── Thread lock for quota updates, persistence, pending-refresh set ──
+# (The per-ticker caches below manage their own locking via TTLCache.)
 _lock = threading.Lock()
 
 # ── Cache TTLs ──────────────────────────────────────────────────────
@@ -53,10 +55,10 @@ GLASSDOOR_CACHE_FILE = CACHE_DIR / "glassdoor_cache.json"
 # ── LRU max entries for per-ticker caches ─────────────────────────────
 _MAX_CACHE_ENTRIES = 500
 
-# ── Per-ticker caches: {TICKER: (timestamp, data | None)} ───────────
-_glassdoor_cache: dict[str, tuple[float, dict | None]] = {}
-_pdl_cache: dict[str, tuple[float, dict | None]] = {}
-_appstore_cache: dict[str, tuple[float, dict | None]] = {}
+# ── Per-ticker caches — values may legitimately be None (negative cache) ──
+_glassdoor_cache = TTLCache(ttl=_GLASSDOOR_TTL, max_size=_MAX_CACHE_ENTRIES)
+_pdl_cache = TTLCache(ttl=_PDL_TTL, max_size=_MAX_CACHE_ENTRIES)
+_appstore_cache = TTLCache(ttl=_APPSTORE_TTL, max_size=_MAX_CACHE_ENTRIES)
 
 # ── Persistent cache state (lazy-hydrated from Supabase on first use) ─
 _glassdoor_hydrated = False
@@ -66,15 +68,6 @@ _pending_refreshes: set[str] = set()  # Prevent duplicate concurrent refreshes
 
 # ── PDL quota configuration ──────────────────────────────────────────
 MAX_MONTHLY_PDL_QUOTA = 100  # Free tier: 100 calls/month
-
-
-def _evict_oldest(cache: dict, max_size: int = _MAX_CACHE_ENTRIES) -> None:
-    """Evict oldest entries if cache exceeds max_size. Must hold _lock."""
-    if len(cache) <= max_size:
-        return
-    sorted_keys = sorted(cache, key=lambda k: cache[k][0])
-    for k in sorted_keys[: len(cache) - max_size]:
-        del cache[k]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -175,7 +168,9 @@ def _hydrate_glassdoor_cache() -> None:
             ts = payload.get("ts", 0.0)
             data = payload.get("data")
             if ticker_key:
-                _glassdoor_cache[ticker_key] = (ts, data)
+                # Seed store directly to preserve the original timestamp
+                # (TTLCache.set() would overwrite with time.time()).
+                _glassdoor_cache.seed(ticker_key, data, ts)
                 loaded += 1
         if loaded:
             logger.info(
@@ -191,7 +186,7 @@ def _hydrate_glassdoor_cache() -> None:
     for ticker_key, entry in entries.items():
         ts = entry.get("ts", 0.0)
         data = entry.get("data")  # may be None (cached miss)
-        _glassdoor_cache[ticker_key] = (ts, data)
+        _glassdoor_cache.seed(ticker_key, data, ts)
         loaded += 1
     if loaded:
         logger.info(
@@ -299,7 +294,8 @@ def _hydrate_pdl_cache() -> None:
             ts = payload.get("ts", 0.0)
             data = payload.get("data")
             if ticker_key:
-                _pdl_cache[ticker_key] = (ts, data)
+                # Seed store directly to preserve the original timestamp.
+                _pdl_cache.seed(ticker_key, data, ts)
                 loaded += 1
         if loaded:
             logger.info(
@@ -384,7 +380,8 @@ def _hydrate_appstore_cache() -> None:
             ts = payload.get("ts", 0.0)
             data = payload.get("data")
             if ticker_key:
-                _appstore_cache[ticker_key] = (ts, data)
+                # Seed store directly to preserve the original timestamp.
+                _appstore_cache.seed(ticker_key, data, ts)
                 loaded += 1
         if loaded:
             logger.info(
@@ -479,13 +476,11 @@ def _get_pdl_data(ticker: str) -> dict | None:
     # ── Lazy hydration from Supabase on first call ──
     _hydrate_pdl_cache()
 
-    # ── Check in-memory cache ──
-    with _lock:
-        cached_entry = _pdl_cache.get(key)
+    # ── Check in-memory cache (fresh OR stale — conserves quota) ──
+    entry = _pdl_cache.get_with_age(key)
 
-    if cached_entry is not None:
-        ts, data = cached_entry
-        age = time.time() - ts
+    if entry is not None:
+        data, age = entry
 
         if age < _PDL_TTL:
             # Case 1: Fresh cache — return immediately
@@ -532,9 +527,8 @@ def _fetch_pdl_from_api(key: str) -> dict | None:
 
     if not raw or not isinstance(raw, dict):
         logger.info("PDL returned no data for %s", key)
+        _pdl_cache.set(key, None)
         with _lock:
-            _pdl_cache[key] = (now, None)
-            _evict_oldest(_pdl_cache)
             _persist_pdl_entry(key, now, None)
         return None
 
@@ -543,18 +537,16 @@ def _fetch_pdl_from_api(key: str) -> dict | None:
         logger.info(
             "PDL error for %s: %s", key, raw.get("error", {}).get("message", "unknown")
         )
+        _pdl_cache.set(key, None)
         with _lock:
-            _pdl_cache[key] = (now, None)
-            _evict_oldest(_pdl_cache)
             _persist_pdl_entry(key, now, None)
         return None
 
     employee_count = raw.get("employee_count")
     if not employee_count:
         # No employee data — cache the miss
+        _pdl_cache.set(key, None)
         with _lock:
-            _pdl_cache[key] = (now, None)
-            _evict_oldest(_pdl_cache)
             _persist_pdl_entry(key, now, None)
         return None
 
@@ -593,9 +585,8 @@ def _fetch_pdl_from_api(key: str) -> dict | None:
         result["industry"],
     )
 
+    _pdl_cache.set(key, result)
     with _lock:
-        _pdl_cache[key] = (now, result)
-        _evict_oldest(_pdl_cache)
         _persist_pdl_entry(key, now, result)
     return result
 
@@ -633,13 +624,11 @@ def _get_glassdoor_data(ticker: str) -> dict | None:
     # ── Lazy hydration from disk on first call ──
     _hydrate_glassdoor_cache()
 
-    # ── Check in-memory cache ──
-    with _lock:
-        cached_entry = _glassdoor_cache.get(key)
+    # ── Check in-memory cache (fresh OR stale drives refresh decision) ──
+    entry = _glassdoor_cache.get_with_age(key)
 
-    if cached_entry is not None:
-        ts, data = cached_entry
-        age = time.time() - ts
+    if entry is not None:
+        data, age = entry
 
         if age < _GLASSDOOR_TTL:
             # Case 1: Fresh cache — return immediately
@@ -687,9 +676,8 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
     if not company_name:
         logger.info("Cannot resolve company name for %s — skipping Glassdoor", key)
         now = time.time()
+        _glassdoor_cache.set(key, None)
         with _lock:
-            _glassdoor_cache[key] = (now, None)
-            _evict_oldest(_glassdoor_cache)
             _persist_glassdoor_entry(key, now, None)
         return None
 
@@ -717,9 +705,8 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
 
     if not resp or not isinstance(resp, dict):
         logger.info("Glassdoor returned no data for %s (%s)", key, company_name)
+        _glassdoor_cache.set(key, None)
         with _lock:
-            _glassdoor_cache[key] = (now, None)
-            _evict_oldest(_glassdoor_cache)
             _persist_glassdoor_entry(key, now, None)
         return None
 
@@ -729,9 +716,8 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
         logger.info(
             "Glassdoor search returned empty results for %s (%s)", key, company_name
         )
+        _glassdoor_cache.set(key, None)
         with _lock:
-            _glassdoor_cache[key] = (now, None)
-            _evict_oldest(_glassdoor_cache)
             _persist_glassdoor_entry(key, now, None)
         return None
 
@@ -759,9 +745,8 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
             key,
             list(raw.keys())[:10],
         )
+        _glassdoor_cache.set(key, None)
         with _lock:
-            _glassdoor_cache[key] = (now, None)
-            _evict_oldest(_glassdoor_cache)
             _persist_glassdoor_entry(key, now, None)
         return None
 
@@ -865,9 +850,8 @@ def _fetch_glassdoor_from_api(key: str) -> dict | None:
         result["review_count"],
     )
 
+    _glassdoor_cache.set(key, result)
     with _lock:
-        _glassdoor_cache[key] = (now, result)
-        _evict_oldest(_glassdoor_cache)
         _persist_glassdoor_entry(key, now, result)
     return result
 
@@ -909,17 +893,15 @@ def get_glassdoor_age_str(ticker: str) -> str:
     key = ticker.upper()
     _hydrate_glassdoor_cache()
 
-    with _lock:
-        entry = _glassdoor_cache.get(key)
+    entry = _glassdoor_cache.get_with_age(key)
 
     if entry is None:
         return ""
 
-    ts, data = entry
+    data, age_seconds = entry
     if data is None:
         return ""
 
-    age_seconds = time.time() - ts
     if age_seconds < 60:
         return "Updated just now"
     elif age_seconds < 3600:
@@ -1012,13 +994,11 @@ def _get_appstore_data(ticker: str) -> dict | None:
     # ── Lazy hydration from Supabase on first call ──
     _hydrate_appstore_cache()
 
-    # ── Check in-memory cache ──
-    with _lock:
-        cached_entry = _appstore_cache.get(key)
+    # ── Check in-memory cache (fresh OR stale — free API, but avoid redundant calls) ──
+    entry = _appstore_cache.get_with_age(key)
 
-    if cached_entry is not None:
-        ts, data = cached_entry
-        age = time.time() - ts
+    if entry is not None:
+        data, age = entry
 
         if age < _APPSTORE_TTL:
             # Case 1: Fresh cache — return immediately
@@ -1050,9 +1030,8 @@ def _fetch_appstore_from_api(key: str) -> dict | None:
         if not company_name:
             logger.info("Cannot resolve company name for %s — skipping App Store", key)
             now = time.time()
+            _appstore_cache.set(key, None)
             with _lock:
-                _appstore_cache[key] = (now, None)
-                _evict_oldest(_appstore_cache)
                 _persist_appstore_entry(key, now, None)
             return None
 
@@ -1092,17 +1071,15 @@ def _fetch_appstore_from_api(key: str) -> dict | None:
 
     if not raw or not isinstance(raw, dict) or raw.get("resultCount", 0) == 0:
         logger.info("iTunes returned no apps for %s (searched: %s)", key, search_name)
+        _appstore_cache.set(key, None)
         with _lock:
-            _appstore_cache[key] = (now, None)
-            _evict_oldest(_appstore_cache)
             _persist_appstore_entry(key, now, None)
         return None
 
     results = raw.get("results", [])
     if not results:
+        _appstore_cache.set(key, None)
         with _lock:
-            _appstore_cache[key] = (now, None)
-            _evict_oldest(_appstore_cache)
             _persist_appstore_entry(key, now, None)
         return None
 
@@ -1128,9 +1105,8 @@ def _fetch_appstore_from_api(key: str) -> dict | None:
 
     rating = best.get("averageUserRating")
     if rating is None:
+        _appstore_cache.set(key, None)
         with _lock:
-            _appstore_cache[key] = (now, None)
-            _evict_oldest(_appstore_cache)
             _persist_appstore_entry(key, now, None)
         return None
 
@@ -1161,9 +1137,8 @@ def _fetch_appstore_from_api(key: str) -> dict | None:
         result["rating_count"],
     )
 
+    _appstore_cache.set(key, result)
     with _lock:
-        _appstore_cache[key] = (now, result)
-        _evict_oldest(_appstore_cache)
         _persist_appstore_entry(key, now, result)
     return result
 
@@ -1242,9 +1217,9 @@ def get_vitals_cache_info() -> dict:
     Useful for diagnostics and the /health endpoint.
     """
     # Count non-None cached entries for each source
-    gd_count = sum(1 for _, (_, d) in _glassdoor_cache.items() if d is not None)
-    pdl_count = sum(1 for _, (_, d) in _pdl_cache.items() if d is not None)
-    app_count = sum(1 for _, (_, d) in _appstore_cache.items() if d is not None)
+    gd_count = sum(1 for _, d, _ in _glassdoor_cache.items_with_age() if d is not None)
+    pdl_count = sum(1 for _, d, _ in _pdl_cache.items_with_age() if d is not None)
+    app_count = sum(1 for _, d, _ in _appstore_cache.items_with_age() if d is not None)
 
     return {
         "glassdoor": {

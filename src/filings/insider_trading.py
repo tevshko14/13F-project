@@ -17,7 +17,6 @@ HTML tables, so we avoid parsing raw XML.
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -26,6 +25,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from filings import supabase_cache
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -246,26 +246,22 @@ import re as _re
 
 _SAFE_TICKER_RE = _re.compile(r"^[A-Za-z][A-Za-z0-9.]{0,11}$")
 
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, list[InsiderTrade]]] = {}
 _GLOBAL_TTL = 300  # 5 min for global screener
 _TICKER_TTL = 600  # 10 min for per-ticker
 _MAX_CACHE = 50  # ~150 MB worst-case at 300; keep at 50 to stay well under Railway RAM
 
-
-def _evict_oldest() -> None:
-    """Remove the oldest entry when the cache exceeds _MAX_CACHE."""
-    while len(_cache) > _MAX_CACHE:
-        oldest = min(_cache, key=lambda k: _cache[k][0])
-        _cache.pop(oldest, None)
+# TTLCache stores with ttl=_TICKER_TTL (the larger of the two TTLs) so stale
+# fallback semantics still work for both global (300s) and per-ticker (600s)
+# reads. The TTL comparison is done per-call in the helpers below.
+_cache: TTLCache = TTLCache(ttl=_TICKER_TTL, max_size=_MAX_CACHE)
 
 
 def _get_cached(key: str, ttl: int) -> list[InsiderTrade] | None:
-    with _lock:
-        if key in _cache:
-            ts, data = _cache[key]
-            if time.time() - ts < ttl:
-                return data
+    entry = _cache.get_with_age(key)
+    if entry is not None:
+        data, age = entry
+        if age < ttl:
+            return data
     return None
 
 
@@ -278,18 +274,15 @@ def _get_cached_with_stale(
     always returns the last cached value (even if stale) so users never
     see an empty / error state while upstream sources are refreshing.
     """
-    with _lock:
-        if key in _cache:
-            ts, data = _cache[key]
-            is_fresh = (time.time() - ts) < ttl
-            return data, is_fresh
+    entry = _cache.get_with_age(key)
+    if entry is not None:
+        data, age = entry
+        return data, age < ttl
     return None, False
 
 
 def _set_cached(key: str, data: list[InsiderTrade]) -> None:
-    with _lock:
-        _cache[key] = (time.time(), data)
-        _evict_oldest()
+    _cache.set(key, data)
 
 
 def _parse_table(html: str, *, has_company_col: bool) -> list[InsiderTrade]:
