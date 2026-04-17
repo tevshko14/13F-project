@@ -262,7 +262,6 @@ src/filings/
     ├── congress.html   # Congress Trading page (3 tabs: Congress, Holdings, Activity)
     ├── politician.html # Politician profile (stats, donut chart, trade history)
     ├── notifications.html # Notification history page
-    ├── activity.html   # Cross-fund activity feed
     ├── support.html    # Panda Fund transparency dashboard + Stripe donations
     ├── earnings_calendar.html  # Earnings calendar page (weekly/monthly views)
     └── partials/       # HTMX / lazy-loaded partials
@@ -275,7 +274,7 @@ src/filings/
         ├── company_filings.html     # SEC filing links
         ├── insider_trades.html      # Insider trading table (global)
         ├── stock_insider_trades.html # Insider trades (per-ticker)
-        ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded)
+        ├── retail_leaderboard_v2.html # ApeWisdom Reddit leaderboard (lazy-loaded)
         ├── compare_content.html     # Compare quarters (lazy-loaded)
         ├── options_feed.html        # Unusual options activity table (OI delta, moneyness, greeks)
         ├── options_clusters.html    # Clustered unusual options cards (multi-contract tickers)

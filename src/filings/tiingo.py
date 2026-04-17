@@ -33,8 +33,7 @@ _IEX_BASE = "https://api.tiingo.com/iex"
 _TIMEOUT = 12  # seconds per HTTP request
 
 # Cache TTLs
-_QUOTE_TTL = 300          # 5 min for individual quotes
-_BATCH_QUOTE_TTL = 300    # 5 min for batch quotes
+_QUOTE_TTL = 300          # 5 min for individual quotes (also used for batch)
 _EOD_TTL = 3600           # 1 hour for EOD history
 _CLOSE_DF_TTL = 3600      # 1 hour for S&P 500 close matrix
 

@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-16 (Sprint 1: shared TTLCache + worker log setup — consolidated 8 duplicate cache implementations and 7 duplicate log setups)
+> Last updated: 2026-04-16 (Sprint 2: removed 6 orphaned templates + dead constant; Sprint 1: shared TTLCache + worker log setup)
 
 ---
 
@@ -269,9 +269,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
         ├── insider_trading.html      # Insider trading screener: global buys/sells with chart
         ├── congress.html             # Congress Trading page: 3-tab (Congress dots, Holdings charts, Activity feed)
         ├── politician.html           # Politician profile: stats, donut chart, portfolio table, trade history
-        ├── search.html               # Fund manager search
         ├── investor.html             # Individual fund page (tabbed: Holdings + Compare Quarters)
-        ├── activity.html             # Cross-fund activity feed (top 100)
         ├── stock.html                # Stock detail (8 tabs: Overview, Ownership, Analysts, Signals, Vitals, Filings, Insider, Congress)
         ├── screener.html              # Stock Valuation Screener: DCF, Monte Carlo, Relative Value tabs + assumptions sidebar with user-controlled peer selector (Fuse.js search, chip tags). Clerk auth gate (blur overlay + sign-in card, same pattern as options page)
         ├── screener_gate.html        # Password gate (used by /macro and /options)
@@ -300,7 +298,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
             ├── company_filings.html    # SEC filing links (lazy-loaded)
             ├── insider_trades.html     # Insider trading table — global screener (lazy-loaded)
             ├── stock_insider_trades.html # Insider trading table — per-ticker (lazy-loaded)
-            ├── retail_leaderboard.html  # ApeWisdom Reddit leaderboard (lazy-loaded into retail page)
+            ├── retail_leaderboard_v2.html # ApeWisdom Reddit leaderboard (lazy-loaded into retail page)
             ├── compare_content.html    # Compare quarters partial (lazy-loaded into investor page)
             ├── deployment_leaderboard.html # Capital Deployed leaderboard (HTMX partial for /funds Deployment tab)
             ├── deployment_card.html    # Capital Deployed stat card (HTMX partial for investor page)
@@ -1484,11 +1482,10 @@ When both `FINNHUB_API_KEY` and `FMP_API_KEY` are unset, the calendar generates 
 | GET | `/grand-portfolio` | `grand_portfolio_redirect` | 301 redirect → `/funds` | — |
 | GET | `/superinvestors` | `superinvestors_page` | 301 redirect → `/funds?view=funds` | — |
 | GET | `/api/fund-row/{cik}` | `fund_row` | Cache first → SEC on miss (L2 Supabase fallback) | `partials/fund_row.html` |
-| GET | `/search` | `search_page` | SEC API (live) | `search.html` |
 | GET | `/holdings/{cik}` | `holdings` | Cache first → SEC on miss | `investor.html` |
 | GET | `/compare/{cik}` | `compare` | Redirect | → `/holdings/{cik}` (302) |
 | GET | `/api/compare/{cik}` | `compare_api` | Cache first → SEC on miss | `partials/compare_content.html` |
-| GET | `/activity` | `activity_feed` | Cache only | `activity.html` |
+| GET | `/activity` | `activity_feed` | 301 redirect | → `/funds?view=activity` |
 | GET | `/stock/{ticker}` | `stock_detail` | Cache only | `stock.html` |
 | GET | `/stock/cusip/{cusip}` | `stock_detail_by_cusip` | Cache only | `stock.html` |
 | GET | `/api/analysts/{ticker}` | `analyst_ratings` | yfinance + Finnhub (live, 5-min cache) | `partials/analyst_ratings.html` |
@@ -1498,7 +1495,7 @@ When both `FINNHUB_API_KEY` and `FMP_API_KEY` are unset, the calendar generates 
 | GET | `/api/company-filings/{ticker}` | `company_filings_tab` | SEC EDGAR | `partials/company_filings.html` |
 | GET | `/api/insider-trades` | `insider_trades_api` | Supabase → OpenInsider → stale L1 | `partials/insider_trades.html` |
 | GET | `/api/insider-trades/{ticker}` | `stock_insider_trades_api` | Hot→OI screener→Cold→stale L1 + title resolution | `partials/stock_insider_trades.html` |
-| GET | `/api/retail/leaderboard` | `retail_leaderboard_api` | ApeWisdom + CNN Fear & Greed | `partials/retail_leaderboard.html` |
+| GET | `/api/retail/leaderboard` | `retail_leaderboard_api` | ApeWisdom + CNN Fear & Greed | `partials/retail_leaderboard_v2.html` |
 | GET | `/api/ticker-search-index` | `ticker_search_index` | NASDAQ Trader + S&P 500 + cache | JSON response |
 | GET | `/api/live-activity` | `live_activity_api` | Supabase `notifications` (5-min HTML cache) | `partials/live_activity.html` |
 | GET | `/api/heatmap` | `heatmap` | yfinance (30-min cache) + Wikipedia | `partials/heatmap.html` |
@@ -1672,7 +1669,7 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   │     └── Panda Fund support widget: progress bar + Stripe Pricing Table embed
   ├── retail.html (sub-tabs: Sentiment | Leaderboard | Calendar)
   │     ├── Sentiment tab: CNN Fear & Greed gauge + summary cards (server-rendered)
-  │     ├── Leaderboard tab: lazy-loads partials/retail_leaderboard.html via fetch(/api/retail/leaderboard)
+  │     ├── Leaderboard tab: lazy-loads partials/retail_leaderboard_v2.html via fetch(/api/retail/leaderboard)
   │     └── Calendar tab: static YouTuber table (server-rendered)
   ├── grand_portfolio.html (URL: /funds, sub-tabs: Funds | Holdings | Activity | Deployment)
   │     ├── Funds tab: HTMX lazy-loads partials/fund_row.html for each of 84 investors
@@ -1694,13 +1691,10 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
   │     ├── Stats grid + ECharts donut portfolio chart (top 10 holdings)
   │     ├── Estimated Portfolio sortable table
   │     └── Trade History sortable table
-  ├── search.html
   ├── investor.html (Tabbed: Holdings + Compare Quarters, lazy-loads compare)
   │     ├── imports partials/ticker_link.html (macro)
   │     ├── lazy-loads partials/compare_content.html via fetch(/api/compare/{cik})
   │     └── lazy-loads partials/deployment_card.html via HTMX (/api/deployment/{cik})
-  ├── activity.html
-  │     └── imports partials/ticker_link.html (macro)
   ├── stock.html (8 Tabs: Overview, Ownership, Analysts, Signals, Vitals, Filings, Insider, Congress)
   │     ├── Heart button (.pp-watch-heart): optimistic toggle, Clerk auth check, POST/DELETE /api/watchlist
   │     ├── includes partials/watchlist_star.html
@@ -1741,7 +1735,7 @@ base.html (nav: Home|Retail|Funds|Insiders|Support the Panda + 🔔 bell + style
 {% endmacro %}
 ```
 
-Used in: `investor.html`, `activity.html`, `grand_portfolio.html`.
+Used in: `investor.html`, `grand_portfolio.html`.
 
 ### Interactive Chart (`stock.html` inline script)
 
