@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-16 (Sprint 2: removed 6 orphaned templates + dead constant; Sprint 1: shared TTLCache + worker log setup)
+> Last updated: 2026-04-16 (Sprint 3: checked in 26 SQL migration files for disaster recovery; Sprint 2: removed 6 orphaned templates + dead constant; Sprint 1: shared TTLCache + worker log setup)
 
 ---
 
@@ -207,6 +207,7 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
 13F-project/
 ├── scripts/
 │   └── backfill_fundamentals.py      # CLI: bulk SEC XBRL backfill (--tier sp500/nasdaq/all, --force, --dry-run, --report)
+├── migrations/                       # Checked-in SQL migrations (versioned snapshot of production schema for disaster recovery — see migrations/README.md)
 ├── pyproject.toml                    # deps, entry points, build config
 ├── README.md                         # Project overview
 ├── README_DEV.md                     # THIS FILE — source of truth

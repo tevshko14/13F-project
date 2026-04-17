@@ -1,0 +1,1 @@
+ALTER TABLE cc_rooms ADD COLUMN ended_at TIMESTAMPTZ;
