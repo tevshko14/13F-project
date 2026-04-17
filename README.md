@@ -218,8 +218,16 @@ railway up
 ## Project Structure
 
 ```
+migrations/             # Checked-in SQL schema (disaster recovery)
 src/filings/
-├── web.py              # FastAPI app (40+ routes, background refresh, Stripe/support)
+├── web.py              # FastAPI app (~107 routes; 18 more in routers/, below)
+├── routers/            # Domain-scoped FastAPI routers (extracted from web.py)
+│   ├── watchlist.py        # /watchlist + /api/watchlist/* (Clerk auth'd)
+│   ├── static_pages.py     # /privacy, /faq, /robots.txt, /llms.txt
+│   └── auth_admin.py       # /login, /signup, /profile, /logout, Clerk webhook, /admin
+├── app_state.py        # Shared Jinja2 templates + validators (imported by web.py and routers/)
+├── caching.py          # Shared TTLCache primitive (used by 8 data modules)
+├── log_config.py       # Shared setup_worker_logging() for cron workers
 ├── cli.py              # CLI entry point
 ├── client.py           # SEC EDGAR data access layer
 ├── analysts.py         # Analyst ratings (Finnhub + yfinance)
@@ -228,6 +236,7 @@ src/filings/
 ├── vitals.py           # Alternative data (Glassdoor, PDL, App Store) + Supabase persistence
 ├── cache.py            # Cache layer (3-tier: in-memory → Supabase → disk)
 ├── supabase_cache.py   # Supabase L2 persistent cache (survives deploys)
+├── youtube_cache.py    # YouTube events/channels persistence (extracted from supabase_cache)
 ├── unusual_options.py  # Unusual options activity detection (premium floor, OI delta, urgency, moneyness, clusters)
 ├── options_sync.py     # Cron worker: scan options chains → detect unusual activity → upsert to Supabase (every 30 min)
 ├── convergence.py      # Convergence Engine: cross-signal analysis (options + insider + congress + short interest + 13F)

@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-16 (Sprint 8 — FINAL: fmt_num Jinja filter + a11y ARIA/sr-only on command palette modal; Sprint 7: ppInitChart() factory; Sprint 6: auth_admin router; Sprint 5: YouTube helpers extracted; Sprint 4: 11 routes + app_state.py; Sprint 3: 26 SQL migration files; Sprint 2: removed 6 orphaned templates; Sprint 1: shared TTLCache + worker log setup)
+> Last updated: 2026-04-17 (post-8-sprint architecture audit: docs + performance audit).  See §10 "8-Sprint Architecture Audit (Apr 2026)" and the "Audit sprint — deferred follow-ups" subsection for what was shipped vs what still pending.
 
 ---
 
@@ -142,13 +142,18 @@ uv run filings-web          # starts at http://localhost:8000
 │  Uses display.py │  │  1-sec rate limit between funds       │
 │  for formatting  │  │  Watchlist: server-side JSON + HTMX   │
 │                  │  │  Notifications: SSE + polling + JSON  │
-└──────────────────┘  │  30+ routes (see Section 6)            │
-                      └──────────┬──────────────────────────┘
+└──────────────────┘  │  ~127 routes total — ~107 in web.py,    │
+                      │  ~18 in filings/routers/ (sprint 4+6):  │
+                      │   • routers/watchlist.py (7 routes)     │
+                      │   • routers/static_pages.py (4 routes)  │
+                      │   • routers/auth_admin.py (7 routes)    │
+                      │  Shared helpers: filings/app_state.py   │
+                      └──────────┬──────────────────────────────┘
                                  │
                                  ▼
                       ┌─────────────────────────┐
                       │  templates/ (Jinja2)     │
-                      │  10 pages + 12 partials  │
+                      │  ~25 pages + ~60 partials│
                       │  (see Section 7)         │
                       └─────────────────────────┘
 ```
@@ -1942,6 +1947,14 @@ the cache — every CLI command makes live SEC API calls.
    are capped at 100/100/unlimited items respectively but have no
    pagination controls.
 
+6. **/login and /signup dropped to default 60/min rate limit** (Sprint 6).
+   Originally 10/min for bot prevention; the post-hoc `limiter.limit()`
+   decorators that used to rebind the functions in `web.py` were broken
+   when the routes moved into `routers/auth_admin.py`. The `Limiter`'s
+   default 60/min still covers these paths but it's ~6× weaker than
+   before. Re-apply inside the router using slowapi's at-definition
+   decorator (TODO comment in web.py).
+
 ### Gotchas for Future Development
 
 - **CIK format mismatch:** Always normalize CIKs by stripping leading zeros.
@@ -1962,6 +1975,39 @@ the cache — every CLI command makes live SEC API calls.
 - **SEC rate limiting:** EDGAR has a soft rate limit of ~10 requests/second.
   The background refresh uses a 1-second delay between funds. Aggressive
   concurrent fetching will get your IP temporarily blocked.
+
+- **Router files are not in `web.py`'s route table source** (Sprint 4+6).
+  11 watchlist/static_pages routes and 7 auth_admin routes are mounted
+  via `app.include_router(...)` from `src/filings/routers/*.py`. Grep for
+  `@app.get` in web.py will MISS them. Use `@router.get` across all of
+  src/filings/ to find every route, or inspect `app.routes` at runtime.
+
+- **Backward-compat re-exports in supabase_cache.py** (Sprint 5). YouTube
+  persistence moved to `filings.youtube_cache`. `supabase_cache.py` imports
+  from it at the bottom with `# noqa: E402, F401`, so `supabase_cache.get_youtube_events`
+  still works for existing callers. New code should import from
+  `filings.youtube_cache` directly. The lazy-proxy `_get_client` inside
+  `youtube_cache.py` is what breaks the otherwise-circular import —
+  don't remove it unless you move `_get_client` to a neutral module first.
+
+- **Circular-import trap for new supabase_cache splits.** `supabase_cache.py`
+  tails re-imports from domain modules; those domain modules need
+  `_get_client` from supabase_cache. The import order works ONLY when
+  `supabase_cache` is imported first (e.g. via `from filings import web`).
+  Importing `from filings.youtube_cache` standalone would cycle-fail.
+  The lazy `_get_client` proxy in `youtube_cache.py` is the pattern to
+  copy for future domain splits.
+
+- **`templates` lives in `app_state.py`, not web.py** (Sprint 4). Both
+  web.py and routers import it from there.  `templates.env.globals` /
+  `.filters` are still registered in web.py (after auth / market data
+  / etc. initialize). Don't re-create a `Jinja2Templates(...)` instance
+  inside a router — reuse the shared one.
+
+- **CLERK_WEBHOOK_SECRET env var is read twice** (Sprint 6 partial cleanup).
+  Once in `web.py` (unused, now removed) and once in
+  `routers/auth_admin.py` (used by the webhook handler).  The router
+  reads it at module-load time; changing the env var needs a redeploy.
 
 ---
 
@@ -2075,6 +2121,33 @@ the cache — every CLI command makes live SEC API calls.
 - [x] Rate limit relaxation: bumped all L2-cached endpoints from 10-15/min → 60/min. Homepage loads fire ~10 API calls simultaneously; old limits caused 429s on normal browsing.
 - [x] 429 stale-fallback: rate-limited API requests now serve last-known-good HTML from L2 cache instead of blank error components. Dynamic route introspection via `_l2_key_registry` (no manual URL map). Covers all 21 `_with_l2_fallback`-decorated endpoints including query-param macro routes.
 - [x] Logo.dev backfill: fetched 2,670 missing ticker logos via Logo.dev ticker API (`scripts/fetch_logos_logodev.py`), 100% hit rate. Total coverage: 6,930/6,930 tickers.
+
+### 8-Sprint Architecture Audit (Apr 2026)
+
+Comprehensive systems-architect audit + phased refactor. Every sprint shipped with /simplify review, /ship pipeline, 5-min Railway deploy, and health verification.
+
+- [x] **Sprint 1** — Shared `TTLCache` primitive (`src/filings/caching.py`) eliminated 8 duplicate `_lock + _cache + _evict_oldest` implementations across `sentiment.py`, `market_data.py`, `analysts.py`, `vitals.py`, `tiingo.py`, `tradier.py`, `google_trends.py`, `insider_trading.py`. Shared `setup_worker_logging()` (`src/filings/log_config.py`) consolidated 7 duplicate worker-log setups. ~250 lines of plumbing removed. Commit: `3de55f9`.
+- [x] **Sprint 2** — Dead code removal. Deleted 6 orphaned templates (`activity.html`, `index.html`, `search.html`, `partials/retail_leaderboard.html` (v1), `partials/vitals_paywall.html`, `reset_password.html`) and dead `_BATCH_QUOTE_TTL` constant. `-1,223` lines. README updates reflect deletions. Commit: `b744bf7`.
+- [x] **Sprint 3** — Disaster-recovery migrations. Checked in 26 SQL migration files (`migrations/*.sql` + `migrations/README.md`) mirroring the production `supabase_migrations.schema_migrations` ledger. Documented known caveats (the erroneous fitness-app `initial_schema` migration; tables created before migration tracking that still live only in prod DB). Commit: `fca6342`.
+- [x] **Sprint 4** — Started web.py router split. Created `src/filings/app_state.py` (leaf module: `templates`, `valid_ticker/cik/cusip/member_id`, `real_ip`) to break cycles. Extracted `routers/watchlist.py` (7 routes) and `routers/static_pages.py` (/privacy, /faq, /robots.txt, /llms.txt). web.py: 7,225 → 6,901 lines. Commit: `24e24b0`.
+- [x] **Sprint 5** — Started supabase_cache.py domain split. Extracted `src/filings/youtube_cache.py` (7 functions, ~215 lines) with backward-compat re-exports. Fixed circular-import gotcha via lazy `_get_client` proxy. supabase_cache.py: 4,625 → 4,410 lines. Commit: `7f8fe53`.
+- [x] **Sprint 6** — Continued router split. Extracted `routers/auth_admin.py` (7 routes: /profile, /login, /signup, /logout, /api/webhooks/clerk, /admin, /admin/user/{id}). Co-located `_admin_cache` + `_check_admin` helper. web.py: 6,901 → 6,720 lines. Commit: `48e0214`.
+- [x] **Sprint 7** — Added `window.ppInitChart(container, optionsOrCb)` factory helper in `base.html`. Unifies init + dispose + resize wiring for ECharts. Existing ~41 chart sites untouched (opt-in migration). Commit: `bd5617e`.
+- [x] **Sprint 8** — Polish: `fmt_num` Jinja filter + WCAG a11y on the ⌘K command palette (`role="dialog"`, `aria-modal`, `aria-labelledby`, `aria-controls`, `aria-autocomplete`, `role="listbox"`, `role="button"` + `aria-label` on Esc, `aria-hidden` on decorative SVG, standard `.sr-only` utility class). Commit: `204af01`.
+
+### Audit sprint — deferred follow-ups
+
+These were scoped out of the 8 sprints for risk/time reasons.  Each is a standalone future session.
+
+- [ ] **Remaining heavy routers** — stock, macro, options, congress, portfolio, assets (logos/headshots/analyst photos). Each has complex shared state (SUPERINVESTORS, `_fund_cache`, `_logo_cache`, Stripe config, etc.) and needs its own careful session.
+- [ ] **Remaining supabase_cache domain splits** — insider (~700 lines), congress (~450), signals (~600: short-interest + earnings + options), assets (~400), admin (~250), notifications/user (~350).
+- [ ] **CSS extraction from `base.html`** — ~1,560 lines of inline CSS (see Sprint 7 performance audit). Needs visual QA and FOUC safeguards.
+- [ ] **Migrate 10 unbounded caches to TTLCache**: `fundamentals._mem_cache`, `earnings_calendar._cal_cache`, `openfigi._cusip_cache`, `earnings_scorecard._cache`, `cboe_data._cache`, `fred_data._cache`, `market_breadth._cache`, `unusual_options._feed_cache`, `wsb_sentiment._cache`, `treasury_data._cache`, plus `insider_trading._title_cache` (unbounded), `auth._profile_cache` (unbounded per user).
+- [ ] **Re-apply strict 10/min rate limit on /login and /signup** (dropped during Sprint 6 router move — default 60/min still applies). Do this inside `routers/auth_admin.py` using slowapi's at-definition decorator.
+- [ ] **Extract `supabase_cache._get_client` into a neutral `supabase_client.py`** so more domain modules can depend on it without the lazy-proxy workaround used in `youtube_cache.py`.
+- [ ] **Migrate ~96 inline `{{ "{:,.0f}".format(x) }}` sites to the new `fmt_num` filter** (Sprint 8 infrastructure ready; template edits pending).
+- [ ] **Migrate ~41 ECharts init sites to `window.ppInitChart()`** (Sprint 7 factory ready; template edits pending).
+- [ ] **Checked-in migration for `congress_trades` + `congress_members` tables** — discovered in the Sprint 8 perf audit that these tables exist in prod DB but have no migration file (created via dashboard SQL editor before migration tracking began).
 
 ### Shelved: Crypto Whale Tracker (branch: `feature/crypto-whale-tracker`)
 
