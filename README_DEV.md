@@ -2149,6 +2149,39 @@ These were scoped out of the 8 sprints for risk/time reasons.  Each is a standal
 - [ ] **Migrate ~41 ECharts init sites to `window.ppInitChart()`** (Sprint 7 factory ready; template edits pending).
 - [ ] **Checked-in migration for `congress_trades` + `congress_members` tables** — discovered in the Sprint 8 perf audit that these tables exist in prod DB but have no migration file (created via dashboard SQL editor before migration tracking began).
 
+### Post-8-sprint Performance Audit (Apr 17, 2026) — AWAITING IMPLEMENTATION APPROVAL
+
+Four parallel audits covering API performance, data storage, memory/OOM risk, and frontend page-load. Findings grouped into 5 epics ranked by impact-to-effort. Each epic ships as a standalone audit-sprint (code → /simplify → /ship → verify).
+
+**Epic A — Production stability (HIGHEST IMPACT, safest to ship first)**
+- [ ] Add `--limit-max-requests 1000` to Procfile (prevents unbounded memory growth; standard practice; one-line change).
+- [ ] LRU eviction on `_refresh_locks` in web.py (unbounded per-CIK `asyncio.Lock` dict — ~100 KB–2 MB leak over weeks at 200 DAU).
+- [ ] Apply explicit `limiter.limit()` to 6 per-ticker endpoints that currently rely on the default 60/min: `/api/financials/{ticker}`, `/api/earnings/{ticker}`, `/api/estimates/{ticker}`, `/api/web-traffic/{ticker}`, `/api/signals/{ticker}`, `/api/heatmap-data`.
+- [ ] Parallelize `build_stock_detail` + `build_stock_history` in stock_detail handler with `asyncio.gather` (~500 ms saved per stock page; sequential today at web.py:2989-2995).
+- [ ] Wrap homepage `_get_panda_fund_stats()` + homepage render in stampede-protection lock (currently unprotected; 10 concurrent requests on cache-TTL expiry trigger 10 background fetches).
+
+**Epic B — Frontend page-load (HIGH user-facing impact)**
+- [ ] Add `defer` to Clerk SDK script in base.html (~150-300 ms FCP improvement; script currently render-blocking).
+- [ ] CSSMinifyMiddleware: skip minification if `Content-Encoding` is already set (prevents redundant decompress → mutate → recompress; ~50-100 ms CPU per response).
+- [ ] Stock page tabs: lazy-load inactive tabs via HTMX `hx-trigger="revealed"` instead of rendering all 6 inline (~100-150 KB per page; ~200-300 ms FCP).
+
+**Epic C — Memory / unbounded caches**
+- [ ] Migrate 10 modules to `TTLCache` (with explicit `max_size`): `fundamentals._mem_cache`, `earnings_calendar._cal_cache`, `openfigi._cusip_cache`, `earnings_scorecard._cache`, `cboe_data._cache`, `fred_data._cache`, `market_breadth._cache`, `unusual_options._feed_cache`, `wsb_sentiment._cache`, `treasury_data._cache`. ~500 MB at-risk across all modules under heavy use.
+- [ ] Cap `_l2_caches` in web.py with LRU (~50 categories max) to prevent dynamic-category growth.
+- [ ] Consolidate `_analyst_pool` (2) + `_sentiment_executor` (3) + `_vitals_pool` (2) + `_health_pool` (1) into the shared `_heavy_pool` (saves ~8-16 MB thread overhead).
+
+**Epic D — Data layer**
+- [ ] Fix N+1 in `upsert_youtube_channels` — batch upsert in one call (10-50× faster for channel-metadata syncs).
+- [ ] Replace unbounded fetch-then-dedupe in `get_distinct_insider_tickers` (10K rows) and `get_congress_trades_missing_prices` (50K rows) with SQL-side `DISTINCT ON` / `EXISTS` / `NOT IN` subqueries.
+- [ ] Replace `SELECT *` on user tables with explicit column projections (`user_notification_preferences`, `congress_sync_log`, `watchlist_digest_log`). Define `_USERPREFS_COLS`, `_SYNCLOG_COLS`, `_DIGESTLOG_COLS` constants.
+- [ ] Add missing indexes: `idx_congress_sync_started_at ON congress_sync_log (started_at DESC)`; `idx_esc_index_quarter_sector ON earnings_scorecard_cache (index_key, quarter, sector)`. Commit as new SQL migration files.
+
+**Epic E — Polish**
+- [ ] Serve logos as WebP (with PNG fallback via `<picture>`) — ~30-40% smaller per logo.
+- [ ] Add `loading="lazy" decoding="async"` to all `<img>` tags in tables (insider trades, fund holdings, politicians).
+- [ ] Defer PostHog inline init to first user interaction (not DOMContentLoaded).
+- [ ] Report unusual_options table growth in `run_retention_cleanup()` return dict for alerting.
+
 ### Shelved: Crypto Whale Tracker (branch: `feature/crypto-whale-tracker`)
 
 Full MVP built and shelved — **not merged to main**. All code lives on the
