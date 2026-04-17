@@ -2049,6 +2049,17 @@ def run_retention_cleanup() -> dict:
         logger.warning("Retention: unusual_options cleanup failed: %s", exc)
         results["unusual_options_deleted"] = -1
 
+    # Post-cleanup row counts for growth-prone tables — lets ops dashboards
+    # alert when cleanup is keeping up (or not) with ingestion rate.
+    # head=True skips row payloads; only the X-Total-Count header is fetched.
+    for table in ("insider_trades", "unusual_options_activity", "sync_logs"):
+        try:
+            resp = client.table(table).select("id", count="exact", head=True).execute()
+            results[f"{table}_size_after"] = resp.count if resp.count is not None else -1
+        except Exception as exc:
+            logger.debug("Retention: %s size check failed: %s", table, exc)
+            results[f"{table}_size_after"] = -1
+
     logger.info("Retention cleanup: %s", results)
     return results
 

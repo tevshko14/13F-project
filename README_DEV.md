@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-17 (Epic D: batch youtube_channels upsert, column projections on 3 user tables, truncation warnings on backfill dedupe queries. Epic C: 10 modules to TTLCache. Epic B skipped (stale). Epic A shipped: Procfile recycle, _refresh_locks LRU, 7 rate limits, stock-page parallel fetch, Panda Fund cache.)
+> Last updated: 2026-04-17 (Epic E — FINAL: 4 img tags get `loading=lazy decoding=async` (screener, earnings_calendar_macro, market_news, earnings_calendar_grid) + `{table}_size_after` observability metrics in `run_retention_cleanup()` via head=True count-only queries.  Logo WebP + PostHog deferral skipped as net-negative.  All 5 perf-audit epics closed.)
 
 ---
 
@@ -2180,11 +2180,11 @@ Epic B decision was "skip — findings stale; move to Epic C".
 - [x] Replaced `SELECT *` on 3 user tables with explicit column projections.  New constants: `_USERPREFS_COLS` (15 cols), `_CONGRESS_SYNC_COLS` (5 cols), `_DIGEST_LOG_COLS` (5 cols).  Excludes internal fields (`id`, `created_at`, `updated_at`) that no caller reads.
 - [~] Missing indexes: investigated both proposed indexes.  `idx_congress_sync_started_at` would have duplicated the pre-existing `idx_csl_started_at` (same columns, different name — discovered by applying + rolling back).  `idx_esc_index_quarter_sector ON earnings_scorecard_cache (index_key, quarter, sector)` was proposed for queries that don't exist in the code (only `cache_key` lookups happen).  Both skipped.  DB schema unchanged.
 
-**Epic E — Polish**
-- [ ] Serve logos as WebP (with PNG fallback via `<picture>`) — ~30-40% smaller per logo.
-- [ ] Add `loading="lazy" decoding="async"` to all `<img>` tags in tables (insider trades, fund holdings, politicians).
-- [ ] Defer PostHog inline init to first user interaction (not DOMContentLoaded).
-- [ ] Report unusual_options table growth in `run_retention_cleanup()` return dict for alerting.
+**Epic E — Polish (SHIPPED 2026-04-17)**
+- [x] Added `loading="lazy" decoding="async"` to 4 img tags that were missing them: `screener.html` (ticker logo card), `partials/earnings_calendar_macro.html` (hover card), `partials/market_news.html` (modal image), `partials/earnings_calendar_grid.html` (hover card).  All 4 had `src=""` filled dynamically by JS; marking them lazy means the browser defers download until interaction.  Audited all 63 `<img>` tags in templates — the remaining 5 without lazy are base.html nav logos (correctly eager — always-visible chrome) and stock.html hero logo (above-fold).
+- [x] Added `{table}_size_after` counts to `run_retention_cleanup()` return dict for `insider_trades`, `unusual_options_activity`, and `sync_logs`.  Uses `select(count="exact", head=True)` so only the row-count header is fetched, not row bodies.  Lets ops alert on stuck retention cleanup before the table bloats.
+- [~] Logo WebP — skipped.  Requires server-side PNG→WebP conversion (Pillow dep), new endpoint/content-negotiation, and `<picture>` markup across every logo call site.  ~1-2h of work for ~10-30 KB gzipped saved per page.  Net defer until it matters.
+- [~] PostHog init deferral — skipped.  PostHog's own library (`/static/array.js`) is ALREADY async-loaded by the install snippet (`p.async=!0`).  The synchronous stub is ~1 ms of JS.  Deferring to first-interaction would lose analytics on the ~30%+ of visitors who bounce before interacting — net-negative.
 
 ### Shelved: Crypto Whale Tracker (branch: `feature/crypto-whale-tracker`)
 
