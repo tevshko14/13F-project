@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-16 (Sprint 4: started web.py split — extracted 11 routes into filings/routers/ (watchlist, static_pages) + created filings/app_state.py; Sprint 3: checked in 26 SQL migration files; Sprint 2: removed 6 orphaned templates; Sprint 1: shared TTLCache + worker log setup)
+> Last updated: 2026-04-16 (Sprint 5: started supabase_cache.py split — extracted 7 YouTube helpers to filings.youtube_cache; Sprint 4: extracted 11 routes into filings/routers/ + filings/app_state.py; Sprint 3: checked in 26 SQL migration files; Sprint 2: removed 6 orphaned templates; Sprint 1: shared TTLCache + worker log setup)
 
 ---
 
@@ -221,12 +221,13 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── caching.py                    # Shared TTLCache primitive: thread-safe dict cache w/ TTL + LRU eviction. Replaces the duplicated `_lock + _cache + _evict_oldest` pattern across 8 data modules. Exports `TTLCache` and `MISS` sentinel (for negative caching).
     ├── log_config.py                 # Shared `setup_worker_logging()` for CLI/cron workers — Railway JSON format + default quiet loggers. Replaces the duplicated `_setup_logging()` in 7 worker files.
     ├── app_state.py                  # Shared Jinja2 `templates`, `valid_ticker/cik/cusip/member_id`, `real_ip` — imported by both `web.py` and `routers/*.py` to avoid circular imports during the web.py router split.
+    ├── youtube_cache.py              # YouTube events/channels persistence — 7 functions extracted from supabase_cache.py during audit-sprint-5. supabase_cache.py re-exports for backward compat. New code should import from here directly.
     ├── routers/
     │   ├── __init__.py               # Routers package (docstring)
     │   ├── watchlist.py              # /watchlist page + 6 `/api/watchlist/*` endpoints (Clerk-authenticated per-user watchlist + notification prefs)
     │   └── static_pages.py           # /privacy, /faq, /robots.txt, /llms.txt (zero-logic static handlers)
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk (filing data only)
-    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications, user_watchlist, user_notification_preferences, watchlist_digest_log, admin_users tables)
+    ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications, user_watchlist, user_notification_preferences, watchlist_digest_log, admin_users tables). NOTE: undergoing domain split (audit-sprint-5) — youtube helpers already moved to `youtube_cache.py`; insider/congress/assets/signals/admin domains to follow in sprint 6.
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
     ├── notifications.py              # Notification creators (13F, YouTube, Reddit, Congress trades) + filing season detection
     ├── analysts.py                   # Analyst ratings (Finnhub + yfinance, 5-min TTL cache)
