@@ -12,10 +12,10 @@ import csv
 import io
 import json
 import logging
-import threading
-import time
 import urllib.request
 from datetime import datetime, timedelta
+
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -24,29 +24,30 @@ _DEBT_URL = (
     "v2/accounting/od/debt_to_penny"
 )
 
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, any]] = {}
-_TTL = 3600 * 6  # 6 hours
+_TTL = 3600 * 6  # 6 hours — kept for signature compatibility below
+_cache = TTLCache(ttl=_TTL, max_size=50)
 
 # Treasury yield maturities we track
 MATURITIES = ["1 Mo", "3 Mo", "6 Mo", "1 Yr", "2 Yr", "5 Yr", "7 Yr", "10 Yr", "20 Yr", "30 Yr"]
 
 
 def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
-    """Generic L1 → L2 → fetcher pattern."""
+    """Generic L1 → L2 → fetcher pattern.
+
+    *ttl* retained for signature compatibility — the shared TTLCache uses
+    a fixed TTL (``_TTL``) since no caller overrides this parameter.
+    """
     # L1
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < ttl:
-            return cached[1]
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     # L2
     try:
         from filings import supabase_cache
         l2 = supabase_cache.get_cached(cache_key)
         if l2:
-            with _lock:
-                _cache[cache_key] = (time.time(), l2)
+            _cache.set(cache_key, l2)
             return l2
     except Exception:
         pass
@@ -60,8 +61,7 @@ def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
                 supabase_cache.set_cached(cache_key, "treasury", result, 3600 * 24)
             except Exception:
                 pass
-            with _lock:
-                _cache[cache_key] = (time.time(), result)
+            _cache.set(cache_key, result)
         return result
     except Exception as exc:
         logger.warning("Treasury fetch failed for %s: %s", cache_key, exc)

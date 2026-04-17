@@ -10,16 +10,15 @@ Used to resolve CUSIPs from SEC 13F filings to tickers/names.
 import json
 import logging
 import os
-import threading
 import time
 import urllib.request
+
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 
 _FIGI_URL = "https://api.openfigi.com/v3/mapping"
-_lock = threading.Lock()
-_cusip_cache: dict[str, tuple[float, dict]] = {}
-_TTL = 3600 * 24 * 7  # 7 days — CUSIP mappings rarely change
+_cusip_cache = TTLCache(ttl=3600 * 24 * 7, max_size=500)  # 7 days — CUSIP mappings rarely change
 
 
 def _get_api_key() -> str:
@@ -41,13 +40,12 @@ def resolve_cusips(cusips: list[str]) -> dict[str, dict]:
     # Check L1 cache first
     uncached = []
     result = {}
-    with _lock:
-        for cusip in cusips:
-            cached = _cusip_cache.get(cusip)
-            if cached and time.time() - cached[0] < _TTL:
-                result[cusip] = cached[1]
-            else:
-                uncached.append(cusip)
+    for cusip in cusips:
+        cached = _cusip_cache.get(cusip)
+        if cached is not None:
+            result[cusip] = cached
+        else:
+            uncached.append(cusip)
 
     if not uncached:
         return result
@@ -60,8 +58,7 @@ def resolve_cusips(cusips: list[str]) -> dict[str, dict]:
             l2 = supabase_cache.get_cached(f"figi:{cusip}")
             if l2 and isinstance(l2, dict):
                 result[cusip] = l2
-                with _lock:
-                    _cusip_cache[cusip] = (time.time(), l2)
+                _cusip_cache.set(cusip, l2)
             else:
                 still_uncached.append(cusip)
     except Exception:
@@ -103,8 +100,7 @@ def resolve_cusips(cusips: list[str]) -> dict[str, dict]:
                         "market_sector": figi_data.get("marketSector", ""),
                     }
                     result[cusip] = mapped
-                    with _lock:
-                        _cusip_cache[cusip] = (time.time(), mapped)
+                    _cusip_cache.set(cusip, mapped)
                     # L2 cache
                     try:
                         from filings import supabase_cache

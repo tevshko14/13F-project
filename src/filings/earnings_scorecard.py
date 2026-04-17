@@ -19,12 +19,13 @@ from datetime import datetime, timedelta
 
 import httpx
 
+from filings.caching import TTLCache
+
 logger = logging.getLogger(__name__)
 
 # ── Cache ────────────────────────────────────────────────────────
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, object]] = {}
-_TTL = 3600  # 1 hour (L1 in-memory)
+_lock = threading.Lock()                          # guards _ecal_result_cache below
+_cache = TTLCache(ttl=3600, max_size=100)         # L1 in-memory for scorecard payloads
 _DB_TTL = 604_800  # 7 days (L2 Supabase)
 
 # ── Constants ────────────────────────────────────────────────────
@@ -112,18 +113,16 @@ def fetch_earnings_data(
     cache_key = f"{index}:{quarter or 'latest'}:{sector or 'all'}"
 
     # L1: in-memory
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < _TTL:
-            return cached[1]
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     # L2: Supabase scorecard_cache
     from filings import supabase_cache
 
     db_hit = supabase_cache.get_scorecard_cache(cache_key, max_age_seconds=_DB_TTL)
     if db_hit is not None:
-        with _lock:
-            _cache[cache_key] = (time.time(), db_hit)
+        _cache.set(cache_key, db_hit)
         return db_hit
 
     # L3 / L4: earnings_history table → FMP fallback
@@ -135,8 +134,7 @@ def fetch_earnings_data(
             cache_key, index, data.get("quarter", ""), sector, data,
         )
 
-    with _lock:
-        _cache[cache_key] = (time.time(), data)
+    _cache.set(cache_key, data)
     return data
 
 
@@ -593,18 +591,16 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
     cache_key = f"history:{index}"
 
     # L1: in-memory
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < _TTL:
-            return cached[1]
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     # L2: Supabase scorecard_cache
     from filings import supabase_cache
 
     db_hit = supabase_cache.get_scorecard_cache(cache_key, max_age_seconds=_DB_TTL)
     if db_hit is not None:
-        with _lock:
-            _cache[cache_key] = (time.time(), db_hit)
+        _cache.set(cache_key, db_hit)
         return db_hit
 
     # L3/L4: build trend from earnings_history (or FMP fallback)
@@ -656,8 +652,7 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
             cache_key, index, "multi", None, trend,
         )
 
-    with _lock:
-        _cache[cache_key] = (time.time(), trend)
+    _cache.set(cache_key, trend)
     return trend
 
 

@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-17 (Epic A: production stability — Procfile recycle, _refresh_locks LRU, 7 explicit rate limits, stock-page parallel fetch, Panda Fund cache. Post-8-sprint architecture audit + perf audit.)  See §10 "Post-8-sprint Performance Audit" for epic progress.
+> Last updated: 2026-04-17 (Epic C: 10 more modules migrated to TTLCache — fundamentals, earnings_calendar, openfigi, earnings_scorecard, cboe_data, fred_data, market_breadth, unusual_options, wsb_sentiment, treasury_data. Epic B skipped (audit findings stale). Epic A shipped: Procfile recycle, _refresh_locks LRU, 7 rate limits, stock-page parallel fetch, Panda Fund cache.)
 
 ---
 
@@ -2160,15 +2160,19 @@ Four parallel audits covering API performance, data storage, memory/OOM risk, an
 - [x] Parallelized `build_stock_detail` + `build_stock_history` via `asyncio.gather` in both `/stock/{ticker}` and `/stock/cusip/{cusip}` handlers (~500 ms saved per stock page). Trade-off: 2 heavy-pool slots instead of 1, absorbed by `_heavy_sem=10`.
 - [x] Panda Fund stats cache (`_panda_fund_cache`): 5-min in-memory TTL, keyed by current YYYY-MM so it auto-invalidates at month rollover. Eliminates per-request Supabase `supporters` query on the homepage.
 
-**Epic B — Frontend page-load (HIGH user-facing impact)**
-- [ ] Add `defer` to Clerk SDK script in base.html (~150-300 ms FCP improvement; script currently render-blocking).
-- [ ] CSSMinifyMiddleware: skip minification if `Content-Encoding` is already set (prevents redundant decompress → mutate → recompress; ~50-100 ms CPU per response).
-- [ ] Stock page tabs: lazy-load inactive tabs via HTMX `hx-trigger="revealed"` instead of rendering all 6 inline (~100-150 KB per page; ~200-300 ms FCP).
+**Epic B — Frontend page-load (SKIPPED 2026-04-17)**
 
-**Epic C — Memory / unbounded caches**
-- [ ] Migrate 10 modules to `TTLCache` (with explicit `max_size`): `fundamentals._mem_cache`, `earnings_calendar._cal_cache`, `openfigi._cusip_cache`, `earnings_scorecard._cache`, `cboe_data._cache`, `fred_data._cache`, `market_breadth._cache`, `unusual_options._feed_cache`, `wsb_sentiment._cache`, `treasury_data._cache`. ~500 MB at-risk across all modules under heavy use.
-- [ ] Cap `_l2_caches` in web.py with LRU (~50 categories max) to prevent dynamic-category growth.
-- [ ] Consolidate `_analyst_pool` (2) + `_sentiment_executor` (3) + `_vitals_pool` (2) + `_health_pool` (1) into the shared `_heavy_pool` (saves ~8-16 MB thread overhead).
+On investigation, each of the 3 originally-proposed fixes was stale or moot:
+- Clerk SDK already had `async` attribute (not render-blocking).  `async` vs `defer` is a micro-trade-off; no user-visible win from switching.
+- `CSSMinifyMiddleware` does NOT decompress Brotli responses.  The agent misread Starlette's LIFO middleware ordering.  In actual response flow, CSSMinify runs FIRST (innermost, raw HTML) then Brotli compresses.  No change needed.
+- Stock page tab lazy-load: 4 of 6 tabs (`financials`, `forecasts`, `signals`, `vitals`) already lazy-load via HTMX skeleton rows.  Only `tab-overview` (correctly inline; it IS the first-paint content) and the `own-panel-funds` sub-panel render server-side.  The sub-panel could be moved to a lazy-loaded partial (~5-10 KB gzipped savings) but the complexity (new endpoint + partial + JS) doesn't beat the move-on-to-real-wins alternative.
+
+Epic B decision was "skip — findings stale; move to Epic C".
+
+**Epic C — Memory / unbounded caches (SHIPPED 2026-04-17)**
+- [x] Migrated 10 modules to `TTLCache`: `fundamentals._mem_cache` (ttl=3600, max=200), `earnings_calendar._cal_cache` (ttl=3600, max=50), `openfigi._cusip_cache` (ttl=604800, max=500), `earnings_scorecard._cache` (ttl=3600, max=100), `cboe_data._CACHES` (multi-TTL dict-of-TTLCache, kept per-kind TTL via 4 instances), `fred_data._cache` (ttl=14400, max=100), `market_breadth._cache` (ttl=1800, max=100), `unusual_options._feed_cache` (ttl=300, max=100), `wsb_sentiment._cache` (ttl=3600, max=50), `treasury_data._cache` (ttl=21600, max=50).  Net -47 lines.  Every cache now bounded.
+- [~] `_l2_caches` in web.py: investigated — already bounded by static decorator args (25 `@_with_l2_fallback` usages, each creates at most one entry keyed by `(category, l1_ttl)`).  No change needed; audit agent's "dynamic category" concern didn't match the code.
+- [~] Thread pool consolidation: investigated — the 4 small pools (`_analyst_pool`, `_sentiment_executor`, `_vitals_pool`, `_health_pool`) provide domain-isolation so a slow Finnhub call can't starve vitals/analyst calls.  The 8-16 MB thread overhead is negligible on a 512 MB Railway plan; the isolation is worth keeping.  Skipped.
 
 **Epic D — Data layer**
 - [ ] Fix N+1 in `upsert_youtube_channels` — batch upsert in one call (10-50× faster for channel-metadata syncs).

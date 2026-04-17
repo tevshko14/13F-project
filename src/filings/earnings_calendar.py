@@ -19,21 +19,18 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-logger = logging.getLogger(__name__)
+from filings.caching import TTLCache
 
-# ── Configuration ────────────────────────────────────────────────
-_TTL = 3600  # 1 hour
+logger = logging.getLogger(__name__)
 
 # ── Feature flag ─────────────────────────────────────────────────
 FEATURE_ENABLED = os.environ.get("EARNINGS_CALENDAR_ENABLED", "1") == "1"
 
 # ── In-memory cache ──────────────────────────────────────────────
-_cal_cache: dict[str, tuple[float, list[dict]]] = {}
-_MAX_CACHE = 50
+_cal_cache = TTLCache(ttl=3600, max_size=50)   # 1 h TTL
 
 
 # ── Public API ───────────────────────────────────────────────────
@@ -71,8 +68,8 @@ def get_earnings_calendar(
 
     cache_key = f"{start_date}:{end_date}"
     cached = _cal_cache.get(cache_key)
-    if cached and (time.time() - cached[0]) < _TTL:
-        return _build_response(cached[1], start_date, end_date, "cached")
+    if cached is not None:
+        return _build_response(cached, start_date, end_date, "cached")
 
     # Try Finnhub first, then FMP
     entries = _fetch_finnhub_calendar(start_date, end_date)
@@ -90,10 +87,7 @@ def get_earnings_calendar(
     entries = _enrich_entries(entries)
 
     # Cache
-    if len(_cal_cache) >= _MAX_CACHE:
-        oldest = min(_cal_cache, key=lambda k: _cal_cache[k][0])
-        _cal_cache.pop(oldest, None)
-    _cal_cache[cache_key] = (time.time(), entries)
+    _cal_cache.set(cache_key, entries)
 
     return _build_response(entries, start_date, end_date, source)
 

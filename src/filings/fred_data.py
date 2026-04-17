@@ -11,16 +11,15 @@ Key series tracked:
 import json
 import logging
 import os
-import threading
-import time
 import urllib.request
+
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 
 _FRED_BASE = "https://api.stlouisfed.org/fred/series/observations"
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, list]] = {}
-_TTL = 3600 * 4  # 4 hours
+_TTL = 3600 * 4  # 4 hours — kept for backward-compat default in _cached_or_fetch signature
+_cache = TTLCache(ttl=_TTL, max_size=100)
 
 # Key economic series for the macro dashboard
 SERIES_META = {
@@ -41,18 +40,20 @@ def _get_api_key() -> str:
 
 
 def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
-    """Generic L1 → L2 → fetcher pattern."""
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < ttl:
-            return cached[1]
+    """Generic L1 → L2 → fetcher pattern.
+
+    *ttl* is retained for signature compatibility but no longer varies per
+    call — the in-memory TTL is fixed at ``_TTL`` on the shared TTLCache.
+    """
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         from filings import supabase_cache
         l2 = supabase_cache.get_cached(cache_key)
         if l2:
-            with _lock:
-                _cache[cache_key] = (time.time(), l2)
+            _cache.set(cache_key, l2)
             return l2
     except Exception:
         pass
@@ -65,8 +66,7 @@ def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
                 supabase_cache.set_cached(cache_key, "fred", result, 3600 * 12)
             except Exception:
                 pass
-            with _lock:
-                _cache[cache_key] = (time.time(), result)
+            _cache.set(cache_key, result)
         return result
     except Exception as exc:
         logger.warning("FRED fetch failed for %s: %s", cache_key, exc)

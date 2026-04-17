@@ -22,6 +22,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 
 from filings import supabase_cache
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,8 @@ _CLUSTER_TTL = 300          # 5 min L1 cache for cluster data
 
 # ── In-memory L1 cache ──────────────────────────────────────────────────────
 
-_lock = threading.Lock()
-_feed_cache: dict[str, tuple[float, list[dict]]] = {}
+_lock = threading.Lock()                              # guards single-entry caches below
+_feed_cache = TTLCache(ttl=_FEED_TTL, max_size=100)
 _heatmap_cache: tuple[float, list[dict]] | None = None
 _cluster_cache: tuple[float, list[dict]] | None = None
 
@@ -270,12 +271,9 @@ def get_unusual_options_feed(
     cache_key = f"{sentiment}:{sort_by}:{ticker}:{limit}"
 
     # L1: in-memory
-    with _lock:
-        cached = _feed_cache.get(cache_key)
-        if cached is not None:
-            ts, data = cached
-            if time.time() - ts < _FEED_TTL:
-                return data
+    cached = _feed_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     # L2: Supabase
     data = supabase_cache.get_unusual_options_feed(
@@ -305,8 +303,7 @@ def get_unusual_options_feed(
         d = row.get("delta")
         row["delta_fmt"] = f"{float(d):.2f}" if d is not None else "—"
 
-    with _lock:
-        _feed_cache[cache_key] = (time.time(), data)
+    _feed_cache.set(cache_key, data)
 
     return data
 
@@ -521,8 +518,8 @@ def detect_clusters(feed: list[dict]) -> list[dict]:
 def invalidate_cache() -> None:
     """Clear all L1 caches — call after a sync cycle completes."""
     global _heatmap_cache, _cluster_cache
+    _feed_cache.clear()
     with _lock:
-        _feed_cache.clear()
         _heatmap_cache = None
         _cluster_cache = None
 

@@ -10,17 +10,17 @@ from __future__ import annotations
 import logging
 import random
 import threading
-import time
 
 import pandas as pd
+
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 
 # ── Cache ────────────────────────────────────────────────────────
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, object]] = {}
+_cache = TTLCache(ttl=1800, max_size=100)             # 30 min L1 in-memory
+_lock = threading.Lock()                              # guards _key_locks only
 _key_locks: dict[str, threading.Lock] = {}
-_TTL = 1800      # 30 minutes (L1 in-memory)
 _L2_TTL = 21600  # 6 hours (Supabase — survives redeploys)
 from filings.market_data import _YF_TIMEOUT
 
@@ -244,21 +244,21 @@ def _get_raw_data(
     cache_key = f"raw:{index}:{period}"
 
     # Fast path: check cache
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Get or create per-key lock to serialize downloads for the same key
     with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < _TTL:
-            return cached[1]
-        # Get or create per-key lock to serialize downloads for the same key
         if cache_key not in _key_locks:
             _key_locks[cache_key] = threading.Lock()
         key_lock = _key_locks[cache_key]
 
     with key_lock:
         # Re-check cache — another thread may have populated it while we waited
-        with _lock:
-            cached = _cache.get(cache_key)
-            if cached and time.time() - cached[0] < _TTL:
-                return cached[1]
+        cached = _cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         # ── L2: Try Supabase (fast, survives redeploys) ──
         try:
@@ -282,8 +282,7 @@ def _get_raw_data(
                     "Warm-loaded breadth %s from Supabase (%d rows, %s)",
                     cache_key, len(close_df), "fresh" if is_fresh else "stale",
                 )
-                with _lock:
-                    _cache[cache_key] = (time.time(), result)
+                _cache.set(cache_key, result)
                 return result
         except Exception as e:
             logger.debug("Supabase breadth warm-load failed: %s", e)
@@ -291,8 +290,7 @@ def _get_raw_data(
         constituents = _get_constituents(index)
         if not constituents:
             result = (None, None, [], None)
-            with _lock:
-                _cache[cache_key] = (time.time(), result)
+            _cache.set(cache_key, result)
             return result
 
         tickers = [c["ticker"] for c in constituents]
@@ -307,8 +305,7 @@ def _get_raw_data(
 
         result = (close_df, vol_df, constituents, idx_prices)
 
-        with _lock:
-            _cache[cache_key] = (time.time(), result)
+        _cache.set(cache_key, result)
 
         # ── Write back to Supabase L2 ──
         try:
@@ -656,10 +653,9 @@ def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
     """Fetch breadth metrics + treemap data (L1 30 min, L2 6 hours)."""
     cache_key = f"breadth:{index}:{period}"
 
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < _TTL:
-            return cached[1]
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     # L2: check Supabase for processed results
     sb_key = f"result:{cache_key}"
@@ -667,8 +663,7 @@ def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
         from filings import supabase_cache
         l2 = supabase_cache.get_cached(sb_key)
         if l2 and isinstance(l2, dict) and l2.get("metrics"):
-            with _lock:
-                _cache[cache_key] = (time.time(), l2)
+            _cache.set(cache_key, l2)
             logger.info("Breadth result warm-loaded from L2: %s", cache_key)
             return l2
     except Exception:
@@ -678,8 +673,7 @@ def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
 
     if close_df is None or len(close_df) < 2 or not constituents:
         data = _build_mock_data(index, period)
-        with _lock:
-            _cache[cache_key] = (time.time(), data)
+        _cache.set(cache_key, data)
         return data
 
     # Compute % changes once — shared by all downstream functions
@@ -701,8 +695,7 @@ def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
         "top_movers": _compute_top_movers(pct_changes, constituents),
     }
 
-    with _lock:
-        _cache[cache_key] = (time.time(), data)
+    _cache.set(cache_key, data)
 
     # Write processed result to L2
     try:
@@ -718,10 +711,9 @@ def fetch_ad_line_history(index: str = "sp500") -> dict:
     """Fetch cumulative A/D line data (L1 30 min, L2 6 hours)."""
     cache_key = f"ad_line:{index}"
 
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < _TTL:
-            return cached[1]
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     # L2: check Supabase for processed results
     sb_key = f"result:{cache_key}"
@@ -729,8 +721,7 @@ def fetch_ad_line_history(index: str = "sp500") -> dict:
         from filings import supabase_cache
         l2 = supabase_cache.get_cached(sb_key)
         if l2 and isinstance(l2, dict) and l2.get("dates"):
-            with _lock:
-                _cache[cache_key] = (time.time(), l2)
+            _cache.set(cache_key, l2)
             logger.info("A/D line warm-loaded from L2: %s", cache_key)
             return l2
     except Exception:
@@ -740,14 +731,12 @@ def fetch_ad_line_history(index: str = "sp500") -> dict:
 
     if close_df is None or len(close_df) < 3 or not constituents:
         data = _build_mock_ad_line(index)
-        with _lock:
-            _cache[cache_key] = (time.time(), data)
+        _cache.set(cache_key, data)
         return data
 
     data = _compute_ad_line(close_df, index, idx_prices)
 
-    with _lock:
-        _cache[cache_key] = (time.time(), data)
+    _cache.set(cache_key, data)
 
     # Write processed result to L2
     try:

@@ -10,31 +10,32 @@ Provides:
 
 import json
 import logging
-import threading
-import time
 import urllib.request
+
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 
 _APE_URL = "https://apewisdom.io/api/v1.0/filter/all-stocks/page/1"
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, any]] = {}
-_TTL = 3600  # 1 hour — sentiment changes fast
+_TTL = 3600  # 1 hour — sentiment changes fast; kept for signature compat
+_cache = TTLCache(ttl=_TTL, max_size=50)
 
 
 def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
-    """Generic L1 → L2 → fetcher pattern."""
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < ttl:
-            return cached[1]
+    """Generic L1 → L2 → fetcher pattern.
+
+    *ttl* retained for signature compatibility — the shared TTLCache is
+    pinned at ``_TTL`` and no caller overrides it.
+    """
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         from filings import supabase_cache
         l2 = supabase_cache.get_cached(cache_key)
         if l2:
-            with _lock:
-                _cache[cache_key] = (time.time(), l2)
+            _cache.set(cache_key, l2)
             return l2
     except Exception:
         pass
@@ -47,8 +48,7 @@ def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
                 supabase_cache.set_cached(cache_key, "wsb", result, 3600 * 2)
             except Exception:
                 pass
-            with _lock:
-                _cache[cache_key] = (time.time(), result)
+            _cache.set(cache_key, result)
         return result
     except Exception as exc:
         logger.warning("WSB fetch failed for %s: %s", cache_key, exc)

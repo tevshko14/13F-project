@@ -16,23 +16,19 @@ from __future__ import annotations
 import csv
 import io
 import logging
-import threading
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
+from filings.caching import TTLCache
+
 logger = logging.getLogger(__name__)
 
-# ── In-memory L1 cache (single keyed dict) ──────────────────────────────────
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, any]] = {}
-
-# L1 TTLs (seconds)
-_TTLS = {
-    "putcall": 3600,    # 1 hour
-    "vix_term": 1800,   # 30 min
-    "skew": 3600,       # 1 hour
-    "ivrank": 1800,     # 30 min
+# ── In-memory L1 cache — one TTLCache per "kind" so each keeps its own TTL ──
+_CACHES: dict[str, TTLCache] = {
+    "putcall":  TTLCache(ttl=3600, max_size=20),   # 1 hour
+    "vix_term": TTLCache(ttl=1800, max_size=20),   # 30 min
+    "skew":     TTLCache(ttl=3600, max_size=20),   # 1 hour
+    "ivrank":   TTLCache(ttl=1800, max_size=20),   # 30 min
 }
 
 # L2 Supabase cache TTLs (seconds)
@@ -56,22 +52,20 @@ from filings.market_data import _yf_session  # noqa: E402  # reuse single sessio
 
 def _cached_or_fetch(cache_key: str, fetcher, kind: str = "putcall"):
     """Generic L1 → L2 → fetcher pattern for all CBOE data."""
-    l1_ttl = _TTLS.get(kind, 3600)
+    cache = _CACHES.get(kind) or _CACHES["putcall"]
     l2_ttl = _L2_TTLS.get(kind, 86400)
 
     # L1
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < l1_ttl:
-            return cached[1]
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     # L2
     try:
         from filings import supabase_cache
         l2 = supabase_cache.get_cached(cache_key)
         if l2:
-            with _lock:
-                _cache[cache_key] = (time.time(), l2)
+            cache.set(cache_key, l2)
             return l2
     except Exception:
         pass
@@ -85,8 +79,7 @@ def _cached_or_fetch(cache_key: str, fetcher, kind: str = "putcall"):
                 supabase_cache.set_cached(cache_key, "cboe", result, l2_ttl)
             except Exception:
                 pass
-            with _lock:
-                _cache[cache_key] = (time.time(), result)
+            cache.set(cache_key, result)
         return result
     except Exception as exc:
         logger.warning("CBOE fetch failed for %s: %s", cache_key, exc)

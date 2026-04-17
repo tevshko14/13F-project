@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 
 from filings import supabase_cache
+from filings.caching import TTLCache, MISS
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +38,9 @@ _MIN_REQUEST_GAP = 0.5          # seconds between requests
 _XBRL_BASE = "https://data.sec.gov/api/xbrl/companyfacts"
 
 # ── Cache config ─────────────────────────────────────────────────────
-_L1_TTL = 3_600                  # 1 hour in-memory
 _L2_TTL = 24 * 3_600             # 24 hours in Supabase
-_MAX_CACHE = 200
-_lock = threading.Lock()
-_mem_cache: dict[str, tuple[float, dict]] = {}   # ticker → (ts, result)
+_mem_cache = TTLCache(ttl=3_600, max_size=200)   # 1h in-memory, ticker → usgaap (or None for cached 404)
+_lock = threading.Lock()                         # guards _cik_cache
 _cik_cache: dict[str, str | None] = {}           # ticker → CIK
 
 # Number of historical periods to keep per statement
@@ -257,11 +256,9 @@ def _fetch_xbrl_facts(ticker: str) -> dict | None:
     key = ticker.upper()
 
     # ── L1: in-memory ────────────────────────────────────────────────
-    with _lock:
-        if key in _mem_cache:
-            ts, data = _mem_cache[key]
-            if time.time() - ts < _L1_TTL:
-                return data
+    l1_hit = _mem_cache.get(key, default=MISS)
+    if l1_hit is not MISS:
+        return l1_hit  # may be None (cached 404)
 
     # ── L2: Supabase ─────────────────────────────────────────────────
     cache_key = f"fundamentals:{key}"
@@ -270,11 +267,9 @@ def _fetch_xbrl_facts(ticker: str) -> dict | None:
         usgaap = cached["usgaap"]
         if cached.get("no_data"):
             # Cached 404
-            with _lock:
-                _mem_cache[key] = (time.time(), None)  # type: ignore[arg-type]
+            _mem_cache.set(key, None)
             return None
-        with _lock:
-            _mem_cache[key] = (time.time(), usgaap)
+        _mem_cache.set(key, usgaap)
         if is_fresh:
             return usgaap
         # Stale — fall through to refresh, but we have a fallback
@@ -299,8 +294,7 @@ def _fetch_xbrl_facts(ticker: str) -> dict | None:
                       "fetched_at": datetime.now(timezone.utc).isoformat()},
                 ttl_seconds=_L2_TTL,
             )
-            with _lock:
-                _mem_cache[key] = (time.time(), None)  # type: ignore[arg-type]
+            _mem_cache.set(key, None)
             return None
         resp.raise_for_status()
     except Exception as exc:
@@ -308,8 +302,7 @@ def _fetch_xbrl_facts(ticker: str) -> dict | None:
         # Return stale data if available
         if isinstance(cached, dict) and cached.get("usgaap"):
             usgaap = cached["usgaap"]
-            with _lock:
-                _mem_cache[key] = (time.time(), usgaap)
+            _mem_cache.set(key, usgaap)
             return usgaap
         return None
 
@@ -330,11 +323,7 @@ def _fetch_xbrl_facts(ticker: str) -> dict | None:
     except Exception as exc:
         logger.debug("Failed to cache fundamentals for %s: %s", key, exc)
 
-    with _lock:
-        _mem_cache[key] = (time.time(), usgaap)
-        if len(_mem_cache) > _MAX_CACHE:
-            oldest = min(_mem_cache, key=lambda k: _mem_cache[k][0])
-            _mem_cache.pop(oldest, None)
+    _mem_cache.set(key, usgaap)
 
     return usgaap
 
