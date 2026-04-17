@@ -157,17 +157,37 @@ _ENABLE_BACKGROUND_REFRESH = (
 )
 # Per-CIK locks so the background sweep and request-triggered refreshes
 # can run concurrently for *different* funds without blocking each other.
+# Bounded: the 85 SUPERINVESTOR CIKs plus any ad-hoc /holdings/{cik} lookups
+# a user tries.  Without a cap, arbitrary CIK URLs would leak one Lock per
+# unique CIK until the next background sweep (which only clears CIKs not in
+# the active fund list).  Insertion-order eviction caps the footprint at
+# ~200 × ~300 bytes/Lock = ~60 KB.  Python 3.7+ dicts preserve insertion
+# order so `next(iter(...))` is the oldest key; no OrderedDict needed.
+_REFRESH_LOCKS_MAX = 200
 _refresh_locks: dict[str, asyncio.Lock] = {}
 _refresh_locks_mu = asyncio.Lock()          # guards the dict itself
 _refresh_in_progress: set[str] = set()
 
 
 async def _get_refresh_lock(cik: str) -> asyncio.Lock:
-    """Return (creating if needed) the per-CIK refresh lock."""
+    """Return (creating if needed) the per-CIK refresh lock.
+
+    Insertion-order eviction once the dict reaches ``_REFRESH_LOCKS_MAX``
+    so arbitrary ``/holdings/{cik}`` traffic can't leak Lock objects.  A
+    concurrent refresh for an evicted CIK just creates a new Lock on its
+    next request — worst case is two refreshes racing for the same fund,
+    which is the same semantics as before the lock existed.
+    """
     async with _refresh_locks_mu:
-        if cik not in _refresh_locks:
-            _refresh_locks[cik] = asyncio.Lock()
-        return _refresh_locks[cik]
+        lock = _refresh_locks.get(cik)
+        if lock is None:
+            lock = asyncio.Lock()
+            _refresh_locks[cik] = lock
+            while len(_refresh_locks) > _REFRESH_LOCKS_MAX:
+                # Evict oldest by insertion order
+                oldest_key = next(iter(_refresh_locks))
+                _refresh_locks.pop(oldest_key, None)
+        return lock
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2478,13 +2498,32 @@ async def admin_backfill_revenue(request: Request, index: str = "sp500"):
 # --- Homepage: dashboard with market data & widgets ---
 
 
+# Panda Fund stats cache — homepage is the site's highest-traffic endpoint.
+# Without this, every homepage hit re-queries Supabase `supporters` for the
+# running monthly total.  Donation data changes at human pace (minutes
+# between donations), so a 5-min TTL trades at most a few seconds of
+# staleness on the progress bar for N× fewer Supabase reads.
+# Keyed by (month) so the cache auto-invalidates at month boundaries —
+# otherwise we'd serve last month's total for up to 5 min into the new month.
+_panda_fund_cache: tuple[float, str, dict] | None = None  # (ts, YYYY-MM, data)
+_PANDA_FUND_TTL = 300  # 5 minutes
+
+
 async def _get_panda_fund_stats() -> dict:
     """Return Panda Fund donation stats for the current month.
 
     Shared by the homepage and /support page to avoid duplicate logic.
+    Cached in-memory for 5 minutes, keyed by current YYYY-MM.
     """
-    monthly_goal = _PANDA_FUND_MONTHLY_GOAL
+    global _panda_fund_cache
+    now = time_module.time()
     current_month = datetime.now().strftime("%Y-%m")
+    if _panda_fund_cache is not None:
+        ts, cached_month, data = _panda_fund_cache
+        if cached_month == current_month and now - ts < _PANDA_FUND_TTL:
+            return data
+
+    monthly_goal = _PANDA_FUND_MONTHLY_GOAL
     raised_cents = await asyncio.to_thread(
         supabase_cache.get_monthly_raised_cents, current_month
     )
@@ -2494,7 +2533,10 @@ async def _get_panda_fund_stats() -> dict:
         raw_raised = int(os.environ.get("PANDA_FUND_RAISED", "0"))
     raised = min(raw_raised, monthly_goal)
     pct = min(100, round(raised / monthly_goal * 100)) if monthly_goal else 0
-    return {"raised": raised, "goal": monthly_goal, "pct": pct}
+
+    result = {"raised": raised, "goal": monthly_goal, "pct": pct}
+    _panda_fund_cache = (now, current_month, result)
+    return result
 
 
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
@@ -2941,19 +2983,27 @@ async def stock_detail_by_cusip(request: Request, cusip: str):
         return PlainTextResponse("Invalid CUSIP", status_code=400)
     cache_data = _fund_cache()
 
-    # Try to build superinvestor ownership data (may be None)
+    # Try to build superinvestor ownership data (may be None).
+    # Parallel: build_stock_history only produces non-empty output when the
+    # CUSIP is held by a superinvestor, same condition as build_stock_detail
+    # returning a non-None value.  Running both concurrently on the heavy
+    # pool halves user latency (~500ms -> ~250ms) at the cost of one extra
+    # thread slot, which _heavy_sem=10 absorbs.
     detail = None
     history = []
     if cache_data:
-        detail = await _to_heavy(
-            client.build_stock_detail,
-            cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True,
-        )
-        if detail:
-            history = await _to_heavy(
+        detail, history = await asyncio.gather(
+            _to_heavy(
+                client.build_stock_detail,
+                cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True,
+            ),
+            _to_heavy(
                 client.build_stock_history,
                 cusip, cache_data, SUPERINVESTORS_BY_CIK, by_cusip=True,
-            )
+            ),
+        )
+        if not detail:
+            history = []  # discard if stock isn't held by any superinvestor
 
     # Build stock identity from detail or minimal CUSIP info
     if detail:
@@ -2982,17 +3032,21 @@ async def stock_detail(request: Request, ticker: str):
         return PlainTextResponse("Invalid ticker", status_code=400)
     cache_data = _fund_cache()
 
-    # Try to build superinvestor ownership data (may be None)
+    # Try to build superinvestor ownership data (may be None).
+    # Parallel for the same reason as stock_detail_by_cusip — see comment there.
     detail = None
     history = []
     if cache_data:
-        detail = await _to_heavy(
-            client.build_stock_detail, ticker, cache_data, SUPERINVESTORS_BY_CIK
-        )
-        if detail:
-            history = await _to_heavy(
+        detail, history = await asyncio.gather(
+            _to_heavy(
+                client.build_stock_detail, ticker, cache_data, SUPERINVESTORS_BY_CIK
+            ),
+            _to_heavy(
                 client.build_stock_history, ticker, cache_data, SUPERINVESTORS_BY_CIK
-            )
+            ),
+        )
+        if not detail:
+            history = []
 
     # Resolve basic stock identity (works for any ticker)
     # Always call resolve_stock_info to get logo_domain; uses cache first (instant)
@@ -6671,6 +6725,14 @@ if _has_limiter:
     congress_trending_api = limiter.limit("60/minute")(congress_trending_api)
     trending_combined_api = limiter.limit("30/minute")(trending_combined_api)
     insider_insights_api = limiter.limit("60/minute")(insider_insights_api)
+    # Per-ticker endpoints not previously covered (audit epic A)
+    api_financials = limiter.limit("60/minute")(api_financials)
+    api_financials_history = limiter.limit("30/minute")(api_financials_history)
+    earnings_data = limiter.limit("60/minute")(earnings_data)
+    forward_estimates = limiter.limit("60/minute")(forward_estimates)
+    web_traffic_data = limiter.limit("60/minute")(web_traffic_data)
+    signals_data = limiter.limit("60/minute")(signals_data)
+    heatmap_data_api = limiter.limit("60/minute")(heatmap_data_api)
     # Homepage widget endpoints — L2 cached, cheap to serve, loaded together
     ticker_search_index = limiter.limit("30/minute")(ticker_search_index)
     alt_signals_short_interest = limiter.limit("30/minute")(alt_signals_short_interest)

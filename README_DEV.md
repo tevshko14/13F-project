@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-17 (post-8-sprint architecture audit: docs + performance audit).  See §10 "8-Sprint Architecture Audit (Apr 2026)" and the "Audit sprint — deferred follow-ups" subsection for what was shipped vs what still pending.
+> Last updated: 2026-04-17 (Epic A: production stability — Procfile recycle, _refresh_locks LRU, 7 explicit rate limits, stock-page parallel fetch, Panda Fund cache. Post-8-sprint architecture audit + perf audit.)  See §10 "Post-8-sprint Performance Audit" for epic progress.
 
 ---
 
@@ -2153,12 +2153,12 @@ These were scoped out of the 8 sprints for risk/time reasons.  Each is a standal
 
 Four parallel audits covering API performance, data storage, memory/OOM risk, and frontend page-load. Findings grouped into 5 epics ranked by impact-to-effort. Each epic ships as a standalone audit-sprint (code → /simplify → /ship → verify).
 
-**Epic A — Production stability (HIGHEST IMPACT, safest to ship first)**
-- [ ] Add `--limit-max-requests 1000` to Procfile (prevents unbounded memory growth; standard practice; one-line change).
-- [ ] LRU eviction on `_refresh_locks` in web.py (unbounded per-CIK `asyncio.Lock` dict — ~100 KB–2 MB leak over weeks at 200 DAU).
-- [ ] Apply explicit `limiter.limit()` to 6 per-ticker endpoints that currently rely on the default 60/min: `/api/financials/{ticker}`, `/api/earnings/{ticker}`, `/api/estimates/{ticker}`, `/api/web-traffic/{ticker}`, `/api/signals/{ticker}`, `/api/heatmap-data`.
-- [ ] Parallelize `build_stock_detail` + `build_stock_history` in stock_detail handler with `asyncio.gather` (~500 ms saved per stock page; sequential today at web.py:2989-2995).
-- [ ] Wrap homepage `_get_panda_fund_stats()` + homepage render in stampede-protection lock (currently unprotected; 10 concurrent requests on cache-TTL expiry trigger 10 background fetches).
+**Epic A — Production stability (SHIPPED 2026-04-17)**
+- [x] Added `--limit-max-requests 1000` to Procfile (safety net; railway.toml primary deploy already had gunicorn `--max-requests 1000 --max-requests-jitter 50`).
+- [x] LRU eviction on `_refresh_locks` in web.py (bounded at 200; insertion-order eviction; prevents per-CIK Lock leaks from arbitrary `/holdings/{cik}` traffic).
+- [x] Explicit `limiter.limit(...)` applied to 7 per-ticker endpoints: `/api/financials/{ticker}`, `/api/financials/{ticker}/history`, `/api/earnings/{ticker}`, `/api/estimates/{ticker}`, `/api/web-traffic/{ticker}`, `/api/signals/{ticker}`, `/api/heatmap-data`.
+- [x] Parallelized `build_stock_detail` + `build_stock_history` via `asyncio.gather` in both `/stock/{ticker}` and `/stock/cusip/{cusip}` handlers (~500 ms saved per stock page). Trade-off: 2 heavy-pool slots instead of 1, absorbed by `_heavy_sem=10`.
+- [x] Panda Fund stats cache (`_panda_fund_cache`): 5-min in-memory TTL, keyed by current YYYY-MM so it auto-invalidates at month rollover. Eliminates per-request Supabase `supporters` query on the homepage.
 
 **Epic B — Frontend page-load (HIGH user-facing impact)**
 - [ ] Add `defer` to Clerk SDK script in base.html (~150-300 ms FCP improvement; script currently render-blocking).
