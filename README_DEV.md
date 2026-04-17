@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-16 (Sprint 5: started supabase_cache.py split — extracted 7 YouTube helpers to filings.youtube_cache; Sprint 4: extracted 11 routes into filings/routers/ + filings/app_state.py; Sprint 3: checked in 26 SQL migration files; Sprint 2: removed 6 orphaned templates; Sprint 1: shared TTLCache + worker log setup)
+> Last updated: 2026-04-16 (Sprint 6: extracted auth_admin router — 7 more routes out of web.py; Sprint 5: extracted 7 YouTube helpers to filings.youtube_cache; Sprint 4: extracted 11 routes into filings/routers/ + filings/app_state.py; Sprint 3: checked in 26 SQL migration files; Sprint 2: removed 6 orphaned templates; Sprint 1: shared TTLCache + worker log setup)
 
 ---
 
@@ -225,7 +225,8 @@ Subsequent deploys: instant startup from Supabase, zero SEC API calls needed.
     ├── routers/
     │   ├── __init__.py               # Routers package (docstring)
     │   ├── watchlist.py              # /watchlist page + 6 `/api/watchlist/*` endpoints (Clerk-authenticated per-user watchlist + notification prefs)
-    │   └── static_pages.py           # /privacy, /faq, /robots.txt, /llms.txt (zero-logic static handlers)
+    │   ├── static_pages.py           # /privacy, /faq, /robots.txt, /llms.txt (zero-logic static handlers)
+    │   └── auth_admin.py             # Auth pages (/login, /signup, /profile, /logout), Clerk webhook (/api/webhooks/clerk, HMAC-verified), and admin panel (/admin, /admin/user/{user_id}). Keeps the _check_admin 5-min cache local.
     ├── cache.py                      # 3-tier cache: L1 in-memory → L2 Supabase → L3 disk (filing data only)
     ├── supabase_cache.py             # Supabase L2 persistent cache (api_cache, insider_trades, notifications, user_watchlist, user_notification_preferences, watchlist_digest_log, admin_users tables). NOTE: undergoing domain split (audit-sprint-5) — youtube helpers already moved to `youtube_cache.py`; insider/congress/assets/signals/admin domains to follow in sprint 6.
     ├── watchlist.py                  # Watchlist persistence (JSON, ~/.13f-cache/watchlist.json)
