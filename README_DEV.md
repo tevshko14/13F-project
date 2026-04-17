@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-16 (Sprint 7: added window.ppInitChart() factory helper in base.html; Sprint 6: extracted auth_admin router; Sprint 5: extracted 7 YouTube helpers; Sprint 4: extracted 11 routes + app_state.py; Sprint 3: checked in 26 SQL migration files; Sprint 2: removed 6 orphaned templates; Sprint 1: shared TTLCache + worker log setup)
+> Last updated: 2026-04-16 (Sprint 8 — FINAL: fmt_num Jinja filter + a11y ARIA/sr-only on command palette modal; Sprint 7: ppInitChart() factory; Sprint 6: auth_admin router; Sprint 5: YouTube helpers extracted; Sprint 4: 11 routes + app_state.py; Sprint 3: 26 SQL migration files; Sprint 2: removed 6 orphaned templates; Sprint 1: shared TTLCache + worker log setup)
 
 ---
 

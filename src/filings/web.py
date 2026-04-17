@@ -879,10 +879,27 @@ def _format_value(value, prefix: str = "$", precision: int = 1) -> str:
     return f"{prefix}{v:,.0f}"
 
 
+def _fmt_num(value, precision: int = 0) -> str:
+    """Format a number with thousands separators — ``{{ x|fmt_num }}``.
+
+    Replaces the ~96 inline ``{{ "{:,.0f}".format(value) }}`` sites in
+    templates with a shorter, consistent syntax.  Falls back to ``str()``
+    on non-numeric input so Jinja doesn't raise during render.
+
+    Examples: ``1234567|fmt_num`` → ``"1,234,567"``;
+              ``3.14159|fmt_num(2)`` → ``"3.14"``.
+    """
+    try:
+        return f"{float(value):,.{precision}f}"
+    except (TypeError, ValueError):
+        return str(value) if value is not None else ""
+
+
 templates.env.filters["format_short_date"] = _format_short_date
 templates.env.filters["format_pretty_date"] = _format_pretty_date
 templates.env.filters["abbreviate_sector"] = _abbreviate_sector
 templates.env.filters["format_value"] = _format_value
+templates.env.filters["fmt_num"] = _fmt_num
 
 
 def _top_tickers(cached: dict, n: int = 5) -> list[str]:

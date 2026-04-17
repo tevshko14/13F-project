@@ -1102,6 +1102,19 @@
         .pp-search-palette-open .pp-search-trigger { visibility: hidden; }
         .pp-search-palette-open .pp-mobile-search-btn { visibility: hidden; }
 
+        /* ── A11y utility: visually-hidden label for screen readers ── */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
         /* ── Command palette modal ── */
         .pp-cmd-backdrop {
             position: fixed;
@@ -3180,20 +3193,27 @@
     </script>
 
     {# ── ⌘K Command Palette Modal ── #}
-    <div id="pp-cmd-backdrop" class="pp-cmd-backdrop" style="display:none;" onclick="ppCloseSearchPalette()"></div>
-    <div id="pp-cmd-modal" class="pp-cmd-modal" style="display:none;">
+    <div id="pp-cmd-backdrop" class="pp-cmd-backdrop" style="display:none;"
+         onclick="ppCloseSearchPalette()" aria-hidden="true"></div>
+    <div id="pp-cmd-modal" class="pp-cmd-modal" style="display:none;"
+         role="dialog" aria-modal="true" aria-labelledby="pp-cmd-input-label">
         <div class="pp-cmd-input-wrap">
-            <svg class="pp-cmd-input-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <svg class="pp-cmd-input-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <label id="pp-cmd-input-label" for="pp-cmd-input" class="sr-only">Search tickers, companies, or investors</label>
             <input type="search"
                    id="pp-cmd-input"
                    class="pp-cmd-input"
                    placeholder="Search tickers, companies, or investors..."
                    autocomplete="off"
+                   aria-controls="pp-cmd-results"
+                   aria-autocomplete="list"
                    oninput="ppGlobalSearch(this.value, 'pp-cmd-results')"
                    onkeydown="ppCmdKeydown(event)">
-            <kbd class="pp-cmd-esc" onclick="ppCloseSearchPalette()">Esc</kbd>
+            <kbd class="pp-cmd-esc" onclick="ppCloseSearchPalette()"
+                 role="button" tabindex="0"
+                 aria-label="Close search">Esc</kbd>
         </div>
-        <div id="pp-cmd-results" class="pp-cmd-results"></div>
+        <div id="pp-cmd-results" class="pp-cmd-results" role="listbox"></div>
     </div>
 
 {% block extra_scripts %}{% endblock %}
