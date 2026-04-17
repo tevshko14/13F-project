@@ -59,7 +59,17 @@ from filings import (
     web_traffic,
     google_trends,
 )
+from filings.app_state import (
+    real_ip as _real_ip,
+    templates,
+    valid_cik as _valid_cik,
+    valid_cusip as _valid_cusip,
+    valid_member_id as _valid_member_id,
+    valid_ticker as _valid_ticker,
+)
 from filings.models import SuperinvestorSummary, StockInfo
+from filings.routers import static_pages as _static_pages_router
+from filings.routers import watchlist as _watchlist_router
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
 
 
@@ -123,22 +133,7 @@ try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
 
-    def _real_ip(request: Request) -> str:
-        """Return the real client IP, trusting Railway's X-Forwarded-For header.
-
-        Railway (and most reverse proxies) append the true client IP as the
-        first value in X-Forwarded-For.  Falling back to request.client.host
-        would give the proxy's internal IP, causing all users to share one
-        rate-limit bucket.
-        """
-        forwarded_for = request.headers.get("x-forwarded-for")
-        if forwarded_for:
-            # Header may be a comma-separated list; first entry is the origin
-            return forwarded_for.split(",")[0].strip()
-        if request.client:
-            return request.client.host
-        return "unknown"
-
+    # _real_ip is imported from filings.app_state at the top of this file.
     limiter = Limiter(key_func=_real_ip, default_limits=["60/minute"])
     _has_limiter = True
 except ImportError:
@@ -786,7 +781,8 @@ except ImportError:
 # GZip outermost — catches anything Brotli didn't handle (non-br clients)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+# ``templates`` is imported from filings.app_state (single shared Jinja2
+# environment; routers in filings/routers/ reuse the same instance).
 
 # Static files (logo, favicon, etc.) — immutable cache for hashed assets
 _static_dir = Path(__file__).parent / "static"
@@ -808,6 +804,13 @@ templates.env.globals["auth_enabled"] = bool(auth.CLERK_DOMAIN or auth.SUPABASE_
 templates.env.globals["clerk_domain"] = auth.CLERK_DOMAIN
 templates.env.globals["posthog_key"] = _POSTHOG_KEY
 templates.env.globals["clerk_publishable_key"] = _CLERK_PUBLISHABLE_KEY
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Router mounts — see filings/routers/ (audit-sprint-4)
+# ═══════════════════════════════════════════════════════════════════════
+app.include_router(_watchlist_router.router)
+app.include_router(_static_pages_router.router)
 
 
 # ── Template filters ──────────────────────────────────────────────────
@@ -965,22 +968,11 @@ def _consensus_cache_set(key: str, value: tuple[float, dict | None]) -> None:
 # ═══════════════════════════════════════════════════════════════════════
 # Security helpers
 # ═══════════════════════════════════════════════════════════════════════
+# NOTE: _valid_ticker / _valid_cik / _valid_cusip / _valid_member_id are
+# imported from filings.app_state at the top of this file so routers can
+# reuse the same validators.
 
-_TICKER_RE = _re.compile(r"^[A-Za-z][A-Za-z0-9.]{0,11}$")
-_CIK_RE = _re.compile(r"^[0-9]{1,10}$")
-_CUSIP_RE = _re.compile(r"^[A-Za-z0-9]{6,9}$")
-_MEMBER_ID_RE = _re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 _ALLOWED_HOST: str = os.environ.get("ALLOWED_HOST", "")  # e.g. "paperpanda.io"
-
-
-def _valid_ticker(ticker: str) -> bool:
-    """Return True if *ticker* looks like a valid stock symbol."""
-    return bool(_TICKER_RE.match(ticker))
-
-
-def _valid_cik(cik: str) -> bool:
-    """Return True if *cik* looks like a valid CIK number."""
-    return bool(_CIK_RE.match(cik))
 
 
 async def _get_fund_data(cik: str) -> dict | None:
@@ -1015,16 +1007,6 @@ async def _get_fund_data(cik: str) -> dict | None:
             asyncio.create_task(_trigger_single_refresh(app, cik_normalized))
 
     return cached
-
-
-def _valid_member_id(member_id: str) -> bool:
-    """Return True if *member_id* looks like a valid congress member ID."""
-    return bool(_MEMBER_ID_RE.match(member_id))
-
-
-def _valid_cusip(cusip: str) -> bool:
-    """Return True if *cusip* looks like a valid CUSIP identifier."""
-    return bool(_CUSIP_RE.match(cusip))
 
 
 def _check_csrf_origin(request: Request) -> JSONResponse | None:
@@ -3649,14 +3631,7 @@ async def support_page(request: Request):
     return templates.TemplateResponse("support.html", ctx)
 
 
-@app.get("/privacy", response_class=HTMLResponse)
-async def privacy_page(request: Request):
-    return templates.TemplateResponse("privacy.html", {"request": request})
-
-
-@app.get("/faq", response_class=HTMLResponse)
-async def faq_page(request: Request):
-    return templates.TemplateResponse("faq.html", {"request": request})
+# /privacy, /faq moved to filings.routers.static_pages (audit-sprint-4).
 
 
 @app.post("/api/create-checkout-session")
@@ -6492,157 +6467,8 @@ async def clerk_webhook(request: Request):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Watchlist API (authenticated)
+# Watchlist API moved to filings.routers.watchlist (audit-sprint-4).
 # ═══════════════════════════════════════════════════════════════════════
-
-
-def _require_user(request: Request) -> str | None:
-    """Return user_id from Clerk auth, or None if not authenticated."""
-    if not request.state.user:
-        return None
-    return request.state.user.get("sub", "") or None
-
-
-@app.post("/api/watchlist", response_class=JSONResponse)
-async def api_watchlist_add(request: Request):
-    """Add a ticker to the user's watchlist."""
-    user_id = _require_user(request)
-    if not user_id:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    try:
-        body = await request.json()
-        ticker = body.get("ticker", "").strip().upper()
-    except Exception:
-        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-    if not ticker or not _valid_ticker(ticker):
-        return JSONResponse({"error": "Invalid ticker"}, status_code=400)
-    ok = await asyncio.to_thread(supabase_cache.add_to_watchlist, user_id, ticker)
-    if not ok:
-        return JSONResponse({"error": "Failed to add"}, status_code=500)
-    return JSONResponse({"ok": True, "ticker": ticker})
-
-
-@app.delete("/api/watchlist/{ticker}", response_class=JSONResponse)
-async def api_watchlist_remove(request: Request, ticker: str):
-    """Remove a ticker from the user's watchlist."""
-    user_id = _require_user(request)
-    if not user_id:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    ticker = ticker.strip().upper()
-    if not ticker or not _valid_ticker(ticker):
-        return JSONResponse({"error": "Invalid ticker"}, status_code=400)
-    ok = await asyncio.to_thread(supabase_cache.remove_from_watchlist, user_id, ticker)
-    if not ok:
-        return JSONResponse({"error": "Failed to remove"}, status_code=500)
-    return JSONResponse({"ok": True, "ticker": ticker})
-
-
-@app.get("/api/watchlist", response_class=JSONResponse)
-async def api_watchlist_list(request: Request):
-    """Return the user's full watchlist with enrichment data."""
-    user_id = _require_user(request)
-    if not user_id:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-
-    watchlist = await asyncio.to_thread(supabase_cache.get_user_watchlist, user_id)
-    if not watchlist:
-        return JSONResponse({"tickers": [], "signals": {}})
-
-    tickers = [w["ticker"] for w in watchlist]
-
-    # Enrich with recent notifications (last 7 days) for watched tickers
-    signals: dict[str, list[dict]] = {t: [] for t in tickers}
-    try:
-        all_notifs = await asyncio.to_thread(
-            supabase_cache.get_recent_notifications, 200
-        )
-        for n in all_notifs:
-            meta = n.get("metadata") or {}
-            nticker = (meta.get("ticker") or "").upper()
-            if nticker in signals:
-                signals[nticker].append({
-                    "type": n.get("type"),
-                    "title": n.get("title"),
-                    "message": n.get("message"),
-                    "link": n.get("link"),
-                    "created_at": n.get("created_at"),
-                })
-        # Keep only last 3 per ticker
-        for t in signals:
-            signals[t] = signals[t][:3]
-    except Exception:
-        pass  # Enrichment is best-effort
-
-    return JSONResponse({
-        "tickers": [
-            {"ticker": w["ticker"], "added_at": w["added_at"]}
-            for w in watchlist
-        ],
-        "signals": signals,
-    })
-
-
-@app.get("/api/watchlist/check/{ticker}", response_class=JSONResponse)
-async def api_watchlist_check(request: Request, ticker: str):
-    """Check if a ticker is on the user's watchlist."""
-    user_id = _require_user(request)
-    if not user_id:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    ticker = ticker.strip().upper()
-    watched = await asyncio.to_thread(
-        supabase_cache.is_ticker_watched, user_id, ticker
-    )
-    return JSONResponse({"watched": watched})
-
-
-@app.get("/api/watchlist/preferences", response_class=JSONResponse)
-async def api_watchlist_prefs_get(request: Request):
-    """Get the user's notification preferences."""
-    user_id = _require_user(request)
-    if not user_id:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    prefs = await asyncio.to_thread(
-        supabase_cache.get_notification_preferences, user_id
-    )
-    return JSONResponse({"preferences": prefs})
-
-
-@app.put("/api/watchlist/preferences", response_class=JSONResponse)
-async def api_watchlist_prefs_update(request: Request):
-    """Update the user's notification preferences (partial update)."""
-    user_id = _require_user(request)
-    if not user_id:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-
-    # Allowlist of updatable fields
-    allowed = {
-        "notify_superinvestor_activity", "notify_insider_trading",
-        "notify_congress_trading", "notify_options_activity",
-        "notify_convergence_signals", "insider_min_value",
-        "insider_title_filter", "digest_enabled", "digest_time",
-        "digest_timezone", "realtime_email_enabled",
-        "telegram_enabled", "telegram_chat_id",
-    }
-    prefs = {k: v for k, v in body.items() if k in allowed}
-    if not prefs:
-        return JSONResponse({"error": "No valid fields"}, status_code=400)
-
-    ok = await asyncio.to_thread(
-        supabase_cache.upsert_notification_preferences, user_id, prefs
-    )
-    if not ok:
-        return JSONResponse({"error": "Failed to save"}, status_code=500)
-    return JSONResponse({"ok": True})
-
-
-@app.get("/watchlist", response_class=HTMLResponse)
-async def watchlist_page(request: Request):
-    """Watchlist dashboard page."""
-    return templates.TemplateResponse("watchlist.html", {"request": request})
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -6807,158 +6633,7 @@ async def health_detail(request: Request):
     )
 
 
-@app.get("/robots.txt")
-async def robots_txt():
-    content = (
-        "# ── Standard crawlers ─────────────────────────────────\n"
-        "User-agent: *\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "# ── AI crawlers — explicitly welcomed ────────────────\n"
-        "# Tier 1: Primary AI search & assistant crawlers\n"
-        "User-agent: GPTBot\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: OAI-SearchBot\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: ChatGPT-User\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: ClaudeBot\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: PerplexityBot\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: anthropic-ai\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "# Tier 2: Platform AI training & indexing crawlers\n"
-        "User-agent: Google-Extended\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: GoogleOther\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: Applebot-Extended\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: Amazonbot\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: cohere-ai\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "# Tier 3: Social & discovery\n"
-        "User-agent: FacebookBot\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "User-agent: Bytespider\n"
-        "Allow: /\n"
-        "Disallow: /api/\n"
-        "\n"
-        "Sitemap: https://paperpanda.io/sitemap.xml\n"
-        "\n"
-        "# ── AI-readable site summary ─────────────────────────\n"
-        "# See https://paperpanda.io/llms.txt\n"
-    )
-    return PlainTextResponse(content, media_type="text/plain")
-
-
-# ── llms.txt — AI-readable site summary ──────────────────────────────
-
-@app.get("/llms.txt")
-async def llms_txt():
-    """Machine-readable site overview for AI assistants and LLMs.
-
-    Follows the llms.txt specification: a structured Markdown file that
-    helps AI systems understand PaperPanda's content, features, and data
-    sources without crawling every page.
-    """
-    content = (
-        "# PaperPanda\n"
-        "\n"
-        "> Free, open-source investment research dashboard tracking superinvestor 13F filings, insider trades, congressional stock activity, and unusual options flow.\n"
-        "\n"
-        "## Main Pages\n"
-        "- [Home](https://paperpanda.io/): Market dashboard with S&P 500 heatmap, market news, and retail sentiment overview\n"
-        "- [Funds](https://paperpanda.io/funds): 13F portfolio intelligence across 85 tracked superinvestors with consensus and momentum charts\n"
-        "- [Insider Trading](https://paperpanda.io/insider-trading): Real-time SEC Form 4 filings showing insider purchases and sales across public companies\n"
-        "- [Congress Trading](https://paperpanda.io/congress): STOCK Act disclosures tracking what 201 House and Senate members are buying and selling\n"
-        "- [Retail Sentiment](https://paperpanda.io/retail): Reddit sentiment, trending tickers, market fear and greed index, and finance YouTuber schedules\n"
-        "- [Options Screener](https://paperpanda.io/options): Advanced unusual options scanner with premium filtering, OI delta tracking, moneyness scoring, urgency weighting, cluster detection, and convergence engine\n"
-        "- [Alternative Signals](https://paperpanda.io/alternative-signals): Short interest, analyst ratings, earnings calendar, and economic events from FRED\n"
-        "- [Macro Dashboard](https://paperpanda.io/macro): Federal Reserve economic indicators, GDP, CPI, unemployment, and interest rates from FRED\n"
-        "- [FAQ](https://paperpanda.io/faq): Frequently asked questions about PaperPanda, 13F filings, insider trading, congressional trading, and more\n"
-        "\n"
-        "## Data & Features\n"
-        "- [Stock Lookup](https://paperpanda.io/stock/AAPL): Per-ticker pages with superinvestor ownership, congressional trades, analyst forecasts, and sentiment\n"
-        "- [Grand Portfolio](https://paperpanda.io/funds): Aggregated superinvestor consensus — most-held and most-added stocks across all tracked funds\n"
-        "- [Options Clusters](https://paperpanda.io/api/options/clusters): Grouped unusual activity showing tickers with multiple flagged contracts, direction, and strength\n"
-        "\n"
-        "## Options Scanner Features\n"
-        "- Premium floor filter: only surfaces contracts with $100K+ estimated premium to eliminate noise\n"
-        "- OI delta tracking: compares today's open interest to previous day, flags new positioning (50%+ OI growth)\n"
-        "- Near-expiry urgency: weights 0-DTE and weekly contracts higher (up to 2x boost)\n"
-        "- Moneyness scoring: labels contracts as Deep ITM, ITM, ATM, OTM, or Deep OTM with conviction multipliers\n"
-        "- Cluster detection: groups 2+ unusual contracts on the same ticker, labels strong clusters (3+ contracts)\n"
-        "- Greeks: delta, gamma, theta, vega displayed when available from Tradier options data\n"
-        "- Convergence engine: cross-references options with insider buys, congress trades, short interest, and 13F adds\n"
-        "\n"
-        "## Key Facts\n"
-        "- Tracks 85 superinvestor funds via SEC EDGAR 13F filings, updated quarterly\n"
-        "- Covers 201 politicians (41 senators, 160 representatives) from STOCK Act disclosures\n"
-        "- Monitors over 1,000 stocks with real-time insider trading from SEC Form 4\n"
-        "- Unusual options scanner covers S&P 500 plus top superinvestor holdings\n"
-        "- Convergence engine cross-references 5 signal types: options, insider buys, congress trades, short interest, and 13F adds\n"
-        "- Data sourced from SEC EDGAR (sec.gov), Tiingo, Tradier, FRED (fred.stlouisfed.org), and Reddit\n"
-        "- Free and open-source project\n"
-        "\n"
-        "## Macro Dashboard\n"
-        "- Earnings scorecard: EPS and revenue beat rates for S&P 500 and NASDAQ 100, with stock price reactions\n"
-        "- Market performance: advance/decline ratios, new highs vs. lows, 50-day MA participation\n"
-        "- Economic indicators from FRED: GDP, CPI, unemployment, consumer sentiment, industrial production, retail sales\n"
-        "- Treasury yield curves: 2s10s spread tracking, historical curve comparison\n"
-        "- CBOE volatility: VIX term structure, SKEW index, put/call ratios\n"
-        "- FX rates: EUR, GBP, JPY, CNY with 30-day sparkline charts (ECB reference rates via Frankfurter)\n"
-        "\n"
-        "## Stock Pages (per-ticker)\n"
-        "- 8 tabs: Overview, Financials, Holdings, Insider Trades, Congressional Trades, Analyst Ratings, Sentiment, Options\n"
-        "- SEC XBRL financial statements (income, balance sheet, cash flow) with insight charts\n"
-        "- Superinvestor ownership table with quarter-over-quarter changes\n"
-        "- Interactive candlestick chart with 1M-5Y timeframes\n"
-        "- Short interest tracking: % of float shorted, days to cover, trend\n"
-        "- Google Trends search interest with 12-month sparklines\n"
-        "\n"
-        "## Data Sources\n"
-        "- SEC EDGAR (sec.gov): 13F filings, Form 4 insider trades, XBRL financial statements\n"
-        "- Capitol Trades: Congressional STOCK Act disclosures\n"
-        "- Tiingo (tiingo.com): Real-time IEX stock quotes, EOD history\n"
-        "- Tradier (tradier.com): Options chains with ORATS greeks\n"
-        "- FRED (fred.stlouisfed.org): Federal Reserve macroeconomic data\n"
-        "- Frankfurter (frankfurter.app): ECB foreign exchange reference rates\n"
-        "- ApeWisdom: Reddit mention aggregation (r/wallstreetbets, r/stocks, r/investing)\n"
-        "- FINRA: Short interest data\n"
-        "\n"
-        "## Contact\n"
-        "- Website: https://paperpanda.io\n"
-        "- GitHub: https://github.com/tevshko14/13F-project\n"
-    )
-    return PlainTextResponse(content, media_type="text/plain")
+# /robots.txt and /llms.txt moved to filings.routers.static_pages.
 
 
 # ── Sitemap cache (regenerated at most once per hour) ─────────────────
