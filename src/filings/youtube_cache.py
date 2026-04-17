@@ -133,27 +133,32 @@ def upsert_youtube_events(rows: list[dict]) -> int:
 
 
 def upsert_youtube_channels(rows: list[dict]) -> int:
-    """Upsert rows into ``youtube_channels``.
+    """Batch-upsert rows into ``youtube_channels``.
 
-    Uses ``ON CONFLICT (channel_id) DO UPDATE``.
-    Returns the number of rows upserted, or 0 on failure.
+    Uses ``ON CONFLICT (channel_id) DO UPDATE``.  Chunked to match the
+    ``upsert_youtube_events`` pattern so a single malformed row doesn't
+    fail the entire sync.  Returns the number of rows upserted, or 0
+    on failure.
     """
     client = _get_client()
     if client is None:
         return 0
+    if not rows:
+        return 0
 
     upserted = 0
-    for row in rows:
+    CHUNK = 50
+    for i in range(0, len(rows), CHUNK):
+        chunk = rows[i : i + CHUNK]
         try:
             client.table("youtube_channels").upsert(
-                row, on_conflict="channel_id"
+                chunk, on_conflict="channel_id"
             ).execute()
-            upserted += 1
+            upserted += len(chunk)
         except Exception as exc:
             logger.warning(
-                "upsert_youtube_channels failed for %s: %s",
-                row.get("channel_id"),
-                exc,
+                "upsert_youtube_channels chunk %d (%d rows) failed: %s",
+                i, len(chunk), exc,
             )
 
     return upserted

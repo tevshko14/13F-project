@@ -76,6 +76,27 @@ _NOTIFICATION_COLS = (
     "id,type,title,message,icon,toast_type,link,metadata,created_at"
 )
 
+# User notification preferences — every column the watchlist UI writes to.
+# Excludes id/created_at/updated_at which callers don't need.  Having an
+# explicit projection keeps the wire payload stable as new columns are
+# added (new schema fields stay server-side until deliberately surfaced).
+_USERPREFS_COLS = (
+    "user_id,ticker,notify_superinvestor_activity,notify_insider_trading,"
+    "notify_congress_trading,notify_options_activity,notify_convergence_signals,"
+    "insider_min_value,insider_title_filter,digest_enabled,digest_time,"
+    "digest_timezone,realtime_email_enabled,telegram_enabled,telegram_chat_id"
+)
+
+# Congress sync log — fields the /health/detail dashboard renders.
+_CONGRESS_SYNC_COLS = (
+    "started_at,status,new_trades,pages_scraped,duration_secs"
+)
+
+# Watchlist digest email log — fields admin dashboard + digest dedup check.
+_DIGEST_LOG_COLS = (
+    "user_id,sent_at,digest_date,event_count,status"
+)
+
 # Unusual options activity — feed + heatmap projections
 _UOA_FEED_COLS = (
     "contract_symbol,ticker,company_name,sector,option_type,"
@@ -1778,16 +1799,27 @@ def get_distinct_insider_tickers() -> list[str]:
     if client is None:
         return []
     try:
-        # Fetch all unique tickers — Supabase doesn't support DISTINCT,
-        # so we select ticker column and deduplicate in Python.
+        # Fetch ticker column and deduplicate in Python.  PostgREST doesn't
+        # support DISTINCT natively.  Called only by insider_backfill (a
+        # one-off admin script), not hot path, so Python dedup is fine.
+        # Limit caps the worst case at ~10k rows; if this ever truncates,
+        # insider_purchases_history has grown past that and we should
+        # switch to a Postgres RPC (`SELECT DISTINCT ticker`).
+        row_cap = 10000
         resp = (
             client.table("insider_purchases_history")
             .select("ticker")
-            .limit(10000)
+            .limit(row_cap)
             .execute()
         )
         if not resp.data:
             return []
+        if len(resp.data) >= row_cap:
+            logger.warning(
+                "get_distinct_insider_tickers hit row cap (%d); may be missing "
+                "tickers.  Consider migrating to a Postgres RPC.",
+                row_cap,
+            )
         tickers = sorted({row["ticker"] for row in resp.data if row.get("ticker")})
         return tickers
     except Exception as exc:
@@ -2370,7 +2402,7 @@ def get_notification_preferences(user_id: str) -> dict | None:
     try:
         resp = (
             client.table("user_notification_preferences")
-            .select("*")
+            .select(_USERPREFS_COLS)
             .eq("user_id", user_id)
             .is_("ticker", "null")
             .maybe_single()
@@ -2787,14 +2819,23 @@ def get_congress_trades_missing_prices(limit: int = 5000) -> list[dict] | None:
         # Simpler approach: fetch all trade_ids that DO have prices, then
         # fetch trades NOT in that set.
 
-        # Step 1: get existing price trade_ids
+        # Step 1: get existing price trade_ids.  Called by the congress-
+        # prices backfill script (one-off), not hot path — the Python set
+        # is fine.  Warn if we truncate so future growth is visible.
+        price_row_cap = 50000
         price_resp = (
             client.table("congress_trades_prices")
             .select("trade_id")
-            .limit(50000)
+            .limit(price_row_cap)
             .execute()
         )
         existing_ids = {r["trade_id"] for r in (price_resp.data or [])}
+        if len(existing_ids) >= price_row_cap:
+            logger.warning(
+                "get_congress_trades_missing_prices hit price-row cap (%d); "
+                "results may incorrectly flag already-priced trades as missing.",
+                price_row_cap,
+            )
 
         # Step 2: get trades with tickers, not in existing set
         resp = (
@@ -2933,7 +2974,7 @@ def get_latest_congress_sync(limit: int = 5) -> list[dict] | None:
     try:
         resp = (
             client.table("congress_sync_log")
-            .select("*")
+            .select(_CONGRESS_SYNC_COLS)
             .order("started_at", desc=True)
             .limit(limit)
             .execute()
@@ -4326,7 +4367,7 @@ def admin_user_detail(user_id: str) -> dict | None:
 
         prefs = (
             client.table("user_notification_preferences")
-            .select("*")
+            .select(_USERPREFS_COLS)
             .eq("user_id", user_id)
             .is_("ticker", "null")
             .maybe_single()
@@ -4335,7 +4376,7 @@ def admin_user_detail(user_id: str) -> dict | None:
 
         digest_log = (
             client.table("watchlist_digest_log")
-            .select("*")
+            .select(_DIGEST_LOG_COLS)
             .eq("user_id", user_id)
             .order("sent_at", desc=True)
             .limit(50)
@@ -4376,7 +4417,7 @@ def admin_digest_stats() -> dict:
 
         all_logs = (
             client.table("watchlist_digest_log")
-            .select("*")
+            .select(_DIGEST_LOG_COLS)
             .gte("digest_date", week_ago)
             .order("sent_at", desc=True)
             .execute()

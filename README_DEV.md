@@ -2,7 +2,7 @@
 
 > **This file is the source of truth for this project.**
 > If context is ever drifting, re-read this file first before making changes.
-> Last updated: 2026-04-17 (Epic C: 10 more modules migrated to TTLCache — fundamentals, earnings_calendar, openfigi, earnings_scorecard, cboe_data, fred_data, market_breadth, unusual_options, wsb_sentiment, treasury_data. Epic B skipped (audit findings stale). Epic A shipped: Procfile recycle, _refresh_locks LRU, 7 rate limits, stock-page parallel fetch, Panda Fund cache.)
+> Last updated: 2026-04-17 (Epic D: batch youtube_channels upsert, column projections on 3 user tables, truncation warnings on backfill dedupe queries. Epic C: 10 modules to TTLCache. Epic B skipped (stale). Epic A shipped: Procfile recycle, _refresh_locks LRU, 7 rate limits, stock-page parallel fetch, Panda Fund cache.)
 
 ---
 
@@ -2174,11 +2174,11 @@ Epic B decision was "skip — findings stale; move to Epic C".
 - [~] `_l2_caches` in web.py: investigated — already bounded by static decorator args (25 `@_with_l2_fallback` usages, each creates at most one entry keyed by `(category, l1_ttl)`).  No change needed; audit agent's "dynamic category" concern didn't match the code.
 - [~] Thread pool consolidation: investigated — the 4 small pools (`_analyst_pool`, `_sentiment_executor`, `_vitals_pool`, `_health_pool`) provide domain-isolation so a slow Finnhub call can't starve vitals/analyst calls.  The 8-16 MB thread overhead is negligible on a 512 MB Railway plan; the isolation is worth keeping.  Skipped.
 
-**Epic D — Data layer**
-- [ ] Fix N+1 in `upsert_youtube_channels` — batch upsert in one call (10-50× faster for channel-metadata syncs).
-- [ ] Replace unbounded fetch-then-dedupe in `get_distinct_insider_tickers` (10K rows) and `get_congress_trades_missing_prices` (50K rows) with SQL-side `DISTINCT ON` / `EXISTS` / `NOT IN` subqueries.
-- [ ] Replace `SELECT *` on user tables with explicit column projections (`user_notification_preferences`, `congress_sync_log`, `watchlist_digest_log`). Define `_USERPREFS_COLS`, `_SYNCLOG_COLS`, `_DIGESTLOG_COLS` constants.
-- [ ] Add missing indexes: `idx_congress_sync_started_at ON congress_sync_log (started_at DESC)`; `idx_esc_index_quarter_sector ON earnings_scorecard_cache (index_key, quarter, sector)`. Commit as new SQL migration files.
+**Epic D — Data layer (SHIPPED 2026-04-17)**
+- [x] Batched `upsert_youtube_channels` — chunks of 50 matching `upsert_youtube_events`.  10-50× faster channel-metadata syncs.
+- [~] Unbounded fetch-then-dedupe queries (`get_distinct_insider_tickers` 10K cap, `get_congress_trades_missing_prices` 50K cap): on investigation both are called only by one-off backfill scripts, not hot-path web endpoints.  Tables are 604 rows / 0 rows today.  Added truncation-detection warnings ("hit row cap — switch to RPC") but kept the Python-side dedupe.  Full SQL-side refactor deferred until the tables grow enough to matter.
+- [x] Replaced `SELECT *` on 3 user tables with explicit column projections.  New constants: `_USERPREFS_COLS` (15 cols), `_CONGRESS_SYNC_COLS` (5 cols), `_DIGEST_LOG_COLS` (5 cols).  Excludes internal fields (`id`, `created_at`, `updated_at`) that no caller reads.
+- [~] Missing indexes: investigated both proposed indexes.  `idx_congress_sync_started_at` would have duplicated the pre-existing `idx_csl_started_at` (same columns, different name — discovered by applying + rolling back).  `idx_esc_index_quarter_sector ON earnings_scorecard_cache (index_key, quarter, sector)` was proposed for queries that don't exist in the code (only `cache_key` lookups happen).  Both skipped.  DB schema unchanged.
 
 **Epic E — Polish**
 - [ ] Serve logos as WebP (with PNG fallback via `<picture>`) — ~30-40% smaller per logo.
