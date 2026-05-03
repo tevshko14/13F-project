@@ -1,0 +1,63 @@
+/* ============================================================================
+ * PaperPanda Redesign — Options page
+ * Reuses .pp-page-* + .pp-insiders-row-flagged for the notable-row tint.
+ * ==========================================================================*/
+
+.pp-options-actions {
+  display: flex;
+  gap: 8px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+.pp-options-flow-table { width: 100%; }
+.pp-options-flow-table thead th {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pp-dim);
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line2);
+}
+.pp-options-flow-table thead th.pp-num { text-align: right; }
+.pp-options-flow-table tbody td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.pp-options-flow-table tbody tr:last-child td { border-bottom: none; }
+.pp-options-flow-table td.pp-num { text-align: right; }
+
+.pp-options-tkr {
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-options-star {
+  color: var(--pp-accent);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+.pp-options-strike  { color: var(--pp-ink); font-weight: 700; }
+.pp-options-premium { color: var(--pp-ink); font-weight: 700; }
+
+/* CALL / PUT outlined chip — green CALL, red PUT. */
+.pp-options-type {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border: 1px solid;
+  letter-spacing: 0.4px;
+}
+.pp-options-type-call {
+  color: var(--pp-up);
+  border-color: var(--pp-up);
+}
+.pp-options-type-put {
+  color: var(--pp-down);
+  border-color: var(--pp-down);
+}

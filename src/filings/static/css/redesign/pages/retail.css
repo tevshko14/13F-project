@@ -1,0 +1,152 @@
+/* ============================================================================
+ * PaperPanda Redesign — Retail page (Pulse · Trends · WSB)
+ * Reuses .pp-page-* chrome from macro.css.
+ * ==========================================================================*/
+
+/* KpiStrip default uses tabular-nums + 22px font — short labels like "AI /
+   Chips" or "$GME +81%" can clip the cell.  Allow value to wrap rather
+   than truncate, since stale `1.5rem` ascent absorbs a 2nd line cleanly. */
+.pp-page-section-kpi .pp-kpi-value {
+  font-size: 18px;
+  white-space: normal;
+  line-height: 1.2;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * FEATURED CALLOUT — coral left-border + 3-col layout (id · stats · spark).
+ * Matches the "notable_panel" pattern flagged in the gap audit.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-retail-featured {
+  padding: 22px 26px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 24px;
+  align-items: center;
+  border-left: 3px solid var(--pp-accent);
+}
+
+.pp-retail-featured-tkr {
+  display: block;
+  font-size: 48px;
+  font-weight: 800;
+  letter-spacing: -2px;
+  color: var(--pp-ink);
+  margin-top: 6px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.pp-retail-featured-name {
+  font-size: 13px;
+  color: var(--pp-dim);
+  margin-top: 4px;
+}
+
+.pp-retail-featured-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.pp-retail-stat-val {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  margin-top: 2px;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-retail-stat-delta {
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pp-retail-featured-spark { display: block; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * TRENDING TABLE — 9 cols, dense (10px header, 12px body).
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-retail-trending-table { width: 100%; }
+.pp-retail-trending-table thead th {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pp-dim);
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line2);
+}
+.pp-retail-trending-table thead th.pp-num { text-align: right; }
+.pp-retail-trending-table thead th.pp-retail-th-rank { width: 36px; }
+.pp-retail-trending-table tbody td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.pp-retail-trending-table tbody tr:last-child td { border-bottom: none; }
+.pp-retail-trending-table td.pp-num { text-align: right; }
+
+.pp-retail-tkr {
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-retail-name {
+  color: var(--pp-text);
+  /* Truncate long names. */
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-retail-mentions {
+  color: var(--pp-ink);
+  font-weight: 700;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SENTIMENT BAR — centered at 50%, fills outward in either direction.
+ * Pattern flagged in gap audit; will extract to a primitive once reused.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-retail-sentiment-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pp-retail-sentiment-bar {
+  position: relative;
+  width: 80px;
+  height: 5px;
+  background: var(--pp-sub2);
+  flex-shrink: 0;
+}
+.pp-retail-sentiment-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--pp-dim2);
+  z-index: 2;
+}
+.pp-retail-sentiment-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  /* width set inline; +/- determined by .is-up / .is-down modifier. */
+}
+.pp-retail-sentiment-fill.is-up   { background: var(--pp-up); }
+.pp-retail-sentiment-fill.is-down {
+  background: var(--pp-down);
+  /* Negative fills extend leftward from center. */
+  transform: translateX(-100%);
+}
+.pp-retail-sentiment-val {
+  font-size: 10px;
+  font-weight: 600;
+}

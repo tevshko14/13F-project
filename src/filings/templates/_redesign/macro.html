@@ -1,0 +1,177 @@
+{#-
+  PaperPanda Redesign — Macro page
+  Mirrors design_handoff_paperpanda/page-macro.jsx
+
+  Tabs: Indicators · Yields · FX & Commodities · Calendar · Heatmap
+  Default = Indicators (live).  Other 4 tabs render a "Coming soon"
+  placeholder until their data wiring lands.
+
+  Real data: fred_indicators.fetch_indicators() — 13 series across
+  5 groups (rates, inflation, employment, consumer, credit).  KPI
+  strip pulls 6 of those series for the hero summary.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment,
+     kpi_strip, spark %}
+
+{% block title %}Macro · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  {# Cache-bust during redesign iteration; switch to hashed filenames at ship. #}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━
+   Pattern shared with other detail pages (Stock, Funds, Insiders).
+   Will extract into a `page_hero` macro once the second/third page
+   confirms the same shape.  Σ glyph stands in for an icon set
+   pending; per design notes, swap for Lucide later. #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">Σ</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">
+      Markets <span class="pp-page-hero-crumb-sep">/</span> Macro
+    </span>
+    <h1 class="pp-page-hero-title">Macro</h1>
+    <div class="pp-page-hero-sub">
+      FRED · BLS · Treasury · {{ macro_count|default(13) }} indicators tracked
+      {%- if macro_is_mock %} · <span class="pp-page-hero-flag">DEMO</span>{% endif %}
+    </div>
+  </div>
+  {{ btn("Add to dashboard", kind="ghost") }}
+</header>
+
+{# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
+<div class="pp-page-section pp-page-section-kpi">
+  {{ kpi_strip(macro_kpi) }}
+</div>
+
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
+<div class="pp-page-tabs">
+  {{ segment(["Indicators","Yields","FX & Commodities","Calendar","Heatmap"],
+             value=macro_tab|default("Indicators"),
+             id="pp-macro-tabs") }}
+</div>
+
+{# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
+<div class="pp-page-body">
+
+  {# ── INDICATORS (default tab — LIVE) ── #}
+  <section class="pp-page-pane is-active" data-tab-pane="Indicators">
+    <div class="pp-macro-indicators-grid">
+      {% for g in macro_groups %}
+        {% call panel() %}
+          {{ panel_head(g.label) }}
+          {% for r in g.rows %}
+            <div class="pp-macro-row">
+              <div class="pp-macro-row-name">
+                <div class="pp-macro-row-title">{{ r.name }}</div>
+                <span class="pp-mono pp-macro-row-code">{{ r.series_id }}</span>
+              </div>
+              {# Sparkline — ~1 year of monthly/weekly observations.
+                 Color follows direction (up=green, down=red, flat=dim). #}
+              {% set _color = "var(--pp-up)" if r.direction == "up"
+                              else ("var(--pp-down)" if r.direction == "down"
+                                    else "var(--pp-dim)") %}
+              {{ spark(r.sparkline|default([]), color=_color, w=80, h=20) }}
+              <span class="pp-mono pp-macro-row-value">{{ r.value_fmt }}</span>
+              <span class="pp-mono pp-macro-row-delta {% if r.direction == 'up' %}pp-up{% elif r.direction == 'down' %}pp-down{% else %}pp-dim{% endif %}">
+                {%- if r.direction == "up" %}▲ {% elif r.direction == "down" %}▼ {% endif -%}
+                {{ r.change_fmt|default("—") }}
+              </span>
+            </div>
+          {% endfor %}
+        {% endcall %}
+      {% endfor %}
+    </div>
+  </section>
+
+  {# ── YIELDS (placeholder — coming next) ── #}
+  <section class="pp-page-pane" data-tab-pane="Yields">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">∞</div>
+        <div class="pp-page-placeholder-title">Yields tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Treasury yield curve (today vs 1m ago), key spreads (2s10s, 3M-10Y, IG/HY OAS),
+          real yields and inflation expectations.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+  <section class="pp-page-pane" data-tab-pane="FX &amp; Commodities">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">¤</div>
+        <div class="pp-page-placeholder-title">FX &amp; Commodities — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          DXY, EURUSD, USDJPY + WTI, Brent, Nat Gas, Gold, Silver, Copper —
+          wired to existing market_data feeds.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+  <section class="pp-page-pane" data-tab-pane="Calendar">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">◷</div>
+        <div class="pp-page-placeholder-title">Calendar — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Macro releases (NFP, CPI, FOMC) with consensus + prior + impact.
+          Data lives in fred_calendar / economic_calendar.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+  <section class="pp-page-pane" data-tab-pane="Heatmap">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">▦</div>
+        <div class="pp-page-placeholder-title">Heatmap — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Sector-by-region today's-return matrix; reuses the heatmap_tile
+          primitive from Home/Heatmap.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+{# Same tab-switcher pattern as Home — vanilla JS, no HTMX.  All panes are
+   server-rendered up front so switches are instant. #}
+<script>
+(function () {
+  var seg = document.getElementById('pp-macro-tabs');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-page-pane');
+  if (!panes.length) return;
+  function activate(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-value') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    });
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    if (name) activate(name);
+  });
+})();
+</script>
+{% endblock %}

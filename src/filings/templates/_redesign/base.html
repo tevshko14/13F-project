@@ -1,0 +1,210 @@
+{#-
+  PaperPanda Redesign — base.html (app shell)
+  Replaces the old templates/base.html when route handlers are flipped
+  to render from _redesign/* (final ship step).
+
+  Mirrors design_handoff_paperpanda/app-shell.jsx structurally:
+    - 232px sidebar with brand + search + 3 nav groups + Panda Fund support
+    - 56px topbar with date kicker, theme toggle, live time, +Alert, avatar
+    - main content area renders the {% block content %}
+
+  Light/dark mode is controlled by `data-theme` on <html>.  The inline
+  anti-FOUC script reads localStorage / system preference BEFORE first
+  paint so there's no flash.
+-#}
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  {#- noindex on every redesign-preview page so search engines don't pick
+      up the in-progress design.  Safety-net even with the env-gate in
+      place.  Removes when the redesign ships at the prod paths. -#}
+  <meta name="robots" content="noindex,nofollow">
+  <title>{% block title %}PaperPanda{% endblock %}</title>
+
+  {#- Anti-FOUC: set theme before any CSS paints. -#}
+  <script>
+    (function() {
+      try {
+        var saved = localStorage.getItem('pp-theme');
+        var prefDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        var theme = saved || (prefDark ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { /* ignore */ }
+    })();
+  </script>
+
+  {#- Geist (300-800) + Geist Mono (300-700) from Google Fonts CDN.
+       Set as the locked design spec.  Body sets font-feature-settings:"ss01"
+       in tokens.css to enable Geist's signature stylistic-set alternates. -#}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preload" as="style"
+        href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@300;400;500;600;700&display=swap">
+
+  {#- Stylesheet order matters: tokens → primitives → app-shell → page-specific -#}
+  <link rel="stylesheet" href="/static/css/redesign/tokens.css">
+  <link rel="stylesheet" href="/static/css/redesign/primitives.css">
+  <link rel="stylesheet" href="/static/css/redesign/app-shell.css">
+  {% block extra_css %}{% endblock %}
+
+  {#- HTMX + Fuse.js — same versions / integrity as production base.html. -#}
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.10/dist/htmx.min.js"
+          integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC"
+          crossorigin="anonymous" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"
+          integrity="sha384-PCSoOZTpbkikBEtd/+uV3WNdc676i9KUf01KOA8CnJotvlx8rRrETbDuwdjqTYvt"
+          crossorigin="anonymous" defer></script>
+  {#- Global fuzzy search — populates window.ppGlobalSearch / ppSearchKeydown
+      / tickerSearchGo / escHtml.  Defer ensures it runs after Fuse loads. -#}
+  <script src="/static/js/redesign/global-search.js" defer></script>
+  {% block extra_head_scripts %}{% endblock %}
+</head>
+<body>
+  <div class="pp-app">
+
+    {# ━━━━━━━━━━ SIDEBAR ━━━━━━━━━━ #}
+    <aside class="pp-app-side pp-side" aria-label="Primary navigation">
+      <a class="pp-brand" href="/" aria-label="PaperPanda home">
+        <span class="pp-brand-tile" aria-hidden="true">P<span class="pp-dot">.</span></span>
+        <span class="pp-brand-name">PaperPanda</span>
+      </a>
+
+      <button class="pp-side-search" type="button"
+              onclick="window.ppOpenSearchPalette && window.ppOpenSearchPalette()"
+              aria-label="Open search (Cmd+K)">
+        <svg class="pp-side-search-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4"/>
+          <path d="M11 11l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span class="pp-side-search-label">Search</span>
+        <span class="pp-side-search-kbd">⌘K</span>
+      </button>
+
+      {%- set nav_active = nav_active|default("Home") -%}
+      {%- set nav_groups = [
+        {"hd": "Overview", "items": [
+          {"name": "Home",          "href": "/",              "badge": ""},
+          {"name": "Watchlist",     "href": "/profile?tab=Watchlist", "badge": ""},
+          {"name": "Notifications", "href": "/profile?tab=Alerts",    "badge": notif_unread|default("")},
+        ]},
+        {"hd": "Markets", "items": [
+          {"name": "Funds",    "href": "/funds",    "badge": ""},
+          {"name": "Screener", "href": "/screener", "badge": ""},
+          {"name": "Options",  "href": "/options",  "badge": ""},
+        ]},
+        {"hd": "Signals", "items": [
+          {"name": "Insiders", "href": "/insider-trading", "badge": insiders_count|default("")},
+          {"name": "Congress", "href": "/congress",        "badge": congress_count|default("")},
+          {"name": "Retail",   "href": "/retail",          "badge": ""},
+          {"name": "Macro",    "href": "/macro",           "badge": ""},
+        ]},
+      ] -%}
+
+      {% for group in nav_groups %}
+        <div class="pp-nav-group">
+          <div class="pp-nav-heading">{{ group.hd }}</div>
+          {% for item in group['items'] %}
+            <a class="pp-nav-item{% if item.name == nav_active %} is-active{% endif %}"
+               href="{{ item.href }}"
+               {% if item.name == nav_active %}aria-current="page"{% endif %}>
+              <span class="pp-nav-item-name">{{ item.name }}</span>
+              {% if item.badge %}<span class="pp-nav-badge">{{ item.badge }}</span>{% endif %}
+            </a>
+          {% endfor %}
+        </div>
+      {% endfor %}
+
+      <div class="pp-side-spacer"></div>
+
+      {# Panda Fund support card — same data feed as the old support widget. #}
+      <div class="pp-side-support">
+        <div class="pp-side-support-kicker">SUPPORT</div>
+        <div class="pp-side-support-title">Feed the panda</div>
+        <div class="pp-side-support-bar">
+          <div class="pp-side-support-bar-fill"
+               style="width: {{ panda_pct|default(42) }}%;"></div>
+        </div>
+        <span class="pp-side-support-amount">
+          ${{ panda_raised|default(84) }} / ${{ panda_goal|default(200) }} ·
+          {{ panda_month|default('') }}
+        </span>
+      </div>
+    </aside>
+
+    {# ━━━━━━━━━━ TOPBAR ━━━━━━━━━━ #}
+    <header class="pp-app-topbar pp-topbar" role="banner">
+      <span class="pp-topbar-kicker">
+        {{ today_label|default('') }} · {{ market_status|default('MARKETS OPEN') }}
+      </span>
+      <div class="pp-topbar-spacer"></div>
+
+      <div class="pp-theme-toggle" role="group" aria-label="Theme">
+        <button type="button" class="pp-theme-toggle-btn"
+                data-pp-theme="light"
+                aria-label="Light theme">☀ LIGHT</button>
+        <button type="button" class="pp-theme-toggle-btn"
+                data-pp-theme="dark"
+                aria-label="Dark theme">☾ DARK</button>
+      </div>
+
+      <span class="pp-topbar-time" id="pp-clock">
+        <span class="pp-topbar-time-dot" aria-hidden="true"></span>
+        <span id="pp-clock-text">--:-- EST</span>
+      </span>
+
+      {% from "_redesign/macros/_primitives.html" import btn, avatar %}
+      {{ btn("+ Alert", kind="accent", attrs='onclick="window.location.href=\'/profile?tab=Alerts\'"') }}
+      <a href="/profile" aria-label="Profile" style="text-decoration:none;">
+        {{ avatar(user_initials|default("PP"), accent=True) }}
+      </a>
+    </header>
+
+    {# ━━━━━━━━━━ MAIN ━━━━━━━━━━ #}
+    <main class="pp-app-main" role="main">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+
+  {# ━━━━━━━━━━ THEME TOGGLE + LIVE CLOCK ━━━━━━━━━━ #}
+  <script>
+  (function() {
+    /* Theme toggle: flip data-theme + persist + dispatch event so charts
+       can re-theme without a full reload. */
+    function setTheme(t) {
+      document.documentElement.setAttribute('data-theme', t);
+      try { localStorage.setItem('pp-theme', t); } catch (e) {}
+      document.querySelectorAll('.pp-theme-toggle-btn').forEach(function(btn) {
+        btn.classList.toggle('is-active', btn.dataset.ppTheme === t);
+      });
+      document.dispatchEvent(new CustomEvent('pp-theme-changed', { detail: { theme: t } }));
+    }
+    /* Hydrate active state for whichever theme was set anti-FOUC */
+    document.querySelectorAll('.pp-theme-toggle-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() { setTheme(btn.dataset.ppTheme); });
+    });
+    setTheme(document.documentElement.getAttribute('data-theme') || 'dark');
+
+    /* Live clock — EST 24h, refreshes every 60s. */
+    function tick() {
+      var now = new Date();
+      var nyParts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false
+      }).formatToParts(now);
+      var hh = nyParts.find(function(p) { return p.type === 'hour'; }).value;
+      var mm = nyParts.find(function(p) { return p.type === 'minute'; }).value;
+      var el = document.getElementById('pp-clock-text');
+      if (el) el.textContent = hh + ':' + mm + ' EST';
+    }
+    tick();
+    setInterval(tick, 60 * 1000);
+  })();
+  </script>
+
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

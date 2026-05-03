@@ -1,0 +1,264 @@
+/* ============================================================================
+ * PaperPanda Redesign — Stock detail page
+ * ==========================================================================*/
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * STOCK HERO — adds price block + action stack to the standard page hero.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-stock-hero {
+  /* Items in order: badge · id-block · price-block · action-stack. */
+  align-items: flex-start;
+}
+
+.pp-stock-badge {
+  /* Override the default 22px font for ticker badges (4-char tickers like
+     "NVDA" need to fit; 18px keeps padding consistent). */
+  font-size: 18px;
+}
+
+.pp-stock-id { min-width: 0; }
+
+.pp-stock-pill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pp-stock-pill {
+  font-size: 10px;
+  padding: 2px 7px;
+  border: 1px solid var(--pp-line2);
+  color: var(--pp-dim);
+  letter-spacing: 1px;
+}
+.pp-stock-delay-flag {
+  font-size: 10px;
+  padding: 2px 7px;
+  color: var(--pp-dim2);
+  font-style: italic;
+}
+
+.pp-stock-title {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.pp-stock-name {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--pp-dim);
+  letter-spacing: -0.3px;
+}
+.pp-stock-sub { font-size: 12px; }
+
+.pp-stock-price-block {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-self: center;
+  min-width: 0;
+}
+.pp-stock-price {
+  display: block;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -1px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.pp-stock-chg {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+.pp-stock-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * BODY ROWS
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-stock-row-hero {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 18px;
+}
+.pp-stock-row-secondary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * CHART PANEL
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-stock-chart-stats {
+  font-size: 11px;
+  color: var(--pp-dim);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.pp-stock-chart-stat-num {
+  color: var(--pp-ink);
+  font-weight: 600;
+  margin-left: 4px;
+}
+.pp-stock-chart-stat-close {
+  font-weight: 700;
+  margin-left: 4px;
+}
+
+.pp-stock-chart-body { padding: 16px 18px; }
+.pp-stock-chart-svg {
+  display: block;
+  width: 100%;
+  height: 280px;
+}
+
+.pp-stock-wick { stroke-width: 1; }
+.pp-stock-body { stroke-width: 0.8; }
+.pp-stock-vol  { /* fill set inline based on direction */ }
+
+.pp-stock-chart-empty {
+  fill: var(--pp-dim);
+  font-family: var(--pp-font-mono);
+  font-size: 12px;
+}
+
+.pp-stock-chart-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.pp-stock-chart-tick { font-size: 10px; color: var(--pp-dim); }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * NEWS PANEL
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-stock-news-counter {
+  font-size: 10px;
+  color: var(--pp-dim);
+}
+
+.pp-stock-news-row {
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-stock-news-row:last-child { border-bottom: none; }
+.pp-stock-news-byline {
+  font-size: 10px;
+  color: var(--pp-accent);
+  letter-spacing: 1px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.pp-stock-news-title {
+  font-size: 13px;
+  color: var(--pp-ink);
+  margin-top: 3px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SENTIMENT PANEL
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-stock-sentiment-body { padding: 18px; }
+.pp-stock-sentiment-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.pp-stock-sentiment-score {
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--pp-accent);
+  letter-spacing: -1.5px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.pp-stock-sentiment-meta {
+  font-size: 12px;
+  color: var(--pp-dim);
+}
+
+.pp-stock-sentiment-bar {
+  height: 6px;
+  background: var(--pp-sub2);
+  position: relative;
+  margin-bottom: 6px;
+}
+.pp-stock-sentiment-tick {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--pp-dim2);
+  z-index: 1;
+}
+.pp-stock-sentiment-fill {
+  position: absolute;
+  left: 50%;
+  height: 100%;
+  width: 35%;
+  background: var(--pp-up);
+}
+.pp-stock-sentiment-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--pp-dim2);
+}
+.pp-stock-sentiment-note {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--pp-line);
+  font-size: 12px;
+  color: var(--pp-text);
+  line-height: 1.55;
+}
+.pp-stock-sentiment-cohort {
+  color: var(--pp-ink);
+  font-weight: 600;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * ABOUT PANEL
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-stock-about-body { padding: 18px; }
+.pp-stock-about-blurb {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--pp-text);
+  margin: 0;
+}
+.pp-stock-about-grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.pp-stock-about-val {
+  display: block;
+  font-size: 13px;
+  color: var(--pp-ink);
+  font-weight: 600;
+  margin-top: 1px;
+}

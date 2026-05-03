@@ -1,0 +1,143 @@
+{#-
+  PaperPanda Redesign — Screener page
+  Mirrors design_handoff_paperpanda/page-screener.jsx
+
+  Single-page layout: page hero · preset chip row · 260px filter rail +
+  result table.  Filters are visual until /api/screener/run lands.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment %}
+
+{% block title %}Screener · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/screener.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━ #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">≣</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">
+      Tools <span class="pp-page-hero-crumb-sep">/</span> Screener
+    </span>
+    <h1 class="pp-page-hero-title">Screener</h1>
+    <div class="pp-page-hero-sub">
+      Combine fundamentals, smart-money, insider, and Congress filters
+    </div>
+  </div>
+  <div class="pp-screener-actions">
+    {{ btn("Save filter", kind="ghost") }}
+    {{ btn("Export CSV", kind="accent") }}
+  </div>
+</header>
+
+{# ━━━━━━━━━━ PRESET CHIPS ROW ━━━━━━━━━━ #}
+<div class="pp-screener-presets">
+  <span class="pp-mono pp-screener-presets-label">Presets</span>
+  {% for p in screener_presets %}
+    <button class="pp-screener-preset{% if p == screener_active_preset %} is-active{% endif %}"
+            data-preset="{{ p }}">{{ p }}</button>
+  {% endfor %}
+</div>
+
+{# ━━━━━━━━━━ FILTER RAIL + RESULTS ━━━━━━━━━━ #}
+<div class="pp-screener-grid">
+
+  {# ── Filter rail (260px, left) ── #}
+  <aside class="pp-screener-rail" aria-label="Screener filters">
+    {% for group in screener_filters %}
+      {% set _is_last = loop.last %}
+      <div class="pp-screener-filter-group{% if _is_last %} is-last{% endif %}">
+        <div class="pp-mono pp-screener-filter-title">{{ group[0] }}</div>
+        <div class="pp-screener-filter-rows">
+          {% for k, v in group[1] %}
+            <div class="pp-screener-filter-row">
+              <span class="pp-screener-filter-label">{{ k }}</span>
+              <span class="pp-mono pp-screener-filter-value">{{ v }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  </aside>
+
+  {# ── Results column (1fr, right) ── #}
+  <div class="pp-screener-results">
+    <div class="pp-screener-results-head">
+      <span class="pp-mono pp-screener-results-count">{{ screener_results|length }} results</span>
+      <span class="pp-mono pp-screener-results-universe">· of {{ screener_universe }} universe</span>
+      <div style="flex:1"></div>
+      {{ segment(["Sort: Smart money","Mkt cap","P/E","Day %","Insider buys"],
+                 value="Sort: Smart money", mono=True) }}
+    </div>
+
+    <table class="pp-table pp-screener-table">
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th>Name</th>
+          <th>Sector</th>
+          <th class="pp-num">Mkt cap</th>
+          <th class="pp-num">P/E</th>
+          <th class="pp-num">Price</th>
+          <th class="pp-num">Day</th>
+          <th class="pp-num">13F flow</th>
+          <th class="pp-num">Insiders</th>
+          <th class="pp-num">Congress</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in screener_results %}
+          <tr>
+            <td><span class="pp-mono pp-screener-tkr">{{ r.tk }}</span></td>
+            <td class="pp-text">{{ r.name }}</td>
+            <td class="pp-dim">{{ r.sec }}</td>
+            <td class="pp-num pp-mono pp-screener-mc">{{ r.mc }}</td>
+            <td class="pp-num pp-mono pp-text">{{ r.pe }}</td>
+            <td class="pp-num pp-mono pp-screener-price">{{ r.price }}</td>
+            <td class="pp-num">
+              <span class="pp-mono {{ 'pp-up' if r.chg >= 0 else 'pp-down' }}" style="font-weight:600;">
+                {%- if r.chg >= 0 %}+{% endif %}{{ "%.2f"|format(r.chg * 100) }}%
+              </span>
+            </td>
+            <td class="pp-num">
+              <span class="pp-mono pp-up" style="font-weight:600;">{{ r.smart }}</span>
+            </td>
+            <td class="pp-num">
+              <span class="pp-mono {% if 'BUY' in r.ins %}pp-up{% elif 'SELL' in r.ins %}pp-down{% else %}pp-dim2{% endif %}" style="font-weight:600;">{{ r.ins }}</span>
+            </td>
+            <td class="pp-num">
+              <span class="pp-mono {% if 'BUY' in r.cong %}pp-up{% elif 'SELL' in r.cong %}pp-down{% else %}pp-dim2{% endif %}" style="font-weight:600;">{{ r.cong }}</span>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+{# Preset chips — visual-only toggle, swaps active class.  Real switch
+   would re-fetch results from /api/screener/run with the preset's filter set. #}
+<script>
+(function () {
+  document.querySelectorAll('.pp-screener-preset').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('.pp-screener-preset').forEach(function (b) {
+        b.classList.toggle('is-active', b === btn);
+      });
+    });
+  });
+})();
+</script>
+{% endblock %}

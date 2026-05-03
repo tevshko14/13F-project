@@ -1,0 +1,532 @@
+/* ============================================================================
+ * PaperPanda Redesign — Primitives stylesheet
+ *
+ * Matches the 13 macros in templates/_redesign/macros/_primitives.html
+ * which mirror the JSX components in design_handoff_paperpanda/pp-components.jsx.
+ *
+ * No raw colors — every color reads from a --pp-* token.
+ * No border-radius — terminal aesthetic mandates sharp corners.
+ * Mono numbers everywhere — fontVariantNumeric: tabular-nums.
+ * ==========================================================================*/
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Atoms — Mono / Kicker / Label
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-mono {
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-kicker {
+  font-family: var(--pp-font-mono);
+  font-size: var(--pp-fs-kicker);
+  font-weight: 700;
+  letter-spacing: var(--pp-ls-mono-loose);
+  text-transform: uppercase;
+  color: var(--pp-accent);
+}
+
+.pp-label {
+  font-size: var(--pp-fs-label);
+  font-weight: 600;
+  letter-spacing: var(--pp-ls-mono-tight);
+  text-transform: uppercase;
+  color: var(--pp-dim);
+}
+
+/* When used inline next to a panel title, the design uses tighter spacing */
+.pp-label-loose { letter-spacing: var(--pp-ls-mono-vloose); }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Buttons — primary / accent / ghost; block for full-width
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-btn {
+  font-family: var(--pp-font-body);
+  font-size: var(--pp-fs-cell);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 7px 13px;
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: opacity 0.12s ease;
+  white-space: nowrap;
+}
+.pp-btn:hover { opacity: 0.85; }
+.pp-btn:active { opacity: 0.95; }
+.pp-btn:focus-visible {
+  outline: 2px solid var(--pp-accent);
+  outline-offset: 2px;
+}
+
+.pp-btn-primary {
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+}
+
+.pp-btn-accent {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+}
+
+.pp-btn-ghost {
+  background: transparent;
+  color: var(--pp-text);
+  border: var(--pp-border-w) solid var(--pp-line2);
+}
+
+.pp-btn-block {
+  width: 100%;
+  display: flex;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Containers — Panel / PanelHead
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-panel {
+  background: var(--pp-panel);
+  border: var(--pp-border-w) solid var(--pp-line2);
+}
+
+.pp-panel-head {
+  display: flex;
+  align-items: baseline;
+  padding: 12px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  gap: 10px;
+}
+
+.pp-panel-head-title {
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.01em;
+}
+
+.pp-panel-head-spacer { flex: 1; }
+
+.pp-panel-head-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Notable callout — coral 3px left border on hero panels per design spec */
+.pp-panel-notable {
+  border-left: 3px solid var(--pp-accent);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Segmented control — Segment / RangeChip
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-segment {
+  display: inline-flex;
+  background: var(--pp-panel);
+  border: var(--pp-border-w) solid var(--pp-line2);
+  padding: 3px;
+  font-size: 12px;
+  font-family: var(--pp-font-body);
+  user-select: none;
+}
+
+.pp-segment-mono {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+}
+
+.pp-segment-opt {
+  padding: 4px 11px;
+  cursor: pointer;
+  color: var(--pp-dim);
+  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: color 0.12s ease;
+}
+
+.pp-segment-mono .pp-segment-opt {
+  letter-spacing: 0.04em;
+}
+
+.pp-segment-opt:hover {
+  color: var(--pp-text);
+}
+
+.pp-segment-opt.is-active {
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-weight: 700;
+}
+
+.pp-segment-accent .pp-segment-opt.is-active {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+}
+
+.pp-segment-opt:focus-visible {
+  outline: 2px solid var(--pp-accent);
+  outline-offset: -2px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * KPI Strip — 6-cell horizontal bar
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-kpi-strip {
+  display: grid;
+  background: var(--pp-panel);
+  border: var(--pp-border-w) solid var(--pp-line2);
+}
+
+.pp-kpi-cell {
+  padding: 14px 16px;
+  border-right: var(--pp-border-w) solid var(--pp-line);
+  min-width: 0; /* allow value text to truncate gracefully */
+}
+
+.pp-kpi-cell:last-child {
+  border-right: 0;
+}
+
+.pp-kpi-value {
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--pp-fs-kpi-value);
+  font-weight: 600;
+  color: var(--pp-ink);
+  margin-top: 4px;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pp-kpi-delta {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Tag — semantic chips for table actions
+ *   BUY / ADDED  → outlined green
+ *   SELL / REDUCED → outlined red
+ *   NEW          → filled coral
+ *   EXITED       → filled red
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-tag {
+  display: inline-block;
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--pp-ls-mono-loose);
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pp-tag-buy,
+.pp-tag-added {
+  color: var(--pp-up);
+  border-color: var(--pp-up);
+}
+
+.pp-tag-sell,
+.pp-tag-reduced {
+  color: var(--pp-down);
+  border-color: var(--pp-down);
+}
+
+.pp-tag-new {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+  border-color: var(--pp-accent);
+}
+
+.pp-tag-exited {
+  background: var(--pp-down);
+  color: var(--pp-accent-ink);
+  border-color: var(--pp-down);
+}
+
+/* Fallback for unknown kind — neutral dim */
+.pp-tag {
+  color: var(--pp-dim);
+  border-color: var(--pp-dim2);
+}
+.pp-tag-buy,
+.pp-tag-added,
+.pp-tag-sell,
+.pp-tag-reduced,
+.pp-tag-new,
+.pp-tag-exited {
+  /* re-apply specific kinds to override the catch-all above */
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Sparkline — inline SVG, no styling beyond stroke
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-spark {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Delta — mono ▲/▼ + percentage with semantic color
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-delta {
+  font-weight: 600;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+/* Reusable color modifiers for any numeric cell or chip.
+   These are referenced from KPI strips, table cells, deltas, etc. */
+.pp-up   { color: var(--pp-up); }
+.pp-down { color: var(--pp-down); }
+.pp-dim  { color: var(--pp-dim); }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Avatar — 28×28 initials chip
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-avatar {
+  width: 28px;
+  height: 28px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--pp-font-body);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.pp-avatar-accent {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Tables — terminal density, mono numbers, sharp 1px rules
+ * The README spec: header padding 10×14, body padding 9×14, fontSize 12.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--pp-fs-cell);
+}
+
+.pp-table thead th {
+  padding: 10px 14px;
+  font-family: var(--pp-font-mono);
+  font-size: var(--pp-fs-cell-head);
+  font-weight: 600;
+  letter-spacing: var(--pp-ls-mono-loose);
+  text-transform: uppercase;
+  color: var(--pp-dim);
+  text-align: left;
+  border-bottom: var(--pp-border-w) solid var(--pp-line2);
+  white-space: nowrap;
+}
+
+.pp-table tbody td {
+  padding: 9px 14px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  vertical-align: middle;
+}
+
+.pp-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.pp-table tbody tr:hover td {
+  background: var(--pp-sub);
+}
+
+/* Number columns — right-aligned, mono, primary cells bolded */
+.pp-table .pp-num,
+.pp-table th.pp-num {
+  text-align: right;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-table td.pp-num-primary {
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+
+/* Sortable header indicator — used by Screener */
+.pp-table th.pp-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.pp-table th.pp-sortable:hover { color: var(--pp-text); }
+.pp-table th.pp-sortable[aria-sort="ascending"]::after {
+  content: " ▲";
+  color: var(--pp-accent);
+}
+.pp-table th.pp-sortable[aria-sort="descending"]::after {
+  content: " ▼";
+  color: var(--pp-accent);
+}
+
+/* Action chip on row right — coral arrow link */
+.pp-row-action {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pp-accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pp-row-action:hover { text-decoration: underline; }
+
+/* Status pill — `● active` / `● paused` lowercase mono with bullet */
+.pp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  color: var(--pp-text);
+}
+.pp-status::before {
+  content: "●";
+  color: var(--pp-up);
+}
+.pp-status-paused::before { color: var(--pp-dim); }
+.pp-status-error::before  { color: var(--pp-down); }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Sentiment bar — centered-zero horizontal fill (Insiders + Retail/Trending)
+ * 80×5px track, fill extends from center to ±50% based on signed value.
+ * Usage: <span class="pp-sentbar" style="--v:0.62"></span>
+ *   --v in [-1, 1].  positive → fill right (up), negative → fill left (down).
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-sentbar {
+  position: relative;
+  display: inline-block;
+  width: 80px;
+  height: 5px;
+  background: var(--pp-line);
+  vertical-align: middle;
+}
+.pp-sentbar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--pp-dim2);
+}
+.pp-sentbar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  /* width = |v| * 50%, anchored at center. */
+  width: calc(max(0, var(--v, 0)) * 50%);
+  left: 50%;
+  background: var(--pp-up);
+}
+.pp-sentbar.pp-sentbar-neg::after {
+  /* negative: extend leftward from center.  Caller supplies absolute |v|. */
+  width: calc(var(--v, 0) * 50%);
+  left: auto;
+  right: 50%;
+  background: var(--pp-down);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Global search dropdown — used by hero search + sidebar ⌘K palette.
+ * Class names (.ts-*) match what global-search.js emits so any container
+ * styled as .pp-hero-search-results (or similar) gets terminal styling.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.ts-category {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--pp-ls-mono-loose);
+  text-transform: uppercase;
+  color: var(--pp-dim);
+  padding: 10px 14px 6px;
+  background: var(--pp-sub);
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+.ts-category:not(:first-child) { border-top: var(--pp-border-w) solid var(--pp-line); }
+
+.ts-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  transition: background 0.06s ease;
+}
+.ts-item:last-child { border-bottom: 0; }
+.ts-item:hover,
+.ts-item.ts-active {
+  background: var(--pp-sub);
+}
+
+.ts-item-ticker {
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--pp-ink);
+  min-width: 70px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-item-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--pp-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-item-meta {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.ts-star { color: var(--pp-accent); flex-shrink: 0; }
+.ts-icon { flex-shrink: 0; font-size: 13px; line-height: 1; color: var(--pp-dim); }
+.ts-icon.pp-party-d { color: var(--pp-party-d); }
+.ts-icon.pp-party-r { color: var(--pp-party-r); }
+
+.ts-empty {
+  padding: 14px;
+  font-size: 12px;
+  color: var(--pp-dim);
+  font-style: italic;
+}

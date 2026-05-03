@@ -1,0 +1,212 @@
+{#-
+  PaperPanda Redesign — Retail page
+  Mirrors design_handoff_paperpanda/page-retail.jsx
+
+  Tabs: Pulse · Trends · WSB
+  Default = Pulse (live).  Trends + WSB are placeholders until their
+  data wiring lands (Google Trends multi-line; WSB sentiment + flair).
+
+  Real data: filings.sentiment._get_apewisdom_all() — 8 ticker trending
+  list with rank / mentions / mentions_24h_ago / upvotes.  Sentiment is
+  a crude upvotes-to-mentions proxy until proper NLP lands.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment,
+     kpi_strip, spark %}
+
+{% block title %}Retail · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/retail.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━ #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">R</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">
+      Sentiment <span class="pp-page-hero-crumb-sep">/</span> Retail
+    </span>
+    <h1 class="pp-page-hero-title">Retail pulse</h1>
+    <div class="pp-page-hero-sub">
+      Google Trends · Reddit · X · 24-hour rolling window
+      {%- if retail_is_mock %} · <span class="pp-page-hero-flag">DEMO</span>{% endif %}
+    </div>
+  </div>
+  {{ btn("Add ticker", kind="ghost") }}
+</header>
+
+{# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
+<div class="pp-page-section pp-page-section-kpi">
+  {{ kpi_strip(retail_kpi) }}
+</div>
+
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
+<div class="pp-page-tabs">
+  {{ segment(["Pulse","Trends","WSB"],
+             value=retail_tab|default("Pulse"),
+             id="pp-retail-tabs") }}
+</div>
+
+{# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
+<div class="pp-page-body">
+
+  {# ── PULSE (default — LIVE via ApeWisdom) ── #}
+  <section class="pp-page-pane is-active" data-tab-pane="Pulse">
+
+    {# Top callout — featured ticker hero with 3-stat grid + spark.
+       Coral left-border accent matches the design's `notable_panel` pattern. #}
+    {% if retail_featured %}
+      {% call panel(cls="pp-retail-featured-panel") %}
+        <div class="pp-retail-featured">
+          <div class="pp-retail-featured-id">
+            {{ kicker("Most discussed · 24h") }}
+            <div class="pp-mono pp-retail-featured-tkr">${{ retail_featured.ticker }}</div>
+            <div class="pp-retail-featured-name">{{ retail_featured.name }}</div>
+          </div>
+          <div class="pp-retail-featured-stats">
+            <div>
+              {{ label("Mentions") }}
+              <span class="pp-mono pp-retail-stat-val">{{ retail_featured.mentions_str }}</span>
+              <span class="pp-mono pp-retail-stat-delta {{ 'pp-up' if retail_featured.dod_up else 'pp-down' }}">{{ retail_featured.dod_str }}</span>
+            </div>
+            <div>
+              {{ label("Sentiment") }}
+              <span class="pp-mono pp-retail-stat-val">{{ retail_featured.sentiment_str }}</span>
+              <span class="pp-mono pp-retail-stat-delta {{ 'pp-up' if retail_featured.sentiment_up else 'pp-down' }}">{{ retail_featured.sentiment_label }}</span>
+            </div>
+            <div>
+              {{ label("Price") }}
+              <span class="pp-mono pp-retail-stat-val">{{ retail_featured.price }}</span>
+              <span class="pp-mono pp-retail-stat-delta pp-dim">{{ retail_featured.price_chg }}</span>
+            </div>
+          </div>
+          {# Inline 140×60 spark.  Mock series — would wire to a 24h
+             mentions-over-time series once we have hourly bucketing. #}
+          {{ spark(
+              [0.32,0.38,0.41,0.39,0.45,0.52,0.48,0.55,0.6,0.58,0.62,0.66,0.63,0.7,0.72,0.68,0.75,0.78,0.74,0.81,0.84,0.8,0.86,0.83,0.88,0.91,0.87,0.93],
+              color="var(--pp-accent)", w=140, h=60, stroke=1.6, cls="pp-retail-featured-spark"
+          ) }}
+        </div>
+      {% endcall %}
+    {% endif %}
+
+    {# Trending now — dense 9-col table.  Real ApeWisdom rows. #}
+    {% call panel() %}
+      {% call panel_head("Trending now", sub="ranked by 24h mention growth") %}
+        {{ segment(["All","Stocks","Crypto","Options"], value="All", mono=True) }}
+      {% endcall %}
+      <table class="pp-table pp-retail-trending-table">
+        <thead>
+          <tr>
+            <th class="pp-num pp-retail-th-rank">#</th>
+            <th>Ticker</th>
+            <th>Name</th>
+            <th class="pp-num">Mentions 24h</th>
+            <th class="pp-num">Δ DoD</th>
+            <th>Sentiment</th>
+            <th class="pp-num">Price</th>
+            <th class="pp-num">Day</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in retail_trending %}
+            <tr>
+              <td class="pp-num">
+                <span class="pp-mono pp-dim2">{{ "%02d"|format(r.rank) }}</span>
+              </td>
+              <td>
+                <span class="pp-mono pp-retail-tkr">${{ r.ticker }}</span>
+              </td>
+              <td class="pp-retail-name">{{ r.name }}</td>
+              <td class="pp-num pp-mono pp-retail-mentions">{{ r.mentions_str }}</td>
+              <td class="pp-num">
+                <span class="pp-mono {{ 'pp-up' if r.dod >= 0 else 'pp-down' }}" style="font-weight:600;">{{ r.dod_str }}</span>
+              </td>
+              <td>
+                {# Sentiment bar — centered at 50%, fills outward. #}
+                <div class="pp-retail-sentiment-cell">
+                  <div class="pp-retail-sentiment-bar">
+                    <div class="pp-retail-sentiment-tick"></div>
+                    <div class="pp-retail-sentiment-fill {{ 'is-up' if r.sentiment_up else 'is-down' }}"
+                         style="width: {{ r.sentiment_bar_width }}%;"></div>
+                  </div>
+                  <span class="pp-mono pp-retail-sentiment-val {{ 'pp-up' if r.sentiment_up else 'pp-down' }}">{{ r.sentiment_str }}</span>
+                </div>
+              </td>
+              <td class="pp-num pp-mono pp-dim">{{ r.price if r.price else '—' }}</td>
+              <td class="pp-num pp-mono pp-dim">{{ r.price_chg if r.price_chg else '—' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endcall %}
+
+  </section>
+
+  {# ── TRENDS (placeholder) ── #}
+  <section class="pp-page-pane" data-tab-pane="Trends">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">∿</div>
+        <div class="pp-page-placeholder-title">Trends tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Google Trends multi-line chart (90-day) for your watchlist.
+          Wires to filings.google_trends; needs an `area_chart` primitive
+          to render multiple series cleanly.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+  {# ── WSB (placeholder) ── #}
+  <section class="pp-page-pane" data-tab-pane="WSB">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">⊘</div>
+        <div class="pp-page-placeholder-title">WSB tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          WSB sentiment index (+71 strongly bullish, distribution bar) plus
+          top tickers table with DD / YOLO / calls-puts breakdowns.
+          Wires to filings.wsb_sentiment; needs Reddit flair extension.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  var seg = document.getElementById('pp-retail-tabs');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-page-pane');
+  if (!panes.length) return;
+  function activate(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-value') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    });
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    if (name) activate(name);
+  });
+})();
+</script>
+{% endblock %}

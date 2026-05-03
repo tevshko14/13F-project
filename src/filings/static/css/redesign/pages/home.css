@@ -1,0 +1,1116 @@
+/* ============================================================================
+ * PaperPanda Redesign — Home page styles
+ * Mirrors design_handoff_paperpanda/page-home.jsx
+ * ==========================================================================*/
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Home Masthead — locked spec.  All values are exact; no clamps, no
+ * substitutions.  Container has a 2px ink bottom rule.  No radius
+ * anywhere in the system.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-mast {
+  padding: 40px 24px 28px;
+  border-bottom: 2px solid var(--pp-ink);
+}
+
+/* Kicker — Geist Mono, accent color, uppercase, 11px tight tracking. */
+.pp-home-mast-kicker {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--pp-accent);
+}
+
+/* H1 — Geist 64px, 0.96 line-height, tight -2.4px tracking, max 1080px.
+   `for modern investors.` is wrapped in span.pp-accent → coral. */
+.pp-home-mast-h1 {
+  font-family: var(--pp-font-display);
+  font-size: 64px;
+  line-height: 0.96;
+  font-weight: 700;
+  letter-spacing: -2.4px;
+  margin: 14px 0 0;
+  color: var(--pp-ink);
+  max-width: 1080px;
+  text-wrap: balance;
+}
+.pp-home-mast-h1 .pp-accent { color: var(--pp-accent); }
+
+/* H2 / subtitle — Geist 17px, 1.5 line-height, dim color, max 780px.
+   `pp-emph` spans inside (the data points "85 superinvestor funds" etc.)
+   read as primary against the dim copy. */
+.pp-home-mast-sub {
+  font-family: var(--pp-font-body);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: -0.2px;
+  margin: 16px 0 0;
+  color: var(--pp-dim);
+  max-width: 780px;
+  text-wrap: pretty;
+}
+.pp-home-mast-sub .pp-emph {
+  color: var(--pp-text);
+  font-weight: 500;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Hero search — flush composite of input shell + Explore button.
+ * 48px tall, 780px max-width, no gap between the two children, no radius.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-hero-search {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  margin-top: 28px;
+  max-width: 780px;
+  height: 48px;
+}
+
+/* Left child: input shell (icon + input + ⌘K hint), fills via flex:1. */
+.pp-hero-search-shell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 16px;
+  background: var(--pp-sub);
+  border: 1px solid var(--pp-line2);
+  border-right: none;        /* flush with the Explore button */
+  cursor: text;
+  transition: border-color 0.12s ease;
+  min-width: 0;
+}
+.pp-hero-search-shell:focus-within {
+  border-color: var(--pp-ink);
+}
+
+.pp-hero-search-icon {
+  flex-shrink: 0;
+  color: var(--pp-dim);
+  opacity: 0.6;
+}
+
+.pp-hero-search-input {
+  flex: 1;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--pp-text);
+  font-family: var(--pp-font-body);
+  font-size: 14px;
+  letter-spacing: -0.1px;
+  height: 100%;
+  padding: 0;
+  min-width: 0;
+}
+.pp-hero-search-input::placeholder {
+  color: var(--pp-dim2);
+  font-family: var(--pp-font-body);
+  font-size: 14px;
+  letter-spacing: -0.1px;
+}
+.pp-hero-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none; appearance: none;
+}
+
+.pp-hero-search-kbd {
+  flex-shrink: 0;
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--pp-dim2);
+  padding: 3px 7px;
+  border: 1px solid var(--pp-line2);
+}
+
+/* Right child: Explore button — flush against the shell, ink fill. */
+.pp-hero-search-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 26px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  border: 1px solid var(--pp-ink);
+  font-family: var(--pp-font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.pp-hero-search-btn:hover {
+  background: var(--pp-accent);
+  border-color: var(--pp-accent);
+  color: #fff;
+}
+.pp-hero-search-btn-arrow {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+/* Results dropdown — anchored under the full composite, flush 1px border. */
+.pp-hero-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-width: 780px;
+  background: var(--pp-panel);
+  border: 1px solid var(--pp-line2);
+  max-height: 420px;
+  overflow-y: auto;
+  z-index: 50;
+  display: none;
+}
+.pp-hero-search-results:not(:empty) { display: block; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Page nav row — Segment (left) + RangeChip (right).  Sits between
+ * masthead and KPI strip.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-navrow {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line2);
+  gap: 14px;
+}
+
+.pp-home-navrow-spacer { flex: 1; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Body — KPI strip + grids.  Page padding 22px 24px 32px.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-body { padding: 22px 24px 32px; }
+
+/* Section spacing now lives on the active tab-pane's flex gap (see
+   .pp-home-tab-pane.is-active below) — child of .pp-home-stack is exactly
+   one visible <section>, so no inter-section margin is needed here. */
+
+/* Hero grid: chart 1.7fr | retail pulse 1fr */
+.pp-home-hero {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 18px;
+}
+
+/* Movers + 13F row */
+.pp-home-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+/* Insider / Congress / Macro 3-col */
+.pp-home-row3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 18px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Hero chart panel — S&P intraday with area fill + reference line + price tag.
+ * Below chart: 4-cell OPEN/HIGH/LOW/VOL strip.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+/* Wrapper holds the inner padding — SVGs ignore CSS padding for their
+   contents, so putting padding on the SVG just inflates the box and makes
+   the chart bleed past the panel.  Keep padding on the div here.
+   `position: relative` anchors the absolutely-positioned HTML overlays
+   (price chip + hover tooltip) to the chart bounds. */
+.pp-home-chart-wrap {
+  position: relative;
+  padding: 16px 18px;
+  cursor: crosshair;
+}
+.pp-home-chart-svg {
+  display: block;
+  width: 100%;
+  height: 200px;
+  /* `preserveAspectRatio="none"` on the <svg> stretches the viewBox
+     horizontally to fill the panel width — which warps any <text> inside
+     the SVG.  We work around it by rendering text as HTML overlays
+     (.pp-home-chart-chip, .pp-home-chart-tooltip) and using
+     `vector-effect: non-scaling-stroke` on the line / crosshair so the
+     stroke widths stay crisp regardless of the stretch ratio. */
+}
+
+.pp-home-chart-grid { stroke: var(--pp-line); stroke-dasharray: 2 4; }
+.pp-home-chart-area { fill: var(--pp-accent); fill-opacity: 0.06; }
+.pp-home-chart-line { fill: none; stroke: var(--pp-ink); stroke-width: 1.6; }
+.pp-home-chart-ref  { stroke: var(--pp-accent); stroke-dasharray: 3 3; }
+
+/* Hover crosshair — vertical dashed line that snaps to the nearest data
+   point.  Hidden by default (display:none); JS toggles `is-active` on the
+   wrapper to reveal. */
+.pp-home-chart-crosshair {
+  stroke: var(--pp-ink);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 80ms linear;
+}
+.pp-home-chart-hover-dot {
+  fill: var(--pp-accent);
+  stroke: var(--pp-bg);
+  stroke-width: 1.5;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 80ms linear;
+}
+.pp-home-chart-wrap.is-hovering .pp-home-chart-crosshair,
+.pp-home-chart-wrap.is-hovering .pp-home-chart-hover-dot {
+  opacity: 1;
+}
+
+/* Price chip — pinned to the right edge, vertical position set inline by
+   the template (top: % of last data-point's y in viewBox).  Centered on
+   that y via translateY(-50%).  Mono numerals so digits stay tabular. */
+.pp-home-chart-chip {
+  position: absolute;
+  right: 18px;
+  transform: translateY(-50%);
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2px 6px;
+  border-radius: 0;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 2;
+}
+
+/* Hover tooltip — coral chip floating above the crosshair, showing the
+   time + price + change at the cursor.  `inset-inline-start` is set in
+   pixels by the JS; we keep the 8px lift so it doesn't cover the dot. */
+.pp-home-chart-tooltip {
+  position: absolute;
+  top: 16px;          /* matches wrap padding-top so it sits at the chart top */
+  left: 0;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 3;
+}
+.pp-home-chart-tooltip[hidden] { display: none; }
+.pp-home-chart-tooltip-time {
+  color: var(--pp-bg);
+  opacity: 0.6;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.pp-home-chart-tooltip-price { font-weight: 700; }
+.pp-home-chart-tooltip-chg.pp-up   { color: var(--pp-up); }
+.pp-home-chart-tooltip-chg.pp-down { color: var(--pp-down); }
+
+.pp-home-chart-foot {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-chart-foot-cell {
+  padding: 10px 18px;
+  border-right: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-chart-foot-cell:last-child { border-right: 0; }
+.pp-home-chart-foot-val {
+  display: block;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--pp-ink);
+  margin-top: 2px;
+  font-weight: 600;
+}
+.pp-home-chart-headlight {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  /* Color comes from .pp-up / .pp-down modifier classes added by the template
+     based on the day's direction.  Do not hardcode here. */
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Retail pulse hero — featured ticker + 4 trending rows.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-retail { display: flex; flex-direction: column; }
+
+.pp-home-retail-feat {
+  padding: 14px 18px;
+  background: var(--pp-sub);
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-retail-feat-tkr {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.027em;
+  margin-top: 4px;
+  color: var(--pp-accent);
+  font-family: var(--pp-font-body);
+}
+.pp-home-retail-feat-meta {
+  font-size: 12px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+  font-style: italic;
+}
+
+.pp-home-retail-list { flex: 1; }
+.pp-home-retail-row {
+  display: grid;
+  grid-template-columns: 50px 1fr 60px;
+  gap: 10px;
+  padding: 9px 18px;
+  align-items: center;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-retail-row:last-child { border-bottom: 0; }
+.pp-home-retail-tkr {
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-size: 13px;
+}
+.pp-home-retail-bar {
+  height: 3px;
+  background: var(--pp-line2);
+}
+.pp-home-retail-bar-fill { height: 100%; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * 13F flow list / Insiders / Congress — list rows, no tables.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-list-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-list-row:last-child { border-bottom: 0; }
+
+.pp-home-list-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-ink);
+}
+.pp-home-list-meta {
+  font-size: 11px;
+  color: var(--pp-dim);
+}
+.pp-home-list-tkr {
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  min-width: 54px;
+  text-align: right;
+}
+.pp-home-list-size {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  color: var(--pp-dim);
+  min-width: 60px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Insider/Congress 5-row variants — slightly different grid */
+.pp-home-insider-row {
+  padding: 9px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.pp-home-insider-row:last-child { border-bottom: 0; }
+.pp-home-insider-name { color: var(--pp-ink); }
+.pp-home-insider-meta { font-size: 10px; color: var(--pp-dim2); }
+
+.pp-home-congress-row {
+  padding: 9px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  display: grid;
+  grid-template-columns: 12px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.pp-home-congress-row:last-child { border-bottom: 0; }
+.pp-home-congress-dot {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+}
+.pp-home-congress-dot-d { background: var(--pp-party-d); }
+.pp-home-congress-dot-r { background: var(--pp-party-r); }
+
+/* Macro panel — label + note + value/change vertical stack */
+.pp-home-macro-row {
+  padding: 11px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.pp-home-macro-row:last-child { border-bottom: 0; }
+.pp-home-macro-label {
+  color: var(--pp-ink);
+  font-size: 13px;
+}
+.pp-home-macro-note {
+  font-size: 10px;
+  color: var(--pp-dim2);
+}
+.pp-home-macro-val {
+  display: block;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-home-macro-chg {
+  display: block;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--pp-dim);
+}
+
+/* "View all →" / "All funds →" link in panel head right slot */
+.pp-link-coral {
+  font-size: 11px;
+  color: var(--pp-accent);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pp-link-coral:hover { text-decoration: underline; }
+
+/* Movers table — extends .pp-table, but Home wants tighter padding (7×14). */
+.pp-home-movers-table thead th { padding: 8px 14px; }
+.pp-home-movers-table tbody td { padding: 7px 14px; }
+.pp-home-movers-table .pp-home-movers-name {
+  color: var(--pp-dim);
+  margin-left: 6px;
+  font-size: 11px;
+}
+
+/* ============================================================================
+ * TICKER TAPE — always-on horizontal scroll above subtab nav
+ * ==========================================================================*/
+
+.pp-home-ticker {
+  border-bottom: 1px solid var(--pp-line2);
+  border-top: 1px solid var(--pp-line2);
+  background: var(--pp-sub);
+  overflow: hidden;
+  height: 34px;
+  display: flex;
+  align-items: center;
+}
+.pp-home-ticker-track {
+  display: flex;
+  white-space: nowrap;
+  /* Slow horizontal scroll; doubled content makes the loop seamless. */
+  animation: pp-ticker-scroll 110s linear infinite;
+}
+.pp-home-ticker:hover .pp-home-ticker-track {
+  animation-play-state: paused;
+}
+.pp-home-ticker-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px;
+  border-right: 1px solid var(--pp-line);
+  font-size: 11px;
+}
+.pp-home-ticker-label {
+  color: var(--pp-ink);
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.pp-home-ticker-value {
+  color: var(--pp-text);
+}
+.pp-home-ticker-chg {
+  font-weight: 600;
+}
+@keyframes pp-ticker-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/* ============================================================================
+ * SUBTAB PANES — only the active one renders.
+ * ==========================================================================*/
+
+.pp-home-tab-pane { display: none; }
+.pp-home-tab-pane.is-active {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* ============================================================================
+ * INDEX TOGGLE INSIDE CHART HEAD (Overview hero) — replaces panel_head
+ * ==========================================================================*/
+
+.pp-home-chart-head {
+  /* Mirrors .pp-panel-head: flex baseline, padding, bottom rule. */
+  display: flex;
+  align-items: center;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--pp-line);
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.pp-home-chart-idx {
+  /* Compact mono segment — overrides default segment padding for the
+     chart-header context. */
+  padding: 0;
+}
+.pp-home-chart-idx .pp-segment-opt {
+  padding: 6px 14px;
+  font-size: 11px;
+}
+.pp-home-chart-sublabel {
+  /* Letter-spaced uppercase mono next to the segment, dim color. */
+  color: var(--pp-dim);
+}
+.pp-home-chart-last {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+}
+.pp-home-chart-head .pp-home-chart-headlight {
+  /* Inside the chart head it sits next to .pp-home-chart-last; size to match
+     the design's 12px change pill.  Force inline-flex so it doesn't take a
+     full block line when the head wraps. */
+  font-size: 12px;
+  display: inline-flex;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.pp-home-chart-head .pp-home-chart-last { white-space: nowrap; }
+/* Group last + change so they wrap together as a unit when the head is
+   narrow.  Without this they wrap independently and the change can drop
+   to its own line, leaving an awkward dangling price. */
+.pp-home-chart-head {
+  /* Tighter horizontal gap so the head fits in the 1.7fr column at narrower
+     widths (the design's 1440 baseline; we wrap below ~1100). */
+  column-gap: 14px;
+  row-gap: 6px;
+}
+
+/* ============================================================================
+ * FEAR & GREED GAUGE (Overview / retail panel)
+ * ==========================================================================*/
+
+.pp-home-feargreed {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--pp-line);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 18px;
+  align-items: center;
+}
+.pp-home-feargreed-svg { display: block; }
+.pp-home-feargreed-text { min-width: 0; }
+.pp-home-feargreed-value {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.5px;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-home-feargreed-meta {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 4px;
+}
+
+/* ============================================================================
+ * FLOW SUBTAB
+ * ==========================================================================*/
+
+.pp-home-flow-trending-body {
+  padding: 18px 24px;
+}
+.pp-home-flow-legend {
+  display: flex;
+  gap: 18px;
+  font-size: 11px;
+  margin-bottom: 14px;
+}
+.pp-home-flow-legend-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pp-home-flow-legend-swatch {
+  width: 14px;
+  height: 10px;
+  display: inline-block;
+}
+.pp-home-flow-legend-swatch-ink    { background: var(--pp-ink); }
+.pp-home-flow-legend-swatch-accent { background: var(--pp-accent); }
+
+.pp-home-flow-row {
+  display: grid;
+  grid-template-columns: 60px 1fr 60px 60px 80px;
+  gap: 14px;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-home-flow-row:last-child { border-bottom: none; }
+.pp-home-flow-tk {
+  color: var(--pp-ink);
+  font-weight: 700;
+  font-size: 13px;
+}
+.pp-home-flow-bars {
+  display: flex;
+  align-items: center;
+  height: 18px;
+}
+.pp-home-flow-bar {
+  height: 14px;
+  /* Dim SELL bars to keep direction readable — matches the JSX 0.4 opacity. */
+}
+.pp-home-flow-bar.is-sell { opacity: 0.4; }
+.pp-home-flow-bar-ink    { background: var(--pp-ink); }
+.pp-home-flow-bar-accent { background: var(--pp-accent); }
+.pp-home-flow-count {
+  font-size: 11px;
+  color: var(--pp-text);
+  text-align: right;
+}
+.pp-home-flow-net {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+/* ============================================================================
+ * HEATMAP SUBTAB — Companies / Sectors toggle
+ * ==========================================================================*/
+
+.pp-home-heatmap-body { padding: 18px; }
+.pp-home-heatmap-grid { display: none; gap: 6px; }
+.pp-home-heatmap-grid.is-active { display: grid; }
+
+.pp-home-heatmap-grid-companies { grid-template-columns: repeat(6, 1fr); }
+.pp-home-heatmap-grid-sectors {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.pp-home-heatmap-tile {
+  border: 1px solid var(--pp-line2);
+  padding: 14px 14px;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.pp-home-heatmap-tile.is-large {
+  min-height: 140px;
+  justify-content: space-between;
+}
+.pp-home-heatmap-tk {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+}
+.pp-home-heatmap-tile.is-large .pp-home-heatmap-tk {
+  font-size: 20px;
+}
+.pp-home-heatmap-pct {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-home-heatmap-tile.is-large .pp-home-heatmap-pct {
+  font-size: 16px;
+  margin-top: 6px;
+}
+.pp-home-heatmap-mcap {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+}
+
+.pp-home-heatmap-sector {
+  padding: 16px 18px;
+  min-height: 76px;
+}
+.pp-home-heatmap-sector-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-home-heatmap-sector-pct {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 6px;
+  letter-spacing: -0.3px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-home-heatmap-sector-mcap {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+}
+
+/* ============================================================================
+ * ACTIVITY SUBTAB — live feed
+ * ==========================================================================*/
+
+.pp-home-activity-live {
+  font-size: 10px;
+  color: var(--pp-up);
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+
+.pp-home-activity-row {
+  display: grid;
+  grid-template-columns: 60px 90px 12px 1fr 70px;
+  gap: 14px;
+  padding: 12px 22px;
+  align-items: center;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 12px;
+}
+.pp-home-activity-row:last-child { border-bottom: none; }
+
+.pp-home-activity-ago {
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 0.4px;
+}
+.pp-home-activity-src {
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.pp-home-activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pp-dim);
+}
+.pp-home-activity-cat-buy   .pp-home-activity-dot { background: var(--pp-up); }
+.pp-home-activity-cat-sell  .pp-home-activity-dot { background: var(--pp-down); }
+.pp-home-activity-cat-alert .pp-home-activity-dot { background: var(--pp-accent); }
+.pp-home-activity-cat-news  .pp-home-activity-dot { background: var(--pp-dim); }
+
+.pp-home-activity-text {
+  color: var(--pp-text);
+  line-height: 1.5;
+}
+.pp-home-activity-tkr {
+  color: var(--pp-ink);
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.pp-home-activity-pill {
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 1px;
+  padding: 2px 7px;
+  /* Border + color pulled from the row's category modifier. */
+  border: 1px solid var(--pp-dim);
+  color: var(--pp-dim);
+}
+.pp-home-activity-cat-buy   .pp-home-activity-pill {
+  border-color: var(--pp-up);
+  color: var(--pp-up);
+}
+.pp-home-activity-cat-sell  .pp-home-activity-pill {
+  border-color: var(--pp-down);
+  color: var(--pp-down);
+}
+.pp-home-activity-cat-alert .pp-home-activity-pill {
+  border-color: var(--pp-accent);
+  color: var(--pp-accent);
+}
+
+/* ============================================================================
+ * NEWS SUBTAB — featured + top stories
+ * ==========================================================================*/
+
+.pp-home-news-grid {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr;
+  gap: 18px;
+}
+
+.pp-home-news-featured {
+  padding: 22px 26px;
+  border-left: 3px solid var(--pp-accent);
+}
+.pp-home-news-byline {
+  font-size: 10px;
+  color: var(--pp-accent);
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.pp-home-news-feat-title {
+  font-family: var(--pp-font-display);
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin: 8px 0 12px;
+  color: var(--pp-ink);
+  text-wrap: balance;
+}
+.pp-home-news-feat-excerpt {
+  font-size: 14px;
+  color: var(--pp-text);
+  line-height: 1.55;
+  margin: 0;
+}
+.pp-home-news-tickers {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
+.pp-home-news-ticker {
+  font-size: 11px;
+  color: var(--pp-ink);
+  font-weight: 700;
+  padding: 2px 8px;
+  border: 1px solid var(--pp-line2);
+}
+
+/* Right-side story rows */
+.pp-home-news-row {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-home-news-row:last-child { border-bottom: none; }
+.pp-home-news-row .pp-home-news-byline {
+  letter-spacing: 1px;
+}
+.pp-home-news-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-ink);
+  margin-top: 4px;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+.pp-home-news-row-tickers {
+  display: flex;
+  gap: 5px;
+  margin-top: 6px;
+}
+.pp-home-news-ticker-inline {
+  font-size: 10px;
+  color: var(--pp-dim);
+  font-weight: 600;
+}
+
+/* ============================================================================
+ * CALENDAR SUBTAB — earnings + macro
+ * ==========================================================================*/
+
+.pp-home-cal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.pp-home-cal-earn-row {
+  display: grid;
+  grid-template-columns: 68px 70px 1fr 60px 70px;
+  gap: 14px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--pp-line);
+  align-items: center;
+  font-size: 12px;
+}
+.pp-home-cal-earn-row:last-child { border-bottom: none; }
+.pp-home-cal-date {
+  color: var(--pp-ink);
+  font-weight: 700;
+}
+.pp-home-cal-tkr {
+  color: var(--pp-ink);
+  font-weight: 700;
+  font-size: 13px;
+}
+.pp-home-cal-when {
+  color: var(--pp-dim);
+  font-size: 11px;
+}
+.pp-home-cal-eps {
+  color: var(--pp-text);
+  text-align: right;
+}
+.pp-home-cal-iv {
+  color: var(--pp-accent);
+  text-align: right;
+  font-weight: 600;
+}
+
+.pp-home-cal-macro-row {
+  display: grid;
+  grid-template-columns: 68px 8px 1fr auto auto;
+  gap: 12px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--pp-line);
+  align-items: center;
+  font-size: 12px;
+}
+.pp-home-cal-macro-row:last-child { border-bottom: none; }
+.pp-home-cal-impact-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pp-dim);
+}
+.pp-home-cal-impact-high   { background: var(--pp-down); }
+.pp-home-cal-impact-medium { background: var(--pp-accent); }
+.pp-home-cal-impact-low    { background: var(--pp-dim); }
+.pp-home-cal-macro-cell { min-width: 0; }
+.pp-home-cal-macro-label {
+  color: var(--pp-ink);
+  font-weight: 600;
+}
+.pp-home-cal-macro-time {
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+  display: block;
+}
+.pp-home-cal-macro-val {
+  color: var(--pp-text);
+  text-align: right;
+}
+.pp-home-cal-impact-tag {
+  color: var(--pp-dim2);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-weight: 700;
+  text-align: right;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * RESPONSIVE — narrow viewport overrides
+ * Mobile is out-of-scope per the handoff README, but we want the page to
+ * fail-safe rather than horizontal-scroll on phones until the proper mobile
+ * pass lands.  Three breakpoints:
+ *   ≤1080px  — sidebar already collapsed (app-shell.css); stack hero grid.
+ *   ≤900px   — collapse Row 2 (movers + 13F) to 1 column.
+ *   ≤600px   — collapse Row 3 (insider / congress / macro), shrink masthead,
+ *              tighten body padding so no element overflows the viewport.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+@media (max-width: 1080px) {
+  .pp-home-hero {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .pp-home-row2 { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  /* Row 3 (insider / congress / macro) stack to single column. */
+  .pp-home-row3 { grid-template-columns: 1fr; }
+
+  /* Masthead — H1 must fit within viewport.  Reduce padding + scale typo. */
+  .pp-home-mast { padding: 28px 16px 20px; }
+  .pp-home-mast-h1 {
+    font-size: 40px;
+    line-height: 1.0;
+    letter-spacing: -1.4px;
+  }
+  .pp-home-mast-sub {
+    font-size: 14px;
+    line-height: 1.45;
+  }
+
+  /* Composite search bar — Explore button hide-text, keep arrow. */
+  .pp-hero-search { max-width: none; }
+  .pp-hero-search-btn { padding: 0 16px; }
+  .pp-hero-search-btn-label { display: none; }
+
+  /* Subtab + range nav — wrap rather than horizontal scroll. */
+  .pp-home-navrow {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  /* KPI strip — hide bottom 2 cells (10Y / VIX) at very narrow widths so
+     S&P / Nasdaq / Dow stay legible.  Better than ellipsis-truncation
+     across all 5.  Numbers still readable in the ticker tape above. */
+  .pp-kpi-strip { grid-template-columns: repeat(3, 1fr) !important; }
+  .pp-kpi-cell:nth-child(n+4) { display: none; }
+  .pp-kpi-value { font-size: 18px; }
+
+  /* Body padding tighter. */
+  .pp-home-body { padding: 16px 16px 24px; }
+}

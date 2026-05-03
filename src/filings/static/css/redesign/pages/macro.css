@@ -1,0 +1,186 @@
+/* ============================================================================
+ * PaperPanda Redesign — Macro page styles
+ * Mirrors design_handoff_paperpanda/page-macro.jsx
+ *
+ * Reusable cross-page patterns get the .pp-page-* prefix (hero, tabs, body,
+ * pane, placeholder).  Macro-specific styles get .pp-macro-* and live below.
+ * ==========================================================================*/
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SHARED PAGE CHROME — re-used by every detail page (Stock, Funds, Insiders,
+ * Congress, Macro, Retail, Options, Profile).  Lives here for now; will move
+ * to a `pages/_chrome.css` once a second page confirms the same shape.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-page-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 18px 24px 16px;
+  border-bottom: 1px solid var(--pp-line2);
+}
+.pp-page-hero-icon {
+  width: 56px;
+  height: 56px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -1px;
+  flex-shrink: 0;
+}
+.pp-page-hero-text { flex: 1; min-width: 0; }
+.pp-page-hero-crumb {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+.pp-page-hero-crumb-sep {
+  color: var(--pp-dim2);
+  margin: 0 4px;
+}
+.pp-page-hero-title {
+  font-family: var(--pp-font-display);
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin: 4px 0 2px;
+  color: var(--pp-ink);
+}
+.pp-page-hero-sub {
+  font-size: 13px;
+  color: var(--pp-dim);
+  font-style: italic;
+}
+/* Inline DEMO flag pinned to the sub-line when fred_indicators is mocked. */
+.pp-page-hero-flag {
+  font-family: var(--pp-font-mono);
+  font-style: normal;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 1px 6px;
+  border: 1px solid var(--pp-accent);
+  color: var(--pp-accent);
+}
+
+.pp-page-section-kpi { padding: 16px 24px 0; }
+
+/* The Mono kpi value font is 22px in primitives.css.  At 18px it wraps to a
+   second line cleanly when content like "$GME +81%" or "201.28" overflows
+   the cell — better than ellipsis truncation since these are data points
+   the user needs to read in full. */
+.pp-page-section-kpi .pp-kpi-value {
+  font-size: 18px;
+  white-space: normal;
+  line-height: 1.2;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.pp-page-tabs {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--pp-line2);
+  gap: 14px;
+}
+
+.pp-page-body { padding: 22px 24px 32px; }
+
+/* Tab panes — only the active one shows.  Same pattern as Home. */
+.pp-page-pane { display: none; }
+.pp-page-pane.is-active {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Placeholder block for tabs that aren't wired yet. */
+.pp-page-placeholder {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--pp-dim);
+}
+.pp-page-placeholder-icon {
+  font-size: 40px;
+  color: var(--pp-dim2);
+  margin-bottom: 14px;
+}
+.pp-page-placeholder-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--pp-text);
+  letter-spacing: -0.2px;
+  margin-bottom: 6px;
+}
+.pp-page-placeholder-sub {
+  font-size: 13px;
+  color: var(--pp-dim);
+  max-width: 540px;
+  margin: 0 auto;
+  line-height: 1.5;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * MACRO / INDICATORS — 2-col grid of panels (one per FRED group).
+ * Each row inside a panel: name+code · spark · value · delta.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-macro-indicators-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+.pp-macro-row {
+  display: grid;
+  /* name | spark | value | delta */
+  grid-template-columns: 1fr auto auto auto;
+  gap: 14px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--pp-line);
+  align-items: center;
+}
+.pp-macro-row:last-child { border-bottom: none; }
+
+.pp-macro-row-name { min-width: 0; }
+.pp-macro-row-title {
+  font-size: 13px;
+  color: var(--pp-ink);
+  font-weight: 500;
+  /* Truncate long FRED names rather than wrap — keeps row heights uniform. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-macro-row-code {
+  font-size: 10px;
+  color: var(--pp-dim2);
+  letter-spacing: 1px;
+  margin-top: 2px;
+  display: block;
+}
+
+.pp-macro-row-value {
+  font-size: 14px;
+  color: var(--pp-ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+  text-align: right;
+}
+.pp-macro-row-delta {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 54px;
+  text-align: right;
+}

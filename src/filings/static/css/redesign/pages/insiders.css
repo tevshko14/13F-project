@@ -1,0 +1,141 @@
+/* ============================================================================
+ * PaperPanda Redesign — Insiders page
+ * Reuses .pp-page-* chrome from macro.css.
+ * ==========================================================================*/
+
+.pp-insiders-actions {
+  display: flex;
+  gap: 8px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Filter row above the table — Action / Role / Plan + count.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-filters {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.pp-insiders-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pp-insiders-count {
+  font-size: 11px;
+  color: var(--pp-dim);
+}
+.pp-insiders-count .pp-ink-strong {
+  color: var(--pp-ink);
+  font-weight: 700;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Notable callout — coral left-border accent for the highest-signal BUY.
+ * The `notable_panel` pattern (flagged for extraction in the gap audit).
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-notable {
+  padding: 18px 22px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  border-left: 3px solid var(--pp-accent);
+}
+.pp-insiders-notable-text { flex: 1; min-width: 0; }
+.pp-insiders-notable-kicker {
+  font-size: 10px;
+  color: var(--pp-accent);
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  display: block;
+}
+.pp-insiders-notable-headline {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--pp-ink);
+  margin-top: 6px;
+  letter-spacing: -0.3px;
+  text-wrap: pretty;
+  line-height: 1.3;
+}
+.pp-insiders-notable-tkr {
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-insiders-notable-meta {
+  font-size: 11px;
+  color: var(--pp-dim);
+  margin-top: 6px;
+  display: block;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Filings table — 9 cols.  Flagged rows get a faint coral tint.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-table { width: 100%; }
+.pp-insiders-table thead th {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pp-dim);
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line2);
+}
+.pp-insiders-table thead th.pp-num { text-align: right; }
+.pp-insiders-table tbody td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.pp-insiders-table tbody tr:last-child td { border-bottom: none; }
+.pp-insiders-table td.pp-num { text-align: right; }
+
+.pp-insiders-row-flagged {
+  /* Subtle coral tint; ~3-4% alpha so it never fights the text contrast. */
+  background: color-mix(in srgb, var(--pp-accent) 4%, transparent);
+}
+
+.pp-insiders-name {
+  font-weight: 600;
+  color: var(--pp-ink);
+}
+.pp-insiders-star {
+  color: var(--pp-accent);
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: 6px;
+}
+.pp-insiders-tkr {
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-insiders-value {
+  color: var(--pp-ink);
+  font-weight: 600;
+}
+
+/* Plan chip — outlined; coral when "open", muted grey otherwise. */
+.pp-insiders-plan {
+  font-size: 10px;
+  padding: 2px 7px;
+  border: 1px solid var(--pp-line2);
+  color: var(--pp-dim);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.pp-insiders-plan.is-open {
+  color: var(--pp-accent);
+  border-color: var(--pp-accent);
+}

@@ -1,0 +1,234 @@
+{#-
+  PaperPanda Redesign — Congress page
+  Mirrors design_handoff_paperpanda/page-congress.jsx
+
+  Tabs: Trades · Members · Leaderboard · Performance · Calendar
+  Default = Trades (live).  Other 4 tabs are placeholders.
+
+  Real data: supabase_cache.get_congress_recent_trades() — 30 most recent
+  STOCK Act disclosures from the existing scrape pipeline.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment,
+     range_chip, kpi_strip, tag %}
+
+{% block title %}Congress · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/insiders.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/congress.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━ #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">§</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">
+      Signals <span class="pp-page-hero-crumb-sep">/</span> Congressional trading
+    </span>
+    <h1 class="pp-page-hero-title">Congress</h1>
+    <div class="pp-page-hero-sub">
+      STOCK Act disclosures · 535 members tracked · filed within 45 days of trade
+      {%- if congress_is_mock %} · <span class="pp-page-hero-flag">DEMO</span>{% endif %}
+    </div>
+  </div>
+  <div class="pp-insiders-actions">
+    {{ btn("Export CSV", kind="ghost") }}
+    {{ btn("+ Alert me", kind="accent") }}
+  </div>
+</header>
+
+{# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
+<div class="pp-page-section pp-page-section-kpi">
+  {{ kpi_strip(congress_kpi) }}
+</div>
+
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
+<div class="pp-page-tabs">
+  {{ segment(["Trades","Members","Leaderboard","Performance","Calendar"],
+             value=congress_tab|default("Trades"),
+             id="pp-congress-tabs") }}
+  <div style="flex:1"></div>
+  {{ range_chip(value="90D") }}
+</div>
+
+{# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
+<div class="pp-page-body">
+
+  {# ── TRADES (default — LIVE) ── #}
+  <section class="pp-page-pane is-active" data-tab-pane="Trades">
+
+    <div class="pp-insiders-filters">
+      <div class="pp-insiders-filter-group">
+        {{ label("Party") }}
+        {{ segment(["All","D","R","I"], value="All", mono=True) }}
+      </div>
+      <div class="pp-insiders-filter-group">
+        {{ label("Chamber") }}
+        {{ segment(["Both","House","Senate"], value="Both", mono=True) }}
+      </div>
+      <div class="pp-insiders-filter-group">
+        {{ label("Action") }}
+        {{ segment(["All","BUY","SELL","EXCH"], value="All", mono=True) }}
+      </div>
+      <div style="flex:1"></div>
+      <span class="pp-mono pp-insiders-count">
+        Showing <span class="pp-ink-strong">{{ congress_rows|length }}</span> of {{ congress_total }} trades · 30d
+      </span>
+    </div>
+
+    {# Notable callout — high-dollar BUY trade. #}
+    {% if congress_notable %}
+      {% set _n = congress_notable %}
+      {% call panel(cls="pp-insiders-notable-panel") %}
+        <div class="pp-insiders-notable">
+          <div class="pp-insiders-notable-text">
+            <span class="pp-mono pp-insiders-notable-kicker">★ Notable trade · {{ _n.date }}</span>
+            <div class="pp-insiders-notable-headline">
+              <span class="pp-accent-color">{{ _n.person }} ({{ _n.party }}-{{ _n.state }})</span> bought
+              <span class="pp-up">{{ _n.size }}</span> of
+              <span class="pp-mono pp-insiders-notable-tkr">{{ _n.ticker }}</span>
+              — STOCK Act disclosure.
+            </div>
+            <span class="pp-mono pp-insiders-notable-meta">
+              Trade {{ _n.date }} · Filed {{ _n.filed }}{% if _n.lag is not none %} · {{ _n.lag }}-day disclosure lag{% endif %}
+            </span>
+          </div>
+          {{ btn("View profile →", kind="ghost") }}
+        </div>
+      {% endcall %}
+    {% endif %}
+
+    {# Trades table — 8 cols.  Notable rows get coral tint. #}
+    {% call panel() %}
+      <table class="pp-table pp-insiders-table pp-congress-table">
+        <thead>
+          <tr>
+            <th>Member</th>
+            <th>Chamber</th>
+            <th>Ticker</th>
+            <th>Action</th>
+            <th class="pp-num">Trade size</th>
+            <th class="pp-num">Trade date</th>
+            <th class="pp-num">Filed</th>
+            <th class="pp-num">Lag</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in congress_rows %}
+            <tr class="{% if r.notable %}pp-insiders-row-flagged{% endif %}">
+              <td>
+                <div class="pp-congress-member">
+                  <span class="pp-congress-party-dot pp-congress-party-{{ r.party|lower }}"
+                        aria-label="{{ 'Democrat' if r.party == 'D' else ('Republican' if r.party == 'R' else 'Independent') }}"></span>
+                  <span class="pp-insiders-name">{{ r.person }}</span>
+                  {% if r.notable %}<span class="pp-insiders-star">★</span>{% endif %}
+                  <span class="pp-mono pp-congress-state">{{ r.state }}</span>
+                </div>
+              </td>
+              <td class="pp-text">{{ r.chamber }}</td>
+              <td><span class="pp-mono pp-insiders-tkr">{{ r.ticker }}</span></td>
+              <td>{{ tag(r.action) }}</td>
+              <td class="pp-num pp-mono pp-insiders-value">{{ r.size }}</td>
+              <td class="pp-num pp-mono pp-text">{{ r.date }}</td>
+              <td class="pp-num pp-mono pp-dim">{{ r.filed }}</td>
+              <td class="pp-num">
+                <span class="pp-mono pp-congress-lag {% if r.lag is none %}pp-dim{% elif r.lag <= 3 %}pp-up{% elif r.lag <= 10 %}pp-accent-color{% else %}pp-down{% endif %}"
+                      style="font-weight:600;">
+                  {%- if r.lag is none -%}—{% else %}{{ r.lag }}d{% endif -%}
+                </span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endcall %}
+
+  </section>
+
+  {# ── 4 placeholder panes ── #}
+  <section class="pp-page-pane" data-tab-pane="Members">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">◐</div>
+        <div class="pp-page-placeholder-title">Members tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Per-member profile cards — track record, sectors, recent activity.
+          Wires to extract_members_from_trades; needs a `person_card` primitive.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Leaderboard">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">▲</div>
+        <div class="pp-page-placeholder-title">Leaderboard tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Member ranking by performance + activity.  Performance attribution
+          job is a heavier build (flagged in audit).
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Performance">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">∿</div>
+        <div class="pp-page-placeholder-title">Performance tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Member returns vs benchmarks (3M / 1Y / 3Y).  Needs the
+          attribution job over congress_trades + market_data history.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Calendar">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">◷</div>
+        <div class="pp-page-placeholder-title">Calendar tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Disclosure deadlines + recent filings calendar view.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  var seg = document.getElementById('pp-congress-tabs');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-page-pane');
+  if (!panes.length) return;
+  function activate(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-value') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    });
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    if (name) activate(name);
+  });
+})();
+</script>
+{% endblock %}

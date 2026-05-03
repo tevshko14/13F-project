@@ -69,6 +69,7 @@ from filings.app_state import (
 )
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.routers import auth_admin as _auth_admin_router
+from filings.routers import redesign_preview as _redesign_preview_router
 from filings.routers import static_pages as _static_pages_router
 from filings.routers import watchlist as _watchlist_router
 from filings.superinvestors import SUPERINVESTORS, SUPERINVESTORS_BY_CIK
@@ -833,6 +834,15 @@ templates.env.globals["clerk_publishable_key"] = _CLERK_PUBLISHABLE_KEY
 app.include_router(_auth_admin_router.router)
 app.include_router(_static_pages_router.router)
 app.include_router(_watchlist_router.router)
+
+# Redesign preview — env-gated.  Only mounted when PP_REDESIGN_PREVIEW=1
+# is set (local dev only).  Routes live under /_v2/* and render the
+# new design templates with mock data, while the production routes keep
+# rendering the old templates unchanged.  Without the env var the router
+# is never registered, so even an accidental Railway deploy is inert.
+if _redesign_preview_router.is_enabled():
+    app.include_router(_redesign_preview_router.router)
+    logger.info("Redesign preview routes mounted at /_v2/*")
 
 
 # ── Template filters ──────────────────────────────────────────────────

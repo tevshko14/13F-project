@@ -1,0 +1,279 @@
+{#-
+  PaperPanda Redesign — Funds detail page
+  Mirrors design_handoff_paperpanda/page-funds.jsx
+
+  Single-page detail view (no functional sub-tabs).  Top segment is
+  rendered for design parity; only Holdings is wired.  All sections
+  (KPI strip, AUM history, Recent activity, Holdings table, Sector
+  allocation, New+Adds, Cuts+Exits) render in one scroll.
+
+  Real data: supabase_cache "13f:{cik}" — populated by the standard
+  13F pipeline (client.get_fund_summary).  Default CIK = 1067983
+  (Berkshire); ?cik=… to load any of the 85 superinvestors.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment,
+     range_chip, kpi_strip, tag %}
+
+{% block title %}{{ fund_name }} · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  {# Reuse macro page chrome (page hero + tab nav + body); add fund-specific. #}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/funds.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━
+   Same shape as Macro hero but with action buttons (Compare / Export /
+   Follow) and an inline CIK pill on the breadcrumb row. #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">{{ fund_icon }}</div>
+  <div class="pp-page-hero-text">
+    <div class="pp-funds-crumb-row">
+      <span class="pp-mono pp-page-hero-crumb">
+        Funds <span class="pp-page-hero-crumb-sep">/</span> 13F filer
+      </span>
+      <span class="pp-mono pp-funds-cik-pill">CIK {{ fund_cik }}</span>
+    </div>
+    <h1 class="pp-page-hero-title">{{ fund_name }}</h1>
+    <div class="pp-page-hero-sub">
+      {% if fund_manager %}{{ fund_manager }} · {% endif %}
+      {% if fund_city %}{{ fund_city }} · {% endif %}
+      {% if fund_filing_date %}Filed {{ fund_filing_date }}{% endif %}
+      {% if fund_report_period %} for period ending {{ fund_report_period }}{% endif %}
+    </div>
+  </div>
+  <div class="pp-funds-actions">
+    {{ btn("Compare", kind="ghost") }}
+    {{ btn("Export",  kind="ghost") }}
+    {{ btn("★ Follow", kind="accent") }}
+  </div>
+</header>
+
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━
+   Top segment — only Holdings is functional; the others stay visual to
+   match the design but render the same body content for now. #}
+<div class="pp-page-tabs">
+  {{ segment(["Holdings","Activity","Performance","Sectors","Filings"],
+             value=funds_tab|default("Holdings"),
+             id="pp-funds-tabs") }}
+  <div style="flex:1"></div>
+  {{ range_chip(value="1Y", id="pp-funds-range") }}
+</div>
+
+{# ━━━━━━━━━━ PAGE BODY ━━━━━━━━━━ #}
+<div class="pp-page-body">
+
+  {# KPI strip — AUM + Positions are real; conc / turnover / YTD vs SPY
+     are derived or pending an aggregate job. #}
+  <section class="pp-page-kpi-row">
+    {{ kpi_strip(funds_kpi) }}
+  </section>
+
+  {# AUM history (1.7fr) + Recent activity (1fr) #}
+  <section class="pp-funds-row-aum">
+    {% call panel(cls="pp-funds-aum-panel") %}
+      {% call panel_head("AUM history", sub="Quarterly") %}
+        <span class="pp-mono pp-up pp-funds-aum-qoq">+$2.1B QoQ</span>
+      {% endcall %}
+      <div class="pp-funds-aum-body">
+        {# Static demo curve — need quarterly AUM history series to wire
+           to real data.  fund.quarterly_changes has periods but not the
+           total AUM per quarter; needs a multi-quarter aggregator job. #}
+        <svg class="pp-funds-aum-svg"
+             viewBox="0 0 600 200" preserveAspectRatio="none"
+             aria-label="AUM history">
+          {% for i in range(4) %}
+            <line class="pp-home-chart-grid"
+                  x1="0" x2="600"
+                  y1="{{ i * 55 + 10 }}" y2="{{ i * 55 + 10 }}"/>
+          {% endfor %}
+          {# Climbing curve — 32 points hand-shaped.  M0 180 → L… → 600 ~50.
+             Use namespace() for the accumulator string — bare {% set %}
+             inside a Jinja loop doesn't escape the loop scope. #}
+          {%- set _aum_pts = [] -%}
+          {%- for i in range(32) -%}
+            {%- set _x = (i * 600 / 31)|round(1) -%}
+            {%- set _y = (180 - i * 4.5)|round(1) -%}
+            {%- set _ = _aum_pts.append([_x, _y]) -%}
+          {%- endfor -%}
+          {%- set _ns = namespace(line="") -%}
+          {%- for p in _aum_pts -%}
+            {%- if loop.first -%}
+              {%- set _ns.line = "M" ~ p[0] ~ " " ~ p[1] -%}
+            {%- else -%}
+              {%- set _ns.line = _ns.line ~ " L" ~ p[0] ~ " " ~ p[1] -%}
+            {%- endif -%}
+          {%- endfor -%}
+          <path d="{{ _ns.line }} L 600 200 L 0 200 Z" fill="var(--pp-accent)" fill-opacity="0.08"/>
+          <path d="{{ _ns.line }}" class="pp-funds-aum-line"
+                vector-effect="non-scaling-stroke"/>
+          {% for p in _aum_pts %}
+            {% if loop.index0 % 4 == 0 %}
+              <circle class="pp-funds-aum-dot"
+                      cx="{{ p[0] }}" cy="{{ p[1] }}" r="2.5"
+                      vector-effect="non-scaling-stroke"/>
+            {% endif %}
+          {% endfor %}
+        </svg>
+        <div class="pp-funds-aum-axis">
+          {% for q in ["Q2 '23","Q4 '23","Q2 '24","Q4 '24","Q2 '25","Q4 '25","Q1 '26"] %}
+            <span class="pp-mono pp-funds-aum-axis-tick">{{ q }}</span>
+          {% endfor %}
+        </div>
+      </div>
+    {% endcall %}
+
+    {% call panel(cls="pp-funds-activity-panel") %}
+      {{ panel_head("Recent activity", sub="last 4 quarters") }}
+      <div class="pp-funds-activity-body">
+        {% if funds_activity %}
+          {% for f in funds_activity %}
+            <div class="pp-funds-activity-row{% if f.current %} is-current{% endif %}">
+              <span class="pp-funds-activity-dot{% if f.current %} is-current{% endif %}"></span>
+              <div>
+                <div class="pp-funds-activity-q">{{ f.quarter }}</div>
+                <div class="pp-funds-activity-meta">{{ f.filing_date }} · {{ f.count_str }}</div>
+              </div>
+              <span class="pp-mono pp-funds-activity-aum {{ 'pp-up' if f.aum_up == True else ('pp-down' if f.aum_up == False else 'pp-dim') }}">
+                {{ f.aum_delta }} AUM
+              </span>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="pp-page-placeholder pp-funds-activity-empty">
+            <div class="pp-page-placeholder-sub">No recent filings cached.</div>
+          </div>
+        {% endif %}
+      </div>
+    {% endcall %}
+  </section>
+
+  {# HOLDINGS — dense table.  10 of {total} positions. #}
+  {% call panel(cls="pp-funds-holdings-panel") %}
+    {% call panel_head("Top 10 holdings",
+                       sub=("%d of %d positions"|format(funds_holdings|length, funds_pos_total))) %}
+      <div class="pp-funds-holdings-controls">
+        {{ segment(["All","Adds","Cuts","New","Exits"], value="All", mono=True) }}
+        <a class="pp-link-coral" href="#">View all {{ funds_pos_total }} →</a>
+      </div>
+    {% endcall %}
+    <table class="pp-table pp-funds-holdings-table">
+      <thead>
+        <tr>
+          <th class="pp-num pp-funds-th-rank">#</th>
+          <th>Holding</th>
+          <th class="pp-num">Shares</th>
+          <th class="pp-num">Value</th>
+          <th>Port %</th>
+          <th class="pp-num">QoQ Δ</th>
+          <th class="pp-num">Last</th>
+          <th class="pp-num">Day</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in funds_holdings %}
+          <tr>
+            <td class="pp-num pp-funds-td-rank">
+              <span class="pp-mono pp-dim2">{{ "%02d"|format(r.rank) }}</span>
+            </td>
+            <td>
+              <span class="pp-funds-tkr">{{ r.ticker }}</span>
+              <span class="pp-funds-name">{{ r.name }}</span>
+            </td>
+            <td class="pp-num pp-mono">{{ r.shares }}</td>
+            <td class="pp-num pp-mono pp-funds-value">{{ r.value }}</td>
+            <td>
+              <div class="pp-funds-port-cell">
+                <div class="pp-funds-port-bar">
+                  <div class="pp-funds-port-bar-fill"
+                       style="width: {{ [r.port * 200, 100]|min|round(1) }}%;"></div>
+                </div>
+                <span class="pp-mono pp-funds-port-pct">{{ r.port_pct_str }}</span>
+              </div>
+            </td>
+            <td class="pp-num">
+              <span class="pp-mono pp-dim2">{{ r.qoq }}</span>
+            </td>
+            <td class="pp-num pp-mono pp-dim">
+              {{ r.last if r.last is not none else '—' }}
+            </td>
+            <td class="pp-num pp-mono pp-dim">
+              {{ r.day if r.day is not none else '—' }}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  {# 3-col: Sector allocation (mock) · New+Adds · Cuts+Exits #}
+  <section class="pp-funds-row-3col">
+    {% call panel() %}
+      {{ panel_head("Sector allocation", sub="Q1 2026") }}
+      <div class="pp-funds-sectors">
+        {% for s in funds_sectors %}
+          <div class="pp-funds-sector-row">
+            <div class="pp-funds-sector-row-head">
+              <span class="pp-funds-sector-name">{{ s.name }}</span>
+              <span class="pp-mono pp-funds-sector-pct">{{ "%.1f"|format(s.pct * 100) }}%</span>
+            </div>
+            <div class="pp-funds-sector-bar">
+              <div class="pp-funds-sector-bar-fill"
+                   style="width: {{ "%.0f"|format(s.pct * 100) }}%;
+                          background: {{ s.color }};"></div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endcall %}
+
+    {% call panel() %}
+      {{ panel_head("New + Adds", sub="this quarter") }}
+      {% if funds_adds %}
+        {% for r in funds_adds %}
+          <div class="pp-funds-change-row">
+            <span class="pp-mono pp-funds-change-tkr">{{ r.ticker }}</span>
+            <div class="pp-funds-change-cell">
+              <div class="pp-funds-change-name">{{ r.name }}</div>
+              <span class="pp-mono pp-funds-change-val">{{ r.val }}</span>
+            </div>
+            {{ tag(r.action) }}
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No adds this quarter.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+
+    {% call panel() %}
+      {{ panel_head("Cuts + Exits", sub="this quarter") }}
+      {% if funds_cuts %}
+        {% for r in funds_cuts %}
+          <div class="pp-funds-change-row">
+            <span class="pp-mono pp-funds-change-tkr">{{ r.ticker }}</span>
+            <div class="pp-funds-change-cell">
+              <div class="pp-funds-change-name">{{ r.name }}</div>
+              <span class="pp-mono pp-funds-change-val">{{ r.val }}</span>
+            </div>
+            {{ tag(r.action) }}
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No cuts this quarter.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+  </section>
+
+</div>
+
+{% endblock %}
