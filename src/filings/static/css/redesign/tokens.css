@@ -12,6 +12,44 @@
  * Sharp 1px rules · zero radii · terminal-grade density.
  * ==========================================================================*/
 
+/* ─────────────────────────────────────────────────────────────────────────────
+ * FONT LOADING — Geist (sans) + Geist Mono (variable woff2, self-hosted)
+ *
+ * Source: vercel/geist-font, SIL Open Font License 1.1.  Fetched from the
+ * jsdelivr-hosted npm package and stored in static/fonts/.  See
+ * static/fonts/LICENSE.md for attribution.
+ *
+ * Variable fonts: ONE file per family covers all weights (Sans: 300–800,
+ * Mono: 400–700).  Combined ~137 KB woff2.  The browser interpolates
+ * intermediate weights as the design CSS requests them.
+ *
+ * `font-display: swap` — render with the system fallback immediately,
+ * then swap to Geist when the file lands.  Prevents FOIT (flash of
+ * invisible text) on slow networks.
+ *
+ * `font-feature-settings: "ss01"` (set on body in tokens.css below) locks
+ * Geist's signature stylistic-set — alternate "s" terminal — required to
+ * match the design.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+@font-face {
+  font-family: "Geist";
+  src: url("/static/fonts/Geist-Variable.woff2") format("woff2-variations"),
+       url("/static/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("/static/fonts/GeistMono-Variable.woff2") format("woff2-variations"),
+       url("/static/fonts/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* ───────── Typography ───────── */
   --pp-font-body:  "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
