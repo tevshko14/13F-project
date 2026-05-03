@@ -269,8 +269,9 @@
 .pp-home-chart-headlight {
   font-family: var(--pp-font-mono);
   font-size: 11px;
-  color: var(--pp-up);
   font-weight: 700;
+  /* Color comes from .pp-up / .pp-down modifier classes added by the template
+     based on the day's direction.  Do not hardcode here. */
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────

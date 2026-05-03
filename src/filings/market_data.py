@@ -81,6 +81,13 @@ _SPARKLINE_TTL = 1_800  # 30 minutes
 _SPARKLINE_MAX = 20     # bounded — keyed by ticker-set:num_points
 _sparkline_cache = TTLCache(ttl=_SPARKLINE_TTL, max_size=_SPARKLINE_MAX)
 
+# Intraday chart cache — keyed by symbol, 5-min TTL.
+# Smaller than the daily-index cache (30 min) because bars roll over every 15
+# min and a stale cell on the masthead would visibly misrepresent the tape.
+_INTRADAY_TTL = 300
+_INTRADAY_MAX = 30   # only used for a handful of indices on the Home page
+_intraday_cache = TTLCache(ttl=_INTRADAY_TTL, max_size=_INTRADAY_MAX)
+
 
 # ── Supabase warm-load (survive redeploys) ───────────────────────────
 
@@ -756,6 +763,201 @@ def _pct_change_for_history(history: list) -> float:
     if start and start > 0:
         return round((end - start) / start * 100, 2)
     return 0.0
+
+
+def get_intraday_chart(symbol: str, interval: str = "15m") -> dict | None:
+    """Fetch today's intraday bars for *symbol*.  Falls back to daily history
+    when intraday is unavailable (off-hours, weekends, vendor outage) so the
+    Home masthead chart never renders empty.
+
+    Returns:
+        {
+          "history":  [[epoch_ms, close], ...]   # one entry per bar
+          "ohlcv":    {open, high, low, close, volume, prev_close}
+          "source":   "intraday" | "stale_intraday" | "daily_fallback"
+          "label":    "INTRADAY · 15M" | "PRIOR SESSION · 15M" | "1M · DAILY"
+        }
+        or None if every path fails (very rare; would mean Supabase + yfinance
+        both unreachable).
+
+    The function is resilient by design — try fresh intraday, then last-session
+    intraday, then the cached daily 1Y history.  The caller renders whichever
+    one comes back and uses ``label`` to tell the user what they're looking at.
+
+    Cache:  L1 in-memory 5-min TTL (per symbol).  Daily fallback comes from the
+    already-cached _index_cache so that path is essentially free.
+    """
+    cache_key = f"{symbol}:{interval}"
+    cached = _intraday_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    result: dict | None = None
+
+    # ── Path 1: try fresh intraday from yfinance ────────────────────────────
+    try:
+        import yfinance as yf
+        import pandas as pd  # noqa: F401  (yf returns a DataFrame; we test it)
+
+        df = yf.Ticker(symbol).history(period="1d", interval=interval, timeout=_YF_TIMEOUT)
+        if df is not None and len(df) > 1:
+            history = []
+            for ts, row in df.iterrows():
+                if pd_isna(row.get("Close")):
+                    continue
+                epoch_ms = int(ts.timestamp() * 1000)
+                history.append([epoch_ms, round(float(row["Close"]), 2)])
+
+            if len(history) >= 2:
+                last_close = history[-1][1]
+                prev_close = _fetch_prev_close(symbol)
+                ohlcv = _intraday_ohlcv(df, prev_close)
+                result = {
+                    "history": history,
+                    "ohlcv":   ohlcv,
+                    "source":  "intraday",
+                    "label":   f"INTRADAY · {interval.upper()}",
+                }
+    except Exception as exc:
+        logger.debug("Intraday fetch for %s failed: %s", symbol, exc)
+
+    # ── Path 2: try the last 5 trading days at intraday resolution.
+    # When the market is closed (overnight / weekend), period="1d" can return
+    # only a couple of bars.  period="5d" lets us still render a meaningful
+    # chart from the most recent session. ────────────────────────────────────
+    if result is None or len(result.get("history", [])) < 6:
+        try:
+            import yfinance as yf
+
+            df = yf.Ticker(symbol).history(period="5d", interval=interval, timeout=_YF_TIMEOUT)
+            if df is not None and len(df) > 6:
+                # Slice to the last session by walking backwards until we find a
+                # gap > 90 minutes (overnight) — the chunk after that is "today".
+                last_session = _slice_last_session(df)
+                history = []
+                for ts, row in last_session.iterrows():
+                    if pd_isna(row.get("Close")):
+                        continue
+                    epoch_ms = int(ts.timestamp() * 1000)
+                    history.append([epoch_ms, round(float(row["Close"]), 2)])
+                if len(history) >= 2:
+                    prev_close = _fetch_prev_close(symbol)
+                    ohlcv = _intraday_ohlcv(last_session, prev_close)
+                    result = {
+                        "history": history,
+                        "ohlcv":   ohlcv,
+                        "source":  "stale_intraday",
+                        "label":   f"PRIOR SESSION · {interval.upper()}",
+                    }
+        except Exception as exc:
+            logger.debug("Stale intraday fetch for %s failed: %s", symbol, exc)
+
+    # ── Path 3: daily 1M fallback from the existing _index_cache.  Always
+    # available on warm cache; never blocks on yfinance. ─────────────────────
+    if result is None:
+        try:
+            idx = get_index_market_data()
+            row = idx.get(symbol) if idx else None
+            if row and row.get("history"):
+                full = row["history"]
+                # Last ~22 trading days for a 1M view
+                history = full[-22:] if len(full) > 22 else full
+                last_close = history[-1][1] if history else None
+                prev_close = history[-2][1] if len(history) >= 2 else last_close
+                first = history[0][1] if history else None
+                highs = [p[1] for p in history]
+                ohlcv = {
+                    "open":       first,
+                    "high":       max(highs) if highs else None,
+                    "low":        min(highs) if highs else None,
+                    "close":      last_close,
+                    "volume":     None,
+                    "prev_close": prev_close,
+                }
+                result = {
+                    "history": history,
+                    "ohlcv":   ohlcv,
+                    "source":  "daily_fallback",
+                    "label":   "1M · DAILY",
+                }
+        except Exception as exc:
+            logger.debug("Daily fallback for %s failed: %s", symbol, exc)
+
+    if result is not None:
+        _intraday_cache.set(cache_key, result)
+    return result
+
+
+def pd_isna(v) -> bool:
+    """Cheap NaN guard that doesn't require importing pandas at module load."""
+    try:
+        import math as _m
+        return v is None or (isinstance(v, float) and _m.isnan(v))
+    except Exception:
+        return v is None
+
+
+def _fetch_prev_close(symbol: str) -> float | None:
+    """Get the previous trading day's close from the cached index data."""
+    try:
+        idx = get_index_market_data()
+        row = idx.get(symbol) if idx else None
+        history = row.get("history") if row else None
+        if history and len(history) >= 2:
+            return history[-2][1]
+    except Exception:
+        pass
+    return None
+
+
+def _intraday_ohlcv(df, prev_close: float | None) -> dict:
+    """Reduce an intraday bars DataFrame to today's session OHLCV.
+
+    OPEN  = first bar's open
+    HIGH  = max of all bars' highs
+    LOW   = min of all bars' lows
+    CLOSE = last bar's close
+    VOLUME = sum of all bars' volumes
+    """
+    try:
+        opens   = df["Open"].dropna()
+        highs   = df["High"].dropna()
+        lows    = df["Low"].dropna()
+        closes  = df["Close"].dropna()
+        volumes = df["Volume"].dropna()
+        return {
+            "open":       float(opens.iloc[0])  if len(opens) else None,
+            "high":       float(highs.max())    if len(highs) else None,
+            "low":        float(lows.min())     if len(lows) else None,
+            "close":      float(closes.iloc[-1]) if len(closes) else None,
+            "volume":     int(volumes.sum())    if len(volumes) else None,
+            "prev_close": prev_close,
+        }
+    except Exception:
+        return {"open": None, "high": None, "low": None, "close": None,
+                "volume": None, "prev_close": prev_close}
+
+
+def _slice_last_session(df):
+    """Return the rows of *df* belonging to the most recent contiguous session.
+
+    Walks the index backwards looking for a gap > 90 minutes — the chunk after
+    that gap is "today" (or the latest open session).  Used by the 5d-interval
+    fallback path so we never render a multi-day broken-line chart.
+    """
+    if df is None or len(df) == 0:
+        return df
+    idx = df.index
+    last = idx[-1]
+    cutoff = None
+    for i in range(len(idx) - 2, -1, -1):
+        gap = (idx[i + 1] - idx[i]).total_seconds()
+        if gap > 90 * 60:
+            cutoff = idx[i + 1]
+            break
+    if cutoff is None:
+        return df
+    return df.loc[cutoff:last]
 
 
 def get_overview_chart_data(symbol: str, period: str = "1M") -> dict | None:

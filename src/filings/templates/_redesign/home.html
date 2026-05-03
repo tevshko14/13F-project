@@ -91,11 +91,20 @@
     {# ━━━━━━━━━━ HERO: chart + retail pulse ━━━━━━━━━━ #}
     <div class="pp-home-hero">
 
-      {# ── Chart panel ── #}
+      {# ── Chart panel ──
+         _ref_y  = where prev-close horizontal reference line sits.
+         _tag_y_top = top of the price chip rect (anchored to the LINE'S last y,
+                      i.e. the current price — NOT the prev-close ref line). #}
+      {% set _ref_y = chart_ref_y|default(74) %}
+      {% set _tag_y = chart_tag_y|default(_ref_y) %}
+      {% set _tag_y_top = (_tag_y - 8) %}
       {% call panel() %}
-        {% call panel_head("S&P 500", sub="Intraday · 15m") %}
-          <span class="pp-home-chart-headlight">
-            +{{ chart_change|default('41.86') }} (+{{ chart_change_pct|default('0.72%') }})
+        {% call panel_head("S&P 500", sub=(chart_label|default("INTRADAY · 15M"))) %}
+          <span class="pp-home-chart-headlight {{ 'pp-up' if chart_change_up|default(True) else 'pp-down' }}">
+            {%- if chart_change_up|default(True) -%}+{%- else -%}-{%- endif -%}
+            {{ chart_change|default('41.86') }}
+            ({%- if chart_change_up|default(True) -%}+{%- else -%}-{%- endif -%}
+            {{ chart_change_pct|default('0.72%') }})
           </span>
         {% endcall %}
         <svg class="pp-home-chart-svg"
@@ -112,14 +121,15 @@
             <path d="{{ chart_area }}" class="pp-home-chart-area"/>
           {% endif %}
           <path d="{{ chart_path }}" class="pp-home-chart-line"/>
-          {# Reference / current price line #}
+          {# Reference line — drawn at the prev-close y position #}
           <line class="pp-home-chart-ref"
-                x1="0" x2="600" y1="74" y2="74"/>
-          {# Price tag at right edge #}
+                x1="0" x2="600" y1="{{ _ref_y }}" y2="{{ _ref_y }}"/>
+          {# Price tag at right edge — anchored to the LINE'S last y so the
+             chip labels the current price, not the prev-close reference. #}
           <rect class="pp-home-chart-tag-rect"
-                x="558" y="66" width="42" height="16"/>
+                x="558" y="{{ _tag_y_top }}" width="42" height="16"/>
           <text class="pp-home-chart-tag-text"
-                x="579" y="78" text-anchor="middle">{{ chart_tag|default('5847') }}</text>
+                x="579" y="{{ _tag_y_top + 12 }}" text-anchor="middle">{{ chart_tag|default('5847') }}</text>
         </svg>
         <div class="pp-home-chart-foot">
           {% for k, v in chart_ohlcv %}

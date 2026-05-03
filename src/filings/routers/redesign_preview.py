@@ -232,25 +232,168 @@ async def _fetch_kpi_strip() -> list[dict]:
         return fallback
 
 
-def _build_intraday_chart() -> dict:
-    """Reproduce the SVG path the JSX home page generates client-side.
+# Hero chart viewBox — kept consistent with home.html's <svg viewBox="0 0 600 200"/>.
+_HERO_VB_W = 600
+_HERO_VB_H = 200
+# Vertical inset — leaves a few px at top + bottom so the line never touches
+# the chart border on extreme highs/lows.
+_HERO_PAD_Y = 12
 
-    The JSX uses Math.sin(i*0.4) + Math.cos(i*0.9) - i*0.55 — a synthetic
-    intraday price walk.  We compute the same path server-side so the
-    rendered page matches the design canvas pixel-for-pixel.
+
+def _hero_chart_paths(history: list, prev_close: float | None) -> dict | None:
+    """Project a [[epoch_ms, price], ...] series into the hero chart's SVG
+    viewBox (600 × 200) and return the line path, the closed area-fill path,
+    and the y-coordinate of the prev-close reference line.
+
+    Normalizes price → y by min/max with `_HERO_PAD_Y` top/bottom padding.
+    Time → x is uniform across the series (no real-time x-axis; bars are
+    rendered evenly spaced regardless of the timestamps).
     """
-    pts = []
-    for i in range(60):
-        x = i * 10
-        y = 110 + math.sin(i * 0.4) * 30 + math.cos(i * 0.9) * 10 - i * 0.55
-        pts.append((x, y))
+    if not history or len(history) < 2:
+        return None
 
+    prices = [p[1] for p in history]
+    p_min, p_max = min(prices), max(prices)
+    # Fold the prev-close into the y-range so the reference line is always on-canvas.
+    if prev_close is not None:
+        p_min = min(p_min, prev_close)
+        p_max = max(p_max, prev_close)
+    p_range = p_max - p_min
+    if p_range <= 0:
+        # Flat series — render a midline.
+        p_range = 1.0
+
+    inner_h = _HERO_VB_H - 2 * _HERO_PAD_Y
+
+    def y_for(price: float) -> float:
+        return _HERO_PAD_Y + (p_max - price) / p_range * inner_h
+
+    # Line path
+    n = len(prices)
+    parts = []
+    last_y = None
+    for i, price in enumerate(prices):
+        x = i / (n - 1) * _HERO_VB_W
+        y = y_for(price)
+        last_y = y
+        parts.append(f"{'M' if i == 0 else 'L'}{x:.1f} {y:.1f}")
+    line_d = " ".join(parts)
+    # Closed area = line + bottom-right + bottom-left + back to start
+    area_d = f"{line_d} L {_HERO_VB_W} {_HERO_VB_H} L 0 {_HERO_VB_H} Z"
+
+    ref_y = y_for(prev_close) if prev_close is not None else _HERO_VB_H / 2
+    # `tag_y` is where the current-price chip sits on the right edge.  We
+    # anchor it to the LINE'S last y (current price), not the reference y
+    # (prev close) — the chip's purpose is to label the current price.
+    tag_y = last_y if last_y is not None else ref_y
+    return {
+        "line":  line_d,
+        "area":  area_d,
+        "ref_y": round(ref_y, 1),
+        "tag_y": round(tag_y, 1),
+    }
+
+
+def _format_volume(v: float | int | None) -> str:
+    """Render a share volume number compactly: 3.41B / 41.2M / 412K."""
+    if v is None:
+        return "—"
+    v = float(v)
+    if v >= 1e9:
+        return f"{v / 1e9:.2f}B"
+    if v >= 1e6:
+        return f"{v / 1e6:.1f}M"
+    if v >= 1e3:
+        return f"{v / 1e3:.0f}K"
+    return f"{int(v):,}"
+
+
+def _format_index_value(v: float | None, decimals: int = 2) -> str:
+    if v is None:
+        return "—"
+    return f"{v:,.{decimals}f}"
+
+
+async def _fetch_hero_chart() -> dict:
+    """Build the S&P intraday hero chart context.
+
+    Returns a dict matching the keys the home.html template expects:
+        chart_path, chart_area, chart_ref_y, chart_change, chart_change_pct,
+        chart_tag, chart_label, chart_ohlcv
+
+    Resilience: get_intraday_chart() ladders intraday → stale-intraday →
+    daily, never returns empty unless every path fails (rare).  When
+    everything fails we fall back to a static synthetic line so the page
+    still has the right shape.
+    """
+    fallback_pts = [
+        110 + math.sin(i * 0.4) * 30 + math.cos(i * 0.9) * 10 - i * 0.55
+        for i in range(60)
+    ]
     line_d = " ".join(
-        f"{'M' if i == 0 else 'L'}{x:.1f} {y:.1f}" for i, (x, y) in enumerate(pts)
+        f"{'M' if i == 0 else 'L'}{i * 10:.1f} {y:.1f}"
+        for i, y in enumerate(fallback_pts)
     )
-    # Closed area path — line + bottom-right + bottom-left + close
     area_d = f"{line_d} L 600 200 L 0 200 Z"
-    return {"line": line_d, "area": area_d}
+    fallback = {
+        "chart_path":       line_d,
+        "chart_area":       area_d,
+        "chart_ref_y":      74,
+        "chart_tag_y":      74,
+        "chart_change":     "41.86",
+        "chart_change_pct": "0.72%",
+        "chart_change_up":  True,
+        "chart_tag":        "5847",
+        "chart_label":      "INTRADAY · 15M",
+        "chart_ohlcv": [
+            ("OPEN",  "5,805.56"),
+            ("HIGH",  "5,851.20"),
+            ("LOW",   "5,798.14"),
+            ("VOL",   "3.41B"),
+        ],
+    }
+
+    try:
+        from filings import market_data
+        chart = await asyncio.to_thread(market_data.get_intraday_chart, "^GSPC")
+        if not chart:
+            return fallback
+        history = chart.get("history") or []
+        ohlcv = chart.get("ohlcv") or {}
+        prev_close = ohlcv.get("prev_close")
+        paths = _hero_chart_paths(history, prev_close)
+        if paths is None:
+            return fallback
+
+        last_close = history[-1][1] if history else None
+        change = (last_close - prev_close) if (last_close is not None and prev_close is not None) else None
+        change_pct = (change / prev_close) if (change is not None and prev_close) else None
+
+        # OHLCV strip — show what the source actually has.  Daily fallback
+        # has no volume; show "—" rather than a bogus number.
+        vol_str = _format_volume(ohlcv.get("volume"))
+        ohlcv_strip = [
+            ("OPEN",  _format_index_value(ohlcv.get("open"))),
+            ("HIGH",  _format_index_value(ohlcv.get("high"))),
+            ("LOW",   _format_index_value(ohlcv.get("low"))),
+            ("VOL",   vol_str),
+        ]
+
+        return {
+            "chart_path":       paths["line"],
+            "chart_area":       paths["area"],
+            "chart_ref_y":      paths["ref_y"],
+            "chart_tag_y":      paths["tag_y"],
+            "chart_change":     f"{abs(change):.2f}" if change is not None else "—",
+            "chart_change_pct": f"{abs(change_pct) * 100:.2f}%" if change_pct is not None else "—",
+            "chart_change_up":  (change is not None and change >= 0),
+            "chart_tag":        f"{int(round(last_close))}" if last_close is not None else "—",
+            "chart_label":      chart.get("label") or "INTRADAY · 15M",
+            "chart_ohlcv":      ohlcv_strip,
+        }
+    except Exception as exc:
+        logger.warning("Hero chart live fetch failed: %s", exc)
+        return fallback
 
 
 # Mock home page payload — mirrors window.PP_DATA in design_handoff/data.js
@@ -326,9 +469,12 @@ def _retail_rows():
 
 @router.get("/home", response_class=HTMLResponse)
 async def preview_home(request: Request):
-    """Home page — masthead + real KPI strip + hero + 3 grid sections."""
-    chart = _build_intraday_chart()
-    kpi_items = await _fetch_kpi_strip()
+    """Home page — masthead + real KPI strip + real hero chart + 3 grid sections."""
+    # Fetch the two real-data sections in parallel — both go through warm caches.
+    kpi_items, hero = await asyncio.gather(
+        _fetch_kpi_strip(),
+        _fetch_hero_chart(),
+    )
     ctx = {
         "request": request,
         **_shell_context("Home"),
@@ -343,18 +489,19 @@ async def preview_home(request: Request):
         # Falls back to design values if Supabase / yfinance unavailable.
         "kpi_strip_items": kpi_items,
 
-        # Hero chart
-        "chart_path":       chart["line"],
-        "chart_area":       chart["area"],
-        "chart_change":     "41.86",
-        "chart_change_pct": "0.72%",
-        "chart_tag":        "5847",
-        "chart_ohlcv": [
-            ("OPEN",  "5,805.56"),
-            ("HIGH",  "5,851.20"),
-            ("LOW",   "5,798.14"),
-            ("VOL",   "3.41B"),
-        ],
+        # Hero S&P chart — REAL intraday via market_data.get_intraday_chart().
+        # Ladders intraday → stale_intraday → 1M daily so the chart never
+        # renders blank.  `chart_label` reflects which source is showing.
+        "chart_path":       hero["chart_path"],
+        "chart_area":       hero["chart_area"],
+        "chart_ref_y":      hero["chart_ref_y"],
+        "chart_tag_y":      hero["chart_tag_y"],
+        "chart_change":     hero["chart_change"],
+        "chart_change_pct": hero["chart_change_pct"],
+        "chart_change_up":  hero["chart_change_up"],
+        "chart_tag":        hero["chart_tag"],
+        "chart_label":      hero["chart_label"],
+        "chart_ohlcv":      hero["chart_ohlcv"],
 
         # Retail pulse (right side of hero)
         "retail_feat": _HOME_RETAIL_FEAT,
