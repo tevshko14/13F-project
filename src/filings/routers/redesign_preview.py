@@ -45,6 +45,84 @@ router = APIRouter(prefix="/_v2", tags=["redesign-preview"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# L2 cache wrapper — wraps any sync compute function in a
+# Supabase-cache-or-compute pattern.  External-API fetchers (CNN F&G,
+# ApeWisdom, Finnhub news, sector ETFs, etc.) used to hit the upstream
+# directly on every cold start, blocking thread-pool slots for 5-30s
+# each.  Wrapping them lets cold workers warm from Supabase in ~50ms.
+#
+# Pattern: try L2 → on hit, return; on miss, run the real fetcher and
+# write the result back.  Stale-while-revalidate: a stale cache row
+# is returned immediately, with a background task firing the refresh
+# (so the next request gets fresh data without anyone waiting).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def _l2_cached(
+    key: str,
+    ttl_seconds: int,
+    compute_sync,
+    *,
+    category: str = "redesign_home",
+):
+    """Read-through cache wrapper.
+
+    Args:
+        key:          Supabase cache key, e.g. "redesign:home:cnn_fg".
+        ttl_seconds:  How long the cached row is considered fresh.
+        compute_sync: Zero-arg sync callable that returns the payload.
+        category:     Cache row category (used for cleanup queries).
+
+    Returns:
+        The cached/computed payload (dict / list / None).  Falls back to
+        running compute_sync if Supabase is unreachable.
+    """
+    # Try L2 first.
+    try:
+        from filings import supabase_cache
+        cached, is_fresh = await asyncio.to_thread(
+            supabase_cache.get_cached_with_stale, key,
+        )
+    except Exception as exc:
+        logger.debug("L2 read failed for %s: %s", key, exc)
+        cached, is_fresh = None, False
+
+    if cached is not None and is_fresh:
+        return cached
+
+    # Stale hit — return it immediately, refresh in background.
+    if cached is not None:
+        async def _bg_refresh():
+            try:
+                payload = await asyncio.to_thread(compute_sync)
+                if payload:
+                    from filings import supabase_cache
+                    await asyncio.to_thread(
+                        supabase_cache.set_cached, key, category, payload, ttl_seconds,
+                    )
+            except Exception as exc:
+                logger.debug("L2 background refresh for %s failed: %s", key, exc)
+        asyncio.create_task(_bg_refresh())
+        return cached
+
+    # Cold L2 — synchronous compute + write-through.
+    try:
+        payload = await asyncio.to_thread(compute_sync)
+    except Exception as exc:
+        logger.warning("L2 compute_sync raised for %s: %s", key, exc)
+        return None
+    if payload:
+        try:
+            from filings import supabase_cache
+            await asyncio.to_thread(
+                supabase_cache.set_cached, key, category, payload, ttl_seconds,
+            )
+        except Exception as exc:
+            logger.debug("L2 set_cached for %s failed: %s", key, exc)
+    return payload
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Mock data — mirrors design_handoff_paperpanda/data.js so visual pages
 # match the design canvas pixel-for-pixel.
 # These get replaced with live data at the route-flip step.
@@ -732,20 +810,25 @@ _FLAT_SPARK = [0.5] * 12
 
 
 # ── 1) Top movers ────────────────────────────────────────────────────
-async def _fetch_home_top_movers(limit: int = 6) -> list[dict]:
+async def _fetch_home_top_movers(limit: int = 6, *, mkt: dict | None = None) -> list[dict]:
     """Top S&P movers ranked by absolute % change today.
 
     Pulls `get_sp500_market_data("1D")` (period-cached for 30 min) and
     `get_sparkline_points(...)` for the picked tickers.  Each row has the
     exact shape the home template iterates: ticker, name, last, pct,
     spark_series, vol.
+
+    `mkt` may be passed in if the caller has already fetched the S&P 1D
+    map (preview_home pre-fetches it once and shares with ticker_tape +
+    heatmap_companies to avoid 3 concurrent cache lookups for the same data).
     """
-    try:
-        from filings import market_data
-        mkt = await asyncio.to_thread(market_data.get_sp500_market_data, "1D")
-    except Exception as exc:
-        logger.warning("Top movers fetch failed: %s", exc)
-        mkt = None
+    if mkt is None:
+        try:
+            from filings import market_data
+            mkt = await asyncio.to_thread(market_data.get_sp500_market_data, "1D")
+        except Exception as exc:
+            logger.warning("Top movers fetch failed: %s", exc)
+            mkt = None
 
     if not mkt or "_metadata" not in mkt:
         return _HOME_TOP_MOVERS  # mock fallback
@@ -1017,9 +1100,17 @@ async def _fetch_home_retail() -> dict:
     tickers) — matches what the template iterates.  Sentiment uses the
     same upvotes/mentions proxy the /_v2/retail page uses.
     """
-    try:
+    def _compute():
+        # _get_apewisdom_all has its own SWR cache — but it's L1-only.
+        # We L2-wrap on top so cold-start workers don't have to fetch all
+        # 5 paginated ApeWisdom requests synchronously.
         from filings import sentiment
-        items = await asyncio.to_thread(sentiment._get_apewisdom_all)
+        return sentiment._get_apewisdom_all()
+
+    try:
+        items = await _l2_cached(
+            "redesign:home:apewisdom", ttl_seconds=300, compute_sync=_compute,
+        )
     except Exception as exc:
         logger.warning("Home retail fetch failed: %s", exc)
         items = None
@@ -1066,11 +1157,19 @@ async def _fetch_home_feargreed() -> dict:
 
     Returns the same shape `_feargreed_payload()` produces — value, label,
     yesterday, week_ago, plus precomputed needle_x / needle_y for the SVG.
+    L2-cached for 5 min so cold workers don't all hit CNN simultaneously.
     Falls back to the mock 71 / Greed when CNN is unreachable.
     """
-    try:
+    def _compute():
+        # _get_cnn_fear_greed has its own SWR L1 cache and background refresh —
+        # use it instead of _fetch_cnn_fear_greed (which always hits CNN).
         from filings import sentiment
-        cnn = await asyncio.to_thread(sentiment._fetch_cnn_fear_greed)
+        return sentiment._get_cnn_fear_greed()
+
+    try:
+        cnn = await _l2_cached(
+            "redesign:home:cnn_fg", ttl_seconds=300, compute_sync=_compute,
+        )
     except Exception as exc:
         logger.warning("Fear & Greed fetch failed: %s", exc)
         return _HOME_FEARGREED
@@ -1113,7 +1212,9 @@ _TICKER_TAPE_LABELS = {
 }
 
 
-async def _fetch_home_ticker_tape() -> list:
+async def _fetch_home_ticker_tape(
+    *, idx_data: dict | None = None, sp_data: dict | None = None,
+) -> list:
     """Build the 18-cell ticker tape using already-cached market data.
 
     Indices: get_index_market_data() (cached 5 min, falls back to L2).
@@ -1121,16 +1222,29 @@ async def _fetch_home_ticker_tape() -> list:
     so the call is shared in cache).
     Other (crypto / FX / commodities): we don't have a unified feed; show
     the mock values for those slots until a wider quote helper lands.
+
+    Both `idx_data` and `sp_data` may be passed in by `preview_home` to
+    avoid duplicate market_data fetches across top_movers / ticker_tape /
+    heatmap_companies.
     """
-    try:
-        from filings import market_data
-        idx_data, sp_data = await asyncio.gather(
-            asyncio.to_thread(market_data.get_index_market_data),
-            asyncio.to_thread(market_data.get_sp500_market_data, "1D"),
-        )
-    except Exception as exc:
-        logger.warning("Ticker tape fetch failed: %s", exc)
-        idx_data = sp_data = None
+    if idx_data is None or sp_data is None:
+        try:
+            from filings import market_data
+            calls = []
+            if idx_data is None:
+                calls.append(asyncio.to_thread(market_data.get_index_market_data))
+            if sp_data is None:
+                calls.append(asyncio.to_thread(market_data.get_sp500_market_data, "1D"))
+            results = await asyncio.gather(*calls)
+            ri = iter(results)
+            if idx_data is None:
+                idx_data = next(ri)
+            if sp_data is None:
+                sp_data = next(ri)
+        except Exception as exc:
+            logger.warning("Ticker tape fetch failed: %s", exc)
+            idx_data = idx_data or None
+            sp_data = sp_data or None
 
     out: list[tuple[str, str, float]] = []
 
@@ -1299,10 +1413,15 @@ async def _fetch_home_news() -> tuple[dict, list[dict]]:
     stories are the next 8.  Falls back to (mock_featured, mock_stories)
     if the API key is missing or the fetch fails.
     """
-    try:
+    def _compute():
+        # market_data.get_market_news has L1-only TTL cache — wrap it so
+        # multiple workers can share Finnhub responses across restarts.
         from filings import market_data
-        articles = await asyncio.to_thread(
-            market_data.get_market_news, "general", 12,
+        return market_data.get_market_news("general", 12)
+
+    try:
+        articles = await _l2_cached(
+            "redesign:home:news_general", ttl_seconds=600, compute_sync=_compute,
         )
     except Exception as exc:
         logger.warning("Home news fetch failed: %s", exc)
@@ -1353,19 +1472,21 @@ def _heatmap_color_for_pct(pct_decimal: float) -> str:
     return f"color-mix(in srgb, {accent} {pct_mix}%, var(--pp-bg))"
 
 
-async def _fetch_home_heatmap_companies() -> list[dict]:
+async def _fetch_home_heatmap_companies(*, mkt: dict | None = None) -> list[dict]:
     """Top S&P companies with daily pct + tile sizing.
 
     Real daily pct from `get_sp500_market_data("1D")`; static weight + mcap
     label from `_HEATMAP_COMPANIES_META`.  Falls back to all-mock when the
-    market data fetch is empty.
+    market data fetch is empty.  Accepts a pre-fetched `mkt` dict to share
+    a single market_data hit with top_movers + ticker_tape.
     """
-    try:
-        from filings import market_data
-        mkt = await asyncio.to_thread(market_data.get_sp500_market_data, "1D")
-    except Exception as exc:
-        logger.warning("Heatmap companies fetch failed: %s", exc)
-        mkt = None
+    if mkt is None:
+        try:
+            from filings import market_data
+            mkt = await asyncio.to_thread(market_data.get_sp500_market_data, "1D")
+        except Exception as exc:
+            logger.warning("Heatmap companies fetch failed: %s", exc)
+            mkt = None
 
     if not mkt or "_metadata" not in mkt:
         return _heatmap_companies_with_color()
@@ -1459,9 +1580,17 @@ def _fetch_sector_etfs_sync() -> dict[str, float]:
 
 
 async def _fetch_home_heatmap_sectors() -> list[dict]:
-    """Sector heatmap rows with real daily pct from sector ETFs."""
+    """Sector heatmap rows with real daily pct from sector ETFs.
+
+    L2-wrapped because the underlying yfinance batch is one of the slowest
+    operations on cold start (~10-15s for 11 sector ETFs).
+    """
     try:
-        pcts = await asyncio.to_thread(_fetch_sector_etfs_sync)
+        pcts = await _l2_cached(
+            "redesign:home:sector_etfs",
+            ttl_seconds=300,
+            compute_sync=_fetch_sector_etfs_sync,
+        )
     except Exception as exc:
         logger.warning("Sector heatmap fetch failed: %s", exc)
         pcts = {}
@@ -1623,10 +1752,17 @@ async def _fetch_home_cal_earnings(limit: int = 6) -> list[dict]:
     names.  Until we wire the actual watchlist, filter to S&P 500 so we
     don't surface every micro-cap that happens to come first alphabetically.
     """
+    def _compute_earnings():
+        # earnings_calendar has its own TTL cache but it's per-process L1.
+        # L2-wrap so cold-start workers warm from Supabase rather than the
+        # Finnhub/FMP backends.
+        from filings import earnings_calendar
+        return earnings_calendar.get_earnings_calendar(None, None, 4)
+
     try:
-        from filings import earnings_calendar, market_data
+        from filings import market_data
         payload, sp_constituents = await asyncio.gather(
-            asyncio.to_thread(earnings_calendar.get_earnings_calendar, None, None, 4),
+            _l2_cached("redesign:home:earnings_4w", 600, _compute_earnings),
             asyncio.to_thread(market_data.get_sp500_constituents),
         )
     except Exception as exc:
@@ -1767,11 +1903,27 @@ async def preview_home(request: Request):
     # Fetch every Overview section in parallel.  Each fetcher returns mock
     # data on failure, so the page renders even if half the upstreams are
     # cold.  Total budget capped by the slowest fetcher (typically yfinance).
+    # ── Phase 1 (parallel): shared market_data fetches ──
+    # 3 fetchers (top_movers, ticker_tape, heatmap_companies) all need the
+    # same S&P 1D map; 2 fetchers (kpi_strip, ticker_tape) need indices.
+    # Pre-fetch each ONCE and pass dicts down — saves 3-4 cache lookups
+    # plus all the thread-pool slots they were holding.  Both calls are
+    # already L2-backed by market_data internally so a cold start hits
+    # Supabase, not yfinance.
+    from filings import market_data as _md
+    sp_1d_map, idx_market_map = await asyncio.gather(
+        asyncio.to_thread(_md.get_sp500_market_data, "1D"),
+        asyncio.to_thread(_md.get_index_market_data),
+    )
+
+    # ── Phase 2 (parallel): every other fetcher, with pre-fetched data
+    # passed where applicable.  Heavy external-API fetchers (F&G, retail,
+    # news, earnings, sector ETFs, FRED) are now L2-cached so a cold worker
+    # warms from Supabase rather than the upstream APIs. ──
     (
         kpi_items, hero,
         top_movers_rows, fund_flow_rows, insider_rows, congress_rows,
         macro_rows, retail_payload, feargreed_payload, ticker_tape_rows,
-        # Subtabs — all 5 now LIVE (Flow / Heatmap / Activity / News / Calendar).
         flow_trending_payload,
         flow_fund_buys_rows, flow_congress_rows,
         heatmap_companies_rows, heatmap_sectors_rows,
@@ -1781,18 +1933,18 @@ async def preview_home(request: Request):
     ) = await asyncio.gather(
         _fetch_kpi_strip(),
         _fetch_hero_chart(),
-        _fetch_home_top_movers(limit=6),
+        _fetch_home_top_movers(limit=6, mkt=sp_1d_map),
         _fetch_home_fund_flows(request, limit=6),
         _fetch_home_insiders(limit=5),
         _fetch_home_congress(limit=5),
         _fetch_home_macro(),
         _fetch_home_retail(),
         _fetch_home_feargreed(),
-        _fetch_home_ticker_tape(),
+        _fetch_home_ticker_tape(idx_data=idx_market_map, sp_data=sp_1d_map),
         _fetch_home_flow_trending(request, limit=12),
         _fetch_home_fund_flows(request, limit=8),
         _fetch_home_congress(limit=8),
-        _fetch_home_heatmap_companies(),
+        _fetch_home_heatmap_companies(mkt=sp_1d_map),
         _fetch_home_heatmap_sectors(),
         _fetch_home_activity(limit=12),
         _fetch_home_news(),
@@ -1962,10 +2114,20 @@ def _macro_groups(payload: dict) -> list[dict]:
 
 async def _fetch_macro_indicators() -> dict:
     """Fetch FRED indicators in a thread (sync httpx pool).  Falls back to
-    the module's mock-builder if the FRED key isn't set or all series fail."""
-    try:
+    the module's mock-builder if the FRED key isn't set or all series fail.
+
+    L2-wrapped because the cold-start path fires 13 parallel FRED API
+    requests (one per indicator), each ~1-2s — too expensive on every
+    worker cold start.
+    """
+    def _compute():
         from filings import fred_indicators
-        payload = await asyncio.to_thread(fred_indicators.fetch_indicators)
+        return fred_indicators.fetch_indicators() or {}
+
+    try:
+        payload = await _l2_cached(
+            "redesign:home:fred_indicators", ttl_seconds=900, compute_sync=_compute,
+        )
         return payload or {}
     except Exception as exc:
         logger.warning("Macro indicators fetch failed: %s", exc)
