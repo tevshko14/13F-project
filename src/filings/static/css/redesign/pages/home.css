@@ -6,35 +6,38 @@
 /* ─────────────────────────────────────────────────────────────────────────────
  * Branded hero — Home only.  Heavy 2px ink rule below it.
  *
- * Replaced the original editorial masthead with the brand-rooted hero:
- * coral kicker → H1 tagline → descriptive subtitle → global search.
- * The terminal aesthetic is preserved (no rounded corners, mono kicker,
- * sharp 1px borders).  Headline scales down on narrower viewports.
+ * Carries the existing brand from production: coral mono kicker →
+ * Fraunces serif H1 → Space Grotesk descriptive subtitle → centered
+ * global search.  Headline + subtitle span the full content width on
+ * desktop so the page reads as a "newspaper masthead" rather than a
+ * narrow editorial column.  Headline scales fluidly between 28px and
+ * 64px so it always feels like a hero on whatever viewport.
  * ───────────────────────────────────────────────────────────────────────────*/
 
 .pp-home-mast {
-  padding: 28px 24px 22px;
+  padding: 36px 24px 28px;
   border-bottom: 2px solid var(--pp-ink);
 }
 
 .pp-home-mast-h1 {
-  font-family: var(--pp-font-body);
-  font-size: clamp(28px, 4vw, 44px);
+  font-family: var(--pp-font-display);
+  font-size: clamp(32px, 5.3vw, 64px);
   line-height: 1.02;
   font-weight: 700;
-  margin: 6px 0 0;
-  letter-spacing: -0.025em;
+  margin: 8px 0 0;
+  letter-spacing: -0.04em;
   color: var(--pp-ink);
-  text-wrap: pretty;
-  max-width: 920px;
+  text-wrap: balance;
+  max-width: none;
 }
 
 .pp-home-mast-sub {
-  font-size: 13.5px;
+  font-family: var(--pp-font-body);
+  font-size: 15px;
   color: var(--pp-dim);
-  margin: 10px 0 0;
+  margin: 14px 0 0;
   line-height: 1.55;
-  max-width: 760px;
+  max-width: none;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -49,7 +52,7 @@
   position: relative;
   display: flex;
   align-items: stretch;
-  margin-top: 18px;
+  margin: 24px auto 0;     /* `auto` left/right centers it on the page */
   background: var(--pp-panel);
   border: var(--pp-border-w) solid var(--pp-line2);
   max-width: 720px;

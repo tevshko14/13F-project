@@ -13,33 +13,20 @@
  * ==========================================================================*/
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * FONT LOADING — Geist (sans) + Geist Mono (variable woff2, self-hosted)
+ * FONT LOADING — Brand fonts match the existing production site.
  *
- * Source: vercel/geist-font, SIL Open Font License 1.1.  Fetched from the
- * jsdelivr-hosted npm package and stored in static/fonts/.  See
- * static/fonts/LICENSE.md for attribution.
+ *   Space Grotesk  — body, all weights 400/500/600/700 (Google Fonts CDN)
+ *   Fraunces       — display / headlines, weights 600/700 (Google Fonts CDN)
+ *   Geist Mono     — data / numbers / tickers (self-hosted, variable woff2)
  *
- * Variable fonts: ONE file per family covers all weights (Sans: 300–800,
- * Mono: 400–700).  Combined ~137 KB woff2.  The browser interpolates
- * intermediate weights as the design CSS requests them.
+ * Space Grotesk + Fraunces are loaded via <link rel="stylesheet"> in
+ * base.html so the redesign matches the existing brand voice (the prod
+ * home.html .hero-title is `font-family: "Fraunces", Georgia, serif`).
  *
- * `font-display: swap` — render with the system fallback immediately,
- * then swap to Geist when the file lands.  Prevents FOIT (flash of
- * invisible text) on slow networks.
- *
- * `font-feature-settings: "ss01"` (set on body in tokens.css below) locks
- * Geist's signature stylistic-set — alternate "s" terminal — required to
- * match the design.
+ * Geist Mono stays self-hosted because it's the only font we use for
+ * data tables / KPI values / ticker symbols — the "terminal" feel is
+ * locked in by the mono.  See static/fonts/LICENSE.md for attribution.
  * ───────────────────────────────────────────────────────────────────────────*/
-
-@font-face {
-  font-family: "Geist";
-  src: url("/static/fonts/Geist-Variable.woff2") format("woff2-variations"),
-       url("/static/fonts/Geist-Variable.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
 
 @font-face {
   font-family: "Geist Mono";
@@ -51,11 +38,12 @@
 }
 
 :root {
-  /* ───────── Typography ───────── */
-  --pp-font-body:  "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
-                   system-ui, sans-serif;
-  --pp-font-mono:  "Geist Mono", ui-monospace, "SF Mono", Menlo,
-                   "Cascadia Code", "Roboto Mono", Consolas, monospace;
+  /* ───────── Typography — Space Grotesk + Fraunces match the prod brand ── */
+  --pp-font-body:    "Space Grotesk", -apple-system, BlinkMacSystemFont,
+                     "Segoe UI", system-ui, sans-serif;
+  --pp-font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --pp-font-mono:    "Geist Mono", ui-monospace, "SF Mono", Menlo,
+                     "Cascadia Code", "Roboto Mono", Consolas, monospace;
 
   /* ───────── Spacing scale (8/12/14/18/22/26/32 — no arbitrary values) ───── */
   --pp-space-1: 8px;
@@ -190,7 +178,6 @@ html, body {
   color: var(--pp-text);
   font-family: var(--pp-font-body);
   font-size: var(--pp-fs-body);
-  font-feature-settings: "ss01";  /* alt s — locks Geist's signature stylistic set */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
