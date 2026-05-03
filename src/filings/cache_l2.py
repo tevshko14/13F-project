@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 async def l2_cached(
     key: str,
     ttl_seconds: int,
-    compute_sync: Callable[[], Any],
+    compute: Callable[[], Any],
     *,
     category: str,
 ) -> Any:
@@ -38,7 +38,11 @@ async def l2_cached(
     Args:
         key:          Supabase cache key, e.g. ``"redesign:home:cnn_fg"``.
         ttl_seconds:  How long the cached row is considered fresh.
-        compute_sync: Zero-arg sync callable that produces the payload.
+        compute:      Either a zero-arg sync callable OR an async
+                      coroutine function.  Async compute paths skip the
+                      heavy thread pool entirely — async httpx clients
+                      yield the event loop during network I/O instead of
+                      holding a thread slot.
         category:     Cache row category — kept stable per key family
                       so ops queries can target rows safely.
 
@@ -58,27 +62,40 @@ async def l2_cached(
     if cached is not None:
         # Stale hit — return it immediately, refresh in the background so
         # the next caller gets fresh data without waiting.
-        asyncio.create_task(_refresh(key, ttl_seconds, compute_sync, category))
+        asyncio.create_task(_refresh(key, ttl_seconds, compute, category))
         return cached
 
-    # Cold miss — compute synchronously, then fire-and-forget the
-    # writeback so the caller doesn't pay the L2 set round trip.
+    # Cold miss — compute, then fire-and-forget the writeback so the
+    # caller doesn't pay the L2 set round trip.
     try:
-        payload = await to_heavy(compute_sync)
+        payload = await _run_compute(compute)
     except Exception as exc:
-        logger.warning("l2_cached: compute_sync raised for %s: %s", key, exc)
+        logger.warning("l2_cached: compute raised for %s: %s", key, exc)
         return None
     if payload:
         asyncio.create_task(_writeback(key, category, payload, ttl_seconds))
     return payload
 
 
+async def _run_compute(compute: Callable[[], Any]) -> Any:
+    """Dispatch to async-await or heavy-pool execution based on shape.
+
+    Async coroutine functions are awaited directly so they can yield the
+    event loop during network I/O (no thread-pool slot held).  Sync
+    callables go through ``to_heavy`` so they participate in the global
+    semaphore budget.
+    """
+    if asyncio.iscoroutinefunction(compute):
+        return await compute()
+    return await to_heavy(compute)
+
+
 async def _refresh(
-    key: str, ttl_seconds: int, compute_sync: Callable[[], Any], category: str,
+    key: str, ttl_seconds: int, compute: Callable[[], Any], category: str,
 ) -> None:
     """Background task: re-run the upstream fetch and write it back to L2."""
     try:
-        payload = await to_heavy(compute_sync)
+        payload = await _run_compute(compute)
     except Exception as exc:
         logger.debug("l2_cached: bg refresh compute failed for %s: %s", key, exc)
         return

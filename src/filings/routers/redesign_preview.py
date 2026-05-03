@@ -21,6 +21,7 @@ import logging
 import math
 import os
 from datetime import datetime, timezone
+from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
@@ -1024,16 +1025,13 @@ async def _fetch_home_retail() -> dict:
     tickers) — matches what the template iterates.  Sentiment uses the
     same upvotes/mentions proxy the /_v2/retail page uses.
     """
-    def _compute():
-        # _get_apewisdom_all has its own SWR cache — but it's L1-only.
-        # We L2-wrap on top so cold-start workers don't have to fetch all
-        # 5 paginated ApeWisdom requests synchronously.
-        from filings import sentiment
-        return sentiment._get_apewisdom_all()
-
     try:
+        # Async-native fetcher uses the shared httpx client so all 5
+        # ApeWisdom paginated requests fire concurrently and yield the
+        # event loop during network I/O — no thread slots held.
         items = await _l2_cached(
-            "redesign:home:apewisdom", ttl_seconds=300, compute_sync=_compute,
+            "redesign:home:apewisdom", ttl_seconds=300,
+            compute=_fetch_apewisdom_async,
             category="redesign_home",
         )
     except Exception as exc:
@@ -1085,15 +1083,12 @@ async def _fetch_home_feargreed() -> dict:
     L2-cached for 5 min so cold workers don't all hit CNN simultaneously.
     Falls back to the mock 71 / Greed when CNN is unreachable.
     """
-    def _compute():
-        # _get_cnn_fear_greed has its own SWR L1 cache and background refresh —
-        # use it instead of _fetch_cnn_fear_greed (which always hits CNN).
-        from filings import sentiment
-        return sentiment._get_cnn_fear_greed()
-
     try:
+        # Async-native fetcher uses the shared httpx client — yields the
+        # event loop during the CNN request, no thread slot held.
         cnn = await _l2_cached(
-            "redesign:home:cnn_fg", ttl_seconds=300, compute_sync=_compute,
+            "redesign:home:cnn_fg", ttl_seconds=300,
+            compute=_fetch_cnn_fg_async,
             category="redesign_home",
         )
     except Exception as exc:
@@ -1347,7 +1342,7 @@ async def _fetch_home_news() -> tuple[dict, list[dict]]:
 
     try:
         articles = await _l2_cached(
-            "redesign:home:news_general", ttl_seconds=600, compute_sync=_compute,
+            "redesign:home:news_general", ttl_seconds=600, compute=_compute,
             category="redesign_home",
         )
     except Exception as exc:
@@ -1516,7 +1511,7 @@ async def _fetch_home_heatmap_sectors() -> list[dict]:
         pcts = await _l2_cached(
             "redesign:home:sector_etfs",
             ttl_seconds=300,
-            compute_sync=_fetch_sector_etfs_sync,
+            compute=_fetch_sector_etfs_sync,
             category="redesign_home",
         )
     except Exception as exc:
@@ -2061,7 +2056,7 @@ async def _fetch_macro_indicators() -> dict:
 
     try:
         payload = await _l2_cached(
-            "redesign:home:fred_indicators", ttl_seconds=900, compute_sync=_compute,
+            "redesign:home:fred_indicators", ttl_seconds=900, compute=_compute,
             category="redesign_home",
         )
         return payload or {}
@@ -3292,3 +3287,102 @@ async def preview_macro(request: Request):
         "macro_tab":    "Indicators",
     }
     return templates.TemplateResponse("_redesign/macro.html", ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Async-native fetchers for the warmer / L2 hot path
+# ─────────────────────────────────────────────────────────────────────────────
+# Use the shared httpx.AsyncClient so network I/O yields the event loop
+# instead of holding a thread-pool slot.  URL / header / shape constants
+# live in `sentiment.py` so the sync + async fetchers share one source
+# of truth for the wire contract.
+
+
+async def _fetch_cnn_fg_async() -> dict | None:
+    """CNN Fear & Greed via the shared async HTTP client."""
+    from filings import sentiment
+    from filings.http_client import get_async_client
+
+    try:
+        r = await get_async_client().get(
+            sentiment._CNN_FG_URL, headers=sentiment._CNN_FG_HEADERS,
+        )
+        r.raise_for_status()
+        return sentiment._normalize_cnn_fg(r.json())
+    except Exception as exc:
+        logger.debug("CNN F&G async fetch failed: %s", exc)
+        return None
+
+
+async def _fetch_apewisdom_async(pages: int = 5) -> list[dict]:
+    """ApeWisdom trending tickers — all pages fetched concurrently."""
+    from filings import sentiment
+    from filings.http_client import get_async_client
+
+    client = get_async_client()
+
+    async def _one_page(page: int) -> list[dict]:
+        try:
+            r = await client.get(sentiment._APEWISDOM_PAGE_URL.format(page=page))
+            r.raise_for_status()
+            return r.json().get("results") or []
+        except Exception as exc:
+            logger.debug("ApeWisdom page %d fetch failed: %s", page, exc)
+            return []
+
+    page_results = await asyncio.gather(*[_one_page(p) for p in range(1, pages + 1)])
+    merged: list[dict] = []
+    for rows in page_results:
+        merged.extend(rows)
+    merged.sort(key=lambda r: r.get("rank") or 9999)
+    return merged
+
+
+def _l2_warmup_targets() -> list[tuple[str, int, Callable[[], Any]]]:
+    """L2 cache entries keyed by (cache_key, ttl_seconds, compute_fn).
+
+    The warmer awaits ``l2_cached`` against each — async compute fns
+    bypass the heavy pool (yield event loop on network I/O); sync fns
+    flow through the heavy semaphore.
+    """
+    from filings import market_data, fred_indicators, earnings_calendar
+
+    return [
+        # Async-native — no thread slot held during network I/O.
+        ("redesign:home:cnn_fg",          300, _fetch_cnn_fg_async),
+        ("redesign:home:apewisdom",       300, _fetch_apewisdom_async),
+        # Sync upstreams — go through the heavy pool / semaphore.
+        ("redesign:home:sector_etfs",     300, _fetch_sector_etfs_sync),
+        ("redesign:home:news_general",    600, lambda: market_data.get_market_news("general", 12)),
+        ("redesign:home:earnings_4w",     600, lambda: earnings_calendar.get_earnings_calendar(None, None, 4)),
+        ("redesign:home:fred_indicators", 900, lambda: fred_indicators.fetch_indicators() or {}),
+    ]
+
+
+async def warm_l2_caches() -> dict:
+    """Pre-warm every L2 cache entry the home page depends on.
+
+    Designed to be called from a recurring background task in the FastAPI
+    lifespan.  All targets fire concurrently — independent upstreams,
+    no shared backpressure beyond the heavy semaphore.  Returns a small
+    status dict so the caller can log progress.
+    """
+    targets = _l2_warmup_targets()
+    results = await asyncio.gather(
+        *(
+            _l2_cached(key, ttl_seconds=ttl, compute=compute_fn, category="redesign_home")
+            for key, ttl, compute_fn in targets
+        ),
+        return_exceptions=True,
+    )
+    succeeded = 0
+    failed: list[str] = []
+    for (key, _ttl, _fn), result in zip(targets, results):
+        if isinstance(result, Exception):
+            logger.debug("warm_l2_caches: %s raised: %s", key, result)
+            failed.append(key)
+        elif result is None:
+            failed.append(key)
+        else:
+            succeeded += 1
+    return {"warmed": succeeded, "failed": failed, "total": len(targets)}

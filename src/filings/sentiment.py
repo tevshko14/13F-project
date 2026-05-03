@@ -109,10 +109,43 @@ def has_alphavantage_key() -> bool:
     return bool(os.environ.get("ALPHAVANTAGE_API_KEY"))
 
 
-_BROWSER_UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-)
+# Canonical browser UA lives in filings.http_client; re-exported here for
+# the existing sync urllib helpers that import _BROWSER_UA from this module.
+from filings.http_client import _BROWSER_UA  # noqa: E402,F401
+
+
+# CNN Fear & Greed — URL, headers, and the canonical raw → normalised
+# shape mapping used by both the sync fetcher in this module and the
+# async fetcher in routers.redesign_preview.
+_CNN_FG_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+_CNN_FG_HEADERS = {
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://edition.cnn.com/",
+    "Origin": "https://edition.cnn.com",
+}
+
+
+def _normalize_cnn_fg(raw: dict | None) -> dict | None:
+    """Map a raw CNN F&G response to our compact shape.
+
+    Returns ``None`` if the response is empty/malformed so the caller
+    can decide whether to log + cache the negative result.
+    """
+    fg = (raw or {}).get("fear_and_greed") or {}
+    score = fg.get("score")
+    if score is None:
+        return None
+    return {
+        "score":          round(float(score), 1),
+        "rating":         str(fg.get("rating", "unknown")).title(),
+        "previous_close": fg.get("previous_close"),
+        "one_week_ago":   fg.get("previous_1_week"),
+        "one_month_ago":  fg.get("previous_1_month"),
+        "one_year_ago":   fg.get("previous_1_year"),
+    }
+
+
+_APEWISDOM_PAGE_URL = "https://apewisdom.io/api/v1.0/filter/all-stocks/page/{page}"
 
 
 def _http_get_json(
@@ -242,36 +275,8 @@ def _fetch_cnn_fear_greed() -> dict | None:
     """Fetch CNN Fear & Greed data and update cache."""
     global _cnn_cache
 
-    url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-    raw = _http_get_json(
-        url,
-        headers={
-            "Accept": "application/json, text/plain, */*",
-            "Referer": "https://edition.cnn.com/",
-            "Origin": "https://edition.cnn.com",
-        },
-    )
-
-    if not raw or not isinstance(raw, dict):
-        with _lock:
-            _cnn_cache = (time.time(), None)
-        return None
-
-    fg = raw.get("fear_and_greed") or {}
-    score = fg.get("score")
-    if score is None:
-        with _lock:
-            _cnn_cache = (time.time(), None)
-        return None
-
-    result = {
-        "score": round(float(score), 1),
-        "rating": str(fg.get("rating", "unknown")).title(),
-        "previous_close": fg.get("previous_close"),
-        "one_week_ago": fg.get("previous_1_week"),
-        "one_month_ago": fg.get("previous_1_month"),
-        "one_year_ago": fg.get("previous_1_year"),
-    }
+    raw = _http_get_json(_CNN_FG_URL, headers=_CNN_FG_HEADERS)
+    result = _normalize_cnn_fg(raw if isinstance(raw, dict) else None)
 
     with _lock:
         _cnn_cache = (time.time(), result)
@@ -334,7 +339,7 @@ def _fetch_apewisdom_pages() -> list[dict]:
     global _apewisdom_cache, _apewisdom_index
 
     def _fetch_page(page: int) -> list[dict]:
-        url = f"https://apewisdom.io/api/v1.0/filter/all-stocks/page/{page}"
+        url = _APEWISDOM_PAGE_URL.format(page=page)
         try:
             raw = _http_get_json(url, timeout=6)
         except Exception:

@@ -631,11 +631,24 @@ async def lifespan(app: FastAPI):
         app.state.refresh_status = "pending"
         _track(_delayed_refresh_sweep(app), "refresh_sweep")
 
-    # Reddit velocity notification scanner (runs every 30 min)
-    _track(_reddit_velocity_scanner(), "reddit_scanner")
+    # Reddit velocity notification scanner (every 30 min)
+    _track(_periodic_task(
+        name="Reddit velocity scan", startup_delay=60,
+        interval=_REDDIT_SCAN_INTERVAL, body=_run_reddit_velocity_scan,
+    ), "reddit_scanner")
 
-    # Feature announcement → notification scanner (runs every 10 min)
-    _track(_feature_announcement_scanner(), "feature_announce_scanner")
+    # Feature announcement → notification scanner (every 10 min)
+    _track(_periodic_task(
+        name="Feature announcement scan", startup_delay=45,
+        interval=_FEATURE_ANNOUNCE_INTERVAL, body=_run_feature_announcement_scan,
+    ), "feature_announce_scanner")
+
+    # Redesign /_v2/home L2 cache warmer (only when env-gated route is on)
+    if _redesign_preview_router.is_enabled():
+        _track(_periodic_task(
+            name="Redesign L2 warmer", startup_delay=30,
+            interval=_REDESIGN_L2_WARMER_INTERVAL, body=_run_redesign_l2_warm,
+        ), "redesign_l2_warmer")
 
     yield
 
@@ -649,6 +662,10 @@ async def lifespan(app: FastAPI):
     if _http_pool is not None:
         await _http_pool.aclose()
         _http_pool = None
+
+    # Drain the shared async HTTP client used by redesign fetchers.
+    from filings.http_client import shutdown_async_client as _shutdown_async_client
+    await _shutdown_async_client()
 
     # Tear down the shared concurrency pools owned by filings.concurrency.
     from filings.concurrency import shutdown_pools as _shutdown_pools
@@ -1554,47 +1571,57 @@ async def _trigger_single_refresh(app: FastAPI, cik: str) -> None:
 
 # ── Reddit velocity notification scanner ──────────────────────────────
 
+async def _periodic_task(
+    *, name: str, startup_delay: int, interval: int, body,
+) -> None:
+    """Run *body* on a recurring schedule with an initial startup delay.
+
+    Replaces the duplicated ``await sleep / while True / try / except /
+    sleep`` skeleton each background scanner used to copy.  Exceptions
+    from *body* are logged and swallowed so one bad iteration never
+    kills the loop.
+    """
+    await asyncio.sleep(startup_delay)
+    while True:
+        try:
+            await body()
+        except Exception as exc:
+            logger.error("%s iteration failed: %s", name, exc)
+        await asyncio.sleep(interval)
+
+
+# ── Reddit velocity → notification scanner ──────────────────────────
+
 _REDDIT_SCAN_INTERVAL = 30 * 60  # 30 minutes
 
 
-async def _reddit_velocity_scanner() -> None:
-    """Periodically check ApeWisdom for velocity spikes and create notifications."""
-    await asyncio.sleep(60)  # let startup settle
-    while True:
-        try:
-            apewisdom = await _to_heavy(sentiment._get_apewisdom_all)
-            if apewisdom:
-                notif_rows: list[dict] = []
-                for item in apewisdom:
-                    ticker = (item.get("ticker") or "").upper()
-                    if not ticker:
-                        continue
-                    mentions = int(item.get("mentions") or 0)
-                    mentions_24h = int(item.get("mentions_24h_ago") or 0)
-                    if mentions_24h > 0:
-                        velocity_pct = ((mentions - mentions_24h) / mentions_24h) * 100
-                    else:
-                        velocity_pct = 0.0
-                    notif = notifications.create_reddit_notification(
-                        ticker=ticker,
-                        name=item.get("name", ticker),
-                        velocity_pct=velocity_pct,
-                        mentions=mentions,
-                    )
-                    if notif is not None:
-                        notif_rows.append(notif)
+async def _run_reddit_velocity_scan() -> None:
+    """One iteration of the Reddit velocity scanner."""
+    apewisdom = await _to_heavy(sentiment._get_apewisdom_all)
+    if not apewisdom:
+        return
+    notif_rows: list[dict] = []
+    for item in apewisdom:
+        ticker = (item.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        mentions = int(item.get("mentions") or 0)
+        mentions_24h = int(item.get("mentions_24h_ago") or 0)
+        velocity_pct = ((mentions - mentions_24h) / mentions_24h) * 100 if mentions_24h > 0 else 0.0
+        notif = notifications.create_reddit_notification(
+            ticker=ticker,
+            name=item.get("name", ticker),
+            velocity_pct=velocity_pct,
+            mentions=mentions,
+        )
+        if notif is not None:
+            notif_rows.append(notif)
 
-                if notif_rows:
-                    # Dedup handled by deterministic IDs (reddit-{ticker}-{date})
-                    n = await asyncio.to_thread(
-                        supabase_cache.upsert_notifications, notif_rows
-                    )
-                    if n:
-                        logger.info("Created %d Reddit velocity notifications", n)
-        except Exception as exc:
-            logger.error("Reddit velocity scan failed: %s", exc)
-
-        await asyncio.sleep(_REDDIT_SCAN_INTERVAL)
+    if notif_rows:
+        # Dedup handled by deterministic IDs (reddit-{ticker}-{date})
+        n = await asyncio.to_thread(supabase_cache.upsert_notifications, notif_rows)
+        if n:
+            logger.info("Created %d Reddit velocity notifications", n)
 
 
 # ── Feature announcement → notification scanner ─────────────────────
@@ -1602,30 +1629,43 @@ async def _reddit_velocity_scanner() -> None:
 _FEATURE_ANNOUNCE_INTERVAL = 10 * 60  # 10 minutes
 
 
-async def _feature_announcement_scanner() -> None:
-    """Periodically check feature_announcements and create notifications."""
-    await asyncio.sleep(45)  # let startup settle
-    while True:
-        try:
-            announcements = await asyncio.to_thread(
-                supabase_cache.get_recent_feature_announcements
-            )
-            if announcements:
-                notif_rows: list[dict] = []
-                for ann in announcements:
-                    notif = notifications.create_feature_release_notification(ann)
-                    if notif is not None:
-                        notif_rows.append(notif)
-                if notif_rows:
-                    n = await asyncio.to_thread(
-                        supabase_cache.upsert_notifications, notif_rows
-                    )
-                    if n:
-                        logger.info("Synced %d feature release notifications", n)
-        except Exception as exc:
-            logger.error("Feature announcement scan failed: %s", exc)
+async def _run_feature_announcement_scan() -> None:
+    """One iteration of the feature announcement scanner."""
+    announcements = await asyncio.to_thread(
+        supabase_cache.get_recent_feature_announcements
+    )
+    if not announcements:
+        return
+    notif_rows: list[dict] = []
+    for ann in announcements:
+        notif = notifications.create_feature_release_notification(ann)
+        if notif is not None:
+            notif_rows.append(notif)
+    if notif_rows:
+        n = await asyncio.to_thread(supabase_cache.upsert_notifications, notif_rows)
+        if n:
+            logger.info("Synced %d feature release notifications", n)
 
-        await asyncio.sleep(_FEATURE_ANNOUNCE_INTERVAL)
+
+# ── /_v2/home L2 cache warmer ────────────────────────────────────────
+
+_REDESIGN_L2_WARMER_INTERVAL = 4 * 60  # 4 min — refreshes before any 5-min TTL expires
+
+
+async def _run_redesign_l2_warm() -> None:
+    """One iteration of the redesign L2 cache warmer.
+
+    Without this, the first /_v2/home request after a worker restart
+    fills every L2 entry by hitting upstreams synchronously — that's
+    what jammed the thread pool the first time we shipped /_v2/home.
+    """
+    status = await _redesign_preview_router.warm_l2_caches()
+    logger.info(
+        "redesign L2 warmer: warmed %d/%d (failed=%s)",
+        status.get("warmed", 0),
+        status.get("total", 0),
+        status.get("failed", []),
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
