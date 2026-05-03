@@ -13,35 +13,22 @@
  * ==========================================================================*/
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * FONT LOADING — Brand fonts match the existing production site.
+ * FONT LOADING — Geist + Geist Mono per the locked spec.
  *
- *   Space Grotesk  — body, all weights 400/500/600/700 (Google Fonts CDN)
- *   Fraunces       — display / headlines, weights 600/700 (Google Fonts CDN)
- *   Geist Mono     — data / numbers / tickers (self-hosted, variable woff2)
+ *   Geist       — display + body, weights 300-800 (Google Fonts CDN)
+ *   Geist Mono  — numbers / tickers / data labels, weights 300-700 (CDN)
  *
- * Space Grotesk + Fraunces are loaded via <link rel="stylesheet"> in
- * base.html so the redesign matches the existing brand voice (the prod
- * home.html .hero-title is `font-family: "Fraunces", Georgia, serif`).
- *
- * Geist Mono stays self-hosted because it's the only font we use for
- * data tables / KPI values / ticker symbols — the "terminal" feel is
- * locked in by the mono.  See static/fonts/LICENSE.md for attribution.
+ * Both load via <link rel="stylesheet"> in base.html.  body uses
+ * `font-feature-settings: "ss01"` to lock Geist's signature stylistic-set
+ * alternate "s" terminal — required to match the design canvas.
  * ───────────────────────────────────────────────────────────────────────────*/
 
-@font-face {
-  font-family: "Geist Mono";
-  src: url("/static/fonts/GeistMono-Variable.woff2") format("woff2-variations"),
-       url("/static/fonts/GeistMono-Variable.woff2") format("woff2");
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-
 :root {
-  /* ───────── Typography — Space Grotesk + Fraunces match the prod brand ── */
-  --pp-font-body:    "Space Grotesk", -apple-system, BlinkMacSystemFont,
-                     "Segoe UI", system-ui, sans-serif;
-  --pp-font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  /* ───────── Typography ───────── */
+  --pp-font-body:    "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                     system-ui, sans-serif;
+  --pp-font-display: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                     system-ui, sans-serif;
   --pp-font-mono:    "Geist Mono", ui-monospace, "SF Mono", Menlo,
                      "Cascadia Code", "Roboto Mono", Consolas, monospace;
 
@@ -81,40 +68,36 @@
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * LIGHT MODE
- * Source: window.PP_THEME.light in theme.js
+ * LIGHT MODE — locked spec values.
  * Used both as default :root tokens AND when [data-theme="light"] explicit.
  * ───────────────────────────────────────────────────────────────────────────*/
 :root,
 :root[data-theme="light"] {
-  --pp-bg:       #f5f2ea;
-  --pp-panel:    #fcfaf3;
-  --pp-sub:      #ece8dc;
-  --pp-sub2:     #e3dccc;
-  --pp-ink:      #0b1320;
-  --pp-text:     #1c2230;
-  --pp-dim:      #6a6f7a;
-  --pp-dim2:     #9c9fa6;
-  --pp-line:     #dfdacc;
-  --pp-line2:    #c9c2af;
+  --pp-bg:       #f7f5ef;
+  --pp-panel:    #ffffff;
+  --pp-sub:      #f0ede5;
+  --pp-sub2:     #e6e2d6;
+  --pp-ink:      #1a1a1c;
+  --pp-text:     #3a3a3c;
+  --pp-dim:      #6a6a64;
+  --pp-dim2:     #9a9a92;
+  --pp-line:     #e4e0d4;
+  --pp-line2:    #d4d0c2;
 
   --pp-accent:     #E15A52;   /* coral — singular brand accent */
   --pp-accent-ink: #ffffff;
 
-  --pp-up:    #0c6e3d;
-  --pp-down:  #bf2a1c;
+  --pp-up:    #2f7d54;
+  --pp-down:  #b04a40;
 
-  /* Party colors — used in Congress page only */
   --pp-party-d: #1a4fbf;
   --pp-party-r: #bf2a1c;
 
-  /* Color scheme hint to UA for form controls / scrollbars */
   color-scheme: light;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * DARK MODE
- * Source: window.PP_THEME.dark in theme.js
+ * DARK MODE — locked spec values.
  * ───────────────────────────────────────────────────────────────────────────*/
 :root[data-theme="dark"] {
   --pp-bg:       #0c0c0e;
@@ -123,16 +106,16 @@
   --pp-sub2:     #1c1c21;
   --pp-ink:      #f3f1ec;
   --pp-text:     #d6d4cd;
-  --pp-dim:      #8a8880;
-  --pp-dim2:     #54524c;
-  --pp-line:     #1f1f23;
+  --pp-dim:      #8a8a82;
+  --pp-dim2:     #5a5a55;
+  --pp-line:     #1f1f25;
   --pp-line2:    #2a2a30;
 
-  --pp-accent:     #E15A52;   /* same hue, both modes */
+  --pp-accent:     #E15A52;
   --pp-accent-ink: #ffffff;
 
-  --pp-up:    #7dd49a;
-  --pp-down:  #ec6a5b;
+  --pp-up:    #4ea674;
+  --pp-down:  #c8584e;
 
   --pp-party-d: #5b8def;
   --pp-party-r: #ec6a5b;
@@ -154,12 +137,12 @@
     --pp-sub2:     #1c1c21;
     --pp-ink:      #f3f1ec;
     --pp-text:     #d6d4cd;
-    --pp-dim:      #8a8880;
-    --pp-dim2:     #54524c;
-    --pp-line:     #1f1f23;
+    --pp-dim:      #8a8a82;
+    --pp-dim2:     #5a5a55;
+    --pp-line:     #1f1f25;
     --pp-line2:    #2a2a30;
-    --pp-up:    #7dd49a;
-    --pp-down:  #ec6a5b;
+    --pp-up:    #4ea674;
+    --pp-down:  #c8584e;
     --pp-party-d: #5b8def;
     --pp-party-r: #ec6a5b;
     color-scheme: dark;
@@ -178,6 +161,7 @@ html, body {
   color: var(--pp-text);
   font-family: var(--pp-font-body);
   font-size: var(--pp-fs-body);
+  font-feature-settings: "ss01";  /* lock Geist's signature stylistic-set */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;

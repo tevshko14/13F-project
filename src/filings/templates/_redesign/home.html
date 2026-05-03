@@ -26,45 +26,52 @@
 
 {% block content %}
 
-{# ━━━━━━━━━━ BRANDED HERO (Home only) ━━━━━━━━━━
-   Replaces the original editorial masthead with the existing brand:
-   the "PaperPanda Intelligence" kicker, the H1 tagline, the descriptive
-   subtitle, and the global fuzzy search.  The search reuses the
-   existing /api/ticker-search-index endpoint and tickerSearchFilter()
-   function from base.html (carried over by including the search index
-   loader at the bottom of the page).
+{# ━━━━━━━━━━ HOME MASTHEAD ━━━━━━━━━━
+   Locked spec: kicker · H1 (with coral accent span) · H2 subtitle (with
+   two emphasis spans on the data points) · flush composite search bar
+   (input shell + ⌘K hint + Explore button, no gap, 48px tall).
+   All colors via tokens; no hardcoded values.
 #}
-<div class="pp-home-mast">
-  {{ kicker(mast_kicker|default("PAPERPANDA INTELLIGENCE")) }}
+<header class="pp-home-mast">
+  <div class="pp-home-mast-kicker">PaperPanda · Intelligence</div>
   <h1 class="pp-home-mast-h1">
-    {{ mast_h1|default("A sharper market dashboard for modern investors.") }}
+    A sharper market dashboard <span class="pp-accent">for modern investors.</span>
   </h1>
   <p class="pp-home-mast-sub">
-    {{ mast_sub|default("Track 85 superinvestor funds, 201 members of Congress, and thousands of insider trades — powered by SEC EDGAR, STOCK Act filings, and Federal Reserve data.") }}
+    Track <span class="pp-emph">85 superinvestor funds</span>,
+    <span class="pp-emph">201 members of Congress</span>, and thousands
+    of insider trades — powered by SEC EDGAR, STOCK Act filings, and
+    Federal Reserve data.
   </p>
 
   <div id="pp-home-hero-search" class="pp-hero-search">
-    <svg class="pp-hero-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <circle cx="11" cy="11" r="8"></circle>
-      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-    </svg>
-    <input type="search"
-           id="pp-hero-search-input"
-           class="pp-hero-search-input"
-           placeholder="Search stock, fund, insider, or congress member"
-           autocomplete="off"
-           aria-label="Site search"
-           aria-controls="pp-hero-search-results"
-           aria-autocomplete="list"
-           oninput="window.ppGlobalSearch && window.ppGlobalSearch(this.value, 'pp-hero-search-results')"
-           onfocus="window.ppGlobalSearch && window.ppGlobalSearch(this.value, 'pp-hero-search-results')"
-           onkeydown="window.ppSearchKeydown && window.ppSearchKeydown(event, 'pp-hero-search-results')">
+    <label class="pp-hero-search-shell" for="pp-hero-search-input">
+      <svg class="pp-hero-search-icon" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.4"/>
+        <line x1="9.5" y1="9.5" x2="13" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      <input type="search"
+             id="pp-hero-search-input"
+             class="pp-hero-search-input"
+             placeholder="Search ticker, fund, insider, or member of Congress…"
+             autocomplete="off"
+             aria-label="Site search"
+             aria-controls="pp-hero-search-results"
+             aria-autocomplete="list"
+             oninput="window.ppGlobalSearch && window.ppGlobalSearch(this.value, 'pp-hero-search-results')"
+             onfocus="window.ppGlobalSearch && window.ppGlobalSearch(this.value, 'pp-hero-search-results')"
+             onkeydown="window.ppSearchKeydown && window.ppSearchKeydown(event, 'pp-hero-search-results')">
+      <span class="pp-hero-search-kbd">⌘K</span>
+    </label>
     <button type="button" class="pp-hero-search-btn"
             onclick="var inp=document.getElementById('pp-hero-search-input'); if(inp.value.trim() && window.ppGlobalSearch) window.ppGlobalSearch(inp.value, 'pp-hero-search-results');"
-            aria-label="Search">EXPLORE →</button>
+            aria-label="Search">
+      <span class="pp-hero-search-btn-label">Explore</span>
+      <span class="pp-hero-search-btn-arrow" aria-hidden="true">→</span>
+    </button>
     <div id="pp-hero-search-results" class="pp-hero-search-results" role="listbox"></div>
   </div>
-</div>
+</header>
 
 {# ━━━━━━━━━━ PAGE NAV ROW (Segment + RangeChip) ━━━━━━━━━━ #}
 <div class="pp-home-navrow">

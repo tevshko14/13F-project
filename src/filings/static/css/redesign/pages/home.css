@@ -4,123 +4,173 @@
  * ==========================================================================*/
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * Branded hero — Home only.  Heavy 2px ink rule below it.
- *
- * Carries the existing brand from production: coral mono kicker →
- * Fraunces serif H1 → Space Grotesk descriptive subtitle → centered
- * global search.  Headline + subtitle span the full content width on
- * desktop so the page reads as a "newspaper masthead" rather than a
- * narrow editorial column.  Headline scales fluidly between 28px and
- * 64px so it always feels like a hero on whatever viewport.
+ * Home Masthead — locked spec.  All values are exact; no clamps, no
+ * substitutions.  Container has a 2px ink bottom rule.  No radius
+ * anywhere in the system.
  * ───────────────────────────────────────────────────────────────────────────*/
 
 .pp-home-mast {
-  padding: 36px 24px 28px;
+  padding: 40px 24px 28px;
   border-bottom: 2px solid var(--pp-ink);
 }
 
-.pp-home-mast-h1 {
-  font-family: var(--pp-font-display);
-  font-size: clamp(32px, 5.3vw, 64px);
-  line-height: 1.02;
+/* Kicker — Geist Mono, accent color, uppercase, 11px tight tracking. */
+.pp-home-mast-kicker {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
   font-weight: 700;
-  margin: 8px 0 0;
-  letter-spacing: -0.04em;
-  color: var(--pp-ink);
-  text-wrap: balance;
-  max-width: none;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--pp-accent);
 }
 
+/* H1 — Geist 64px, 0.96 line-height, tight -2.4px tracking, max 1080px.
+   `for modern investors.` is wrapped in span.pp-accent → coral. */
+.pp-home-mast-h1 {
+  font-family: var(--pp-font-display);
+  font-size: 64px;
+  line-height: 0.96;
+  font-weight: 700;
+  letter-spacing: -2.4px;
+  margin: 14px 0 0;
+  color: var(--pp-ink);
+  max-width: 1080px;
+  text-wrap: balance;
+}
+.pp-home-mast-h1 .pp-accent { color: var(--pp-accent); }
+
+/* H2 / subtitle — Geist 17px, 1.5 line-height, dim color, max 780px.
+   `pp-emph` spans inside (the data points "85 superinvestor funds" etc.)
+   read as primary against the dim copy. */
 .pp-home-mast-sub {
   font-family: var(--pp-font-body);
-  font-size: 15px;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: -0.2px;
+  margin: 16px 0 0;
   color: var(--pp-dim);
-  margin: 14px 0 0;
-  line-height: 1.55;
-  max-width: none;
+  max-width: 780px;
+  text-wrap: pretty;
+}
+.pp-home-mast-sub .pp-emph {
+  color: var(--pp-text);
+  font-weight: 500;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * Global hero search — sharp 1px terminal styling.
- * Reuses the existing tickerSearchFilter() (Fuse.js) from base.html.
- *
- * Layout: icon · input · explore button.  Border deepens on hover/focus.
- * Result dropdown appears beneath, anchored to the search bar's left edge.
+ * Hero search — flush composite of input shell + Explore button.
+ * 48px tall, 780px max-width, no gap between the two children, no radius.
  * ───────────────────────────────────────────────────────────────────────────*/
 
 .pp-hero-search {
   position: relative;
   display: flex;
   align-items: stretch;
-  margin: 24px auto 0;     /* `auto` left/right centers it on the page */
-  background: var(--pp-panel);
-  border: var(--pp-border-w) solid var(--pp-line2);
-  max-width: 720px;
-  transition: border-color 0.12s ease;
+  margin-top: 28px;
+  max-width: 780px;
+  height: 48px;
 }
-.pp-hero-search:hover,
-.pp-hero-search:focus-within {
+
+/* Left child: input shell (icon + input + ⌘K hint), fills via flex:1. */
+.pp-hero-search-shell {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 48px;
+  padding: 0 16px;
+  background: var(--pp-sub);
+  border: 1px solid var(--pp-line2);
+  border-right: none;        /* flush with the Explore button */
+  cursor: text;
+  transition: border-color 0.12s ease;
+  min-width: 0;
+}
+.pp-hero-search-shell:focus-within {
   border-color: var(--pp-ink);
 }
 
 .pp-hero-search-icon {
-  width: 16px;
-  height: 16px;
-  margin: 0 12px 0 14px;
-  color: var(--pp-dim);
-  align-self: center;
   flex-shrink: 0;
+  color: var(--pp-dim);
+  opacity: 0.6;
 }
-.pp-hero-search:focus-within .pp-hero-search-icon { color: var(--pp-accent); }
 
 .pp-hero-search-input {
   flex: 1;
   border: 0;
+  outline: 0;
   background: transparent;
   color: var(--pp-text);
   font-family: var(--pp-font-body);
   font-size: 14px;
-  padding: 14px 8px;
-  outline: 0;
-  min-width: 0;  /* let it shrink inside the flex container */
+  letter-spacing: -0.1px;
+  height: 100%;
+  padding: 0;
+  min-width: 0;
 }
 .pp-hero-search-input::placeholder {
   color: var(--pp-dim2);
-  font-family: var(--pp-font-mono);
-  font-size: 12.5px;
-  letter-spacing: 0.02em;
+  font-family: var(--pp-font-body);
+  font-size: 14px;
+  letter-spacing: -0.1px;
 }
 .pp-hero-search-input::-webkit-search-cancel-button {
   -webkit-appearance: none; appearance: none;
 }
 
+.pp-hero-search-kbd {
+  flex-shrink: 0;
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--pp-dim2);
+  padding: 3px 7px;
+  border: 1px solid var(--pp-line2);
+}
+
+/* Right child: Explore button — flush against the shell, ink fill. */
 .pp-hero-search-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 26px;
   background: var(--pp-ink);
   color: var(--pp-bg);
-  border: 0;
-  border-left: var(--pp-border-w) solid var(--pp-line2);
-  padding: 0 18px;
+  border: 1px solid var(--pp-ink);
   font-family: var(--pp-font-mono);
-  font-size: 11px;
-  letter-spacing: 0.1em;
+  font-size: 13px;
   font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-  flex-shrink: 0;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .pp-hero-search-btn:hover {
   background: var(--pp-accent);
-  color: var(--pp-accent-ink);
+  border-color: var(--pp-accent);
+  color: #fff;
+}
+.pp-hero-search-btn-arrow {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
 }
 
+/* Results dropdown — anchored under the full composite, flush 1px border. */
 .pp-hero-search-results {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   right: 0;
-  max-width: 720px;
+  max-width: 780px;
   background: var(--pp-panel);
-  border: var(--pp-border-w) solid var(--pp-line2);
+  border: 1px solid var(--pp-line2);
   max-height: 420px;
   overflow-y: auto;
   z-index: 50;

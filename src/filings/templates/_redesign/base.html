@@ -32,16 +32,15 @@
     })();
   </script>
 
-  {#- Brand fonts: Space Grotesk (body) + Fraunces (display) from Google Fonts
-       — same source as the existing prod base.html so visual brand stays
-       consistent.  Geist Mono is self-hosted for the data/terminal feel. -#}
+  {#- Geist (300-800) + Geist Mono (300-700) from Google Fonts CDN.
+       Set as the locked design spec.  Body sets font-feature-settings:"ss01"
+       in tokens.css to enable Geist's signature stylistic-set alternates. -#}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preload" as="style"
-        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap">
+        href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@300;400;500;600;700&display=swap">
   <link rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap">
-  <link rel="preload" href="/static/fonts/GeistMono-Variable.woff2" as="font" type="font/woff2" crossorigin>
+        href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@300;400;500;600;700&display=swap">
 
   {#- Stylesheet order matters: tokens → primitives → app-shell → page-specific -#}
   <link rel="stylesheet" href="/static/css/redesign/tokens.css">
