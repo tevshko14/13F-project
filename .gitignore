@@ -35,3 +35,9 @@ notifications.json
 apps/web/.next/
 apps/web/node_modules/
 apps/web/.env.local
+
+# Design handoff bundle (reference-only, not built/shipped)
+design_handoff_paperpanda/
+
+# Stray local artifacts
+PaperPanda_Insights_Report.pdf
