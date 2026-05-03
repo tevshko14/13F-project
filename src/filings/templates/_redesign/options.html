@@ -1,0 +1,164 @@
+{#-
+  PaperPanda Redesign — Options page
+  Mirrors design_handoff_paperpanda/page-options.jsx
+
+  Tabs: Unusual flow · Open interest · Volatility
+  Default = Unusual flow.  All three are mock — per-print sweep
+  classification requires an OPRA-licensed feed (flagged in audit).
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment,
+     kpi_strip, tag %}
+
+{% block title %}Options · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/options.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━ #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">Δ</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">
+      Signals <span class="pp-page-hero-crumb-sep">/</span> Options
+    </span>
+    <h1 class="pp-page-hero-title">Options</h1>
+    <div class="pp-page-hero-sub">
+      CBOE feed · 15-min delayed · 3,420 unusual prints today ·
+      <span class="pp-page-hero-flag">DEMO</span>
+    </div>
+  </div>
+  <div class="pp-options-actions">
+    {{ btn("Filters", kind="ghost") }}
+    {{ btn("+ Alert", kind="accent") }}
+  </div>
+</header>
+
+{# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
+<div class="pp-page-section pp-page-section-kpi">
+  {{ kpi_strip(options_kpi) }}
+</div>
+
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
+<div class="pp-page-tabs">
+  {{ segment(["Unusual flow","Open interest","Volatility"],
+             value=options_tab|default("Unusual flow"),
+             id="pp-options-tabs") }}
+</div>
+
+{# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
+<div class="pp-page-body">
+
+  <section class="pp-page-pane is-active" data-tab-pane="Unusual flow">
+    {% call panel() %}
+      {% call panel_head("Largest premium prints · today", sub="block + sweep") %}
+        {{ segment(["All","Calls","Puts","Sweeps"], value="All", mono=True) }}
+      {% endcall %}
+      <table class="pp-table pp-options-flow-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Type</th>
+            <th class="pp-num">Strike</th>
+            <th class="pp-num">Expiry</th>
+            <th class="pp-num">Spot</th>
+            <th class="pp-num">vs spot</th>
+            <th class="pp-num">Premium</th>
+            <th class="pp-num">Volume</th>
+            <th class="pp-num">OI</th>
+            <th class="pp-num">IV</th>
+            <th>Side</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in options_flow %}
+            <tr class="{% if r.notable %}pp-insiders-row-flagged{% endif %}">
+              <td>
+                <span class="pp-mono pp-options-tkr">{{ r.tk }}</span>
+                {% if r.notable %}<span class="pp-options-star">★</span>{% endif %}
+              </td>
+              <td>
+                <span class="pp-mono pp-options-type pp-options-type-{{ r.type|lower }}">{{ r.type }}</span>
+              </td>
+              <td class="pp-num pp-mono pp-options-strike">${{ r.strike }}</td>
+              <td class="pp-num pp-mono pp-text">{{ r.exp }}</td>
+              <td class="pp-num pp-mono pp-dim">{{ r.spot }}</td>
+              <td class="pp-num">
+                <span class="pp-mono {{ 'pp-up' if r.upside.startswith('+') else 'pp-down' }}" style="font-weight:600;">{{ r.upside }}</span>
+              </td>
+              <td class="pp-num pp-mono pp-options-premium">{{ r.premium }}</td>
+              <td class="pp-num pp-mono pp-text">{{ r.vol }}</td>
+              <td class="pp-num pp-mono pp-dim">{{ r.oi }}</td>
+              <td class="pp-num">
+                <span class="pp-mono {% if r.iv|replace('%','')|int > 80 %}pp-accent-color{% else %}pp-text{% endif %}">{{ r.iv }}</span>
+              </td>
+              <td>{{ tag(r.side) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endcall %}
+  </section>
+
+  <section class="pp-page-pane" data-tab-pane="Open interest">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">▮</div>
+        <div class="pp-page-placeholder-title">Open interest — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Highest OI by strike (next 30d expiries).  Same OPRA-vendor blocker.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+  <section class="pp-page-pane" data-tab-pane="Volatility">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">∿</div>
+        <div class="pp-page-placeholder-title">Volatility — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          IV rank / IV percentile / IV-HV ratio.  Existing cboe_data.py
+          has IV rank for some tickers; needs broader index.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  var seg = document.getElementById('pp-options-tabs');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-page-pane');
+  if (!panes.length) return;
+  function activate(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-value') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    });
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    if (name) activate(name);
+  });
+})();
+</script>
+{% endblock %}

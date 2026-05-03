@@ -18,6 +18,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
+  {#- noindex on every redesign-preview page so search engines don't pick
+      up the in-progress design.  Safety-net even with the env-gate in
+      place.  Removes when the redesign ships at the prod paths. -#}
+  <meta name="robots" content="noindex,nofollow">
   <title>{% block title %}PaperPanda{% endblock %}</title>
 
   {#- Anti-FOUC: set theme before any CSS paints. -#}

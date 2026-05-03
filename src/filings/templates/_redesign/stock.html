@@ -1,0 +1,291 @@
+{#-
+  PaperPanda Redesign — Stock detail page
+  Mirrors design_handoff_paperpanda/page-stock.jsx + stock-tab-overview.jsx
+
+  Tabs: Overview · Financials · Ownership · Forecasts · Signals · Vitals
+  Default = Overview.  Other 5 tabs are placeholders.
+
+  Real data: market_data.get_stock_ohlcv() drives candlestick chart + KPI
+  derivations (Open/High/Low/Volume/Avg Vol/52W H/L).  Mkt Cap + P/E +
+  CUSIP need fundamentals join — flagged in audit.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment,
+     range_chip, kpi_strip %}
+
+{% block title %}{{ stock_ticker }} · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/stock.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ STOCK HERO ━━━━━━━━━━
+   Variant of page-hero with: ticker badge · breadcrumb + exchange/CUSIP pills
+   + delayed flag · ticker + name baseline · sub stats · big price + change
+   on right · Compare/Watch action buttons. #}
+<header class="pp-page-hero pp-stock-hero">
+  <div class="pp-page-hero-icon pp-stock-badge" aria-hidden="true">{{ stock_ticker }}</div>
+  <div class="pp-page-hero-text pp-stock-id">
+    <div class="pp-stock-pill-row">
+      <span class="pp-mono pp-page-hero-crumb">
+        Stock <span class="pp-page-hero-crumb-sep">/</span> Equity
+      </span>
+      <span class="pp-mono pp-stock-pill">{{ stock_exchange }}</span>
+      <span class="pp-mono pp-stock-pill">CUSIP {{ stock_cusip }}</span>
+      <span class="pp-stock-delay-flag">15-min delayed</span>
+      {%- if stock_is_mock %}
+        <span class="pp-page-hero-flag">DEMO</span>
+      {% endif %}
+    </div>
+    <h1 class="pp-page-hero-title pp-stock-title">
+      <span>{{ stock_ticker }}</span>
+      <span class="pp-stock-name">{{ stock_name }}</span>
+    </h1>
+    <div class="pp-page-hero-sub pp-stock-sub">
+      Equity · 1Y candle history loaded
+    </div>
+  </div>
+  <div class="pp-stock-price-block">
+    <span class="pp-mono pp-stock-price">${{ stock_price }}</span>
+    {% if stock_chg_pct is not none %}
+      <span class="pp-mono pp-stock-chg {{ 'pp-up' if stock_chg_up else 'pp-down' }}">
+        {{- '▲' if stock_chg_up else '▼' }}
+        {%- if stock_chg_abs is not none %} {{ "%.2f"|format(stock_chg_abs|abs) }}{% endif %}
+        ({{- '+' if stock_chg_up else '-' -}}{{ "%.2f"|format((stock_chg_pct * 100)|abs) }}%) today
+      </span>
+    {% endif %}
+  </div>
+  <div class="pp-stock-actions">
+    {{ btn("+ Compare", kind="ghost") }}
+    {{ btn("★ Watch",  kind="accent") }}
+  </div>
+</header>
+
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
+<div class="pp-page-tabs">
+  {{ segment(["Overview","Financials","Ownership","Forecasts","Signals","Vitals"],
+             value=stock_tab|default("Overview"),
+             id="pp-stock-tabs") }}
+  <div style="flex:1"></div>
+  {{ range_chip(value="1Y") }}
+</div>
+
+{# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
+<div class="pp-page-body">
+
+  {# ── OVERVIEW (default) ── #}
+  <section class="pp-page-pane is-active" data-tab-pane="Overview">
+
+    {# 8-cell KPI strip — Open/High/Low/Volume/Avg Vol/Mkt Cap/P/E/52W H/L. #}
+    <section class="pp-page-section-kpi">
+      {{ kpi_strip(stock_kpi) }}
+    </section>
+
+    {# 1.7fr/1fr: candlestick chart + news list. #}
+    <section class="pp-stock-row-hero">
+      {% call panel(cls="pp-stock-chart-panel") %}
+        {% call panel_head("Price · Candlestick + Volume", sub="1Y · daily") %}
+          <span class="pp-mono pp-stock-chart-stats">
+            O <span class="pp-stock-chart-stat-num">{{ stock_kpi[0].value }}</span>
+            H <span class="pp-stock-chart-stat-num">{{ stock_kpi[1].value }}</span>
+            L <span class="pp-stock-chart-stat-num">{{ stock_kpi[2].value }}</span>
+            C <span class="pp-stock-chart-stat-close pp-up">{{ stock_close }}</span>
+          </span>
+        {% endcall %}
+        <div class="pp-stock-chart-body">
+          <svg class="pp-stock-chart-svg"
+               viewBox="0 0 600 280" preserveAspectRatio="none"
+               aria-label="{{ stock_ticker }} 1-year candlestick chart">
+            {# Gridlines (5 dashed). #}
+            {% for i in range(5) %}
+              <line class="pp-home-chart-grid"
+                    x1="0" x2="600"
+                    y1="{{ i * 46 + 10 }}" y2="{{ i * 46 + 10 }}"/>
+            {% endfor %}
+            {# Candlesticks. #}
+            {% if stock_chart and stock_chart.bars %}
+              {% for b in stock_chart.bars %}
+                {% set _color = "var(--pp-up)" if b.up else "var(--pp-down)" %}
+                <line class="pp-stock-wick"
+                      x1="{{ b.x }}" x2="{{ b.x }}"
+                      y1="{{ b.wick_y1 }}" y2="{{ b.wick_y2 }}"
+                      stroke="{{ _color }}"/>
+                <rect class="pp-stock-body"
+                      x="{{ b.body_x }}" y="{{ b.body_y }}"
+                      width="{{ b.body_w }}" height="{{ b.body_h }}"
+                      fill="{{ _color }}"
+                      fill-opacity="{{ '0.85' if b.up else '1' }}"
+                      stroke="{{ _color }}"/>
+                {# Volume strip below at y=220-270. #}
+                <rect class="pp-stock-vol"
+                      x="{{ b.vol_x }}" y="{{ b.vol_y }}"
+                      width="6" height="{{ b.vol_h }}"
+                      fill="{{ _color }}"
+                      fill-opacity="0.35"/>
+              {% endfor %}
+            {% else %}
+              <text x="300" y="140" text-anchor="middle" class="pp-stock-chart-empty">
+                Loading 1Y candles…
+              </text>
+            {% endif %}
+          </svg>
+          <div class="pp-stock-chart-axis">
+            {% for d in ["Apr '25","Jun","Aug","Oct","Dec","Feb '26","Apr"] %}
+              <span class="pp-mono pp-stock-chart-tick">{{ d }}</span>
+            {% endfor %}
+          </div>
+        </div>
+      {% endcall %}
+
+      {% call panel(cls="pp-stock-news-panel") %}
+        {% call panel_head("Latest news", sub="real-time") %}
+          <span class="pp-mono pp-stock-news-counter">{{ stock_news|length }} items</span>
+        {% endcall %}
+        {% if stock_news %}
+          {% for n in stock_news %}
+            <div class="pp-stock-news-row">
+              <span class="pp-mono pp-stock-news-byline">{{ n.src }}{% if n.ago %} · {{ n.ago }}{% endif %}</span>
+              <div class="pp-stock-news-title">{{ n.title }}</div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">No news available right now.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+    </section>
+
+    {# 2-col: Retail sentiment + About company. #}
+    <section class="pp-stock-row-secondary">
+      {% call panel() %}
+        {{ panel_head("Retail sentiment", sub="r/wallstreetbets · 24h") }}
+        <div class="pp-stock-sentiment-body">
+          <div class="pp-stock-sentiment-head">
+            <span class="pp-mono pp-stock-sentiment-score">+71</span>
+            <div>
+              {{ label("Sentiment score") }}
+              <span class="pp-mono pp-stock-sentiment-meta">
+                2,891 mentions · #3 most discussed
+              </span>
+            </div>
+          </div>
+          {# Centered-zero sentiment bar — extracted to primitive in audit. #}
+          <div class="pp-stock-sentiment-bar">
+            <div class="pp-stock-sentiment-tick"></div>
+            <div class="pp-stock-sentiment-fill"></div>
+          </div>
+          <div class="pp-stock-sentiment-axis">
+            <span class="pp-mono">BEARISH</span>
+            <span class="pp-mono">NEUTRAL</span>
+            <span class="pp-mono">BULLISH</span>
+          </div>
+          <div class="pp-stock-sentiment-note">
+            Top tickers mentioned alongside:
+            <span class="pp-mono pp-stock-sentiment-cohort">SMCI, AVGO, AMD</span>.
+            Sentiment +14pp WoW driven by Blackwell shipment optimism.
+          </div>
+        </div>
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("About", sub="company") }}
+        <div class="pp-stock-about-body">
+          <p class="pp-stock-about-blurb">
+            {{ stock_name }} — full company description from fundamentals.get_company_overview()
+            will populate here.  Coming next pass with the SEC company-facts join.
+          </p>
+          <div class="pp-stock-about-grid">
+            {% for k, v in [
+                 ("CEO",       "—"),
+                 ("Founded",   "—"),
+                 ("Employees", "—"),
+                 ("HQ",        "—"),
+                 ("IPO",       "—"),
+                 ("Website",   "—"),
+               ] %}
+              <div>
+                {{ label(k) }}
+                <span class="pp-mono pp-stock-about-val">{{ v }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endcall %}
+    </section>
+
+  </section>
+
+  {# 5 placeholder panes. #}
+  <section class="pp-page-pane" data-tab-pane="Financials">
+    {% call panel() %}<div class="pp-page-placeholder">
+      <div class="pp-page-placeholder-icon">$</div>
+      <div class="pp-page-placeholder-title">Financials — coming soon</div>
+      <div class="pp-page-placeholder-sub">Income statement / Balance sheet / Cash flow tables. fundamentals.get_fundamentals already wires this.</div>
+    </div>{% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Ownership">
+    {% call panel() %}<div class="pp-page-placeholder">
+      <div class="pp-page-placeholder-icon">▣</div>
+      <div class="pp-page-placeholder-title">Ownership — coming soon</div>
+      <div class="pp-page-placeholder-sub">Funds · Congress · Insiders · SEC filings sub-pills.  Existing client.get_holders + insider_trading + congress_trading drive this.</div>
+    </div>{% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Forecasts">
+    {% call panel() %}<div class="pp-page-placeholder">
+      <div class="pp-page-placeholder-icon">∿</div>
+      <div class="pp-page-placeholder-title">Forecasts — coming soon</div>
+      <div class="pp-page-placeholder-sub">Analyst price targets, EPS / revenue estimates.  analysts.py already populates these.</div>
+    </div>{% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Signals">
+    {% call panel() %}<div class="pp-page-placeholder">
+      <div class="pp-page-placeholder-icon">⚡</div>
+      <div class="pp-page-placeholder-title">Signals — coming soon</div>
+      <div class="pp-page-placeholder-sub">Smart-money / insider / congress / retail / options signals.  Cross-aggregation; needs primitives `notable_panel` + `cluster_card`.</div>
+    </div>{% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Vitals">
+    {% call panel() %}<div class="pp-page-placeholder">
+      <div class="pp-page-placeholder-icon">●</div>
+      <div class="pp-page-placeholder-title">Vitals — coming soon</div>
+      <div class="pp-page-placeholder-sub">Liquidity / valuation / quality / momentum scorecards.  Existing earnings_scorecard + screener fields.</div>
+    </div>{% endcall %}
+  </section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  var seg = document.getElementById('pp-stock-tabs');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-page-pane');
+  if (!panes.length) return;
+  function activate(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-value') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    });
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    if (name) activate(name);
+  });
+})();
+</script>
+{% endblock %}

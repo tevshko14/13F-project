@@ -1,0 +1,29 @@
+/* ============================================================================
+ * PaperPanda Redesign — Congress page
+ * Reuses .pp-page-* + .pp-insiders-* (notable callout, table, filters).
+ * ==========================================================================*/
+
+/* Member cell — party dot + name + optional star + state code. */
+.pp-congress-member {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.pp-congress-party-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--pp-dim);
+  flex-shrink: 0;
+}
+.pp-congress-party-d { background: #2274d6; }   /* blue, party D */
+.pp-congress-party-r { background: #d62b2b; }   /* red,  party R */
+.pp-congress-party-i { background: var(--pp-dim); } /* dim, independent */
+.pp-congress-state {
+  font-size: 10px;
+  color: var(--pp-dim2);
+}
+
+.pp-congress-lag {
+  font-size: 11px;
+  font-weight: 600;
+}

@@ -21,7 +21,12 @@
 {% block title %}Home · PaperPanda{% endblock %}
 
 {% block extra_css %}
-  <link rel="stylesheet" href="/static/css/redesign/pages/home.css">
+  {# Cache-bust on every render in dev — SecurityHeadersMiddleware sets a
+     1h max-age which is too long while iterating on the redesign.  The
+     query-string busts both the browser cache and any CDN.  Drop this
+     once we ship and switch to hashed filenames. #}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/home.css?v={{ range(1, 10**9) | random }}">
 {% endblock %}
 
 {% block content %}
@@ -73,9 +78,31 @@
   </div>
 </header>
 
-{# ━━━━━━━━━━ PAGE NAV ROW (Segment + RangeChip) ━━━━━━━━━━ #}
+{# ━━━━━━━━━━ TICKER TAPE ━━━━━━━━━━
+   Always-on bar above the subtab nav.  Mock data for now — wire to a
+   websocket / SSE feed once we ship.  Items duplicated in CSS via
+   pseudo-elements would also work, but rendering twice in HTML keeps
+   it simple and SSR-friendly. #}
+<div class="pp-home-ticker" aria-label="Market snapshot">
+  <div class="pp-home-ticker-track">
+    {% for label, value, pct in (ticker_tape + ticker_tape) %}
+      <span class="pp-home-ticker-cell">
+        <span class="pp-mono pp-home-ticker-label">{{ label }}</span>
+        <span class="pp-mono pp-home-ticker-value">{{ value }}</span>
+        <span class="pp-mono pp-home-ticker-chg {{ 'pp-up' if pct >= 0 else 'pp-down' }}">
+          {{- '▲' if pct >= 0 else '▼' }}&nbsp;{{ "%.2f"|format((pct * 100)|abs) }}%
+        </span>
+      </span>
+    {% endfor %}
+  </div>
+</div>
+
+{# ━━━━━━━━━━ PAGE NAV ROW (Segment + RangeChip) ━━━━━━━━━━
+   The Segment is wired to JS-only tab switching (see #pp-home-tab-js).
+   No HTMX fetch — all 6 panes are server-rendered up front, JS toggles
+   `is-active` on `<section data-tab-pane>` to swap. #}
 <div class="pp-home-navrow">
-  {{ segment(["Overview","Flow","Heatmap","News","Calendar"],
+  {{ segment(["Overview","Flow","Heatmap","Activity","News","Calendar"],
              value=home_view|default("Overview"),
              id="pp-home-view") }}
   <div class="pp-home-navrow-spacer"></div>
@@ -85,6 +112,11 @@
 <div class="pp-home-body">
   <div class="pp-home-stack">
 
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━ OVERVIEW SUBTAB (default) ━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <section class="pp-home-tab-pane is-active" data-tab-pane="Overview">
+
     {# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
     {{ kpi_strip(kpi_strip_items) }}
 
@@ -92,46 +124,85 @@
     <div class="pp-home-hero">
 
       {# ── Chart panel ──
-         _ref_y  = where prev-close horizontal reference line sits.
-         _tag_y_top = top of the price chip rect (anchored to the LINE'S last y,
-                      i.e. the current price — NOT the prev-close ref line). #}
+         _ref_y      = where prev-close horizontal reference line sits.
+         _tag_y      = where the line's LAST y is (current price level).
+         The price chip + hover tooltip are rendered as HTML overlays so
+         the SVG can keep preserveAspectRatio="none" without warping any
+         text.  Hover JS reads data-history + data-prev-close + the
+         viewBox-to-pixel mapping to surface the price/time at the cursor. #}
       {% set _ref_y = chart_ref_y|default(74) %}
       {% set _tag_y = chart_tag_y|default(_ref_y) %}
-      {% set _tag_y_top = (_tag_y - 8) %}
       {% call panel() %}
-        {% call panel_head("S&P 500", sub=(chart_label|default("INTRADAY · 15M"))) %}
-          <span class="pp-home-chart-headlight {{ 'pp-up' if chart_change_up|default(True) else 'pp-down' }}">
+        {# Custom chart panel head — replaces panel_head() because the design
+           pulls the title slot OUT and uses an index segment as the leading
+           element.  The right side carries the live last + change.
+           Toggle is visual-only for now (only S&P has real intraday wired);
+           clicking Nasdaq / Dow is a no-op until we extend _fetch_hero_chart()
+           to fetch all three in parallel. #}
+        <div class="pp-panel-head pp-home-chart-head">
+          <div class="pp-segment pp-segment-mono pp-home-chart-idx" id="pp-home-chart-idx" role="tablist">
+            <span class="pp-segment-opt is-active" data-chart-idx="S&P 500" role="tab">S&amp;P 500</span>
+            <span class="pp-segment-opt"             data-chart-idx="Nasdaq"  role="tab">Nasdaq</span>
+            <span class="pp-segment-opt"             data-chart-idx="Dow"     role="tab">Dow</span>
+          </div>
+          <div class="pp-label pp-label-loose pp-home-chart-sublabel">{{ chart_label|default("INTRADAY · 15M") }}</div>
+          <div class="pp-panel-head-spacer"></div>
+          <span class="pp-mono pp-home-chart-last">{{ chart_tag|default('5,847.42') }}</span>
+          <span class="pp-mono pp-home-chart-headlight {{ 'pp-up' if chart_change_up|default(True) else 'pp-down' }}">
             {%- if chart_change_up|default(True) -%}+{%- else -%}-{%- endif -%}
             {{ chart_change|default('41.86') }}
             ({%- if chart_change_up|default(True) -%}+{%- else -%}-{%- endif -%}
             {{ chart_change_pct|default('0.72%') }})
           </span>
-        {% endcall %}
-        <div class="pp-home-chart-wrap">
-        <svg class="pp-home-chart-svg"
-             viewBox="0 0 600 200" preserveAspectRatio="none"
-             aria-label="S&P 500 intraday line chart">
-          {# Grid lines — 4 horizontal dashes #}
-          {% for i in range(4) %}
-            <line class="pp-home-chart-grid"
-                  x1="0" x2="600"
-                  y1="{{ i * 55 + 10 }}" y2="{{ i * 55 + 10 }}"/>
-          {% endfor %}
-          {# Area fill (closed path) + stroke #}
-          {% if chart_area %}
-            <path d="{{ chart_area }}" class="pp-home-chart-area"/>
-          {% endif %}
-          <path d="{{ chart_path }}" class="pp-home-chart-line"/>
-          {# Reference line — drawn at the prev-close y position #}
-          <line class="pp-home-chart-ref"
-                x1="0" x2="600" y1="{{ _ref_y }}" y2="{{ _ref_y }}"/>
-          {# Price tag at right edge — anchored to the LINE'S last y so the
-             chip labels the current price, not the prev-close reference. #}
-          <rect class="pp-home-chart-tag-rect"
-                x="558" y="{{ _tag_y_top }}" width="42" height="16"/>
-          <text class="pp-home-chart-tag-text"
-                x="579" y="{{ _tag_y_top + 12 }}" text-anchor="middle">{{ chart_tag|default('5847') }}</text>
-        </svg>
+        </div>
+        <div class="pp-home-chart-wrap"
+             data-history='{{ chart_history_json|default("[]")|safe }}'
+             data-prev-close="{{ chart_prev_close|default('') }}"
+             data-vb-w="600" data-vb-h="200">
+          <svg class="pp-home-chart-svg"
+               viewBox="0 0 600 200" preserveAspectRatio="none"
+               aria-label="S&P 500 intraday line chart">
+            {# Grid lines — 4 horizontal dashes (these stretch but are decorative) #}
+            {% for i in range(4) %}
+              <line class="pp-home-chart-grid"
+                    x1="0" x2="600"
+                    y1="{{ i * 55 + 10 }}" y2="{{ i * 55 + 10 }}"/>
+            {% endfor %}
+            {# Area fill (closed path) + line stroke.  vector-effect on the
+               stroke keeps it 1.6px regardless of aspect-ratio stretch. #}
+            {% if chart_area %}
+              <path d="{{ chart_area }}" class="pp-home-chart-area"/>
+            {% endif %}
+            <path d="{{ chart_path }}" class="pp-home-chart-line"
+                  vector-effect="non-scaling-stroke"/>
+            {# Prev-close horizontal reference line. #}
+            <line class="pp-home-chart-ref"
+                  x1="0" x2="600" y1="{{ _ref_y }}" y2="{{ _ref_y }}"
+                  vector-effect="non-scaling-stroke"/>
+            {# Hover crosshair (vertical line) — initially hidden, JS toggles. #}
+            <line class="pp-home-chart-crosshair"
+                  x1="0" x2="0" y1="0" y2="200"
+                  vector-effect="non-scaling-stroke"/>
+            {# Hover dot on the data line — coral fill. #}
+            <circle class="pp-home-chart-hover-dot" cx="0" cy="0" r="3"/>
+          </svg>
+          {# HTML price chip — current price, anchored to line's last y.
+             Lives outside the SVG so the text isn't horizontally stretched.
+             SVG is exactly 200px tall and the wrap has 16px top padding, so
+             wrap-relative px = 16 + tag_y (1:1 with viewBox y). Using px
+             instead of % avoids the wrap-padding skew (% is of wrap.height,
+             not SVG height). #}
+          <div class="pp-home-chart-chip"
+               style="top: {{ (16 + _tag_y)|round(2) }}px;">
+            {{ chart_tag|default('5847') }}
+          </div>
+          {# HTML hover tooltip — coral chip with time + price + chg.
+             Hidden by default; JS positions absolutely on mousemove. #}
+          <div class="pp-home-chart-tooltip" hidden>
+            <span class="pp-home-chart-tooltip-time"></span>
+            <span class="pp-home-chart-tooltip-price"></span>
+            <span class="pp-home-chart-tooltip-chg"></span>
+          </div>
         </div>
         <div class="pp-home-chart-foot">
           {% for k, v in chart_ohlcv %}
@@ -146,6 +217,38 @@
       {# ── Retail pulse panel ── #}
       {% call panel(cls="pp-home-retail") %}
         {{ panel_head("Retail pulse", sub="24h · social") }}
+
+        {# ── Fear & Greed gauge — semicircular SVG with 5 colored arcs +
+             needle pointing at the current value.  Mocked until wired to
+             CNN F&G or rebuilt from sub-signals (VIX, put/call, breadth,
+             safe-haven demand, momentum, junk-bond demand, market vol).
+             Right-of-gauge: kicker · big number+label · y'day / 1w ago. #}
+        <div class="pp-home-feargreed">
+          <svg class="pp-home-feargreed-svg" width="100" height="64" viewBox="0 0 100 60" aria-hidden="true">
+            {# 5 colored arcs from -90° (left) to +90° (right).
+               Each arc spans 36° (180° / 5).  Endpoints precomputed from
+               polar(angle, r=44) with cx=50, cy=50. Arc path uses A r r 0 0 1.
+               Hand-coded since Jinja2 doesn't have a math.sin/cos pipeline. #}
+            <path d="M 6 50 A 44 44 0 0 1 14.13 23.95"  stroke="var(--pp-down)"   stroke-width="6" fill="none"/>
+            <path d="M 14.13 23.95 A 44 44 0 0 1 36.06 6.97" stroke="#c8584e"     stroke-width="6" fill="none"/>
+            <path d="M 36.06 6.97 A 44 44 0 0 1 63.94 6.97"  stroke="var(--pp-dim)" stroke-width="6" fill="none"/>
+            <path d="M 63.94 6.97 A 44 44 0 0 1 85.87 23.95" stroke="#4ea674"     stroke-width="6" fill="none"/>
+            <path d="M 85.87 23.95 A 44 44 0 0 1 94 50"      stroke="var(--pp-up)"   stroke-width="6" fill="none"/>
+            {# Needle — line from center to (nx, ny) + 3px hub circle.
+               Endpoint precomputed in _feargreed_payload(). #}
+            <line x1="50" y1="50"
+                  x2="{{ feargreed.needle_x }}"
+                  y2="{{ feargreed.needle_y }}"
+                  stroke="var(--pp-ink)" stroke-width="2" stroke-linecap="round"/>
+            <circle cx="50" cy="50" r="3" fill="var(--pp-ink)"/>
+          </svg>
+          <div class="pp-home-feargreed-text">
+            {{ kicker("Fear & Greed") }}
+            <div class="pp-mono pp-home-feargreed-value">{{ feargreed.value }} · {{ feargreed.label }}</div>
+            <div class="pp-mono pp-home-feargreed-meta">Yesterday {{ feargreed.yesterday }} · 1w ago {{ feargreed.week_ago }}</div>
+          </div>
+        </div>
+
         <div class="pp-home-retail-feat">
           {{ kicker("Most discussed") }}
           <div class="pp-home-retail-feat-tkr">${{ retail_feat.ticker|default('GME') }}</div>
@@ -288,6 +391,455 @@
       {% endcall %}
     </div>
 
+  </section>{# end Overview pane #}
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━━ FLOW SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <section class="pp-home-tab-pane" data-tab-pane="Flow">
+
+    {# ── Trending — superinvestors + Congress, aggregated.
+         Two stacked horizontal bars per row: ink (funds) + coral (congress).
+         SELL/REDUCED renders at 0.4 opacity to keep direction readable. #}
+    {% call panel(cls="pp-home-flow-trending") %}
+      {{ panel_head("Trending — superinvestors + Congress", sub="aggregated buys & sells · 30d") }}
+      <div class="pp-home-flow-trending-body">
+        <div class="pp-home-flow-legend">
+          <span class="pp-home-flow-legend-cell">
+            <span class="pp-home-flow-legend-swatch pp-home-flow-legend-swatch-ink"></span>
+            <span class="pp-mono pp-dim">Superinvestors (13F)</span>
+          </span>
+          <span class="pp-home-flow-legend-cell">
+            <span class="pp-home-flow-legend-swatch pp-home-flow-legend-swatch-accent"></span>
+            <span class="pp-mono pp-dim">Congress (STOCK Act)</span>
+          </span>
+        </div>
+        {% for r in flow_trending %}
+          <div class="pp-home-flow-row">
+            <span class="pp-mono pp-home-flow-tk">${{ r.tk }}</span>
+            <div class="pp-home-flow-bars">
+              <div class="pp-home-flow-bar pp-home-flow-bar-ink{% if r.fundsDir == 'SELL' %} is-sell{% endif %}"
+                   style="width: {{ ((r.funds / flow_trending_max) * 60)|round(1) }}%;"></div>
+              <div class="pp-home-flow-bar pp-home-flow-bar-accent{% if r.congDir == 'SELL' %} is-sell{% endif %}"
+                   style="width: {{ ((r.cong / flow_trending_max) * 60)|round(1) }}%;"></div>
+            </div>
+            <span class="pp-mono pp-home-flow-count">{{ r.funds }} fnd</span>
+            <span class="pp-mono pp-home-flow-count">{{ r.cong }} cng</span>
+            <span class="pp-mono pp-home-flow-net {{ 'pp-up' if r.net >= 0 else 'pp-down' }}">
+              {%- if r.net >= 0 -%}+{%- endif -%}{{ r.net }} net
+            </span>
+          </div>
+        {% endfor %}
+      </div>
+    {% endcall %}
+
+    {# Two-column: Top fund buys / Congress trades — same row pattern as Overview #}
+    <div class="pp-home-row2">
+      {% call panel() %}
+        {{ panel_head("Top fund buys", sub="this week") }}
+        {% for f in flow_fund_buys %}
+          <div class="pp-home-list-row">
+            <div>
+              <div class="pp-home-list-name">{{ f.manager }}</div>
+              <div class="pp-home-list-meta">
+                {{ f.fund }} · <span class="pp-mono">{{ f.aum }}</span>
+              </div>
+            </div>
+            {{ tag(f.action) }}
+            <span class="pp-home-list-tkr">{{ f.ticker }}</span>
+          </div>
+        {% endfor %}
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Congress trades", sub="48h") }}
+        {% for r in flow_congress %}
+          <div class="pp-home-congress-row">
+            <span class="pp-home-congress-dot pp-home-congress-dot-{{ r.party|lower }}" aria-label="{{ 'Democrat' if r.party == 'D' else 'Republican' }}"></span>
+            <div>
+              <div class="pp-home-insider-name">{{ r.person }}</div>
+              <div class="pp-home-insider-meta">{{ r.chamber }} · ${{ r.ticker }}</div>
+            </div>
+            {{ tag(r.action) }}
+            <span class="pp-mono" style="font-size:11px; color: var(--pp-dim); min-width:60px; text-align:right;">{{ r.size }}</span>
+          </div>
+        {% endfor %}
+      {% endcall %}
+    </div>
+
+  </section>{# end Flow pane #}
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━ HEATMAP SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <section class="pp-home-tab-pane" data-tab-pane="Heatmap">
+    {% call panel() %}
+      {% call panel_head("Market heatmap", sub="today") %}
+        <div class="pp-segment pp-segment-mono" id="pp-heatmap-mode" role="tablist">
+          <span class="pp-segment-opt is-active" data-heatmap-mode="Companies" role="tab">Companies</span>
+          <span class="pp-segment-opt"             data-heatmap-mode="Sectors"   role="tab">Sectors</span>
+        </div>
+      {% endcall %}
+      <div class="pp-home-heatmap-body">
+        {# ── Companies grid (default visible) ── #}
+        <div class="pp-home-heatmap-grid pp-home-heatmap-grid-companies is-active"
+             data-heatmap-pane="Companies">
+          {% for c in heatmap_companies %}
+            <div class="pp-home-heatmap-tile{% if c.is_large %} is-large{% endif %}"
+                 style="background: {{ c.tile_bg }};
+                        grid-column: span {{ c.span_col }};
+                        grid-row: span {{ c.span_row }};">
+              <span class="pp-mono pp-home-heatmap-tk">{{ c.ticker }}</span>
+              <div>
+                <span class="pp-mono pp-home-heatmap-pct {{ 'pp-up' if c.pct >= 0 else 'pp-down' }}">
+                  {%- if c.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(c.pct * 100) }}%
+                </span>
+                {% if c.show_mcap %}
+                  <span class="pp-mono pp-home-heatmap-mcap">{{ c.mcap }}</span>
+                {% endif %}
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        {# ── Sectors grid ── #}
+        <div class="pp-home-heatmap-grid pp-home-heatmap-grid-sectors"
+             data-heatmap-pane="Sectors">
+          {% for s in heatmap_sectors %}
+            <div class="pp-home-heatmap-tile pp-home-heatmap-sector"
+                 style="background: {{ s.tile_bg }};
+                        grid-column: span {{ s.span_col }};">
+              <div class="pp-home-heatmap-sector-name">{{ s.name }}</div>
+              <span class="pp-mono pp-home-heatmap-sector-pct {{ 'pp-up' if s.pct >= 0 else 'pp-down' }}">
+                {%- if s.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(s.pct * 100) }}%
+              </span>
+              <span class="pp-mono pp-home-heatmap-sector-mcap">Mkt cap {{ s.mcap }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% endcall %}
+  </section>{# end Heatmap pane #}
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━ ACTIVITY SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <section class="pp-home-tab-pane" data-tab-pane="Activity">
+    {% call panel() %}
+      {% call panel_head("Live activity", sub="real-time · last 60 minutes") %}
+        <span class="pp-mono pp-home-activity-live">● LIVE</span>
+      {% endcall %}
+      {% for f in activity_feed %}
+        <div class="pp-home-activity-row pp-home-activity-cat-{{ f.cat|lower }}">
+          <span class="pp-mono pp-home-activity-ago">{{ f.ago }} ago</span>
+          <span class="pp-mono pp-home-activity-src">{{ f.src }}</span>
+          <span class="pp-home-activity-dot"></span>
+          <div class="pp-home-activity-text">
+            {%- if f.ticker -%}
+              <span class="pp-mono pp-home-activity-tkr">${{ f.ticker }}</span>
+            {%- endif %}
+            {{ f.text }}
+          </div>
+          <span class="pp-mono pp-home-activity-pill">{{ f.cat }}</span>
+        </div>
+      {% endfor %}
+    {% endcall %}
+  </section>{# end Activity pane #}
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━ NEWS SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <section class="pp-home-tab-pane" data-tab-pane="News">
+    <div class="pp-home-news-grid">
+      {# ── Featured story (left, larger, coral left-border accent) ── #}
+      {% call panel() %}
+        {{ panel_head("Featured story", sub="now") }}
+        <div class="pp-home-news-featured">
+          <span class="pp-mono pp-home-news-byline">{{ news_featured.src }} · {{ news_featured.ago }}</span>
+          <h3 class="pp-home-news-feat-title">{{ news_featured.title }}</h3>
+          <p class="pp-home-news-feat-excerpt">{{ news_featured.excerpt }}</p>
+          <div class="pp-home-news-tickers">
+            {% for tk in news_featured.tickers %}
+              <span class="pp-mono pp-home-news-ticker">${{ tk }}</span>
+            {% endfor %}
+          </div>
+        </div>
+      {% endcall %}
+
+      {# ── Top stories list (right) ── #}
+      {% call panel() %}
+        {{ panel_head("Top stories") }}
+        {% for n in news_stories %}
+          <div class="pp-home-news-row">
+            <span class="pp-mono pp-home-news-byline pp-accent-color">{{ n.src }} · {{ n.ago }}</span>
+            <div class="pp-home-news-row-title">{{ n.title }}</div>
+            <div class="pp-home-news-row-tickers">
+              {% for tk in n.tickers %}
+                <span class="pp-mono pp-home-news-ticker-inline">${{ tk }}</span>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      {% endcall %}
+    </div>
+  </section>{# end News pane #}
+
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━ CALENDAR SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  <section class="pp-home-tab-pane" data-tab-pane="Calendar">
+    <div class="pp-home-cal-grid">
+      {% call panel() %}
+        {{ panel_head("Earnings", sub="next 30d · watchlist") }}
+        {% for e in cal_earnings %}
+          <div class="pp-home-cal-earn-row">
+            <span class="pp-mono pp-home-cal-date">{{ e.date }}</span>
+            <span class="pp-mono pp-home-cal-tkr">${{ e.ticker }}</span>
+            <span class="pp-mono pp-home-cal-when">{{ e.when }}</span>
+            <span class="pp-mono pp-home-cal-eps">{{ e.eps }}</span>
+            <span class="pp-mono pp-home-cal-iv">{{ e.iv }}</span>
+          </div>
+        {% endfor %}
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Macro", sub="next 60d") }}
+        {% for m in cal_macro %}
+          <div class="pp-home-cal-macro-row">
+            <span class="pp-mono pp-home-cal-date">{{ m.date }}</span>
+            <span class="pp-home-cal-impact-dot pp-home-cal-impact-{{ m.impact }}"></span>
+            <div class="pp-home-cal-macro-cell">
+              <div class="pp-home-cal-macro-label">{{ m.label }}</div>
+              <span class="pp-mono pp-home-cal-macro-time">{{ m.time }}</span>
+            </div>
+            <span class="pp-mono pp-home-cal-macro-val">{{ m.val }}</span>
+            <span class="pp-mono pp-home-cal-impact-tag">{{ m.impact }}</span>
+          </div>
+        {% endfor %}
+      {% endcall %}
+    </div>
+  </section>{# end Calendar pane #}
+
   </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+{# ━━━━━━━━━━ SUBTAB SWITCHER ━━━━━━━━━━
+   Vanilla JS toggling. The Segment macro renders with `data-value` attrs;
+   we listen for clicks at the segment root and swap which `<section
+   data-tab-pane>` has `is-active`.  All 6 panes are server-rendered up
+   front (only the active one is visible via CSS), so switching is instant
+   and doesn't refetch.  Future: wire ?tab=Flow into the URL via
+   pushState so reload preserves the tab.
+#}
+<script>
+(function () {
+  var seg = document.getElementById('pp-home-view');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-home-tab-pane');
+  if (!panes.length) return;
+
+  function activate(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-value') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    });
+  }
+
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    if (name) activate(name);
+  });
+})();
+</script>
+
+{# ━━━━━━━━━━ HEATMAP MODE TOGGLE ━━━━━━━━━━
+   Same pattern as the subtab switcher but scoped to the Companies / Sectors
+   pair inside the Heatmap pane. #}
+<script>
+(function () {
+  var seg = document.getElementById('pp-heatmap-mode');
+  if (!seg) return;
+  var grids = document.querySelectorAll('[data-heatmap-pane]');
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var mode = opt.getAttribute('data-heatmap-mode');
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o === opt);
+    });
+    grids.forEach(function (g) {
+      g.classList.toggle('is-active', g.getAttribute('data-heatmap-pane') === mode);
+    });
+  });
+})();
+</script>
+
+{# ━━━━━━━━━━ INDEX TOGGLE (visual-only for now) ━━━━━━━━━━
+   Click swaps active class on the segment.  Until we extend
+   _fetch_hero_chart() to fetch all three indices in parallel, clicking
+   Nasdaq / Dow does nothing functional — the chart stays on S&P data.
+   Marked in the audit list. #}
+<script>
+(function () {
+  var seg = document.getElementById('pp-home-chart-idx');
+  if (!seg) return;
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o === opt);
+    });
+  });
+})();
+</script>
+
+{# ━━━━━━━━━━ HERO CHART HOVER ━━━━━━━━━━
+   Reads the [[ts_ms, price], …] history JSON off the wrapper's data attr,
+   maps mousemove → nearest data point → updates crosshair x, hover dot
+   (cx/cy) inside the SVG, and an HTML tooltip with time / price / chg.
+
+   Why HTML tooltip + SVG crosshair: the SVG uses preserveAspectRatio="none",
+   which stretches the viewBox horizontally.  Anything inside the SVG with
+   text gets warped.  Lines / dots are fine because we use
+   vector-effect:non-scaling-stroke + a tiny circle whose r is in viewBox
+   units (small enough that any stretch is invisible).
+#}
+<script>
+(function () {
+  var wrap = document.querySelector('.pp-home-chart-wrap');
+  if (!wrap) return;
+
+  var historyAttr = wrap.getAttribute('data-history') || '[]';
+  var history;
+  try { history = JSON.parse(historyAttr); } catch (e) { history = []; }
+  if (!Array.isArray(history) || history.length < 2) return;
+
+  var prevCloseRaw = wrap.getAttribute('data-prev-close');
+  var prevClose = prevCloseRaw ? parseFloat(prevCloseRaw) : null;
+  if (prevClose !== null && isNaN(prevClose)) prevClose = null;
+
+  var vbW = parseFloat(wrap.getAttribute('data-vb-w')) || 600;
+  var vbH = parseFloat(wrap.getAttribute('data-vb-h')) || 200;
+
+  var svg = wrap.querySelector('.pp-home-chart-svg');
+  var crosshair = wrap.querySelector('.pp-home-chart-crosshair');
+  var dot = wrap.querySelector('.pp-home-chart-hover-dot');
+  var tooltip = wrap.querySelector('.pp-home-chart-tooltip');
+  var ttTime  = tooltip && tooltip.querySelector('.pp-home-chart-tooltip-time');
+  var ttPrice = tooltip && tooltip.querySelector('.pp-home-chart-tooltip-price');
+  var ttChg   = tooltip && tooltip.querySelector('.pp-home-chart-tooltip-chg');
+  if (!svg || !crosshair || !dot || !tooltip || !ttTime || !ttPrice || !ttChg) return;
+
+  /* ── viewBox y-projection: must match _hero_chart_paths() exactly ─────
+     Python: y = PAD_Y + (p_max - price) / span * inner_h
+     with PAD_Y=12, inner_h = vbH - 2*PAD_Y = 176, span clamped to 1.0
+     when flat.  Same lo/hi expansion to include prev_close. */
+  var PAD_Y = 12;
+  var INNER_H = vbH - 2 * PAD_Y;
+  var prices = history.map(function (h) { return h[1]; });
+  var lo = Math.min.apply(null, prices);
+  var hi = Math.max.apply(null, prices);
+  if (prevClose !== null) {
+    if (prevClose < lo) lo = prevClose;
+    if (prevClose > hi) hi = prevClose;
+  }
+  var span = hi - lo;
+  if (span <= 0) span = 1.0;
+  function yFor(price) {
+    return PAD_Y + (hi - price) / span * INNER_H;
+  }
+
+  /* Time formatter — HH:MM in the user's local zone.  History timestamps
+     are epoch ms.  Mono font in the tooltip means tabular alignment. */
+  function fmtTime(tsMs) {
+    var d = new Date(tsMs);
+    var h = d.getHours();
+    var m = d.getMinutes();
+    return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
+  }
+
+  /* Price formatter — match the chart_tag style (integer for indices).
+     Source data has 4 decimals; show 2 to keep tooltip readable. */
+  function fmtPrice(p) {
+    return p.toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  function updateAt(idx, mouseClientX) {
+    var pt = history[idx];
+    if (!pt) return;
+    var ts = pt[0];
+    var price = pt[1];
+
+    /* Map history index → viewBox x.  Same as the Python path math:
+       last point sits at x = vbW (600), first at x = 0. */
+    var vbx = (idx / (history.length - 1)) * vbW;
+    var vby = yFor(price);
+
+    crosshair.setAttribute('x1', vbx);
+    crosshair.setAttribute('x2', vbx);
+    dot.setAttribute('cx', vbx);
+    dot.setAttribute('cy', vby);
+
+    /* Tooltip is HTML — translate viewBox x to a pixel offset within
+       the wrapper.  SVG fills the wrapper minus 18px L/R padding. */
+    var rect = svg.getBoundingClientRect();
+    var wrapRect = wrap.getBoundingClientRect();
+    var pxX = (vbx / vbW) * rect.width + (rect.left - wrapRect.left);
+    tooltip.style.left = pxX + 'px';
+    tooltip.hidden = false;
+
+    ttTime.textContent = fmtTime(ts);
+    ttPrice.textContent = fmtPrice(price);
+
+    if (prevClose !== null) {
+      var chg = price - prevClose;
+      var chgPct = (chg / prevClose) * 100;
+      var sign = chg >= 0 ? '+' : '−';
+      var absChg = Math.abs(chg);
+      var absPct = Math.abs(chgPct);
+      ttChg.textContent = sign + fmtPrice(absChg) + ' (' + sign + absPct.toFixed(2) + '%)';
+      ttChg.classList.toggle('pp-up', chg >= 0);
+      ttChg.classList.toggle('pp-down', chg < 0);
+    } else {
+      ttChg.textContent = '';
+    }
+  }
+
+  function onMove(ev) {
+    var rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    var relX = ev.clientX - rect.left;
+    if (relX < 0) relX = 0;
+    if (relX > rect.width) relX = rect.width;
+
+    /* Pixel x → viewBox x → nearest history index. */
+    var vbx = (relX / rect.width) * vbW;
+    var idxFloat = (vbx / vbW) * (history.length - 1);
+    var idx = Math.round(idxFloat);
+    if (idx < 0) idx = 0;
+    if (idx > history.length - 1) idx = history.length - 1;
+
+    wrap.classList.add('is-hovering');
+    updateAt(idx, ev.clientX);
+  }
+
+  function onLeave() {
+    wrap.classList.remove('is-hovering');
+    tooltip.hidden = true;
+  }
+
+  wrap.addEventListener('mousemove', onMove);
+  wrap.addEventListener('mouseleave', onLeave);
+})();
+</script>
 {% endblock %}

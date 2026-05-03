@@ -1,0 +1,235 @@
+{#-
+  PaperPanda Redesign — Insiders page
+  Mirrors design_handoff_paperpanda/page-insiders.jsx
+
+  Tabs: Filings · Clusters · People · Companies · Calendar
+  Default = Filings (live).  Other 4 tabs are placeholders.
+
+  Real data: insider_trading.get_latest_insider_trades() — global feed
+  of Form 4 transactions (insiders + 10% holders).  Form 144 not yet
+  ingested (flagged in the gap audit).
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment,
+     range_chip, kpi_strip, tag %}
+
+{% block title %}Insiders · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/insiders.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━ #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">i.</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">
+      Signals <span class="pp-page-hero-crumb-sep">/</span> Insider transactions
+    </span>
+    <h1 class="pp-page-hero-title">Insiders</h1>
+    <div class="pp-page-hero-sub">
+      Form 4 + Form 144 filings · officers, directors, 10% holders · disclosed within 2 business days
+      {%- if insiders_is_mock %} · <span class="pp-page-hero-flag">DEMO</span>{% endif %}
+    </div>
+  </div>
+  <div class="pp-insiders-actions">
+    {{ btn("Export CSV", kind="ghost") }}
+    {{ btn("+ Alert me", kind="accent") }}
+  </div>
+</header>
+
+{# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
+<div class="pp-page-section pp-page-section-kpi">
+  {{ kpi_strip(insiders_kpi) }}
+</div>
+
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
+<div class="pp-page-tabs">
+  {{ segment(["Filings","Clusters","People","Companies","Calendar"],
+             value=insiders_tab|default("Filings"),
+             id="pp-insiders-tabs") }}
+  <div style="flex:1"></div>
+  {{ range_chip(value="30D") }}
+</div>
+
+{# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
+<div class="pp-page-body">
+
+  {# ── FILINGS (default — LIVE) ── #}
+  <section class="pp-page-pane is-active" data-tab-pane="Filings">
+
+    {# Filter row — Action / Role / Plan + showing-count.
+       Visual-only for now; client filtering will be added when we route
+       individual filter values to /_v2/api/insiders. #}
+    <div class="pp-insiders-filters">
+      <div class="pp-insiders-filter-group">
+        {{ label("Action") }}
+        {{ segment(["All","BUY","SELL"], value="All", mono=True) }}
+      </div>
+      <div class="pp-insiders-filter-group">
+        {{ label("Role") }}
+        {{ segment(["All","CEO","CFO","Director","10% own."], value="All", mono=True) }}
+      </div>
+      <div class="pp-insiders-filter-group">
+        {{ label("Plan") }}
+        {{ segment(["All","Open","10b5-1"], value="All", mono=True) }}
+      </div>
+      <div style="flex:1"></div>
+      <span class="pp-mono pp-insiders-count">
+        Showing <span class="pp-ink-strong">{{ insiders_rows|length }}</span> of {{ insiders_total }} filings · 30d
+      </span>
+    </div>
+
+    {# Notable callout — coral left-border accent panel for the most
+       impactful BUY in the window.  This is the `notable_panel` pattern
+       flagged in the gap audit. #}
+    {% if insiders_notable %}
+      {% set _n = insiders_notable %}
+      {% call panel(cls="pp-insiders-notable-panel") %}
+        <div class="pp-insiders-notable">
+          <div class="pp-insiders-notable-text">
+            <span class="pp-mono pp-insiders-notable-kicker">★ Open-market buy · {{ _n.date }}</span>
+            <div class="pp-insiders-notable-headline">
+              <span class="pp-accent-color">{{ _n.person }} ({{ _n.role }})</span> bought
+              <span class="pp-up">{{ _n.value }}</span> of
+              <span class="pp-mono pp-insiders-notable-tkr">{{ _n.ticker }}</span>
+              — open-market trade.
+            </div>
+            <span class="pp-mono pp-insiders-notable-meta">
+              {{ _n.shares }} shares @ {{ _n.price }} · No 10b5-1 plan · Filed same day
+            </span>
+          </div>
+          {{ btn("View profile →", kind="ghost") }}
+        </div>
+      {% endcall %}
+    {% endif %}
+
+    {# Filings table — 9 columns, alternating row tint for flagged BUYs. #}
+    {% call panel() %}
+      <table class="pp-table pp-insiders-table">
+        <thead>
+          <tr>
+            <th>Insider</th>
+            <th>Role</th>
+            <th>Ticker</th>
+            <th>Action</th>
+            <th class="pp-num">Shares</th>
+            <th class="pp-num">Price</th>
+            <th class="pp-num">Value</th>
+            <th>Plan</th>
+            <th class="pp-num">Trade date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in insiders_rows %}
+            <tr class="{% if r.flag %}pp-insiders-row-flagged{% endif %}">
+              <td>
+                <span class="pp-insiders-name">{{ r.person }}</span>
+                {% if r.flag %}<span class="pp-insiders-star">★</span>{% endif %}
+              </td>
+              <td class="pp-text">{{ r.role }}</td>
+              <td><span class="pp-mono pp-insiders-tkr">{{ r.ticker }}</span></td>
+              <td>{{ tag(r.action) }}</td>
+              <td class="pp-num pp-mono pp-text">{{ r.shares }}</td>
+              <td class="pp-num pp-mono pp-text">{{ r.price }}</td>
+              <td class="pp-num pp-mono pp-insiders-value">{{ r.value }}</td>
+              <td>
+                <span class="pp-mono pp-insiders-plan {% if r.plan == 'open' %}is-open{% endif %}">
+                  {{ r.plan }}
+                </span>
+              </td>
+              <td class="pp-num pp-mono pp-text">{{ r.date }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endcall %}
+
+  </section>
+
+  {# ── 4 placeholder panes ── #}
+  <section class="pp-page-pane" data-tab-pane="Clusters">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">⊕</div>
+        <div class="pp-page-placeholder-title">Clusters tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          ≥3 insiders trading the same direction in 30d.  Highest-signal
+          pattern; needs a `cluster_card` primitive (flagged in audit).
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="People">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">◐</div>
+        <div class="pp-page-placeholder-title">People tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Per-insider profile cards — track record, recent trades, sectors.
+          Needs a `person_card` primitive.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Companies">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">▣</div>
+        <div class="pp-page-placeholder-title">Companies tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Aggregate view by ticker — sentiment bar, net flow, count.
+          Existing aggregate_top_tickers can power this.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+  <section class="pp-page-pane" data-tab-pane="Calendar">
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">◷</div>
+        <div class="pp-page-placeholder-title">Calendar tab — coming soon</div>
+        <div class="pp-page-placeholder-sub">
+          Blackout-window timeline — needs T-30/T+2 derivation off
+          earnings_calendar.
+        </div>
+      </div>
+    {% endcall %}
+  </section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  var seg = document.getElementById('pp-insiders-tabs');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-page-pane');
+  if (!panes.length) return;
+  function activate(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-value') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    });
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    if (name) activate(name);
+  });
+})();
+</script>
+{% endblock %}
