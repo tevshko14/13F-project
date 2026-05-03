@@ -107,6 +107,7 @@
             {{ chart_change_pct|default('0.72%') }})
           </span>
         {% endcall %}
+        <div class="pp-home-chart-wrap">
         <svg class="pp-home-chart-svg"
              viewBox="0 0 600 200" preserveAspectRatio="none"
              aria-label="S&P 500 intraday line chart">
@@ -131,6 +132,7 @@
           <text class="pp-home-chart-tag-text"
                 x="579" y="{{ _tag_y_top + 12 }}" text-anchor="middle">{{ chart_tag|default('5847') }}</text>
         </svg>
+        </div>
         <div class="pp-home-chart-foot">
           {% for k, v in chart_ohlcv %}
             <div class="pp-home-chart-foot-cell">
