@@ -1,0 +1,190 @@
+/* ============================================================================
+ * PaperPanda Redesign — Theme tokens (light + dark)
+ *
+ * Source of truth: design_handoff_paperpanda/theme.js  (window.PP_THEME)
+ * Coral (#E15A52) is the SINGULAR brand accent in BOTH modes.
+ * Up/down semantic colors appear ONLY on data — never on chrome.
+ *
+ * All component CSS reads from these custom properties.  Switching theme
+ * is a single attribute flip on <html data-theme="light|dark">; never
+ * read --pp-* values from JS — let CSS do the work.
+ *
+ * Sharp 1px rules · zero radii · terminal-grade density.
+ * ==========================================================================*/
+
+:root {
+  /* ───────── Typography ───────── */
+  --pp-font-body:  "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI",
+                   system-ui, sans-serif;
+  --pp-font-mono:  "Geist Mono", ui-monospace, "SF Mono", Menlo,
+                   "Cascadia Code", "Roboto Mono", Consolas, monospace;
+
+  /* ───────── Spacing scale (8/12/14/18/22/26/32 — no arbitrary values) ───── */
+  --pp-space-1: 8px;
+  --pp-space-2: 12px;
+  --pp-space-3: 14px;
+  --pp-space-4: 18px;
+  --pp-space-5: 22px;
+  --pp-space-6: 26px;
+  --pp-space-7: 32px;
+
+  /* ───────── Page chrome dimensions ───────── */
+  --pp-sidebar-w: 232px;
+  --pp-topbar-h:  56px;
+  --pp-page-pad:  24px;
+
+  /* ───────── Type scale ───────── */
+  --pp-fs-kicker:     10px;
+  --pp-fs-label:      10px;
+  --pp-fs-body:       13px;
+  --pp-fs-cell:       12px;
+  --pp-fs-cell-head:  10px;
+  --pp-fs-kpi-value:  22px;
+  --pp-fs-h1:         28px;
+  --pp-fs-h2:         18px;
+
+  /* Letter-spacing system: negative for headlines, positive for mono labels */
+  --pp-ls-headline: -0.02em;   /* -1 in design spec */
+  --pp-ls-mono-tight: 0.05em;
+  --pp-ls-mono-loose: 0.1em;   /* uppercase mono kickers / labels */
+  --pp-ls-mono-vloose: 0.14em;
+
+  /* ───────── Borders (zero radii anywhere) ───────── */
+  --pp-radius: 0;
+  --pp-border-w: 1px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * LIGHT MODE
+ * Source: window.PP_THEME.light in theme.js
+ * Used both as default :root tokens AND when [data-theme="light"] explicit.
+ * ───────────────────────────────────────────────────────────────────────────*/
+:root,
+:root[data-theme="light"] {
+  --pp-bg:       #f5f2ea;
+  --pp-panel:    #fcfaf3;
+  --pp-sub:      #ece8dc;
+  --pp-sub2:     #e3dccc;
+  --pp-ink:      #0b1320;
+  --pp-text:     #1c2230;
+  --pp-dim:      #6a6f7a;
+  --pp-dim2:     #9c9fa6;
+  --pp-line:     #dfdacc;
+  --pp-line2:    #c9c2af;
+
+  --pp-accent:     #E15A52;   /* coral — singular brand accent */
+  --pp-accent-ink: #ffffff;
+
+  --pp-up:    #0c6e3d;
+  --pp-down:  #bf2a1c;
+
+  /* Party colors — used in Congress page only */
+  --pp-party-d: #1a4fbf;
+  --pp-party-r: #bf2a1c;
+
+  /* Color scheme hint to UA for form controls / scrollbars */
+  color-scheme: light;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * DARK MODE
+ * Source: window.PP_THEME.dark in theme.js
+ * ───────────────────────────────────────────────────────────────────────────*/
+:root[data-theme="dark"] {
+  --pp-bg:       #0c0c0e;
+  --pp-panel:    #101013;
+  --pp-sub:      #16161a;
+  --pp-sub2:     #1c1c21;
+  --pp-ink:      #f3f1ec;
+  --pp-text:     #d6d4cd;
+  --pp-dim:      #8a8880;
+  --pp-dim2:     #54524c;
+  --pp-line:     #1f1f23;
+  --pp-line2:    #2a2a30;
+
+  --pp-accent:     #E15A52;   /* same hue, both modes */
+  --pp-accent-ink: #ffffff;
+
+  --pp-up:    #7dd49a;
+  --pp-down:  #ec6a5b;
+
+  --pp-party-d: #5b8def;
+  --pp-party-r: #ec6a5b;
+
+  color-scheme: dark;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SYSTEM-PREFERENCE FALLBACK
+ * If no explicit data-theme is set and the user's OS prefers dark, use dark.
+ * The base.html anti-FOUC inline script always sets data-theme before paint,
+ * so this @media block is only a defensive fallback.
+ * ───────────────────────────────────────────────────────────────────────────*/
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --pp-bg:       #0c0c0e;
+    --pp-panel:    #101013;
+    --pp-sub:      #16161a;
+    --pp-sub2:     #1c1c21;
+    --pp-ink:      #f3f1ec;
+    --pp-text:     #d6d4cd;
+    --pp-dim:      #8a8880;
+    --pp-dim2:     #54524c;
+    --pp-line:     #1f1f23;
+    --pp-line2:    #2a2a30;
+    --pp-up:    #7dd49a;
+    --pp-down:  #ec6a5b;
+    --pp-party-d: #5b8def;
+    --pp-party-r: #ec6a5b;
+    color-scheme: dark;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * GLOBAL RESET — terminal aesthetic baseline
+ * ───────────────────────────────────────────────────────────────────────────*/
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--pp-bg);
+  color: var(--pp-text);
+  font-family: var(--pp-font-body);
+  font-size: var(--pp-fs-body);
+  font-feature-settings: "ss01";  /* alt s — locks Geist's signature stylistic set */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* All numbers should be tabular even outside Mono — table cells, badges, etc. */
+.pp-tabular { font-variant-numeric: tabular-nums; }
+
+/* Default link styling — coral on hover only */
+a {
+  color: var(--pp-text);
+  text-decoration: none;
+}
+a:hover { color: var(--pp-accent); }
+
+/* No rounded corners anywhere by default — terminal aesthetic */
+button, input, select, textarea {
+  border-radius: 0;
+  font-family: inherit;
+}
+
+/* Selection respects the brand accent */
+::selection {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+}
+
+/* Custom scrollbar (subtle, matches panel borders) */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--pp-bg); }
+::-webkit-scrollbar-thumb {
+  background: var(--pp-line2);
+  border: 2px solid var(--pp-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--pp-dim2); }

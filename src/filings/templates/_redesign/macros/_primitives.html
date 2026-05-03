@@ -1,0 +1,243 @@
+{#-
+  PaperPanda Redesign — Primitive macros
+  Jinja2 translation of design_handoff_paperpanda/pp-components.jsx
+
+  Each macro renders the same DOM the JSX components produce, just
+  server-side and with class names instead of inline style objects.
+  All visual styling lives in static/css/redesign/primitives.css and
+  is driven by --pp-* tokens (see tokens.css).
+
+  Usage:
+    {% from "_redesign/macros/_primitives.html" import mono, kicker, panel, kpi_strip %}
+    {{ kicker("MOST ACTIVE") }}
+    {{ kpi_strip([{"label":"S&P 500","value":"5,847.42","delta":"+0.42","up":true}, ...]) }}
+
+  The 13 primitives, in the order they appear in pp-components.jsx:
+    Atoms       — mono, kicker, label
+    Buttons     — btn
+    Containers  — panel, panel_head
+    Controls    — segment, range_chip
+    Data        — kpi_strip, tag, spark, delta
+    Identity    — avatar
+-#}
+
+{# ── Atoms ─────────────────────────────────────────────────────────── #}
+
+{%- macro mono(text, cls="", title="") -%}
+<span class="pp-mono{{ ' ' ~ cls if cls else '' }}"{% if title %} title="{{ title }}"{% endif %}>{{ text }}</span>
+{%- endmacro -%}
+
+{#-
+  Kicker — coral uppercase mono label, used above headlines.
+  letter-spacing: 2, fontSize: 10, fontWeight: 700, textTransform: uppercase
+-#}
+{%- macro kicker(text, color=None) -%}
+<div class="pp-kicker"{% if color %} style="color:{{ color }};"{% endif %}>{{ text }}</div>
+{%- endmacro -%}
+
+{#-
+  Label — small mono uppercase label (KPI cells, table headers).
+  letter-spacing: 1.4, fontSize: 10, fontWeight: 600, color: dim
+-#}
+{%- macro label(text, cls="") -%}
+<div class="pp-label{{ ' ' ~ cls if cls else '' }}">{{ text }}</div>
+{%- endmacro -%}
+
+
+{# ── Buttons ───────────────────────────────────────────────────────── #}
+
+{#-
+  Button — kind: primary | accent | ghost.  block=True for full-width.
+  Spec: padding 7px 13px, fontSize 12, fontWeight 600, letterSpacing -0.1.
+-#}
+{%- macro btn(text, kind="primary", block=False, type="button", id="", cls="", attrs="") -%}
+<button{% if id %} id="{{ id }}"{% endif %} type="{{ type }}"
+        class="pp-btn pp-btn-{{ kind }}{{ ' pp-btn-block' if block else '' }}{{ ' ' ~ cls if cls else '' }}"
+        {{ attrs|safe }}>{{ text }}</button>
+{%- endmacro -%}
+
+
+{# ── Containers ────────────────────────────────────────────────────── #}
+
+{#-
+  Panel — bordered container.
+  background: panel, border: 1px solid line2.  Caller fills body.
+  Use the {% call %} form so panel body can include arbitrary HTML.
+
+  Usage:
+    {% call panel() %}
+      ...content...
+    {% endcall %}
+-#}
+{%- macro panel(cls="", id="") -%}
+<div{% if id %} id="{{ id }}"{% endif %} class="pp-panel{{ ' ' ~ cls if cls else '' }}">
+{{ caller() }}
+</div>
+{%- endmacro -%}
+
+{#-
+  PanelHead — title + optional sub + optional right slot.
+  display: flex, baseline align, padding 12px 18px, borderBottom 1px solid line.
+  Use {% call %} when you need the right slot to contain markup.
+
+  Simple form (no right slot):
+    {{ panel_head(title="Top Movers", sub="vs prior close") }}
+
+  With right slot:
+    {% call panel_head(title="Top Movers", sub="vs prior close") %}
+      <button class="pp-btn pp-btn-ghost">View all</button>
+    {% endcall %}
+-#}
+{%- macro panel_head(title, sub="", cls="") -%}
+<div class="pp-panel-head{{ ' ' ~ cls if cls else '' }}">
+  <span class="pp-panel-head-title">{{ title }}</span>
+  {% if sub %}<div class="pp-label pp-label-loose">{{ sub }}</div>{% endif %}
+  {% if caller is defined and caller %}
+    <div class="pp-panel-head-spacer"></div>
+    <div class="pp-panel-head-right">{{ caller() }}</div>
+  {% endif %}
+</div>
+{%- endmacro -%}
+
+
+{# ── Controls ──────────────────────────────────────────────────────── #}
+
+{#-
+  Segment — segmented-control tab strip.
+  options: list of strings. value: currently active option.
+  mono=True for monospace labels, accent=True for coral active state.
+
+  Renders <a> tags by default (server-side click handled via href).  For
+  in-page tab toggles, callers pass attrs="data-tab=..." and JS handles
+  the active-state flip + body re-render.
+
+  When `id` is provided, JS hooks can find the segment via getElementById.
+-#}
+{%- macro segment(options, value="", mono=False, accent=False, id="", attr_name="data-value", on_click_js="") -%}
+<div{% if id %} id="{{ id }}"{% endif %} class="pp-segment{{ ' pp-segment-mono' if mono else '' }}{{ ' pp-segment-accent' if accent else '' }}" role="tablist">
+  {% for o in options %}
+    {%- set active = (o == value) -%}
+    <span class="pp-segment-opt{{ ' is-active' if active else '' }}"
+          {{ attr_name }}="{{ o }}"
+          role="tab" aria-selected="{{ 'true' if active else 'false' }}"
+          {% if on_click_js %}onclick="{{ on_click_js }}('{{ o }}')"{% endif %}
+          tabindex="0">{{ o }}</span>
+  {% endfor %}
+</div>
+{%- endmacro -%}
+
+{#-
+  RangeChip — convenience wrapper for date-range pickers.
+  Defaults to 1D/1W/1M/3M/1Y/ALL with mono+accent styling.
+-#}
+{%- macro range_chip(value="1M", id="", on_click_js="") -%}
+{{ segment(["1D","1W","1M","3M","1Y","ALL"], value=value, mono=True, accent=True, id=id, on_click_js=on_click_js) }}
+{%- endmacro -%}
+
+
+{# ── Data ──────────────────────────────────────────────────────────── #}
+
+{#-
+  KpiStrip — horizontal bar of {label, value, delta?, up?} cells.
+  Up to 6 cells; cells share equal width via grid template.
+  Each cell: padding 14px 16px, label small mono, value big mono.
+  delta: optional trailing % or change.  up: True (green ▲) / False (red ▼).
+  Pass up=None for neutral grey delta.
+
+  Items shape: [{"label": "S&P 500", "value": "5,847", "delta": "+0.42%", "up": true}, ...]
+-#}
+{%- macro kpi_strip(items) -%}
+<div class="pp-kpi-strip" style="grid-template-columns:repeat({{ items|length }},1fr);">
+  {% for it in items %}
+    <div class="pp-kpi-cell">
+      <div class="pp-label">{{ it.label }}</div>
+      <div class="pp-kpi-value">{{ it.value }}</div>
+      {% if it.delta %}
+        <span class="pp-mono pp-kpi-delta{% if it.up == True %} pp-up{% elif it.up == False %} pp-down{% else %} pp-dim{% endif %}">
+          {%- if it.up == True %}▲ {% elif it.up == False %}▼ {% endif -%}
+          {{ it.delta }}
+        </span>
+      {% endif %}
+    </div>
+  {% endfor %}
+</div>
+{%- endmacro -%}
+
+{#-
+  Tag — semantic chip for BUY / SELL / NEW / REDUCED / EXITED / ADDED.
+  - BUY/ADDED: outlined green
+  - SELL/REDUCED: outlined red
+  - NEW: filled coral
+  - EXITED: filled red
+  text override: pass `text=` to render different label than the kind.
+-#}
+{%- macro tag(kind, text="") -%}
+{%- set kind_lc = kind|lower -%}
+<span class="pp-tag pp-tag-{{ kind_lc }} pp-mono">{{ text or kind }}</span>
+{%- endmacro -%}
+
+{#-
+  Spark — inline SVG sparkline.
+  series: list of floats (any range — auto-normalized).
+  color: CSS color (defaults to var(--pp-ink)).
+  w/h: dimensions in pixels (default 72×20 for inline tables).
+  cls: extra classes.
+
+  Computes the SVG path server-side using min/max normalization.
+-#}
+{%- macro spark(series, color="", w=72, h=20, stroke=1.4, cls="") -%}
+{%- if series and series|length > 1 -%}
+  {%- set s_min = series|min -%}
+  {%- set s_max = series|max -%}
+  {%- set s_range = s_max - s_min if (s_max - s_min) > 0 else 1 -%}
+  {%- set last_idx = series|length - 1 -%}
+  <svg class="pp-spark{{ ' ' ~ cls if cls else '' }}"
+       width="{{ w }}" height="{{ h }}"
+       viewBox="0 0 {{ w }} {{ h }}" preserveAspectRatio="none"
+       aria-hidden="true">
+    <path d="
+      {%- for v in series -%}
+        {%- set x = (loop.index0 / last_idx) * w -%}
+        {%- set y = h - ((v - s_min) / s_range) * h -%}
+        {{ 'M' if loop.first else 'L' }}{{ '%.1f'|format(x) }} {{ '%.1f'|format(y) }}
+      {%- endfor -%}
+    " fill="none"
+       stroke="{{ color or 'var(--pp-ink)' }}"
+       stroke-width="{{ stroke }}"
+       stroke-linecap="round"
+       stroke-linejoin="round"/>
+  </svg>
+{%- endif -%}
+{%- endmacro -%}
+
+{#-
+  Delta — mono number with arrow + color.
+  value: float (e.g., 0.0421 for +4.21%).
+  digits: decimal places (default 2).
+  prefix_pct: True to multiply by 100 + add %, False to render raw.
+-#}
+{%- macro delta(value, digits=2, prefix_pct=True) -%}
+{%- set up = value >= 0 -%}
+{%- if prefix_pct -%}
+  {%- set rendered = (value * 100)|abs -%}
+  {%- set str_val = "%.{}f".format(digits)|format(rendered) ~ "%" -%}
+{%- else -%}
+  {%- set str_val = "%.{}f".format(digits)|format(value|abs) -%}
+{%- endif -%}
+<span class="pp-mono pp-delta {{ 'pp-up' if up else 'pp-down' }}">
+  {{- '▲' if up else '▼' }} {{ str_val -}}
+</span>
+{%- endmacro -%}
+
+
+{# ── Identity ──────────────────────────────────────────────────────── #}
+
+{#-
+  Avatar — initials in a 28×28 box.
+  initials: 2-3 character string.
+  accent: True → coral background; False → ink (default).
+-#}
+{%- macro avatar(initials, accent=False, cls="") -%}
+<div class="pp-avatar{{ ' pp-avatar-accent' if accent else '' }}{{ ' ' ~ cls if cls else '' }}"
+     aria-label="{{ initials }}">{{ initials }}</div>
+{%- endmacro -%}
