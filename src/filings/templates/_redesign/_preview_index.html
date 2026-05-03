@@ -1,0 +1,51 @@
+{#-
+  Redesign preview index — links to every redesign page route built so
+  far.  Only rendered when PP_REDESIGN_PREVIEW=1 is set; never reachable
+  in production.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import kicker, panel, panel_head, label, mono %}
+
+{% block title %}Redesign preview · PaperPanda{% endblock %}
+
+{% block content %}
+<div class="pp-page">
+  <div class="pp-page-header">
+    {{ kicker("REDESIGN PREVIEW") }}
+    <h1 class="pp-page-h1">Page index</h1>
+    <p class="pp-page-sub">
+      Every page in the redesign as it's built.  These mount only when
+      <code>PP_REDESIGN_PREVIEW=1</code>; production routes still serve the
+      old templates.  Click any page to see the new design with mock data.
+    </p>
+  </div>
+
+  {% call panel() %}
+    {{ panel_head("Pages", sub=(pages|length ~ " routes")) }}
+    <table class="pp-table">
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Route</th>
+          <th class="pp-num">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for name, href in pages %}
+          <tr>
+            <td><a href="{{ href }}" style="font-weight:600; color: var(--pp-ink);">{{ name }}</a></td>
+            <td>{{ mono(href) }}</td>
+            <td class="pp-num">
+              {%- if name == "Home" -%}
+                <span class="pp-status">building</span>
+              {%- else -%}
+                <span class="pp-status pp-status-paused">queued</span>
+              {%- endif -%}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+</div>
+{% endblock %}

@@ -1,0 +1,303 @@
+/* ============================================================================
+ * PaperPanda Redesign — Home page styles
+ * Mirrors design_handoff_paperpanda/page-home.jsx
+ * ==========================================================================*/
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Editorial masthead — Home only.  Heavy 2px ink rule below it.
+ * Headline is 46px Geist 700, tracking -1.4, with one phrase in coral.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-mast {
+  padding: 24px 24px 16px;
+  border-bottom: 2px solid var(--pp-ink);
+}
+
+.pp-home-mast-h1 {
+  font-family: var(--pp-font-body);
+  font-size: 46px;
+  line-height: 0.98;
+  font-weight: 700;
+  margin: 6px 0 0;
+  letter-spacing: -0.03em;
+  color: var(--pp-ink);
+  text-wrap: pretty;
+  max-width: 920px;
+}
+.pp-home-mast-h1 .pp-accent { color: var(--pp-accent); }
+
+.pp-home-mast-sub {
+  font-size: 13px;
+  color: var(--pp-dim);
+  margin-top: 8px;
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Page nav row — Segment (left) + RangeChip (right).  Sits between
+ * masthead and KPI strip.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-navrow {
+  display: flex;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line2);
+  gap: 14px;
+}
+
+.pp-home-navrow-spacer { flex: 1; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Body — KPI strip + grids.  Page padding 22px 24px 32px.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-body { padding: 22px 24px 32px; }
+
+.pp-home-stack > * + * { margin-top: 18px; }
+
+/* Hero grid: chart 1.7fr | retail pulse 1fr */
+.pp-home-hero {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 18px;
+}
+
+/* Movers + 13F row */
+.pp-home-row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+/* Insider / Congress / Macro 3-col */
+.pp-home-row3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 18px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Hero chart panel — S&P intraday with area fill + reference line + price tag.
+ * Below chart: 4-cell OPEN/HIGH/LOW/VOL strip.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-chart-svg {
+  display: block;
+  padding: 16px 18px;
+  width: 100%;
+  height: 200px;
+  box-sizing: content-box;
+}
+
+.pp-home-chart-grid { stroke: var(--pp-line); stroke-dasharray: 2 4; }
+.pp-home-chart-area { fill: var(--pp-accent); fill-opacity: 0.06; }
+.pp-home-chart-line { fill: none; stroke: var(--pp-ink); stroke-width: 1.6; }
+.pp-home-chart-ref  { stroke: var(--pp-accent); stroke-dasharray: 3 3; }
+.pp-home-chart-tag-rect { fill: var(--pp-accent); }
+.pp-home-chart-tag-text {
+  fill: var(--pp-accent-ink);
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.pp-home-chart-foot {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border-top: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-chart-foot-cell {
+  padding: 10px 18px;
+  border-right: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-chart-foot-cell:last-child { border-right: 0; }
+.pp-home-chart-foot-val {
+  display: block;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--pp-ink);
+  margin-top: 2px;
+  font-weight: 600;
+}
+.pp-home-chart-headlight {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  color: var(--pp-up);
+  font-weight: 700;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Retail pulse hero — featured ticker + 4 trending rows.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-retail { display: flex; flex-direction: column; }
+
+.pp-home-retail-feat {
+  padding: 14px 18px;
+  background: var(--pp-sub);
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-retail-feat-tkr {
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.027em;
+  margin-top: 4px;
+  color: var(--pp-accent);
+  font-family: var(--pp-font-body);
+}
+.pp-home-retail-feat-meta {
+  font-size: 12px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+  font-style: italic;
+}
+
+.pp-home-retail-list { flex: 1; }
+.pp-home-retail-row {
+  display: grid;
+  grid-template-columns: 50px 1fr 60px;
+  gap: 10px;
+  padding: 9px 18px;
+  align-items: center;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-retail-row:last-child { border-bottom: 0; }
+.pp-home-retail-tkr {
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-size: 13px;
+}
+.pp-home-retail-bar {
+  height: 3px;
+  background: var(--pp-line2);
+}
+.pp-home-retail-bar-fill { height: 100%; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * 13F flow list / Insiders / Congress — list rows, no tables.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-list-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+.pp-home-list-row:last-child { border-bottom: 0; }
+
+.pp-home-list-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-ink);
+}
+.pp-home-list-meta {
+  font-size: 11px;
+  color: var(--pp-dim);
+}
+.pp-home-list-tkr {
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  min-width: 54px;
+  text-align: right;
+}
+.pp-home-list-size {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  color: var(--pp-dim);
+  min-width: 60px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Insider/Congress 5-row variants — slightly different grid */
+.pp-home-insider-row {
+  padding: 9px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.pp-home-insider-row:last-child { border-bottom: 0; }
+.pp-home-insider-name { color: var(--pp-ink); }
+.pp-home-insider-meta { font-size: 10px; color: var(--pp-dim2); }
+
+.pp-home-congress-row {
+  padding: 9px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  display: grid;
+  grid-template-columns: 12px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.pp-home-congress-row:last-child { border-bottom: 0; }
+.pp-home-congress-dot {
+  width: 8px;
+  height: 8px;
+  display: inline-block;
+}
+.pp-home-congress-dot-d { background: var(--pp-party-d); }
+.pp-home-congress-dot-r { background: var(--pp-party-r); }
+
+/* Macro panel — label + note + value/change vertical stack */
+.pp-home-macro-row {
+  padding: 11px 18px;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.pp-home-macro-row:last-child { border-bottom: 0; }
+.pp-home-macro-label {
+  color: var(--pp-ink);
+  font-size: 13px;
+}
+.pp-home-macro-note {
+  font-size: 10px;
+  color: var(--pp-dim2);
+}
+.pp-home-macro-val {
+  display: block;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-home-macro-chg {
+  display: block;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--pp-dim);
+}
+
+/* "View all →" / "All funds →" link in panel head right slot */
+.pp-link-coral {
+  font-size: 11px;
+  color: var(--pp-accent);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.pp-link-coral:hover { text-decoration: underline; }
+
+/* Movers table — extends .pp-table, but Home wants tighter padding (7×14). */
+.pp-home-movers-table thead th { padding: 8px 14px; }
+.pp-home-movers-table tbody td { padding: 7px 14px; }
+.pp-home-movers-table .pp-home-movers-name {
+  color: var(--pp-dim);
+  margin-left: 6px;
+  font-size: 11px;
+}

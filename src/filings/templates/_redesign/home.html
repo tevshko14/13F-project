@@ -1,0 +1,246 @@
+{#-
+  PaperPanda Redesign — Home / Dashboard
+  Mirrors design_handoff_paperpanda/page-home.jsx
+
+  Editorial masthead (Home only) → page nav row → KPI strip →
+  hero (chart + retail) → movers + 13F → insiders/congress/macro 3-col.
+
+  Real data wiring happens at the route-flip step.  This template
+  expects the route handler to populate:
+    - top_movers, fund_flows, insiders, congress, macro, retail (lists)
+    - kpi_strip (5-cell list)
+    - chart_path  (SVG path string for the S&P intraday line)
+    - chart_area  (closed-path version for area fill)
+    - chart_ohlcv (4-cell strip data)
+    - mast_kicker, mast_h1_lead, mast_h1_accent, mast_sub
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+    kicker, label, mono, panel, panel_head, kpi_strip, segment, range_chip, tag, spark %}
+
+{% block title %}Home · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet" href="/static/css/redesign/pages/home.css">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ EDITORIAL MASTHEAD (Home only) ━━━━━━━━━━ #}
+<div class="pp-home-mast">
+  {{ kicker(mast_kicker|default("TODAY'S TAPE")) }}
+  <h1 class="pp-home-mast-h1">
+    {{ mast_h1_lead|default("Risk-on rotation.") }}
+    <span class="pp-accent">{{ mast_h1_accent|default("Semis lead.") }}</span>
+  </h1>
+  <div class="pp-home-mast-sub">
+    {{ mast_sub|default("Breadth confirms. Vol bleeds. Pelosi files NVDA calls — fourth time this year.") }}
+  </div>
+</div>
+
+{# ━━━━━━━━━━ PAGE NAV ROW (Segment + RangeChip) ━━━━━━━━━━ #}
+<div class="pp-home-navrow">
+  {{ segment(["Overview","Flow","Heatmap","News","Calendar"],
+             value=home_view|default("Overview"),
+             id="pp-home-view") }}
+  <div class="pp-home-navrow-spacer"></div>
+  {{ range_chip(value=home_range|default("1M"), id="pp-home-range") }}
+</div>
+
+<div class="pp-home-body">
+  <div class="pp-home-stack">
+
+    {# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
+    {{ kpi_strip(kpi_strip_items) }}
+
+    {# ━━━━━━━━━━ HERO: chart + retail pulse ━━━━━━━━━━ #}
+    <div class="pp-home-hero">
+
+      {# ── Chart panel ── #}
+      {% call panel() %}
+        {% call panel_head("S&P 500", sub="Intraday · 15m") %}
+          <span class="pp-home-chart-headlight">
+            +{{ chart_change|default('41.86') }} (+{{ chart_change_pct|default('0.72%') }})
+          </span>
+        {% endcall %}
+        <svg class="pp-home-chart-svg"
+             viewBox="0 0 600 200" preserveAspectRatio="none"
+             aria-label="S&P 500 intraday line chart">
+          {# Grid lines — 4 horizontal dashes #}
+          {% for i in range(4) %}
+            <line class="pp-home-chart-grid"
+                  x1="0" x2="600"
+                  y1="{{ i * 55 + 10 }}" y2="{{ i * 55 + 10 }}"/>
+          {% endfor %}
+          {# Area fill (closed path) + stroke #}
+          {% if chart_area %}
+            <path d="{{ chart_area }}" class="pp-home-chart-area"/>
+          {% endif %}
+          <path d="{{ chart_path }}" class="pp-home-chart-line"/>
+          {# Reference / current price line #}
+          <line class="pp-home-chart-ref"
+                x1="0" x2="600" y1="74" y2="74"/>
+          {# Price tag at right edge #}
+          <rect class="pp-home-chart-tag-rect"
+                x="558" y="66" width="42" height="16"/>
+          <text class="pp-home-chart-tag-text"
+                x="579" y="78" text-anchor="middle">{{ chart_tag|default('5847') }}</text>
+        </svg>
+        <div class="pp-home-chart-foot">
+          {% for k, v in chart_ohlcv %}
+            <div class="pp-home-chart-foot-cell">
+              {{ label(k) }}
+              <span class="pp-home-chart-foot-val">{{ v }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endcall %}
+
+      {# ── Retail pulse panel ── #}
+      {% call panel(cls="pp-home-retail") %}
+        {{ panel_head("Retail pulse", sub="24h · social") }}
+        <div class="pp-home-retail-feat">
+          {{ kicker("Most discussed") }}
+          <div class="pp-home-retail-feat-tkr">${{ retail_feat.ticker|default('GME') }}</div>
+          <div class="pp-home-retail-feat-meta">
+            {{ retail_feat.mentions|default('4,218') }} mentions · sentiment +{{ retail_feat.sentiment|default('62') }}
+          </div>
+        </div>
+        <div class="pp-home-retail-list">
+          {% for r in retail_rows %}
+            <div class="pp-home-retail-row">
+              <span class="pp-home-retail-tkr">${{ r.ticker }}</span>
+              <div class="pp-home-retail-bar">
+                <div class="pp-home-retail-bar-fill"
+                     style="width: {{ r.bar_pct }}%; background: {{ r.bar_color }};"></div>
+              </div>
+              <span class="pp-mono pp-home-retail-pct {{ 'pp-up' if r.sentiment >= 0 else 'pp-down' }}"
+                    style="font-size:11px; text-align:right; font-weight:600;">
+                {%- if r.sentiment >= 0 %}+{% endif -%}
+                {{ "%.0f"|format(r.sentiment * 100) }}%
+              </span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endcall %}
+    </div>
+
+    {# ━━━━━━━━━━ ROW 2: Top movers + 13F flow ━━━━━━━━━━ #}
+    <div class="pp-home-row2">
+
+      {# ── Top movers table ── #}
+      {% call panel() %}
+        {% call panel_head("Top movers", sub="by volume") %}
+          <a class="pp-link-coral" href="#">View all →</a>
+        {% endcall %}
+        <table class="pp-table pp-home-movers-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th class="pp-num">Last</th>
+              <th class="pp-num">Chg%</th>
+              <th class="pp-num">Spark</th>
+              <th class="pp-num">Vol</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in top_movers %}
+              <tr>
+                <td>
+                  <span style="font-weight:700; color: var(--pp-ink);">{{ r.ticker }}</span>
+                  <span class="pp-home-movers-name">{{ r.name }}</span>
+                </td>
+                <td class="pp-num pp-mono">{{ r.last }}</td>
+                <td class="pp-num">
+                  <span class="pp-mono {{ 'pp-up' if r.pct >= 0 else 'pp-down' }}"
+                        style="font-weight:600;">
+                    {%- if r.pct >= 0 %}+{% endif -%}{{ "%.2f"|format(r.pct * 100) }}%
+                  </span>
+                </td>
+                <td class="pp-num">
+                  {{ spark(r.spark_series, color=("var(--pp-up)" if r.pct >= 0 else "var(--pp-down)"), w=72, h=20) }}
+                </td>
+                <td class="pp-num">
+                  <span class="pp-mono pp-dim" style="font-size:11px;">{{ r.vol }}</span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+
+      {# ── 13F flow list ── #}
+      {% call panel() %}
+        {% call panel_head("13F flow", sub="this week") %}
+          <a class="pp-link-coral" href="/funds">All funds →</a>
+        {% endcall %}
+        {% for f in fund_flows %}
+          <div class="pp-home-list-row">
+            <div>
+              <div class="pp-home-list-name">{{ f.manager }}</div>
+              <div class="pp-home-list-meta">
+                {{ f.fund }} · <span class="pp-mono">{{ f.aum }}</span>
+              </div>
+            </div>
+            {{ tag(f.action) }}
+            <span class="pp-home-list-tkr">{{ f.ticker }}</span>
+          </div>
+        {% endfor %}
+      {% endcall %}
+    </div>
+
+    {# ━━━━━━━━━━ ROW 3: Insider · Congress · Macro ━━━━━━━━━━ #}
+    <div class="pp-home-row3">
+
+      {# ── Insider flow ── #}
+      {% call panel() %}
+        {{ panel_head("Insider flow", sub="48h") }}
+        {% for r in insiders %}
+          <div class="pp-home-insider-row">
+            <div>
+              <div class="pp-home-insider-name">{{ r.person }}</div>
+              <div class="pp-home-insider-meta">{{ r.role }} · ${{ r.ticker }}</div>
+            </div>
+            {{ tag(r.action) }}
+            <span class="pp-mono" style="font-size:11px; color: var(--pp-dim); min-width:60px; text-align:right;">{{ r.value }}</span>
+          </div>
+        {% endfor %}
+      {% endcall %}
+
+      {# ── Congress ── #}
+      {% call panel() %}
+        {{ panel_head("Congress", sub="STOCK Act") }}
+        {% for r in congress %}
+          <div class="pp-home-congress-row">
+            <span class="pp-home-congress-dot pp-home-congress-dot-{{ r.party|lower }}" aria-label="{{ 'Democrat' if r.party == 'D' else 'Republican' }}"></span>
+            <div>
+              <div class="pp-home-insider-name">{{ r.person }}</div>
+              <div class="pp-home-insider-meta">{{ r.chamber }} · ${{ r.ticker }}</div>
+            </div>
+            {{ tag(r.action) }}
+            <span class="pp-mono" style="font-size:11px; color: var(--pp-dim); min-width:60px; text-align:right;">{{ r.size }}</span>
+          </div>
+        {% endfor %}
+      {% endcall %}
+
+      {# ── Macro ── #}
+      {% call panel() %}
+        {{ panel_head("Macro", sub="FRED") }}
+        {% for m in macro %}
+          <div class="pp-home-macro-row">
+            <div>
+              <div class="pp-home-macro-label">{{ m.label }}</div>
+              <div class="pp-home-macro-note">{{ m.note }}</div>
+            </div>
+            <div style="text-align:right;">
+              <span class="pp-home-macro-val">{{ m.val }}</span>
+              <span class="pp-home-macro-chg">{{ m.chg }}</span>
+            </div>
+          </div>
+        {% endfor %}
+      {% endcall %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}
