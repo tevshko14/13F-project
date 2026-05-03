@@ -27,6 +27,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from filings.app_state import templates
+from filings.cache_l2 import l2_cached as _l2_cached
+from filings.concurrency import to_heavy
 
 logger = logging.getLogger(__name__)
 
@@ -42,84 +44,6 @@ def is_enabled() -> bool:
 
 
 router = APIRouter(prefix="/_v2", tags=["redesign-preview"])
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# L2 cache wrapper — wraps any sync compute function in a
-# Supabase-cache-or-compute pattern.  External-API fetchers (CNN F&G,
-# ApeWisdom, Finnhub news, sector ETFs, etc.) used to hit the upstream
-# directly on every cold start, blocking thread-pool slots for 5-30s
-# each.  Wrapping them lets cold workers warm from Supabase in ~50ms.
-#
-# Pattern: try L2 → on hit, return; on miss, run the real fetcher and
-# write the result back.  Stale-while-revalidate: a stale cache row
-# is returned immediately, with a background task firing the refresh
-# (so the next request gets fresh data without anyone waiting).
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-async def _l2_cached(
-    key: str,
-    ttl_seconds: int,
-    compute_sync,
-    *,
-    category: str = "redesign_home",
-):
-    """Read-through cache wrapper.
-
-    Args:
-        key:          Supabase cache key, e.g. "redesign:home:cnn_fg".
-        ttl_seconds:  How long the cached row is considered fresh.
-        compute_sync: Zero-arg sync callable that returns the payload.
-        category:     Cache row category (used for cleanup queries).
-
-    Returns:
-        The cached/computed payload (dict / list / None).  Falls back to
-        running compute_sync if Supabase is unreachable.
-    """
-    # Try L2 first.
-    try:
-        from filings import supabase_cache
-        cached, is_fresh = await asyncio.to_thread(
-            supabase_cache.get_cached_with_stale, key,
-        )
-    except Exception as exc:
-        logger.debug("L2 read failed for %s: %s", key, exc)
-        cached, is_fresh = None, False
-
-    if cached is not None and is_fresh:
-        return cached
-
-    # Stale hit — return it immediately, refresh in background.
-    if cached is not None:
-        async def _bg_refresh():
-            try:
-                payload = await asyncio.to_thread(compute_sync)
-                if payload:
-                    from filings import supabase_cache
-                    await asyncio.to_thread(
-                        supabase_cache.set_cached, key, category, payload, ttl_seconds,
-                    )
-            except Exception as exc:
-                logger.debug("L2 background refresh for %s failed: %s", key, exc)
-        asyncio.create_task(_bg_refresh())
-        return cached
-
-    # Cold L2 — synchronous compute + write-through.
-    try:
-        payload = await asyncio.to_thread(compute_sync)
-    except Exception as exc:
-        logger.warning("L2 compute_sync raised for %s: %s", key, exc)
-        return None
-    if payload:
-        try:
-            from filings import supabase_cache
-            await asyncio.to_thread(
-                supabase_cache.set_cached, key, category, payload, ttl_seconds,
-            )
-        except Exception as exc:
-            logger.debug("L2 set_cached for %s failed: %s", key, exc)
-    return payload
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -288,7 +212,7 @@ async def _fetch_kpi_strip() -> list[dict]:
     try:
         from filings import market_data
 
-        data = await asyncio.to_thread(market_data.get_index_market_data)
+        data = await to_heavy(market_data.get_index_market_data)
         if not data:
             return fallback
         items = []
@@ -437,7 +361,7 @@ async def _fetch_hero_chart() -> dict:
 
     try:
         from filings import market_data
-        chart = await asyncio.to_thread(market_data.get_intraday_chart, "^GSPC")
+        chart = await to_heavy(market_data.get_intraday_chart, "^GSPC")
         if not chart:
             return fallback
         history = chart.get("history") or []
@@ -825,7 +749,7 @@ async def _fetch_home_top_movers(limit: int = 6, *, mkt: dict | None = None) -> 
     if mkt is None:
         try:
             from filings import market_data
-            mkt = await asyncio.to_thread(market_data.get_sp500_market_data, "1D")
+            mkt = await to_heavy(market_data.get_sp500_market_data, "1D")
         except Exception as exc:
             logger.warning("Top movers fetch failed: %s", exc)
             mkt = None
@@ -846,7 +770,7 @@ async def _fetch_home_top_movers(limit: int = 6, *, mkt: dict | None = None) -> 
     tickers = [sym for sym, _ in picked]
     try:
         from filings import market_data
-        sparks = await asyncio.to_thread(market_data.get_sparkline_points, tickers, 20)
+        sparks = await to_heavy(market_data.get_sparkline_points, tickers, 20)
     except Exception:
         sparks = {}
 
@@ -990,7 +914,7 @@ async def _fetch_home_insiders(limit: int = 5) -> list[dict]:
     """5 most recent insider trades shaped for the Home Overview list."""
     try:
         from filings import insider_trading
-        trades = await asyncio.to_thread(
+        trades = await to_heavy(
             insider_trading.get_latest_insider_trades, "", limit, "",
         )
     except Exception as exc:
@@ -1023,7 +947,7 @@ async def _fetch_home_congress(limit: int = 5) -> list[dict]:
     """5 most recent congress trades shaped for the Home Overview list."""
     try:
         from filings import supabase_cache
-        rows_raw = await asyncio.to_thread(
+        rows_raw = await to_heavy(
             supabase_cache.get_congress_recent_trades, limit,
         )
     except Exception as exc:
@@ -1056,7 +980,7 @@ async def _fetch_home_macro() -> list[dict]:
     """
     try:
         from filings import fred_indicators
-        payload = await asyncio.to_thread(fred_indicators.fetch_indicators)
+        payload = await to_heavy(fred_indicators.fetch_indicators)
     except Exception as exc:
         logger.warning("Home macro fetch failed: %s", exc)
         return _HOME_MACRO
@@ -1110,6 +1034,7 @@ async def _fetch_home_retail() -> dict:
     try:
         items = await _l2_cached(
             "redesign:home:apewisdom", ttl_seconds=300, compute_sync=_compute,
+            category="redesign_home",
         )
     except Exception as exc:
         logger.warning("Home retail fetch failed: %s", exc)
@@ -1169,6 +1094,7 @@ async def _fetch_home_feargreed() -> dict:
     try:
         cnn = await _l2_cached(
             "redesign:home:cnn_fg", ttl_seconds=300, compute_sync=_compute,
+            category="redesign_home",
         )
     except Exception as exc:
         logger.warning("Fear & Greed fetch failed: %s", exc)
@@ -1232,9 +1158,9 @@ async def _fetch_home_ticker_tape(
             from filings import market_data
             calls = []
             if idx_data is None:
-                calls.append(asyncio.to_thread(market_data.get_index_market_data))
+                calls.append(to_heavy(market_data.get_index_market_data))
             if sp_data is None:
-                calls.append(asyncio.to_thread(market_data.get_sp500_market_data, "1D"))
+                calls.append(to_heavy(market_data.get_sp500_market_data, "1D"))
             results = await asyncio.gather(*calls)
             ri = iter(results)
             if idx_data is None:
@@ -1350,7 +1276,7 @@ async def _fetch_home_flow_trending(request: Request, limit: int = 12) -> tuple[
     cong_sells: Counter = Counter()
     try:
         from filings import supabase_cache
-        cong_trades = await asyncio.to_thread(
+        cong_trades = await to_heavy(
             supabase_cache.get_congress_recent_trades, 200,
         )
     except Exception as exc:
@@ -1422,6 +1348,7 @@ async def _fetch_home_news() -> tuple[dict, list[dict]]:
     try:
         articles = await _l2_cached(
             "redesign:home:news_general", ttl_seconds=600, compute_sync=_compute,
+            category="redesign_home",
         )
     except Exception as exc:
         logger.warning("Home news fetch failed: %s", exc)
@@ -1483,7 +1410,7 @@ async def _fetch_home_heatmap_companies(*, mkt: dict | None = None) -> list[dict
     if mkt is None:
         try:
             from filings import market_data
-            mkt = await asyncio.to_thread(market_data.get_sp500_market_data, "1D")
+            mkt = await to_heavy(market_data.get_sp500_market_data, "1D")
         except Exception as exc:
             logger.warning("Heatmap companies fetch failed: %s", exc)
             mkt = None
@@ -1590,6 +1517,7 @@ async def _fetch_home_heatmap_sectors() -> list[dict]:
             "redesign:home:sector_etfs",
             ttl_seconds=300,
             compute_sync=_fetch_sector_etfs_sync,
+            category="redesign_home",
         )
     except Exception as exc:
         logger.warning("Sector heatmap fetch failed: %s", exc)
@@ -1650,9 +1578,9 @@ async def _fetch_home_activity(limit: int = 12) -> list[dict]:
     try:
         from filings import insider_trading, supabase_cache, market_data
         insiders, congress, news = await asyncio.gather(
-            asyncio.to_thread(insider_trading.get_latest_insider_trades, "", 8, ""),
-            asyncio.to_thread(supabase_cache.get_congress_recent_trades, 8),
-            asyncio.to_thread(market_data.get_market_news, "general", 8),
+            to_heavy(insider_trading.get_latest_insider_trades, "", 8, ""),
+            to_heavy(supabase_cache.get_congress_recent_trades, 8),
+            to_heavy(market_data.get_market_news, "general", 8),
         )
     except Exception as exc:
         logger.warning("Activity feed fetch failed: %s", exc)
@@ -1762,8 +1690,9 @@ async def _fetch_home_cal_earnings(limit: int = 6) -> list[dict]:
     try:
         from filings import market_data
         payload, sp_constituents = await asyncio.gather(
-            _l2_cached("redesign:home:earnings_4w", 600, _compute_earnings),
-            asyncio.to_thread(market_data.get_sp500_constituents),
+            _l2_cached("redesign:home:earnings_4w", 600, _compute_earnings,
+                       category="redesign_home"),
+            to_heavy(market_data.get_sp500_constituents),
         )
     except Exception as exc:
         logger.warning("Home earnings calendar fetch failed: %s", exc)
@@ -1832,7 +1761,7 @@ async def _fetch_home_cal_macro(limit: int = 6) -> list[dict]:
     # Other valid PERIOD_CHOICES: this_week / next_week / next_2w.
     try:
         from filings import fred_calendar
-        payload = await asyncio.to_thread(
+        payload = await to_heavy(
             fred_calendar.fetch_economic_events, "all", "us", "all",
         )
     except Exception as exc:
@@ -1912,20 +1841,23 @@ async def preview_home(request: Request):
     # Supabase, not yfinance.
     from filings import market_data as _md
     sp_1d_map, idx_market_map = await asyncio.gather(
-        asyncio.to_thread(_md.get_sp500_market_data, "1D"),
-        asyncio.to_thread(_md.get_index_market_data),
+        to_heavy(_md.get_sp500_market_data, "1D"),
+        to_heavy(_md.get_index_market_data),
     )
 
     # ── Phase 2 (parallel): every other fetcher, with pre-fetched data
     # passed where applicable.  Heavy external-API fetchers (F&G, retail,
-    # news, earnings, sector ETFs, FRED) are now L2-cached so a cold worker
-    # warms from Supabase rather than the upstream APIs. ──
+    # news, earnings, sector ETFs, FRED) are L2-cached so a cold worker
+    # warms from Supabase rather than the upstream APIs.
+    #
+    # Fund flows + congress are fetched ONCE at the larger limit (8) and
+    # sliced for the 6-row Overview panels — saves duplicate upstream
+    # round trips and two heavy-pool slots. ──
     (
         kpi_items, hero,
-        top_movers_rows, fund_flow_rows, insider_rows, congress_rows,
+        top_movers_rows, fund_flows_full, insider_rows, congress_full,
         macro_rows, retail_payload, feargreed_payload, ticker_tape_rows,
         flow_trending_payload,
-        flow_fund_buys_rows, flow_congress_rows,
         heatmap_companies_rows, heatmap_sectors_rows,
         activity_rows,
         news_payload,
@@ -1934,16 +1866,14 @@ async def preview_home(request: Request):
         _fetch_kpi_strip(),
         _fetch_hero_chart(),
         _fetch_home_top_movers(limit=6, mkt=sp_1d_map),
-        _fetch_home_fund_flows(request, limit=6),
+        _fetch_home_fund_flows(request, limit=8),
         _fetch_home_insiders(limit=5),
-        _fetch_home_congress(limit=5),
+        _fetch_home_congress(limit=8),
         _fetch_home_macro(),
         _fetch_home_retail(),
         _fetch_home_feargreed(),
         _fetch_home_ticker_tape(idx_data=idx_market_map, sp_data=sp_1d_map),
         _fetch_home_flow_trending(request, limit=12),
-        _fetch_home_fund_flows(request, limit=8),
-        _fetch_home_congress(limit=8),
         _fetch_home_heatmap_companies(mkt=sp_1d_map),
         _fetch_home_heatmap_sectors(),
         _fetch_home_activity(limit=12),
@@ -1951,6 +1881,11 @@ async def preview_home(request: Request):
         _fetch_home_cal_earnings(limit=6),
         _fetch_home_cal_macro(limit=6),
     )
+    # Slice the 8-row results for the 6-row Overview panels.
+    fund_flow_rows = fund_flows_full[:6]
+    congress_rows = congress_full[:6]
+    flow_fund_buys_rows = fund_flows_full
+    flow_congress_rows = congress_full
     flow_trending_rows, flow_trending_max = flow_trending_payload
     news_featured_ctx, news_stories_ctx = news_payload
     ctx = {
@@ -2127,6 +2062,7 @@ async def _fetch_macro_indicators() -> dict:
     try:
         payload = await _l2_cached(
             "redesign:home:fred_indicators", ttl_seconds=900, compute_sync=_compute,
+            category="redesign_home",
         )
         return payload or {}
     except Exception as exc:
@@ -2202,7 +2138,7 @@ async def _fetch_fund_data(cik: str) -> dict | None:
     cik_norm = (cik or "").lstrip("0") or cik
     try:
         from filings import supabase_cache
-        data, _fresh = await asyncio.to_thread(
+        data, _fresh = await to_heavy(
             supabase_cache.get_cached_with_stale, f"13f:{cik_norm}"
         )
         return data if isinstance(data, dict) else None
@@ -2450,14 +2386,14 @@ async def _fetch_stock_overview(ticker: str) -> dict:
     """
     try:
         from filings import market_data
-        ohlcv = await asyncio.to_thread(market_data.get_stock_ohlcv, ticker.upper(), "1Y")
+        ohlcv = await to_heavy(market_data.get_stock_ohlcv, ticker.upper(), "1Y")
     except Exception as exc:
         logger.warning("Stock OHLCV fetch failed for %s: %s", ticker, exc)
         ohlcv = None
 
     try:
         from filings import market_data
-        news = await asyncio.to_thread(market_data.get_market_news, "general", 6)
+        news = await to_heavy(market_data.get_market_news, "general", 6)
     except Exception as exc:
         logger.warning("Market news fetch failed: %s", exc)
         news = []
@@ -2791,7 +2727,7 @@ async def _fetch_congress_data() -> dict:
     """Read recent congressional trades from Supabase cache."""
     try:
         from filings import supabase_cache
-        rows = await asyncio.to_thread(supabase_cache.get_congress_recent_trades, 30)
+        rows = await to_heavy(supabase_cache.get_congress_recent_trades, 30)
     except Exception as exc:
         logger.warning("Congress trades fetch failed: %s", exc)
         rows = None
@@ -2944,7 +2880,7 @@ async def _fetch_insiders_data() -> dict:
     """
     try:
         from filings import insider_trading
-        trades = await asyncio.to_thread(
+        trades = await to_heavy(
             insider_trading.get_latest_insider_trades,
             "", 24, "",
         )
@@ -3094,7 +3030,7 @@ async def _fetch_profile_watchlist() -> list[dict]:
     """
     try:
         from filings import watchlist
-        entries = await asyncio.to_thread(watchlist.load_watchlist)
+        entries = await to_heavy(watchlist.load_watchlist)
     except Exception as exc:
         logger.warning("Watchlist load failed: %s", exc)
         entries = []
@@ -3205,7 +3141,7 @@ async def _fetch_retail_data() -> dict:
     """
     try:
         from filings import sentiment
-        items = await asyncio.to_thread(sentiment._get_apewisdom_all)
+        items = await to_heavy(sentiment._get_apewisdom_all)
     except Exception as exc:
         logger.warning("ApeWisdom fetch failed: %s", exc)
         items = []

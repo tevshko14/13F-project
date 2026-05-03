@@ -67,6 +67,7 @@ from filings.app_state import (
     valid_member_id as _valid_member_id,
     valid_ticker as _valid_ticker,
 )
+from filings.concurrency import to_heavy as _to_heavy
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.routers import auth_admin as _auth_admin_router
 from filings.routers import redesign_preview as _redesign_preview_router
@@ -191,14 +192,6 @@ async def _get_refresh_lock(cik: str) -> asyncio.Lock:
         return lock
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# Heavy thread pool — isolated from the default asyncio pool so slow
-# yfinance/Finnhub/SEC calls never starve health checks or fast routes.
-# ═══════════════════════════════════════════════════════════════════════
-
-_heavy_pool: ThreadPoolExecutor | None = None
-_heavy_sem: asyncio.Semaphore | None = None
-
 # ── Ticker logo cache ─────────────────────────────────────────────
 # Only the *set* of known IDs is loaded at startup (negligible memory).
 # Actual image bytes are fetched on-demand and held in a bounded LRU dict.
@@ -228,25 +221,6 @@ _http_pool: httpx.AsyncClient | None = None
 
 _analyst_photo_cache: OrderedDict[str, bytes] = OrderedDict()
 _analyst_photo_set: set[str] = set()  # exposed to templates as Jinja global
-
-
-async def _to_heavy(fn, *args):
-    """Run *fn* on the heavy thread pool, gated by a semaphore.
-
-    Use instead of ``asyncio.to_thread()`` for any function that makes
-    slow HTTP calls (yfinance, Finnhub, SEC EDGAR, ApeWisdom, etc.).
-    The semaphore prevents cache-miss stampedes from saturating the pool.
-    """
-    pool = _heavy_pool
-    sem = _heavy_sem
-    if pool is None:
-        # Fallback: heavy pool not yet initialised (should not happen)
-        return await asyncio.to_thread(fn, *args)
-    loop = asyncio.get_running_loop()
-    if sem is not None:
-        async with sem:
-            return await loop.run_in_executor(pool, fn, *args)
-    return await loop.run_in_executor(pool, fn, *args)
 
 
 async def _safe_fetch(coro, label: str, timeout: int = 10, default=None):
@@ -491,24 +465,21 @@ async def lifespan(app: FastAPI):
     funds in the background so users never see outdated data even if the
     cron job fails.
     """
-    global _heavy_pool, _heavy_sem, _startup_ts
+    global _startup_ts
     _startup_ts = time_module.time()
 
     # ── Thread pool architecture ─────────────────────────────────────────
-    # Default pool: lightweight work (cache reads, template rendering, etc.)
-    # Heavy pool: yfinance downloads, Finnhub, SEC EDGAR — slow HTTP calls
-    #             that can block 5-15s.  Isolated so they never starve the
-    #             default pool (which handles health checks + fast routes).
-    # Semaphore: caps concurrent heavy-pool submissions to prevent
-    #            cache-miss stampedes from saturating even the heavy pool.
-    _pool_size = int(os.environ.get("WORKER_THREADS", "8"))
-    loop = asyncio.get_running_loop()
-    loop.set_default_executor(ThreadPoolExecutor(max_workers=_pool_size))
-    _heavy_pool = ThreadPoolExecutor(
-        max_workers=int(os.environ.get("HEAVY_THREADS", "8")),
-        thread_name_prefix="heavy",
-    )
-    _heavy_sem = asyncio.Semaphore(int(os.environ.get("HEAVY_CONCURRENCY", "10")))
+    # Owned by `filings.concurrency.init_pools()` so routers can also call
+    # `to_heavy(...)` without circular-importing web.py.  Defaults sized
+    # for a Railway container (≈1-2 vCPU, 512MB-2GB RAM):
+    #   default pool = 32 (was 8) — fast/light work, prevents queueing
+    #                                on health checks + hot paths
+    #   heavy  pool  = 16 (was 8) — yfinance / Finnhub / SEC / ApeWisdom
+    #   semaphore   = 12 (was 10) — global cap on concurrent heavy ops;
+    #                                THE protection against fan-out blowups
+    # Override via WORKER_THREADS / HEAVY_THREADS / HEAVY_CONCURRENCY env vars.
+    from filings.concurrency import init_pools as _init_pools
+    _init_pools()
 
     global _http_pool
     _http_pool = httpx.AsyncClient(
@@ -679,9 +650,9 @@ async def lifespan(app: FastAPI):
         await _http_pool.aclose()
         _http_pool = None
 
-    if _heavy_pool is not None:
-        _heavy_pool.shutdown(wait=False)
-        _heavy_pool = None
+    # Tear down the shared concurrency pools owned by filings.concurrency.
+    from filings.concurrency import shutdown_pools as _shutdown_pools
+    _shutdown_pools()
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2998,7 +2969,7 @@ async def stock_detail_by_cusip(request: Request, cusip: str):
     # CUSIP is held by a superinvestor, same condition as build_stock_detail
     # returning a non-None value.  Running both concurrently on the heavy
     # pool halves user latency (~500ms -> ~250ms) at the cost of one extra
-    # thread slot, which _heavy_sem=10 absorbs.
+    # thread slot, which the heavy semaphore absorbs.
     detail = None
     history = []
     if cache_data:
