@@ -586,6 +586,10 @@ _INDEX_SYMBOLS: dict[str, dict] = {
     "^DJI": {"name": "Dow Jones", "tab": "indices"},
     "^RUT": {"name": "Russell 2000", "tab": "indices"},
     "^VIX": {"name": "VIX", "tab": "indices"},
+    # Rates — TNX is the CBOE 10-Year Treasury Note Yield index (in %).
+    # Added for the redesign Home KPI strip; comes through get_index_market_data
+    # for free (same yfinance batch) and is cached/L2-mirrored like the rest.
+    "^TNX": {"name": "10Y", "tab": "rates"},
     # Commodities
     "GC=F": {"name": "Gold", "tab": "commodities"},
     "CL=F": {"name": "Crude Oil", "tab": "commodities"},

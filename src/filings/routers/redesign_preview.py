@@ -15,6 +15,8 @@ pointed at these templates and mock data is replaced with live feeds.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import math
 import os
 from datetime import datetime, timezone
@@ -24,6 +26,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from filings.app_state import templates
+
+logger = logging.getLogger(__name__)
 
 
 def is_enabled() -> bool:
@@ -123,9 +127,109 @@ async def preview_index(request: Request):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Page routes — added one at a time as pages are built.
-# Each renders a template from _redesign/ with mock data only.
+# Page routes — wired to real data through existing modules where possible,
+# with mock-only fallbacks for sections that would otherwise be empty.
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+# KPI strip: which 5 yfinance symbols feed the Home masthead, in display order.
+# Each entry is (symbol, label, formatter).  The formatter takes the raw price
+# and returns a display string matching the design — indices show "5,847.42",
+# VIX shows "14.82", and ^TNX (the 10-Year Treasury yield) shows "4.214%".
+_KPI_INDICES: list[tuple[str, str, str]] = [
+    ("^GSPC", "S&P 500", "comma2"),
+    ("^IXIC", "Nasdaq",  "comma2"),
+    ("^DJI",  "Dow",     "comma2"),
+    ("^VIX",  "VIX",     "two"),
+    ("^TNX",  "10Y",     "yield3"),
+]
+
+
+def _format_kpi_value(price: float, kind: str) -> str:
+    """Format a KPI value to match the design's exact rendering."""
+    if price is None:
+        return "—"
+    if kind == "comma2":
+        # Indices: thousands separator + 2 decimals → "5,847.42"
+        return f"{price:,.2f}"
+    if kind == "yield3":
+        # 10-Year Treasury yield: 3 decimals + percent sign → "4.214%"
+        return f"{price:.3f}%"
+    if kind == "two":
+        # VIX: just 2 decimals, no comma (always < 1000) → "14.82"
+        return f"{price:.2f}"
+    return str(price)
+
+
+def _format_kpi_delta(pct_change: float | None) -> str:
+    """Format the delta string (no leading sign — arrow conveys direction)."""
+    if pct_change is None:
+        return ""
+    return f"{abs(pct_change) * 100:.2f}%"
+
+
+def _daily_pct_from_history(history: list | None) -> float | None:
+    """Return the most recent day's percent change as a fractional float
+    (e.g. 0.0072 = +0.72%) from a [[epoch_ms, close], ...] history list.
+
+    The KPI strip needs DAILY change (today close vs prior close), but
+    get_index_market_data() returns 1Y history with a `pct_change` field
+    computed over the full window — too long for the design's intent.
+    """
+    if not history or len(history) < 2:
+        return None
+    try:
+        prev = float(history[-2][1])
+        last = float(history[-1][1])
+        if prev == 0:
+            return None
+        return (last - prev) / prev
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+async def _fetch_kpi_strip() -> list[dict]:
+    """Build the 5-cell KPI strip from real market data.
+
+    Goes through filings.market_data.get_index_market_data() which already
+    has L1 in-memory + L2 Supabase caching, so this is fast on warm cache.
+    Daily percent change is recomputed from the tail of the 1Y history
+    series (the row's own `pct_change` is full-window — wrong for the
+    daily-tape framing of this strip).
+    Fallback is the static design values so the page never breaks if
+    yfinance / Supabase are unavailable.
+    """
+    fallback = [
+        {"label": "S&P 500", "value": "5,847.42",  "delta": "0.72%", "up": True},
+        {"label": "Nasdaq",  "value": "20,194.18", "delta": "0.45%", "up": True},
+        {"label": "Dow",     "value": "42,233.71", "delta": "0.04%", "up": False},
+        {"label": "VIX",     "value": "14.82",     "delta": "2.05%", "up": False},
+        {"label": "10Y",     "value": "4.214%",    "delta": "0.48%", "up": True},
+    ]
+    try:
+        from filings import market_data
+
+        data = await asyncio.to_thread(market_data.get_index_market_data)
+        if not data:
+            return fallback
+        items = []
+        for sym, label, kind in _KPI_INDICES:
+            row = data.get(sym)
+            if not row:
+                items.append(next((f for f in fallback if f["label"] == label), fallback[0]))
+                continue
+            price = row.get("price")
+            daily_pct = _daily_pct_from_history(row.get("history"))
+            items.append({
+                "label": label,
+                "value": _format_kpi_value(price, kind),
+                "delta": _format_kpi_delta(daily_pct),
+                "up":   (daily_pct is not None and daily_pct >= 0),
+            })
+        return items
+    except Exception as exc:
+        logger.warning("KPI strip live fetch failed, using design fallback: %s", exc)
+        return fallback
 
 
 def _build_intraday_chart() -> dict:
@@ -222,26 +326,22 @@ def _retail_rows():
 
 @router.get("/home", response_class=HTMLResponse)
 async def preview_home(request: Request):
-    """Home page — editorial masthead + KPI strip + hero + 3 grid sections."""
+    """Home page — masthead + real KPI strip + hero + 3 grid sections."""
     chart = _build_intraday_chart()
+    kpi_items = await _fetch_kpi_strip()
     ctx = {
         "request": request,
         **_shell_context("Home"),
 
-        # Branded hero copy (replaces the JSX editorial masthead).
-        # Carries the existing brand: kicker → H1 tagline → descriptive subtitle.
-        "mast_kicker":  "PAPERPANDA INTELLIGENCE",
+        # Masthead copy — kicker rendered uppercase via CSS.
+        "mast_kicker":  "PaperPanda · Intelligence",
         "mast_h1":      "A sharper market dashboard for modern investors.",
         "mast_sub":     "Track 85 superinvestor funds, 201 members of Congress, and thousands of insider trades — powered by SEC EDGAR, STOCK Act filings, and Federal Reserve data.",
 
-        # KPI strip — 5 cells per the JSX (S&P, Nasdaq, Dow, VIX, 10Y)
-        "kpi_strip_items": [
-            {"label": "S&P 500",  "value": "5,847.42",  "delta": "0.72%", "up": True},
-            {"label": "Nasdaq",   "value": "20,194.18", "delta": "0.45%", "up": True},
-            {"label": "Dow",      "value": "42,233.71", "delta": "0.04%", "up": False},
-            {"label": "VIX",      "value": "14.82",     "delta": "2.05%", "up": False},
-            {"label": "10Y",      "value": "4.214%",    "delta": "0.48%", "up": True},
-        ],
+        # KPI strip — REAL data via market_data.get_index_market_data()
+        # ^GSPC + ^IXIC + ^DJI + ^VIX + ^TNX (10Y Treasury yield).
+        # Falls back to design values if Supabase / yfinance unavailable.
+        "kpi_strip_items": kpi_items,
 
         # Hero chart
         "chart_path":       chart["line"],
