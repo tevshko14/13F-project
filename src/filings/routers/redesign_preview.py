@@ -228,11 +228,11 @@ async def preview_home(request: Request):
         "request": request,
         **_shell_context("Home"),
 
-        # masthead copy
-        "mast_kicker":     "TODAY'S TAPE",
-        "mast_h1_lead":    "Risk-on rotation.",
-        "mast_h1_accent":  "Semis lead.",
-        "mast_sub":        "Breadth confirms. Vol bleeds. Pelosi files NVDA calls — fourth time this year.",
+        # Branded hero copy (replaces the JSX editorial masthead).
+        # Carries the existing brand: kicker → H1 tagline → descriptive subtitle.
+        "mast_kicker":  "PAPERPANDA INTELLIGENCE",
+        "mast_h1":      "A sharper market dashboard for modern investors.",
+        "mast_sub":     "Track 85 superinvestor funds, 201 members of Congress, and thousands of insider trades — powered by SEC EDGAR, STOCK Act filings, and Federal Reserve data.",
 
         # KPI strip — 5 cells per the JSX (S&P, Nasdaq, Dow, VIX, 10Y)
         "kpi_strip_items": [

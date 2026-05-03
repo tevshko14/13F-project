@@ -4,35 +4,126 @@
  * ==========================================================================*/
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * Editorial masthead — Home only.  Heavy 2px ink rule below it.
- * Headline is 46px Geist 700, tracking -1.4, with one phrase in coral.
+ * Branded hero — Home only.  Heavy 2px ink rule below it.
+ *
+ * Replaced the original editorial masthead with the brand-rooted hero:
+ * coral kicker → H1 tagline → descriptive subtitle → global search.
+ * The terminal aesthetic is preserved (no rounded corners, mono kicker,
+ * sharp 1px borders).  Headline scales down on narrower viewports.
  * ───────────────────────────────────────────────────────────────────────────*/
 
 .pp-home-mast {
-  padding: 24px 24px 16px;
+  padding: 28px 24px 22px;
   border-bottom: 2px solid var(--pp-ink);
 }
 
 .pp-home-mast-h1 {
   font-family: var(--pp-font-body);
-  font-size: 46px;
-  line-height: 0.98;
+  font-size: clamp(28px, 4vw, 44px);
+  line-height: 1.02;
   font-weight: 700;
   margin: 6px 0 0;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.025em;
   color: var(--pp-ink);
   text-wrap: pretty;
   max-width: 920px;
 }
-.pp-home-mast-h1 .pp-accent { color: var(--pp-accent); }
 
 .pp-home-mast-sub {
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--pp-dim);
-  margin-top: 8px;
-  line-height: 1.5;
-  font-style: italic;
+  margin: 10px 0 0;
+  line-height: 1.55;
+  max-width: 760px;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Global hero search — sharp 1px terminal styling.
+ * Reuses the existing tickerSearchFilter() (Fuse.js) from base.html.
+ *
+ * Layout: icon · input · explore button.  Border deepens on hover/focus.
+ * Result dropdown appears beneath, anchored to the search bar's left edge.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-hero-search {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  margin-top: 18px;
+  background: var(--pp-panel);
+  border: var(--pp-border-w) solid var(--pp-line2);
+  max-width: 720px;
+  transition: border-color 0.12s ease;
+}
+.pp-hero-search:hover,
+.pp-hero-search:focus-within {
+  border-color: var(--pp-ink);
+}
+
+.pp-hero-search-icon {
+  width: 16px;
+  height: 16px;
+  margin: 0 12px 0 14px;
+  color: var(--pp-dim);
+  align-self: center;
+  flex-shrink: 0;
+}
+.pp-hero-search:focus-within .pp-hero-search-icon { color: var(--pp-accent); }
+
+.pp-hero-search-input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--pp-text);
+  font-family: var(--pp-font-body);
+  font-size: 14px;
+  padding: 14px 8px;
+  outline: 0;
+  min-width: 0;  /* let it shrink inside the flex container */
+}
+.pp-hero-search-input::placeholder {
+  color: var(--pp-dim2);
+  font-family: var(--pp-font-mono);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+}
+.pp-hero-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none; appearance: none;
+}
+
+.pp-hero-search-btn {
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  border: 0;
+  border-left: var(--pp-border-w) solid var(--pp-line2);
+  padding: 0 18px;
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  flex-shrink: 0;
+}
+.pp-hero-search-btn:hover {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+}
+
+.pp-hero-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-width: 720px;
+  background: var(--pp-panel);
+  border: var(--pp-border-w) solid var(--pp-line2);
+  max-height: 420px;
+  overflow-y: auto;
+  z-index: 50;
+  display: none;
+}
+.pp-hero-search-results:not(:empty) { display: block; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * Page nav row — Segment (left) + RangeChip (right).  Sits between

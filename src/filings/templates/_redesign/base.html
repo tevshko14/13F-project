@@ -42,10 +42,16 @@
   <link rel="stylesheet" href="/static/css/redesign/app-shell.css">
   {% block extra_css %}{% endblock %}
 
-  {#- HTMX (carry over from the existing prod stack — same pattern). -#}
+  {#- HTMX + Fuse.js — same versions / integrity as production base.html. -#}
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.10/dist/htmx.min.js"
           integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5xLSi8nO7UC"
           crossorigin="anonymous" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"
+          integrity="sha384-PCSoOZTpbkikBEtd/+uV3WNdc676i9KUf01KOA8CnJotvlx8rRrETbDuwdjqTYvt"
+          crossorigin="anonymous" defer></script>
+  {#- Global fuzzy search — populates window.ppGlobalSearch / ppSearchKeydown
+      / tickerSearchGo / escHtml.  Defer ensures it runs after Fuse loads. -#}
+  <script src="/static/js/redesign/global-search.js" defer></script>
   {% block extra_head_scripts %}{% endblock %}
 </head>
 <body>

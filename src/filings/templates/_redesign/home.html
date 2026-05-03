@@ -26,15 +26,43 @@
 
 {% block content %}
 
-{# ━━━━━━━━━━ EDITORIAL MASTHEAD (Home only) ━━━━━━━━━━ #}
+{# ━━━━━━━━━━ BRANDED HERO (Home only) ━━━━━━━━━━
+   Replaces the original editorial masthead with the existing brand:
+   the "PaperPanda Intelligence" kicker, the H1 tagline, the descriptive
+   subtitle, and the global fuzzy search.  The search reuses the
+   existing /api/ticker-search-index endpoint and tickerSearchFilter()
+   function from base.html (carried over by including the search index
+   loader at the bottom of the page).
+#}
 <div class="pp-home-mast">
-  {{ kicker(mast_kicker|default("TODAY'S TAPE")) }}
+  {{ kicker(mast_kicker|default("PAPERPANDA INTELLIGENCE")) }}
   <h1 class="pp-home-mast-h1">
-    {{ mast_h1_lead|default("Risk-on rotation.") }}
-    <span class="pp-accent">{{ mast_h1_accent|default("Semis lead.") }}</span>
+    {{ mast_h1|default("A sharper market dashboard for modern investors.") }}
   </h1>
-  <div class="pp-home-mast-sub">
-    {{ mast_sub|default("Breadth confirms. Vol bleeds. Pelosi files NVDA calls — fourth time this year.") }}
+  <p class="pp-home-mast-sub">
+    {{ mast_sub|default("Track 85 superinvestor funds, 201 members of Congress, and thousands of insider trades — powered by SEC EDGAR, STOCK Act filings, and Federal Reserve data.") }}
+  </p>
+
+  <div id="pp-home-hero-search" class="pp-hero-search">
+    <svg class="pp-hero-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8"></circle>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </svg>
+    <input type="search"
+           id="pp-hero-search-input"
+           class="pp-hero-search-input"
+           placeholder="Search stock, fund, insider, or congress member"
+           autocomplete="off"
+           aria-label="Site search"
+           aria-controls="pp-hero-search-results"
+           aria-autocomplete="list"
+           oninput="window.ppGlobalSearch && window.ppGlobalSearch(this.value, 'pp-hero-search-results')"
+           onfocus="window.ppGlobalSearch && window.ppGlobalSearch(this.value, 'pp-hero-search-results')"
+           onkeydown="window.ppSearchKeydown && window.ppSearchKeydown(event, 'pp-hero-search-results')">
+    <button type="button" class="pp-hero-search-btn"
+            onclick="var inp=document.getElementById('pp-hero-search-input'); if(inp.value.trim() && window.ppGlobalSearch) window.ppGlobalSearch(inp.value, 'pp-hero-search-results');"
+            aria-label="Search">EXPLORE →</button>
+    <div id="pp-hero-search-results" class="pp-hero-search-results" role="listbox"></div>
   </div>
 </div>
 

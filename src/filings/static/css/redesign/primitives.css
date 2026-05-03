@@ -458,3 +458,75 @@
   right: 50%;
   background: var(--pp-down);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Global search dropdown — used by hero search + sidebar ⌘K palette.
+ * Class names (.ts-*) match what global-search.js emits so any container
+ * styled as .pp-hero-search-results (or similar) gets terminal styling.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.ts-category {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--pp-ls-mono-loose);
+  text-transform: uppercase;
+  color: var(--pp-dim);
+  padding: 10px 14px 6px;
+  background: var(--pp-sub);
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+.ts-category:not(:first-child) { border-top: var(--pp-border-w) solid var(--pp-line); }
+
+.ts-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  cursor: pointer;
+  border-bottom: var(--pp-border-w) solid var(--pp-line);
+  transition: background 0.06s ease;
+}
+.ts-item:last-child { border-bottom: 0; }
+.ts-item:hover,
+.ts-item.ts-active {
+  background: var(--pp-sub);
+}
+
+.ts-item-ticker {
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--pp-ink);
+  min-width: 70px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ts-item-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--pp-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ts-item-meta {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.ts-star { color: var(--pp-accent); flex-shrink: 0; }
+.ts-icon { flex-shrink: 0; font-size: 13px; line-height: 1; color: var(--pp-dim); }
+.ts-icon.pp-party-d { color: var(--pp-party-d); }
+.ts-icon.pp-party-r { color: var(--pp-party-r); }
+
+.ts-empty {
+  padding: 14px;
+  font-size: 12px;
+  color: var(--pp-dim);
+  font-style: italic;
+}
