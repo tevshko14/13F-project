@@ -26,7 +26,7 @@
      query-string busts both the browser cache and any CDN.  Drop this
      once we ship and switch to hashed filenames. #}
   <link rel="stylesheet"
-        href="/static/css/redesign/pages/home.css?v={{ range(1, 10**9) | random }}">
+        href="/static/css/redesign/pages/home.css?v={{ asset_version|default(1) }}">
 {% endblock %}
 
 {% block content %}
@@ -78,38 +78,33 @@
   </div>
 </header>
 
-{# ━━━━━━━━━━ TICKER TAPE ━━━━━━━━━━
-   Always-on bar above the subtab nav.  Mock data for now — wire to a
-   websocket / SSE feed once we ship.  Items duplicated in CSS via
-   pseudo-elements would also work, but rendering twice in HTML keeps
-   it simple and SSR-friendly. #}
-<div class="pp-home-ticker" aria-label="Market snapshot">
-  <div class="pp-home-ticker-track">
-    {% for label, value, pct in (ticker_tape + ticker_tape) %}
-      <span class="pp-home-ticker-cell">
-        <span class="pp-mono pp-home-ticker-label">{{ label }}</span>
-        <span class="pp-mono pp-home-ticker-value">{{ value }}</span>
-        <span class="pp-mono pp-home-ticker-chg {{ 'pp-up' if pct >= 0 else 'pp-down' }}">
-          {{- '▲' if pct >= 0 else '▼' }}&nbsp;{{ "%.2f"|format((pct * 100)|abs) }}%
-        </span>
-      </span>
-    {% endfor %}
-  </div>
-</div>
-
-{# ━━━━━━━━━━ PAGE NAV ROW (Segment + RangeChip) ━━━━━━━━━━
-   The Segment is wired to JS-only tab switching (see #pp-home-tab-js).
-   No HTMX fetch — all 6 panes are server-rendered up front, JS toggles
-   `is-active` on `<section data-tab-pane>` to swap. #}
+{# ━━━━━━━━━━ PAGE NAV ROW (Subtab segment + Ticker tape) ━━━━━━━━━━
+   Two equal-width slots beside each other under the global search:
+   the subtab segment (Overview / Flow / Heatmap / Activity / News /
+   Calendar) on the left, the live market ticker on the right.  Gap
+   between them matches the standard component gap used on the body
+   grids below. #}
 <div class="pp-home-navrow">
   {{ segment(["Overview","Flow","Heatmap","Activity","News","Calendar"],
              value=home_view|default("Overview"),
              id="pp-home-view") }}
-  <div class="pp-home-navrow-spacer"></div>
-  {{ range_chip(value=home_range|default("1M"), id="pp-home-range") }}
+  <div class="pp-home-ticker" aria-label="Market snapshot">
+    <div class="pp-home-ticker-track">
+      {% for label, value, pct in (ticker_tape + ticker_tape) %}
+        <span class="pp-home-ticker-cell">
+          <span class="pp-mono pp-home-ticker-label">{{ label }}</span>
+          <span class="pp-mono pp-home-ticker-value">{{ value }}</span>
+          <span class="pp-mono pp-home-ticker-chg {{ 'pp-up' if pct >= 0 else 'pp-down' }}">
+            {{- '▲' if pct >= 0 else '▼' }}&nbsp;{{ "%.2f"|format((pct * 100)|abs) }}%
+          </span>
+        </span>
+      {% endfor %}
+    </div>
+  </div>
 </div>
 
 <div class="pp-home-body">
+
   <div class="pp-home-stack">
 
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
@@ -136,25 +131,39 @@
         {# Custom chart panel head — replaces panel_head() because the design
            pulls the title slot OUT and uses an index segment as the leading
            element.  The right side carries the live last + change.
-           Toggle is visual-only for now (only S&P has real intraday wired);
-           clicking Nasdaq / Dow is a no-op until we extend _fetch_hero_chart()
-           to fetch all three in parallel. #}
+           Index toggle is visual-only for now (only S&P has real intraday
+           wired); clicking Nasdaq / Dow is a no-op until we extend
+           _fetch_hero_chart() to fetch all three in parallel.
+
+           Timeframe chip drives the chart's lookback window — wired
+           to per-period data delivered via the #pp-home-chart-data
+           JSON blob below.  JS swaps the SVG path / area / reference
+           line / price chip / sub-label / change indicator on click. #}
+        {% set _default_idx = chart_default_index|default("S&P 500") %}
         <div class="pp-panel-head pp-home-chart-head">
           <div class="pp-segment pp-segment-mono pp-home-chart-idx" id="pp-home-chart-idx" role="tablist">
-            <span class="pp-segment-opt is-active" data-chart-idx="S&P 500" role="tab">S&amp;P 500</span>
-            <span class="pp-segment-opt"             data-chart-idx="Nasdaq"  role="tab">Nasdaq</span>
-            <span class="pp-segment-opt"             data-chart-idx="Dow"     role="tab">Dow</span>
+            <span class="pp-segment-opt{% if _default_idx == 'S&P 500' %} is-active{% endif %}" data-chart-idx="S&P 500" role="tab">S&amp;P 500</span>
+            <span class="pp-segment-opt{% if _default_idx == 'NASDAQ'  %} is-active{% endif %}" data-chart-idx="NASDAQ"  role="tab">NASDAQ</span>
+            <span class="pp-segment-opt{% if _default_idx == 'DOW'     %} is-active{% endif %}" data-chart-idx="DOW"     role="tab">DOW</span>
           </div>
-          <div class="pp-label pp-label-loose pp-home-chart-sublabel">{{ chart_label|default("INTRADAY · 15M") }}</div>
+          {{ range_chip(value=chart_default_period|default("1D"), id="pp-home-chart-range") }}
+          <div class="pp-label pp-label-loose pp-home-chart-sublabel" id="pp-home-chart-sublabel">{{ chart_label|default("INTRADAY · 15M") }}</div>
           <div class="pp-panel-head-spacer"></div>
-          <span class="pp-mono pp-home-chart-last">{{ chart_tag|default('5,847.42') }}</span>
-          <span class="pp-mono pp-home-chart-headlight {{ 'pp-up' if chart_change_up|default(True) else 'pp-down' }}">
+          <span class="pp-mono pp-home-chart-last" id="pp-home-chart-last">{{ chart_tag|default('5,847.42') }}</span>
+          <span class="pp-mono pp-home-chart-headlight {{ 'pp-up' if chart_change_up|default(True) else 'pp-down' }}"
+                id="pp-home-chart-headlight">
             {%- if chart_change_up|default(True) -%}+{%- else -%}-{%- endif -%}
             {{ chart_change|default('41.86') }}
             ({%- if chart_change_up|default(True) -%}+{%- else -%}-{%- endif -%}
             {{ chart_change_pct|default('0.72%') }})
           </span>
         </div>
+        {# Chart registry — nested {idx: {period: payload}} so the toggle JS
+           can swap on either axis.  Defaults filled by SSR; this is just
+           the data backing the client-side switch.  Sibling OHLCV blob
+           drives the foot strip swap on idx change. #}
+        <script id="pp-home-chart-data"  type="application/json">{{ chart_indices_json|default('{}')|safe }}</script>
+        <script id="pp-home-chart-ohlcv" type="application/json">{{ chart_ohlcv_json|default('{}')|safe }}</script>
         <div class="pp-home-chart-wrap"
              data-history='{{ chart_history_json|default("[]")|safe }}'
              data-prev-close="{{ chart_prev_close|default('') }}"
@@ -169,14 +178,13 @@
                     y1="{{ i * 55 + 10 }}" y2="{{ i * 55 + 10 }}"/>
             {% endfor %}
             {# Area fill (closed path) + line stroke.  vector-effect on the
-               stroke keeps it 1.6px regardless of aspect-ratio stretch. #}
-            {% if chart_area %}
-              <path d="{{ chart_area }}" class="pp-home-chart-area"/>
-            {% endif %}
-            <path d="{{ chart_path }}" class="pp-home-chart-line"
+               stroke keeps it 1.6px regardless of aspect-ratio stretch.
+               IDs let the timeframe toggle JS swap the `d` attr on click. #}
+            <path d="{{ chart_area|default('') }}" class="pp-home-chart-area" id="pp-home-chart-area"/>
+            <path d="{{ chart_path }}" class="pp-home-chart-line" id="pp-home-chart-line"
                   vector-effect="non-scaling-stroke"/>
-            {# Prev-close horizontal reference line. #}
-            <line class="pp-home-chart-ref"
+            {# Reference line — prev close for 1D, period-start close otherwise. #}
+            <line class="pp-home-chart-ref" id="pp-home-chart-ref"
                   x1="0" x2="600" y1="{{ _ref_y }}" y2="{{ _ref_y }}"
                   vector-effect="non-scaling-stroke"/>
             {# Hover crosshair (vertical line) — initially hidden, JS toggles. #}
@@ -192,7 +200,7 @@
              wrap-relative px = 16 + tag_y (1:1 with viewBox y). Using px
              instead of % avoids the wrap-padding skew (% is of wrap.height,
              not SVG height). #}
-          <div class="pp-home-chart-chip"
+          <div class="pp-home-chart-chip" id="pp-home-chart-chip"
                style="top: {{ (16 + _tag_y)|round(2) }}px;">
             {{ chart_tag|default('5847') }}
           </div>
@@ -204,9 +212,9 @@
             <span class="pp-home-chart-tooltip-chg"></span>
           </div>
         </div>
-        <div class="pp-home-chart-foot">
+        <div class="pp-home-chart-foot" id="pp-home-chart-foot">
           {% for k, v in chart_ohlcv %}
-            <div class="pp-home-chart-foot-cell">
+            <div class="pp-home-chart-foot-cell" data-foot-key="{{ k }}">
               {{ label(k) }}
               <span class="pp-home-chart-foot-val">{{ v }}</span>
             </div>
@@ -224,29 +232,48 @@
              safe-haven demand, momentum, junk-bond demand, market vol).
              Right-of-gauge: kicker · big number+label · y'day / 1w ago. #}
         <div class="pp-home-feargreed">
-          <svg class="pp-home-feargreed-svg" width="100" height="64" viewBox="0 0 100 60" aria-hidden="true">
-            {# 5 colored arcs from -90° (left) to +90° (right).
-               Each arc spans 36° (180° / 5).  Endpoints precomputed from
-               polar(angle, r=44) with cx=50, cy=50. Arc path uses A r r 0 0 1.
-               Hand-coded since Jinja2 doesn't have a math.sin/cos pipeline. #}
-            <path d="M 6 50 A 44 44 0 0 1 14.13 23.95"  stroke="var(--pp-down)"   stroke-width="6" fill="none"/>
-            <path d="M 14.13 23.95 A 44 44 0 0 1 36.06 6.97" stroke="#c8584e"     stroke-width="6" fill="none"/>
-            <path d="M 36.06 6.97 A 44 44 0 0 1 63.94 6.97"  stroke="var(--pp-dim)" stroke-width="6" fill="none"/>
-            <path d="M 63.94 6.97 A 44 44 0 0 1 85.87 23.95" stroke="#4ea674"     stroke-width="6" fill="none"/>
-            <path d="M 85.87 23.95 A 44 44 0 0 1 94 50"      stroke="var(--pp-up)"   stroke-width="6" fill="none"/>
-            {# Needle — line from center to (nx, ny) + 3px hub circle.
-               Endpoint precomputed in _feargreed_payload(). #}
-            <line x1="50" y1="50"
-                  x2="{{ feargreed.needle_x }}"
-                  y2="{{ feargreed.needle_y }}"
-                  stroke="var(--pp-ink)" stroke-width="2" stroke-linecap="round"/>
-            <circle cx="50" cy="50" r="3" fill="var(--pp-ink)"/>
-          </svg>
-          <div class="pp-home-feargreed-text">
-            {{ kicker("Fear & Greed") }}
-            <div class="pp-mono pp-home-feargreed-value">{{ feargreed.value }} · {{ feargreed.label }}</div>
-            <div class="pp-mono pp-home-feargreed-meta">Yesterday {{ feargreed.yesterday }} · 1w ago {{ feargreed.week_ago }}</div>
+          {# ── LEFT half: gauge + kicker + big value (original design) ── #}
+          <div class="pp-home-feargreed-main">
+            <svg class="pp-home-feargreed-svg" width="100" height="64" viewBox="0 0 100 60" aria-hidden="true">
+              {# 5 colored arcs from -90° (left) to +90° (right).
+                 Each arc spans 36° (180° / 5).  Endpoints precomputed from
+                 polar(angle, r=44) with cx=50, cy=50. Arc path uses A r r 0 0 1.
+                 Hand-coded since Jinja2 doesn't have a math.sin/cos pipeline. #}
+              <path d="M 6 50 A 44 44 0 0 1 14.13 23.95"  stroke="var(--pp-down)"   stroke-width="6" fill="none"/>
+              <path d="M 14.13 23.95 A 44 44 0 0 1 36.06 6.97" stroke="#c8584e"     stroke-width="6" fill="none"/>
+              <path d="M 36.06 6.97 A 44 44 0 0 1 63.94 6.97"  stroke="var(--pp-dim)" stroke-width="6" fill="none"/>
+              <path d="M 63.94 6.97 A 44 44 0 0 1 85.87 23.95" stroke="#4ea674"     stroke-width="6" fill="none"/>
+              <path d="M 85.87 23.95 A 44 44 0 0 1 94 50"      stroke="var(--pp-up)"   stroke-width="6" fill="none"/>
+              {# Needle — line from center to (nx, ny) + 3px hub circle.
+                 Endpoint precomputed in _feargreed_payload(). #}
+              <line x1="50" y1="50"
+                    x2="{{ feargreed.needle_x }}"
+                    y2="{{ feargreed.needle_y }}"
+                    stroke="var(--pp-ink)" stroke-width="2" stroke-linecap="round"/>
+              <circle cx="50" cy="50" r="3" fill="var(--pp-ink)"/>
+            </svg>
+            <div class="pp-home-feargreed-text">
+              {{ kicker("Fear & Greed") }}
+              <div class="pp-mono pp-home-feargreed-value">{{ feargreed.value }} · {{ feargreed.label }}</div>
+            </div>
+            <div class="pp-home-feargreed-asof">Data as of {{ feargreed.as_of }}</div>
           </div>
+          {# ── RIGHT half: 3 timeframe rows.  Score is colored via the
+               server-supplied band class (green / red / neutral). #}
+          <dl class="pp-mono pp-home-feargreed-history">
+            <div class="pp-home-feargreed-history-row">
+              <dt>Last week</dt>
+              <dd class="{{ feargreed.week_band }}">{{ feargreed.week_ago }}</dd>
+            </div>
+            <div class="pp-home-feargreed-history-row">
+              <dt>Last month</dt>
+              <dd class="{{ feargreed.month_band }}">{{ feargreed.month_ago }}</dd>
+            </div>
+            <div class="pp-home-feargreed-history-row">
+              <dt>Last year</dt>
+              <dd class="{{ feargreed.year_band }}">{{ feargreed.year_ago }}</dd>
+            </div>
+          </dl>
         </div>
 
         <div class="pp-home-retail-feat">
@@ -281,9 +308,9 @@
       {# ── Top movers table ── #}
       {% call panel() %}
         {% call panel_head("Top movers", sub="by volume") %}
-          <a class="pp-link-coral" href="#">View all →</a>
+          <a class="pp-link-coral" href="/_v2/screener">View all →</a>
         {% endcall %}
-        <table class="pp-table pp-home-movers-table">
+        <table class="pp-table pp-home-movers-table pp-row-link-table">
           <thead>
             <tr>
               <th>Ticker</th>
@@ -295,7 +322,8 @@
           </thead>
           <tbody>
             {% for r in top_movers %}
-              <tr>
+              <tr data-row-href="/_v2/stock/{{ r.ticker }}" tabindex="0" role="link"
+                  aria-label="Open {{ r.ticker }} stock page">
                 <td>
                   <span style="font-weight:700; color: var(--pp-ink);">{{ r.ticker }}</span>
                   <span class="pp-home-movers-name">{{ r.name }}</span>
@@ -322,16 +350,20 @@
       {# ── 13F flow list ── #}
       {% call panel() %}
         {% call panel_head("13F flow", sub="this week") %}
-          <a class="pp-link-coral" href="/funds">All funds →</a>
+          <a class="pp-link-coral" href="/_v2/funds">All funds →</a>
         {% endcall %}
         {% for f in fund_flows %}
-          <div class="pp-home-list-row">
+          <div class="pp-home-list-row"
+               {% if f.cik %}data-row-href="/_v2/funds?cik={{ f.cik }}"
+                            tabindex="0" role="link"
+                            aria-label="Open {{ f.manager }} portfolio"{% endif %}>
             <div>
               <div class="pp-home-list-name">{{ f.manager }}</div>
               <div class="pp-home-list-meta">
                 {{ f.fund }} · <span class="pp-mono">{{ f.aum }}</span>
               </div>
             </div>
+            <span class="pp-mono pp-home-list-delta">{{ f.delta|default("") }}</span>
             {{ tag(f.action) }}
             <span class="pp-home-list-tkr">{{ f.ticker }}</span>
           </div>
@@ -346,13 +378,14 @@
       {% call panel() %}
         {{ panel_head("Insider flow", sub="48h") }}
         {% for r in insiders %}
-          <div class="pp-home-insider-row">
-            <div>
-              <div class="pp-home-insider-name">{{ r.person }}</div>
-              <div class="pp-home-insider-meta">{{ r.role }} · ${{ r.ticker }}</div>
+          <div class="pp-home-list-row">
+            <div class="pp-home-list-name-block">
+              <span class="pp-home-list-name">{{ r.person }}</span>
+              {% if r.role %}{{ tag("role", text=r.role) }}{% endif %}
             </div>
+            <span class="pp-mono pp-home-list-delta">{{ r.value }}</span>
             {{ tag(r.action) }}
-            <span class="pp-mono" style="font-size:11px; color: var(--pp-dim); min-width:60px; text-align:right;">{{ r.value }}</span>
+            <span class="pp-home-list-tkr">{{ r.ticker }}</span>
           </div>
         {% endfor %}
       {% endcall %}
@@ -361,14 +394,14 @@
       {% call panel() %}
         {{ panel_head("Congress", sub="STOCK Act") }}
         {% for r in congress %}
-          <div class="pp-home-congress-row">
-            <span class="pp-home-congress-dot pp-home-congress-dot-{{ r.party|lower }}" aria-label="{{ 'Democrat' if r.party == 'D' else 'Republican' }}"></span>
-            <div>
-              <div class="pp-home-insider-name">{{ r.person }}</div>
-              <div class="pp-home-insider-meta">{{ r.chamber }} · ${{ r.ticker }}</div>
+          <div class="pp-home-list-row">
+            <div class="pp-home-list-name-block">
+              <span class="pp-home-list-name">{{ r.person }}</span>
+              {{ tag("party-" + r.party|lower, text=r.party ~ " - " ~ r.chamber) }}
             </div>
+            <span class="pp-mono pp-home-list-delta">{{ r.size }}</span>
             {{ tag(r.action) }}
-            <span class="pp-mono" style="font-size:11px; color: var(--pp-dim); min-width:60px; text-align:right;">{{ r.size }}</span>
+            <span class="pp-home-list-tkr">{{ r.ticker }}</span>
           </div>
         {% endfor %}
       {% endcall %}
@@ -402,32 +435,83 @@
          Two stacked horizontal bars per row: ink (funds) + coral (congress).
          SELL/REDUCED renders at 0.4 opacity to keep direction readable. #}
     {% call panel(cls="pp-home-flow-trending") %}
-      {{ panel_head("Trending — superinvestors + Congress", sub="aggregated buys & sells · 30d") }}
-      <div class="pp-home-flow-trending-body">
+      {{ panel_head("Trending with Smart Money", sub="top tickers by buyer count · 30d") }}
+      <div class="pp-home-flow-trending-body" id="pp-flow-trending">
+        {# Toggleable legend — clicking a cell hides that source's bar +
+           re-sorts the rows by the visible source's buyer count. #}
         <div class="pp-home-flow-legend">
-          <span class="pp-home-flow-legend-cell">
+          <button type="button" class="pp-home-flow-legend-cell is-on"
+                  data-source="funds" aria-pressed="true">
             <span class="pp-home-flow-legend-swatch pp-home-flow-legend-swatch-ink"></span>
-            <span class="pp-mono pp-dim">Superinvestors (13F)</span>
-          </span>
-          <span class="pp-home-flow-legend-cell">
+            <span class="pp-mono">Superinvestors</span>
+          </button>
+          <button type="button" class="pp-home-flow-legend-cell is-on"
+                  data-source="cong" aria-pressed="true">
             <span class="pp-home-flow-legend-swatch pp-home-flow-legend-swatch-accent"></span>
-            <span class="pp-mono pp-dim">Congress (STOCK Act)</span>
-          </span>
+            <span class="pp-mono">Congress</span>
+          </button>
         </div>
         {% for r in flow_trending %}
-          <div class="pp-home-flow-row">
+          <div class="pp-home-flow-row"
+               data-row-href="/_v2/stock/{{ r.tk }}"
+               tabindex="0" role="link"
+               aria-label="Open {{ r.tk }} stock page"
+               data-tk="{{ r.tk }}"
+               data-funds-buyers="{{ r.fund_buyers|default(0) }}"
+               data-cong-buyers="{{ r.cong_buyers|default(0) }}"
+               data-total-buyers="{{ r.total_buyers|default(r.funds + r.cong) }}">
             <span class="pp-mono pp-home-flow-tk">${{ r.tk }}</span>
             <div class="pp-home-flow-bars">
               <div class="pp-home-flow-bar pp-home-flow-bar-ink{% if r.fundsDir == 'SELL' %} is-sell{% endif %}"
+                   data-source="funds"
                    style="width: {{ ((r.funds / flow_trending_max) * 60)|round(1) }}%;"></div>
               <div class="pp-home-flow-bar pp-home-flow-bar-accent{% if r.congDir == 'SELL' %} is-sell{% endif %}"
+                   data-source="cong"
                    style="width: {{ ((r.cong / flow_trending_max) * 60)|round(1) }}%;"></div>
             </div>
-            <span class="pp-mono pp-home-flow-count">{{ r.funds }} fnd</span>
-            <span class="pp-mono pp-home-flow-count">{{ r.cong }} cng</span>
+            <span class="pp-mono pp-home-flow-count" data-count="funds">{{ r.funds }} fnd</span>
+            <span class="pp-mono pp-home-flow-count" data-count="cong">{{ r.cong }} cng</span>
             <span class="pp-mono pp-home-flow-net {{ 'pp-up' if r.net >= 0 else 'pp-down' }}">
               {%- if r.net >= 0 -%}+{%- endif -%}{{ r.net }} net
             </span>
+            {# Hover tooltip — populated server-side, positioned absolutely
+               via the wrapping row.  Hidden by default; CSS reveals on hover. #}
+            <div class="pp-home-flow-tooltip" role="tooltip">
+              <div class="pp-home-flow-tooltip-tk">${{ r.tk }}</div>
+              <div class="pp-home-flow-tooltip-section">
+                <div class="pp-home-flow-tooltip-head pp-home-flow-tooltip-head-funds">
+                  <span class="pp-home-flow-tooltip-dot"></span>
+                  Superinvestors: <b>{{ r.fund_buyers|default(0) }}</b>
+                </div>
+                {% if r.fund_names %}
+                  <ul class="pp-home-flow-tooltip-names">
+                    {% for n in r.fund_names %}<li>· {{ n }}</li>{% endfor %}
+                    {% if r.fund_more and r.fund_more > 0 %}<li class="pp-dim">+ {{ r.fund_more }} more</li>{% endif %}
+                  </ul>
+                {% endif %}
+              </div>
+              <div class="pp-home-flow-tooltip-section">
+                <div class="pp-home-flow-tooltip-head pp-home-flow-tooltip-head-cong">
+                  <span class="pp-home-flow-tooltip-dot"></span>
+                  Congress: <b>{{ r.cong_buyers|default(0) }}</b>
+                </div>
+                {% if r.cong_buyers and r.cong_buyers > 0 %}
+                  <div class="pp-home-flow-tooltip-party">
+                    <span class="pp-tag pp-tag-party-d pp-mono">D: {{ r.cong_d|default(0) }}</span>
+                    <span class="pp-tag pp-tag-party-r pp-mono">R: {{ r.cong_r|default(0) }}</span>
+                  </div>
+                {% endif %}
+                {% if r.cong_names %}
+                  <ul class="pp-home-flow-tooltip-names">
+                    {% for n in r.cong_names %}<li>· {{ n }}</li>{% endfor %}
+                    {% if r.cong_more and r.cong_more > 0 %}<li class="pp-dim">+ {{ r.cong_more }} more</li>{% endif %}
+                  </ul>
+                {% endif %}
+              </div>
+              <div class="pp-home-flow-tooltip-total">
+                Total: <b>{{ r.total_buyers|default(r.funds + r.cong) }}</b> buyers
+              </div>
+            </div>
           </div>
         {% endfor %}
       </div>
@@ -438,13 +522,17 @@
       {% call panel() %}
         {{ panel_head("Top fund buys", sub="this week") }}
         {% for f in flow_fund_buys %}
-          <div class="pp-home-list-row">
+          <div class="pp-home-list-row"
+               {% if f.cik %}data-row-href="/_v2/funds?cik={{ f.cik }}"
+                            tabindex="0" role="link"
+                            aria-label="Open {{ f.manager }} portfolio"{% endif %}>
             <div>
               <div class="pp-home-list-name">{{ f.manager }}</div>
               <div class="pp-home-list-meta">
                 {{ f.fund }} · <span class="pp-mono">{{ f.aum }}</span>
               </div>
             </div>
+            <span class="pp-mono pp-home-list-delta">{{ f.delta|default("") }}</span>
             {{ tag(f.action) }}
             <span class="pp-home-list-tkr">{{ f.ticker }}</span>
           </div>
@@ -454,14 +542,14 @@
       {% call panel() %}
         {{ panel_head("Congress trades", sub="48h") }}
         {% for r in flow_congress %}
-          <div class="pp-home-congress-row">
-            <span class="pp-home-congress-dot pp-home-congress-dot-{{ r.party|lower }}" aria-label="{{ 'Democrat' if r.party == 'D' else 'Republican' }}"></span>
-            <div>
-              <div class="pp-home-insider-name">{{ r.person }}</div>
-              <div class="pp-home-insider-meta">{{ r.chamber }} · ${{ r.ticker }}</div>
+          <div class="pp-home-list-row">
+            <div class="pp-home-list-name-block">
+              <span class="pp-home-list-name">{{ r.person }}</span>
+              {{ tag("party-" + r.party|lower, text=r.party ~ " - " ~ r.chamber) }}
             </div>
+            <span class="pp-mono pp-home-list-delta">{{ r.size }}</span>
             {{ tag(r.action) }}
-            <span class="pp-mono" style="font-size:11px; color: var(--pp-dim); min-width:60px; text-align:right;">{{ r.size }}</span>
+            <span class="pp-home-list-tkr">{{ r.ticker }}</span>
           </div>
         {% endfor %}
       {% endcall %}
@@ -485,13 +573,13 @@
         <div class="pp-home-heatmap-grid pp-home-heatmap-grid-companies is-active"
              data-heatmap-pane="Companies">
           {% for c in heatmap_companies %}
-            <div class="pp-home-heatmap-tile{% if c.is_large %} is-large{% endif %}"
+            <div class="pp-home-heatmap-tile{% if c.is_large %} is-large{% endif %}{% if c.tile_dark %} is-dark{% endif %}"
                  style="background: {{ c.tile_bg }};
                         grid-column: span {{ c.span_col }};
                         grid-row: span {{ c.span_row }};">
               <span class="pp-mono pp-home-heatmap-tk">{{ c.ticker }}</span>
               <div>
-                <span class="pp-mono pp-home-heatmap-pct {{ 'pp-up' if c.pct >= 0 else 'pp-down' }}">
+                <span class="pp-mono pp-home-heatmap-pct">
                   {%- if c.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(c.pct * 100) }}%
                 </span>
                 {% if c.show_mcap %}
@@ -505,11 +593,11 @@
         <div class="pp-home-heatmap-grid pp-home-heatmap-grid-sectors"
              data-heatmap-pane="Sectors">
           {% for s in heatmap_sectors %}
-            <div class="pp-home-heatmap-tile pp-home-heatmap-sector"
+            <div class="pp-home-heatmap-tile pp-home-heatmap-sector{% if s.tile_dark %} is-dark{% endif %}"
                  style="background: {{ s.tile_bg }};
                         grid-column: span {{ s.span_col }};">
               <div class="pp-home-heatmap-sector-name">{{ s.name }}</div>
-              <span class="pp-mono pp-home-heatmap-sector-pct {{ 'pp-up' if s.pct >= 0 else 'pp-down' }}">
+              <span class="pp-mono pp-home-heatmap-sector-pct">
                 {%- if s.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(s.pct * 100) }}%
               </span>
               <span class="pp-mono pp-home-heatmap-sector-mcap">Mkt cap {{ s.mcap }}</span>
@@ -529,7 +617,10 @@
         <span class="pp-mono pp-home-activity-live">● LIVE</span>
       {% endcall %}
       {% for f in activity_feed %}
-        <div class="pp-home-activity-row pp-home-activity-cat-{{ f.cat|lower }}">
+        <div class="pp-home-activity-row pp-home-activity-cat-{{ f.cat }}"
+             {% if f.href %}data-row-href="{{ f.href }}"
+                          tabindex="0" role="link"
+                          aria-label="{{ f.text }}"{% endif %}>
           <span class="pp-mono pp-home-activity-ago">{{ f.ago }} ago</span>
           <span class="pp-mono pp-home-activity-src">{{ f.src }}</span>
           <span class="pp-home-activity-dot"></span>
@@ -539,9 +630,10 @@
             {%- endif %}
             {{ f.text }}
           </div>
-          <span class="pp-mono pp-home-activity-pill">{{ f.cat }}</span>
+          {{ tag("notif-" + f.cat, text=f.pill) }}
         </div>
       {% endfor %}
+      <a class="pp-home-activity-footer" href="/profile?tab=Alerts">View all activity →</a>
     {% endcall %}
   </section>{# end Activity pane #}
 
@@ -549,37 +641,145 @@
   {# ━━━━━━━━━━━━━━━━━━━━━━━━ NEWS SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
   <section class="pp-home-tab-pane" data-tab-pane="News">
-    <div class="pp-home-news-grid">
-      {# ── Featured story (left, larger, coral left-border accent) ── #}
-      {% call panel() %}
-        {{ panel_head("Featured story", sub="now") }}
-        <div class="pp-home-news-featured">
-          <span class="pp-mono pp-home-news-byline">{{ news_featured.src }} · {{ news_featured.ago }}</span>
-          <h3 class="pp-home-news-feat-title">{{ news_featured.title }}</h3>
-          <p class="pp-home-news-feat-excerpt">{{ news_featured.excerpt }}</p>
-          <div class="pp-home-news-tickers">
-            {% for tk in news_featured.tickers %}
-              <span class="pp-mono pp-home-news-ticker">${{ tk }}</span>
-            {% endfor %}
-          </div>
-        </div>
-      {% endcall %}
-
-      {# ── Top stories list (right) ── #}
-      {% call panel() %}
-        {{ panel_head("Top stories") }}
-        {% for n in news_stories %}
-          <div class="pp-home-news-row">
-            <span class="pp-mono pp-home-news-byline pp-accent-color">{{ n.src }} · {{ n.ago }}</span>
-            <div class="pp-home-news-row-title">{{ n.title }}</div>
-            <div class="pp-home-news-row-tickers">
-              {% for tk in n.tickers %}
-                <span class="pp-mono pp-home-news-ticker-inline">${{ tk }}</span>
-              {% endfor %}
-            </div>
-          </div>
+    {# ── Filter rail ── #}
+    {% set _news_cats = ["All","Markets","Macro","Earnings","Funds","Congress","Insiders","Retail"] %}
+    <div class="pp-news-filter-rail" id="pp-news-filters">
+      {{ kicker("Filter") }}
+      <div class="pp-news-filter-pills">
+        {% for c in _news_cats %}
+          <button type="button" class="pp-news-filter-pill{% if loop.first %} is-on{% endif %}"
+                  data-cat="{{ c }}" aria-pressed="{{ 'true' if loop.first else 'false' }}">{{ c }}</button>
         {% endfor %}
-      {% endcall %}
+      </div>
+      <span class="pp-mono pp-news-filter-count" id="pp-news-filter-count">{{ news_stories[1:]|length }} stories</span>
+    </div>
+
+    {# ── 3-zone editorial grid: 1fr | 340px ── #}
+    <div class="pp-news-grid">
+      {# ────── LEFT COLUMN ────── #}
+      <div class="pp-news-left">
+
+        {# ── Top stories: 1×2 grid of equal-weight cards.  First card
+             pulls the head article (`featured`); the second pulls
+             stories[0].  Both use the same image-on-top + kicker +
+             headline + tickers card pattern.  Container is capped at
+             80% of the left column so the top band reads tighter than
+             the full-width More-headlines feed below.  data-news-idx
+             aligns with the JSON payload so the click handler can
+             hydrate the modal correctly. #}
+        {% set _top2 = [("featured", news_featured)] %}
+        {% if news_stories %}{% set _ = _top2.append((0, news_stories[0])) %}{% endif %}
+        <div class="pp-news-topgrid">
+          {% for idx, n in _top2 %}
+            <article class="pp-news-sub pp-news-card" data-news-idx="{{ idx }}"
+                     tabindex="0" role="button"
+                     aria-label="Read: {{ n.title }}">
+              {% if n.image %}
+                <div class="pp-news-sub-thumb">
+                  <img src="{{ n.image }}" alt="" loading="lazy" decoding="async"
+                       onerror="this.parentNode.classList.add('is-empty')">
+                </div>
+              {% else %}
+                <div class="pp-news-sub-thumb is-empty"></div>
+              {% endif %}
+              <span class="pp-mono pp-news-kicker pp-news-kicker-coral">{{ n.src }} · {{ n.cat|default('Markets') }} · {{ n.ago }}</span>
+              <h3 class="pp-news-sub-headline">{{ n.title }}</h3>
+              {% if n.tickers %}
+                <div class="pp-news-sub-tickers">
+                  {% for tk in n.tickers[:3] %}
+                    <a class="pp-mono pp-news-ticker-inline" href="/_v2/stock/{{ tk }}"
+                       onclick="event.stopPropagation()">${{ tk }}</a>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+
+        {# ── More headlines (filterable text-only feed) ── #}
+        <div class="pp-news-more">
+          <div class="pp-news-more-head">{{ kicker("More headlines") }}</div>
+          {% for n in news_stories[1:] %}
+            {# data-news-idx aligns with the JSON payload: stories[0]
+               occupies the second top-grid card, so more-headlines
+               starts at index 1.  data-cat drives the filter pill
+               toggle. #}
+            <a class="pp-news-more-row pp-news-card"
+               data-news-idx="{{ loop.index0 + 1 }}"
+               data-cat="{{ n.cat|default('Markets') }}"
+               role="button"
+               tabindex="0"
+               aria-label="Read: {{ n.title }}">
+              <span class="pp-mono pp-news-more-time">{{ n.ago }}</span>
+              <span class="pp-mono pp-news-more-src">{{ n.src }}</span>
+              <span class="pp-news-more-title">{{ n.title }}</span>
+              <span class="pp-mono pp-news-more-cat">{{ n.cat|default('Markets') }}</span>
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# ────── RIGHT RAIL ────── #}
+      <aside class="pp-news-rail">
+        {% call panel() %}
+          {{ panel_head("Most read", sub="last 24h") }}
+          {% for r in news_most_read %}
+            <div class="pp-news-mread-row">
+              <span class="pp-mono pp-news-mread-rank">{{ r.rank }}</span>
+              <div class="pp-news-mread-body">
+                <div class="pp-news-mread-title">{{ r.title }}</div>
+                <span class="pp-mono pp-news-kicker pp-news-kicker-coral">{{ r.src }}</span>
+              </div>
+              <span class="pp-mono pp-news-mread-reads">{{ r.reads }}</span>
+            </div>
+          {% endfor %}
+        {% endcall %}
+
+        {% call panel() %}
+          {{ panel_head("Market wire", sub="real-time") }}
+          {% for w in news_market_wire %}
+            {% set _up = w.change.startswith("+") %}
+            <div class="pp-news-wire-row">
+              <span class="pp-mono pp-news-wire-time">{{ w.time }}</span>
+              <span class="pp-mono pp-news-wire-tk">{{ w.ticker }}</span>
+              <span class="pp-mono pp-news-wire-chg {{ 'pp-up' if _up else 'pp-down' }}">{{ w.change }}</span>
+              <span class="pp-news-wire-copy">{{ w.wire }}</span>
+            </div>
+          {% endfor %}
+        {% endcall %}
+      </aside>
+    </div>
+
+    {# Article payload for the JS modal — featured + stories combined.
+       Order matters: featured is index "featured", stories are 0..N. #}
+    <script id="pp-news-data" type="application/json">{{
+      {"featured": news_featured, "stories": news_stories}|tojson|safe
+    }}</script>
+
+    {# ━━━━━━━━━━ NEWS MODAL ━━━━━━━━━━
+       Click any news card to populate + open this modal.  Close on
+       backdrop click, X button, or Escape.  Mirrors the production v1
+       /partials/market_news.html behavior with the redesign's clean,
+       border-based aesthetic (no rounded corners, ink/sub palette). #}
+    <div class="pp-news-modal-backdrop" id="pp-news-modal" hidden>
+      <div class="pp-news-modal" role="dialog" aria-modal="true" aria-labelledby="pp-news-modal-headline">
+        <button type="button" class="pp-news-modal-close" aria-label="Close">×</button>
+        <div class="pp-news-modal-img-wrap" id="pp-news-modal-img-wrap" hidden>
+          <img class="pp-news-modal-img" id="pp-news-modal-img" src="" alt="" loading="lazy" decoding="async">
+        </div>
+        <h3 class="pp-news-modal-headline" id="pp-news-modal-headline"></h3>
+        <div class="pp-news-modal-meta">
+          <span class="pp-mono pp-news-modal-source" id="pp-news-modal-source"></span>
+          <span class="pp-news-modal-dot">·</span>
+          <span class="pp-mono pp-news-modal-time" id="pp-news-modal-time"></span>
+        </div>
+        <p class="pp-news-modal-summary" id="pp-news-modal-summary"></p>
+        <div class="pp-news-modal-tickers" id="pp-news-modal-tickers"></div>
+        <a class="pp-news-modal-extlink" id="pp-news-modal-link"
+           href="#" target="_blank" rel="noopener noreferrer">
+          Read full article ↗
+        </a>
+      </div>
     </div>
   </section>{# end News pane #}
 
@@ -681,21 +881,129 @@
 })();
 </script>
 
-{# ━━━━━━━━━━ INDEX TOGGLE (visual-only for now) ━━━━━━━━━━
-   Click swaps active class on the segment.  Until we extend
-   _fetch_hero_chart() to fetch all three indices in parallel, clicking
-   Nasdaq / Dow does nothing functional — the chart stays on S&P data.
-   Marked in the audit list. #}
+{# ━━━━━━━━━━ CHART TOGGLES (index × timeframe) ━━━━━━━━━━
+   Both segments — S&P / NASDAQ / DOW and 1D / 1W / 1M / 3M / 1Y / 5Y —
+   index into the same nested registry at #pp-home-chart-data.  Single
+   apply(idx, period) function swaps SVG geometry + labels + live values.
+   On idx change we also swap the OPEN/HIGH/LOW/VOL strip from a sibling
+   blob.  Quiet failure if either JSON blob is missing or empty. #}
 <script>
 (function () {
-  var seg = document.getElementById('pp-home-chart-idx');
-  if (!seg) return;
-  seg.addEventListener('click', function (ev) {
+  var idxSeg   = document.getElementById('pp-home-chart-idx');
+  var rangeSeg = document.getElementById('pp-home-chart-range');
+  var dataEl   = document.getElementById('pp-home-chart-data');
+  var ohlcvEl  = document.getElementById('pp-home-chart-ohlcv');
+  if (!idxSeg || !rangeSeg || !dataEl) return;
+
+  var registry, ohlcvByIdx;
+  try { registry   = JSON.parse(dataEl.textContent  || '{}'); } catch (e) { return; }
+  try { ohlcvByIdx = JSON.parse((ohlcvEl && ohlcvEl.textContent) || '{}'); } catch (e) { ohlcvByIdx = {}; }
+  if (!registry || Object.keys(registry).length === 0) return;
+
+  var line     = document.getElementById('pp-home-chart-line');
+  var area     = document.getElementById('pp-home-chart-area');
+  var ref      = document.getElementById('pp-home-chart-ref');
+  var chip     = document.getElementById('pp-home-chart-chip');
+  var sublabel = document.getElementById('pp-home-chart-sublabel');
+  var lastEl   = document.getElementById('pp-home-chart-last');
+  var headEl   = document.getElementById('pp-home-chart-headlight');
+  var foot     = document.getElementById('pp-home-chart-foot');
+  var wrap     = document.querySelector('.pp-home-chart-wrap');
+
+  function activeOpt(seg) {
+    return seg.querySelector('.pp-segment-opt.is-active');
+  }
+  var startIdxOpt    = activeOpt(idxSeg);
+  var startRangeOpt  = activeOpt(rangeSeg);
+  var currentIdx     = (startIdxOpt   && startIdxOpt.getAttribute('data-chart-idx')) || Object.keys(registry)[0];
+  var currentPeriod  = (startRangeOpt && startRangeOpt.getAttribute('data-value'))   || '1D';
+
+  function pickPeriod(idx) {
+    /* Keep the current period if the new index has it, else fall back
+       to whatever's available (1D usually). */
+    var avail = registry[idx] || {};
+    if (avail[currentPeriod]) return currentPeriod;
+    var ordered = ['1D', '1W', '1M', '3M', '1Y', '5Y'];
+    for (var i = 0; i < ordered.length; i++) {
+      if (avail[ordered[i]]) return ordered[i];
+    }
+    return null;
+  }
+
+  function syncSegment(seg, attr, value) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o.getAttribute(attr) === value);
+    });
+  }
+
+  function applyOhlcv(idx) {
+    if (!foot) return;
+    var rows = ohlcvByIdx[idx];
+    if (!Array.isArray(rows)) return;
+    rows.forEach(function (row) {
+      if (!Array.isArray(row) || row.length < 2) return;
+      var cell = foot.querySelector('[data-foot-key="' + row[0] + '"] .pp-home-chart-foot-val');
+      if (cell) cell.textContent = row[1];
+    });
+  }
+
+  function apply(idx, period) {
+    var byPeriod = registry[idx];
+    if (!byPeriod) return;
+    var p = byPeriod[period];
+    if (!p) return;
+
+    currentIdx    = idx;
+    currentPeriod = period;
+    syncSegment(idxSeg,   'data-chart-idx', idx);
+    syncSegment(rangeSeg, 'data-value',     period);
+
+    if (line) line.setAttribute('d', p.path);
+    if (area) area.setAttribute('d', p.area);
+    if (ref) {
+      ref.setAttribute('y1', p.ref_y);
+      ref.setAttribute('y2', p.ref_y);
+    }
+    if (chip) {
+      chip.style.top = (16 + p.tag_y) + 'px';
+      chip.textContent = p.tag;
+    }
+    if (sublabel) sublabel.textContent = p.label;
+    if (lastEl) lastEl.textContent = p.tag;
+    if (headEl) {
+      var sign = p.change_up ? '+' : '-';
+      headEl.textContent = sign + p.change + ' (' + sign + p.change_pct + ')';
+      headEl.classList.toggle('pp-up',   !!p.change_up);
+      headEl.classList.toggle('pp-down', !p.change_up);
+    }
+    applyOhlcv(idx);
+
+    /* Refresh hover-tooltip sources so the crosshair tracks the new line. */
+    if (wrap) {
+      wrap.setAttribute('data-history',    JSON.stringify(p.history || []));
+      wrap.setAttribute('data-prev-close', p.prev_close != null ? String(p.prev_close) : '');
+      wrap.dispatchEvent(new CustomEvent('pp-chart-period-changed', { detail: { idx: idx, period: period } }));
+    }
+  }
+
+  idxSeg.addEventListener('click', function (ev) {
     var opt = ev.target.closest('.pp-segment-opt');
     if (!opt) return;
-    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
-      o.classList.toggle('is-active', o === opt);
-    });
+    var idx = opt.getAttribute('data-chart-idx');
+    if (!idx || !registry[idx]) return;
+    var period = pickPeriod(idx);
+    if (!period) return;
+    apply(idx, period);
+  });
+
+  rangeSeg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var period = opt.getAttribute('data-value');
+    if (!period) return;
+    var byPeriod = registry[currentIdx] || {};
+    if (!byPeriod[period]) return;
+    apply(currentIdx, period);
   });
 })();
 </script>
@@ -710,20 +1018,15 @@
    text gets warped.  Lines / dots are fine because we use
    vector-effect:non-scaling-stroke + a tiny circle whose r is in viewBox
    units (small enough that any stretch is invisible).
+
+   Period-aware: the timeframe toggle swaps `data-history` + `data-prev-close`
+   on the wrap and dispatches `pp-chart-period-changed`.  We re-load state
+   on that event so the crosshair tracks the new line.
 #}
 <script>
 (function () {
   var wrap = document.querySelector('.pp-home-chart-wrap');
   if (!wrap) return;
-
-  var historyAttr = wrap.getAttribute('data-history') || '[]';
-  var history;
-  try { history = JSON.parse(historyAttr); } catch (e) { history = []; }
-  if (!Array.isArray(history) || history.length < 2) return;
-
-  var prevCloseRaw = wrap.getAttribute('data-prev-close');
-  var prevClose = prevCloseRaw ? parseFloat(prevCloseRaw) : null;
-  if (prevClose !== null && isNaN(prevClose)) prevClose = null;
 
   var vbW = parseFloat(wrap.getAttribute('data-vb-w')) || 600;
   var vbH = parseFloat(wrap.getAttribute('data-vb-h')) || 200;
@@ -743,26 +1046,57 @@
      when flat.  Same lo/hi expansion to include prev_close. */
   var PAD_Y = 12;
   var INNER_H = vbH - 2 * PAD_Y;
-  var prices = history.map(function (h) { return h[1]; });
-  var lo = Math.min.apply(null, prices);
-  var hi = Math.max.apply(null, prices);
-  if (prevClose !== null) {
-    if (prevClose < lo) lo = prevClose;
-    if (prevClose > hi) hi = prevClose;
+
+  /* ── mutable state, refreshed on period change ───────────────────────── */
+  var history = [];
+  var prevClose = null;
+  var hi = 0, span = 1, isIntraday = true;
+
+  function loadState() {
+    var historyAttr = wrap.getAttribute('data-history') || '[]';
+    try { history = JSON.parse(historyAttr); } catch (e) { history = []; }
+    if (!Array.isArray(history)) history = [];
+
+    var prevCloseRaw = wrap.getAttribute('data-prev-close');
+    prevClose = prevCloseRaw ? parseFloat(prevCloseRaw) : null;
+    if (prevClose !== null && isNaN(prevClose)) prevClose = null;
+
+    if (history.length < 2) {
+      hi = 0; span = 1; isIntraday = true;
+      return;
+    }
+
+    var prices = history.map(function (h) { return h[1]; });
+    var lo = Math.min.apply(null, prices);
+    hi = Math.max.apply(null, prices);
+    if (prevClose !== null) {
+      if (prevClose < lo) lo = prevClose;
+      if (prevClose > hi) hi = prevClose;
+    }
+    span = hi - lo;
+    if (span <= 0) span = 1.0;
+
+    /* Intraday detection: if first → last span is < 36h, format HH:MM;
+       otherwise (multi-day periods) format MMM D. */
+    var t0 = history[0][0];
+    var tN = history[history.length - 1][0];
+    isIntraday = (tN - t0) < 36 * 60 * 60 * 1000;
   }
-  var span = hi - lo;
-  if (span <= 0) span = 1.0;
+
   function yFor(price) {
     return PAD_Y + (hi - price) / span * INNER_H;
   }
 
-  /* Time formatter — HH:MM in the user's local zone.  History timestamps
-     are epoch ms.  Mono font in the tooltip means tabular alignment. */
+  /* Time formatter.  Intraday: HH:MM.  Multi-day: "MMM D" (e.g. "Apr 12"). */
+  var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function fmtTime(tsMs) {
     var d = new Date(tsMs);
-    var h = d.getHours();
-    var m = d.getMinutes();
-    return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
+    if (isIntraday) {
+      var h = d.getHours();
+      var m = d.getMinutes();
+      return (h < 10 ? '0' + h : h) + ':' + (m < 10 ? '0' + m : m);
+    }
+    return MONTHS[d.getMonth()] + ' ' + d.getDate();
   }
 
   /* Price formatter — match the chart_tag style (integer for indices).
@@ -774,7 +1108,7 @@
     });
   }
 
-  function updateAt(idx, mouseClientX) {
+  function updateAt(idx) {
     var pt = history[idx];
     if (!pt) return;
     var ts = pt[0];
@@ -816,6 +1150,7 @@
   }
 
   function onMove(ev) {
+    if (history.length < 2) return;
     var rect = svg.getBoundingClientRect();
     if (rect.width <= 0) return;
     var relX = ev.clientX - rect.left;
@@ -830,7 +1165,7 @@
     if (idx > history.length - 1) idx = history.length - 1;
 
     wrap.classList.add('is-hovering');
-    updateAt(idx, ev.clientX);
+    updateAt(idx);
   }
 
   function onLeave() {
@@ -838,8 +1173,254 @@
     tooltip.hidden = true;
   }
 
+  loadState();
   wrap.addEventListener('mousemove', onMove);
   wrap.addEventListener('mouseleave', onLeave);
+  wrap.addEventListener('pp-chart-period-changed', function () {
+    loadState();
+    /* Hide any stale tooltip from the previous period until next mousemove. */
+    wrap.classList.remove('is-hovering');
+    tooltip.hidden = true;
+  });
+})();
+</script>
+
+{# ━━━━━━━━━━ FLOW TRENDING — legend toggles + row resort ━━━━━━━━━━
+   Clicking a legend cell toggles that source's visibility on the panel.
+   Two effects: (1) CSS hides the corresponding bar/count via the
+   ``data-show-funds`` / ``data-show-cong`` attrs we set on the container;
+   (2) rows re-sort by whichever source(s) remain visible — sum of
+   funds_buyers + cong_buyers when both on, else just the visible one.
+
+   At least one source must stay enabled.  Click the disabled legend cell
+   to re-enable; clicking the only enabled cell is a no-op. #}
+<script>
+(function () {
+  var container = document.getElementById('pp-flow-trending');
+  if (!container) return;
+  var legend = container.querySelectorAll('.pp-home-flow-legend-cell');
+  var rows   = Array.from(container.querySelectorAll('.pp-home-flow-row'));
+  if (!rows.length) return;
+
+  /* Initial state — both sources visible. */
+  container.setAttribute('data-show-funds', '1');
+  container.setAttribute('data-show-cong',  '1');
+
+  function isOn(source) { return container.getAttribute('data-show-' + source) === '1'; }
+
+  function buyerCount(row) {
+    var f = parseInt(row.getAttribute('data-funds-buyers'), 10) || 0;
+    var c = parseInt(row.getAttribute('data-cong-buyers'),  10) || 0;
+    if (isOn('funds') && isOn('cong')) return f + c;
+    if (isOn('funds')) return f;
+    if (isOn('cong'))  return c;
+    return 0;
+  }
+
+  function resort() {
+    var sorted = rows.slice().sort(function (a, b) {
+      return buyerCount(b) - buyerCount(a);
+    });
+    /* Re-append in new order — DOM moves are cheap for ~12 rows. */
+    sorted.forEach(function (r) { container.appendChild(r); });
+  }
+
+  legend.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var src = btn.getAttribute('data-source');
+      if (!src) return;
+      /* Don't allow turning off the last enabled source. */
+      var otherSrc = src === 'funds' ? 'cong' : 'funds';
+      if (isOn(src) && !isOn(otherSrc)) return;
+      var nowOn = !isOn(src);
+      container.setAttribute('data-show-' + src, nowOn ? '1' : '0');
+      btn.classList.toggle('is-on', nowOn);
+      btn.setAttribute('aria-pressed', String(nowOn));
+      resort();
+    });
+  });
+})();
+</script>
+
+{# ━━━━━━━━━━ ROW-LINK NAVIGATION ━━━━━━━━━━
+   Any element marked with data-row-href becomes click-to-navigate —
+   works for table rows, div list rows, anything.  Mouse: middle-click
+   and ctrl/cmd+click open in a new tab (matching <a> behavior).
+   Keyboard: pair the attribute with tabindex="0" + role="link" and the
+   handler activates on Enter / Space. #}
+<script>
+(function () {
+  function navigate(href, ev) {
+    if (ev && (ev.metaKey || ev.ctrlKey || ev.button === 1)) {
+      window.open(href, '_blank', 'noopener');
+    } else {
+      window.location.href = href;
+    }
+  }
+
+  document.addEventListener('click', function (ev) {
+    var row = ev.target.closest('[data-row-href]');
+    if (!row) return;
+    /* Don't hijack clicks that landed on a real <a>/<button> inside the row. */
+    if (ev.target.closest('a, button')) return;
+    navigate(row.getAttribute('data-row-href'), ev);
+  });
+
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    var row = ev.target.closest('[data-row-href]');
+    if (!row) return;
+    /* Only activate when the row itself is focused (avoids hijacking
+       Enter/Space from inputs / nested buttons inside the row). */
+    if (document.activeElement !== row) return;
+    ev.preventDefault();
+    navigate(row.getAttribute('data-row-href'), ev);
+  });
+})();
+</script>
+
+{# ━━━━━━━━━━ NEWS FILTER PILLS ━━━━━━━━━━
+   Click a category pill → mark active, hide every .pp-news-more-row
+   whose data-cat doesn't match.  "All" reveals everything.  Filter
+   only affects the More-headlines feed; featured + sub-features stay
+   visible regardless (per spec). #}
+<script>
+(function () {
+  var rail = document.getElementById('pp-news-filters');
+  if (!rail) return;
+  var pills = rail.querySelectorAll('.pp-news-filter-pill');
+  var rows  = document.querySelectorAll('.pp-news-more-row');
+  var count = document.getElementById('pp-news-filter-count');
+  if (!pills.length || !rows.length) return;
+
+  function applyFilter(cat) {
+    var visible = 0;
+    rows.forEach(function (r) {
+      var rowCat = r.getAttribute('data-cat') || '';
+      var match = cat === 'All' || rowCat === cat;
+      r.hidden = !match;
+      if (match) visible++;
+    });
+    if (count) count.textContent = visible + (visible === 1 ? ' story' : ' stories');
+  }
+
+  rail.addEventListener('click', function (ev) {
+    var pill = ev.target.closest('.pp-news-filter-pill');
+    if (!pill) return;
+    pills.forEach(function (p) {
+      var on = p === pill;
+      p.classList.toggle('is-on', on);
+      p.setAttribute('aria-pressed', String(on));
+    });
+    applyFilter(pill.getAttribute('data-cat') || 'All');
+  });
+})();
+</script>
+
+{# ━━━━━━━━━━ NEWS MODAL ━━━━━━━━━━
+   Click any .pp-news-card to populate + open the modal with the
+   article's image, headline, source, summary, tickers, and a link to
+   the source.  Mirrors the production v1 /partials/market_news.html
+   behavior — same fields, same UX (backdrop close, ESC close, X
+   close).  Article data lives in #pp-news-data as JSON.  Tickers are
+   real <a> tags so ⌘-click still opens the stock page in a new tab. #}
+<script>
+(function () {
+  var dataEl = document.getElementById('pp-news-data');
+  var modal  = document.getElementById('pp-news-modal');
+  if (!dataEl || !modal) return;
+
+  var payload;
+  try { payload = JSON.parse(dataEl.textContent || '{}'); }
+  catch (e) { return; }
+  if (!payload || (!payload.featured && !(payload.stories || []).length)) return;
+
+  var imgWrap   = document.getElementById('pp-news-modal-img-wrap');
+  var imgEl     = document.getElementById('pp-news-modal-img');
+  var headlineE = document.getElementById('pp-news-modal-headline');
+  var sourceE   = document.getElementById('pp-news-modal-source');
+  var timeE     = document.getElementById('pp-news-modal-time');
+  var summaryE  = document.getElementById('pp-news-modal-summary');
+  var tickersE  = document.getElementById('pp-news-modal-tickers');
+  var linkE     = document.getElementById('pp-news-modal-link');
+  var closeBtn  = modal.querySelector('.pp-news-modal-close');
+
+  function lookupArticle(idx) {
+    if (idx === 'featured') return payload.featured;
+    var n = parseInt(idx, 10);
+    if (isNaN(n)) return null;
+    return (payload.stories || [])[n] || null;
+  }
+
+  function openModal(article) {
+    if (!article) return;
+    if (article.image) {
+      imgEl.src = article.image;
+      imgEl.alt = '';
+      imgWrap.hidden = false;
+    } else {
+      imgEl.removeAttribute('src');
+      imgWrap.hidden = true;
+    }
+    headlineE.textContent = article.title || '';
+    sourceE.textContent   = article.src   || '';
+    timeE.textContent     = article.ago   || '';
+    summaryE.textContent  = article.summary || article.excerpt || '';
+    /* Build tickers as real <a>s so ⌘-click works + screen readers
+       announce them as links. */
+    tickersE.innerHTML = '';
+    (article.tickers || []).forEach(function (tk) {
+      var a = document.createElement('a');
+      a.className = 'pp-mono pp-news-ticker';
+      a.href = '/_v2/stock/' + encodeURIComponent(tk);
+      a.textContent = '$' + tk;
+      tickersE.appendChild(a);
+    });
+    linkE.href = article.url || '#';
+    if (!article.url) {
+      linkE.style.display = 'none';
+    } else {
+      linkE.style.display = '';
+    }
+    modal.hidden = false;
+    /* Lock background scroll while modal is open. */
+    document.body.style.overflow = 'hidden';
+    closeBtn.focus();
+  }
+
+  function closeModal() {
+    modal.hidden = true;
+    document.body.style.overflow = '';
+  }
+
+  /* Click any card → open the matching article. */
+  document.addEventListener('click', function (ev) {
+    var card = ev.target.closest('.pp-news-card');
+    if (!card) return;
+    /* Don't open the modal if the click landed on a ticker link inside. */
+    if (ev.target.closest('a')) return;
+    var idx = card.getAttribute('data-news-idx');
+    openModal(lookupArticle(idx));
+  });
+
+  /* Keyboard: Enter / Space on a focused card opens the modal. */
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    var card = ev.target.closest('.pp-news-card');
+    if (!card) return;
+    if (document.activeElement !== card) return;
+    ev.preventDefault();
+    openModal(lookupArticle(card.getAttribute('data-news-idx')));
+  });
+
+  /* Close: X button, backdrop click, Escape. */
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', function (ev) {
+    if (ev.target === modal) closeModal();
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && !modal.hidden) closeModal();
+  });
 })();
 </script>
 {% endblock %}

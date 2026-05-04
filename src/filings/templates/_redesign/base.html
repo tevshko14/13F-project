@@ -46,10 +46,14 @@
   <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700;800&family=Geist+Mono:wght@300;400;500;600;700&display=swap">
 
-  {#- Stylesheet order matters: tokens → primitives → app-shell → page-specific -#}
-  <link rel="stylesheet" href="/static/css/redesign/tokens.css">
-  <link rel="stylesheet" href="/static/css/redesign/primitives.css">
-  <link rel="stylesheet" href="/static/css/redesign/app-shell.css">
+  {#- Stylesheet order matters: tokens → primitives → app-shell → page-specific.
+      Cache-busted with the module-import timestamp (asset_version) — stable
+      across all renders within one deploy, but unique per deploy so a CSS
+      release invalidates browser/CDN caches automatically. -#}
+  {% set _v = asset_version|default(1) %}
+  <link rel="stylesheet" href="/static/css/redesign/tokens.css?v={{ _v }}">
+  <link rel="stylesheet" href="/static/css/redesign/primitives.css?v={{ _v }}">
+  <link rel="stylesheet" href="/static/css/redesign/app-shell.css?v={{ _v }}">
   {% block extra_css %}{% endblock %}
 
   {#- HTMX + Fuse.js — same versions / integrity as production base.html. -#}

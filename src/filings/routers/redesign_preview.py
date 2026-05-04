@@ -20,16 +20,22 @@ import json
 import logging
 import math
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
+
+# Module-import timestamp — stable across all renders within one
+# deploy, but unique per deploy so CSS changes don't get served from
+# stale browser caches after a release.
+_ASSET_VERSION = int(time.time())
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from filings.app_state import templates
 from filings.cache_l2 import l2_cached as _l2_cached
-from filings.concurrency import to_heavy
+from filings.concurrency import to_heavy, to_light
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +106,7 @@ def _shell_context(active: str) -> dict:
         "notif_unread": 2,
         "insiders_count": 12,
         "congress_count": 3,
+        "asset_version": _ASSET_VERSION,
     }
 
 
@@ -318,18 +325,60 @@ def _format_index_value(v: float | None, decimals: int = 2) -> str:
     return f"{v:,.{decimals}f}"
 
 
-async def _fetch_hero_chart() -> dict:
-    """Build the S&P intraday hero chart context.
+# Order matters: drives rendering order in the range_chip and JSON blob keys.
+_CHART_PERIODS = ["1D", "1W", "1M", "3M", "1Y", "5Y"]
+_DAILY_PERIOD_BARS = {"1W": 5, "1M": 22, "3M": 65, "1Y": 252}  # 5Y = full history
 
-    Returns a dict matching the keys the home.html template expects:
-        chart_path, chart_area, chart_ref_y, chart_change, chart_change_pct,
-        chart_tag, chart_label, chart_ohlcv
+# Index toggle entries: (label shown in segment + JSON-blob key, Yahoo symbol).
+# Order drives the segment's option order.  Labels are uppercase to match the
+# design's mono index-tab styling; "S&P 500" stays as-is.
+_HERO_INDICES: list[tuple[str, str]] = [
+    ("S&P 500", "^GSPC"),
+    ("NASDAQ",  "^IXIC"),
+    ("DOW",     "^DJI"),
+]
 
-    Resilience: get_intraday_chart() ladders intraday → stale-intraday →
-    daily, never returns empty unless every path fails (rare).  When
-    everything fails we fall back to a static synthetic line so the page
-    still has the right shape.
+
+def _build_period_payload(history: list, reference: float | None, label: str) -> dict | None:
+    """Project a [[ts_ms, price], ...] history into the chart payload shape.
+
+    Reference is the price the change indicator measures against — prev
+    close for 1D, period-start close for daily windows.  Returns ``None``
+    when the history is too small to render.
     """
+    if not history or len(history) < 2 or reference is None:
+        return None
+    paths = _hero_chart_paths(history, reference)
+    if paths is None:
+        return None
+
+    last_price = history[-1][1]
+    change = last_price - reference
+    change_pct = change / reference if reference else None
+
+    history_compact = [
+        [int(ts), round(float(p), 4)]
+        for ts, p in history
+        if ts is not None and p is not None
+    ]
+
+    return {
+        "path":         paths["line"],
+        "area":         paths["area"],
+        "ref_y":        paths["ref_y"],
+        "tag_y":        paths["tag_y"],
+        "tag":          f"{int(round(last_price))}" if last_price is not None else "—",
+        "change":       f"{abs(change):.2f}",
+        "change_pct":   f"{abs(change_pct) * 100:.2f}%" if change_pct is not None else "—",
+        "change_up":    change >= 0,
+        "label":        label,
+        "history":      history_compact,
+        "prev_close":   round(float(reference), 4),
+    }
+
+
+def _fallback_hero_payload() -> dict:
+    """Synthetic single-period payload for when every upstream fails."""
     fallback_pts = [
         110 + math.sin(i * 0.4) * 30 + math.cos(i * 0.9) * 10 - i * 0.55
         for i in range(60)
@@ -339,80 +388,198 @@ async def _fetch_hero_chart() -> dict:
         for i, y in enumerate(fallback_pts)
     )
     area_d = f"{line_d} L 600 200 L 0 200 Z"
-    fallback = {
-        "chart_path":       line_d,
-        "chart_area":       area_d,
-        "chart_ref_y":      74,
-        "chart_tag_y":      74,
-        "chart_change":     "41.86",
-        "chart_change_pct": "0.72%",
-        "chart_change_up":  True,
-        "chart_tag":        "5847",
-        "chart_label":      "INTRADAY · 15M",
-        # Empty history → JS hover stays inert; chart still renders.
-        "chart_history_json": "[]",
-        "chart_prev_close":   "",
-        "chart_ohlcv": [
-            ("OPEN",  "5,805.56"),
-            ("HIGH",  "5,851.20"),
-            ("LOW",   "5,798.14"),
-            ("VOL",   "3.41B"),
-        ],
+    period = {
+        "path":       line_d,
+        "area":       area_d,
+        "ref_y":      74,
+        "tag_y":      74,
+        "tag":        "5847",
+        "change":     "41.86",
+        "change_pct": "0.72%",
+        "change_up":  True,
+        "label":      "INTRADAY · 15M",
+        "history":    [],
+        "prev_close": 0,
+    }
+    fallback_ohlcv = [
+        ("OPEN",  "5,805.56"),
+        ("HIGH",  "5,851.20"),
+        ("LOW",   "5,798.14"),
+        ("VOL",   "3.41B"),
+    ]
+    return {
+        "chart_path":           period["path"],
+        "chart_area":           period["area"],
+        "chart_ref_y":          period["ref_y"],
+        "chart_tag_y":          period["tag_y"],
+        "chart_change":         period["change"],
+        "chart_change_pct":     period["change_pct"],
+        "chart_change_up":      period["change_up"],
+        "chart_tag":            period["tag"],
+        "chart_label":          period["label"],
+        "chart_history_json":   "[]",
+        "chart_prev_close":     "",
+        "chart_ohlcv":          fallback_ohlcv,
+        "chart_ohlcv_json":     json.dumps({"S&P 500": fallback_ohlcv}, separators=(",", ":")),
+        "chart_default_index":  "S&P 500",
+        "chart_default_period": "1D",
+        "chart_indices_json":   json.dumps({"S&P 500": {"1D": period}}, separators=(",", ":")),
     }
 
+
+def _build_index_periods(intraday: dict | None, history_5y: dict | None) -> dict[str, dict]:
+    """Project an index's intraday + 5Y history into per-period payloads.
+
+    Returns ``{"1D": {...}, "1W": {...}, ...}`` for whichever periods we
+    have enough data to render.  Empty dict when nothing is renderable.
+    """
+    periods: dict[str, dict] = {}
+
+    # 1D — intraday minute bars; reference = previous close
+    if intraday and intraday.get("history"):
+        prev_close = (intraday.get("ohlcv") or {}).get("prev_close")
+        period = _build_period_payload(
+            intraday["history"], prev_close,
+            intraday.get("label") or "INTRADAY · 15M",
+        )
+        if period:
+            periods["1D"] = period
+
+    # 1W / 1M / 3M / 1Y / 5Y — daily-candle slices from the 5Y history
+    if history_5y and history_5y.get("ohlcv"):
+        # OHLCV row shape: [ts_ms, open, high, low, close, volume].
+        closes = [[row[0], row[4]] for row in history_5y["ohlcv"] if row[4] is not None]
+        for period_key in ("1W", "1M", "3M", "1Y"):
+            bars = _DAILY_PERIOD_BARS[period_key]
+            if len(closes) < bars:
+                continue
+            sliced = closes[-bars:]
+            period = _build_period_payload(sliced, sliced[0][1], f"{period_key} · DAILY")
+            if period:
+                periods[period_key] = period
+        # 5Y = the entire history (sample down for path-string size).
+        if closes:
+            sampled = _sample_for_chart(closes, max_points=200)
+            period = _build_period_payload(sampled, sampled[0][1], "5Y · DAILY")
+            if period:
+                periods["5Y"] = period
+
+    return periods
+
+
+def _index_ohlcv_strip(intraday: dict | None) -> list[tuple[str, str]]:
+    """OPEN/HIGH/LOW/VOL strip for the day's session of one index."""
+    intraday_ohlcv = (intraday or {}).get("ohlcv") or {}
+    return [
+        ("OPEN",  _format_index_value(intraday_ohlcv.get("open"))),
+        ("HIGH",  _format_index_value(intraday_ohlcv.get("high"))),
+        ("LOW",   _format_index_value(intraday_ohlcv.get("low"))),
+        ("VOL",   _format_volume(intraday_ohlcv.get("volume"))),
+    ]
+
+
+async def _hero_chart_compute() -> dict | None:
+    """Inner fetcher for the hero chart.  Fans out 6 yfinance calls (3
+    indices × intraday + 5Y) in parallel.  Returns ``None`` on total
+    failure so the L2 wrapper can return a stale entry instead of
+    caching an empty result."""
+    from filings import market_data
+
+    async def _fetch_pair(symbol: str) -> tuple[dict | None, dict | None]:
+        intraday, history_5y = await asyncio.gather(
+            to_heavy(market_data.get_intraday_chart, symbol),
+            to_heavy(market_data.get_stock_ohlcv, symbol, "5Y"),
+            return_exceptions=True,
+        )
+        if isinstance(intraday, BaseException):
+            intraday = None
+        if isinstance(history_5y, BaseException):
+            history_5y = None
+        return intraday, history_5y
+
     try:
-        from filings import market_data
-        chart = await to_heavy(market_data.get_intraday_chart, "^GSPC")
-        if not chart:
-            return fallback
-        history = chart.get("history") or []
-        ohlcv = chart.get("ohlcv") or {}
-        prev_close = ohlcv.get("prev_close")
-        paths = _hero_chart_paths(history, prev_close)
-        if paths is None:
-            return fallback
-
-        last_close = history[-1][1] if history else None
-        change = (last_close - prev_close) if (last_close is not None and prev_close is not None) else None
-        change_pct = (change / prev_close) if (change is not None and prev_close) else None
-
-        # OHLCV strip — show what the source actually has.  Daily fallback
-        # has no volume; show "—" rather than a bogus number.
-        vol_str = _format_volume(ohlcv.get("volume"))
-        ohlcv_strip = [
-            ("OPEN",  _format_index_value(ohlcv.get("open"))),
-            ("HIGH",  _format_index_value(ohlcv.get("high"))),
-            ("LOW",   _format_index_value(ohlcv.get("low"))),
-            ("VOL",   vol_str),
-        ]
-
-        # Compact history for hover tooltip — keep it small (just [ts_ms, price]).
-        # JSON-encode here so the template can drop it straight into a data
-        # attribute without escaping individual numbers.
-        history_compact = [
-            [int(ts), round(float(p), 4)]
-            for ts, p in history
-            if ts is not None and p is not None
-        ]
-        history_json = json.dumps(history_compact, separators=(",", ":"))
-
-        return {
-            "chart_path":       paths["line"],
-            "chart_area":       paths["area"],
-            "chart_ref_y":      paths["ref_y"],
-            "chart_tag_y":      paths["tag_y"],
-            "chart_change":     f"{abs(change):.2f}" if change is not None else "—",
-            "chart_change_pct": f"{abs(change_pct) * 100:.2f}%" if change_pct is not None else "—",
-            "chart_change_up":  (change is not None and change >= 0),
-            "chart_tag":        f"{int(round(last_close))}" if last_close is not None else "—",
-            "chart_label":      chart.get("label") or "INTRADAY · 15M",
-            "chart_history_json": history_json,
-            "chart_prev_close":   f"{prev_close:.4f}" if prev_close is not None else "",
-            "chart_ohlcv":      ohlcv_strip,
-        }
+        return await asyncio.gather(
+            *(_fetch_pair(sym) for _label, sym in _HERO_INDICES),
+            return_exceptions=False,
+        )
     except Exception as exc:
-        logger.warning("Hero chart live fetch failed: %s", exc)
-        return fallback
+        logger.warning("Hero chart fetch failed: %s", exc)
+        return None
+
+
+async def _fetch_hero_chart() -> dict:
+    """Build the hero chart context for all 3 indices × all 6 periods.
+
+    Fetches intraday + 5Y daily for S&P / NASDAQ / DOW concurrently
+    (6 upstreams), then assembles per-(index, period) geometry +
+    OHLCV strips + the SSR defaults.  L2-cached for 2 min so cold-start
+    workers warm from Supabase rather than blocking on yfinance.
+    """
+    try:
+        results = await _l2_cached(
+            "redesign:home:hero_chart", ttl_seconds=120,
+            compute=_hero_chart_compute, category="redesign_home",
+        )
+    except Exception as exc:
+        logger.warning("Hero chart L2 fetch failed: %s", exc)
+        results = None
+    if not results:
+        return _fallback_hero_payload()
+
+    # Build per-index period registries + OHLCV strips.
+    indices_payload: dict[str, dict] = {}
+    ohlcv_by_index: dict[str, list[tuple[str, str]]] = {}
+    for (label, _sym), (intraday, history_5y) in zip(_HERO_INDICES, results):
+        periods = _build_index_periods(intraday, history_5y)
+        if periods:
+            indices_payload[label] = periods
+            ohlcv_by_index[label] = _index_ohlcv_strip(intraday)
+
+    if not indices_payload:
+        return _fallback_hero_payload()
+
+    # SSR defaults — first index in _HERO_INDICES that returned data,
+    # then the shortest period we built for it.  Almost always (S&P, 1D).
+    default_idx = next((lbl for lbl, _ in _HERO_INDICES if lbl in indices_payload), None)
+    default_periods = indices_payload[default_idx]
+    default_period_key = next((k for k in _CHART_PERIODS if k in default_periods), "1D")
+    default = default_periods[default_period_key]
+
+    return {
+        # Default-period values for the initial server-side render so the
+        # page paints before JS hydrates the toggle.
+        "chart_path":         default["path"],
+        "chart_area":         default["area"],
+        "chart_ref_y":        default["ref_y"],
+        "chart_tag_y":        default["tag_y"],
+        "chart_change":       default["change"],
+        "chart_change_pct":   default["change_pct"],
+        "chart_change_up":    default["change_up"],
+        "chart_tag":          default["tag"],
+        "chart_label":        default["label"],
+        "chart_history_json": json.dumps(default["history"], separators=(",", ":")),
+        "chart_prev_close":   f"{default['prev_close']:.4f}",
+        "chart_ohlcv":        ohlcv_by_index[default_idx],
+        # Per-index OHLCV registry — JS swaps the strip on idx click.
+        "chart_ohlcv_json":   json.dumps(ohlcv_by_index, separators=(",", ":")),
+        # Per-(index, period) registry for the client-side toggle.
+        "chart_default_index":  default_idx,
+        "chart_default_period": default_period_key,
+        "chart_indices_json":   json.dumps(indices_payload, separators=(",", ":")),
+    }
+
+
+def _sample_for_chart(points: list, *, max_points: int) -> list:
+    """Down-sample a long history to ``max_points`` evenly-spaced entries.
+
+    Used for ALL (5Y) so the SVG path string stays under ~5KB.  Returns
+    the original list when it's already short enough.
+    """
+    n = len(points)
+    if n <= max_points:
+        return points
+    step = (n - 1) / (max_points - 1)
+    return [points[round(i * step)] for i in range(max_points)]
 
 
 # Mock home page payload — mirrors window.PP_DATA in design_handoff/data.js
@@ -426,12 +593,12 @@ _HOME_TOP_MOVERS = [
 ]
 
 _HOME_FUND_FLOWS = [
-    {"manager": "Warren Buffett",       "fund": "Berkshire Hathaway", "aum": "$312B",  "action": "ADDED",   "ticker": "OXY"},
-    {"manager": "Bill Ackman",          "fund": "Pershing Square",    "aum": "$11.4B", "action": "NEW",     "ticker": "BAM"},
-    {"manager": "Michael Burry",        "fund": "Scion Asset Mgmt",   "aum": "$83M",   "action": "REDUCED", "ticker": "JD"},
-    {"manager": "David Einhorn",        "fund": "Greenlight Capital", "aum": "$1.6B",  "action": "ADDED",   "ticker": "GRBK"},
-    {"manager": "Daniel Loeb",          "fund": "Third Point",        "aum": "$5.9B",  "action": "EXITED",  "ticker": "PCG"},
-    {"manager": "David Tepper",         "fund": "Appaloosa",          "aum": "$6.2B",  "action": "ADDED",   "ticker": "BABA"},
+    {"manager": "Warren Buffett",     "fund": "Berkshire Hathaway", "aum": "$312B",  "action": "ADDED",   "ticker": "OXY",   "cik": "1067983", "delta": "+$1.2B"},
+    {"manager": "Bill Ackman",        "fund": "Pershing Square",    "aum": "$11.4B", "action": "NEW",     "ticker": "BAM",   "cik": "1336528", "delta": "+$840M"},
+    {"manager": "Michael Burry",      "fund": "Scion Asset Mgmt",   "aum": "$83M",   "action": "REDUCED", "ticker": "JD",    "cik": "1649339", "delta": "−$12M"},
+    {"manager": "David Einhorn",      "fund": "Greenlight Capital", "aum": "$1.6B",  "action": "ADDED",   "ticker": "GRBK",  "cik": "1079114", "delta": "+$94M"},
+    {"manager": "Daniel Loeb",        "fund": "Third Point",        "aum": "$5.9B",  "action": "EXITED",  "ticker": "PCG",   "cik": "1040273", "delta": "−$320M"},
+    {"manager": "David Tepper",       "fund": "Appaloosa",          "aum": "$6.2B",  "action": "ADDED",   "ticker": "BABA",  "cik": "1656456", "delta": "+$210M"},
 ]
 
 _HOME_INSIDERS = [
@@ -474,7 +641,33 @@ _HOME_TICKER_TAPE = [
 
 # ── Fear & Greed gauge (Overview, retail panel).
 #    Mock until we wire CNN F&G or rebuild from sub-signals.
-def _feargreed_payload(value: int, label: str, yesterday: int, week_ago: int) -> dict:
+def _feargreed_as_of_now() -> str:
+    """Timestamp string for the F&G "Data as of …" footer.
+
+    CNN F&G updates once at market close, but we cache for 5 min in L2 —
+    rendering the current UTC time is accurate to within the cache TTL,
+    which matches what the user is actually seeing.
+    """
+    now = datetime.now(timezone.utc)
+    return now.strftime("%b %-d, %Y %-I:%M %p UTC")
+
+
+def _feargreed_band(value: int) -> str:
+    """CSS class for an F&G score: green (greed), red (fear), or no class
+    (neutral) — matches the up/down palette used elsewhere on the page."""
+    if value >= 55:
+        return "pp-up"
+    if value <= 44:
+        return "pp-down"
+    return ""
+
+
+def _feargreed_payload(
+    value: int, label: str,
+    yesterday: int, week_ago: int,
+    month_ago: int = 0, year_ago: int = 0,
+    as_of: str | None = None,
+) -> dict:
     """Build the F&G context with precomputed needle endpoint.
 
     The semicircular gauge maps 0..100 → -90°..+90° around (cx=50, cy=50).
@@ -491,29 +684,64 @@ def _feargreed_payload(value: int, label: str, yesterday: int, week_ago: int) ->
         "label":     label,
         "yesterday": yesterday,
         "week_ago":  week_ago,
+        "month_ago": month_ago,
+        "year_ago":  year_ago,
+        # CSS bands for the timeframe rows so the template can color-code
+        # each score without an inline ternary on every row.
+        "week_band":  _feargreed_band(week_ago),
+        "month_band": _feargreed_band(month_ago),
+        "year_band":  _feargreed_band(year_ago),
+        "as_of":     as_of or _feargreed_as_of_now(),
         "needle_x":  round(nx, 2),
         "needle_y":  round(ny, 2),
     }
 
 
-_HOME_FEARGREED = _feargreed_payload(value=71, label="Greed", yesterday=64, week_ago=58)
+def _home_feargreed_mock() -> dict:
+    """Fresh mock F&G payload — built per-call so the ``as_of`` stamp
+    reflects render time, not server-start time."""
+    return _feargreed_payload(
+        value=71, label="Greed",
+        yesterday=64, week_ago=58, month_ago=42, year_ago=55,
+    )
 
 # ── Flow subtab — trending tickers aggregated across 13F + Congress.
-#    funds = # of 13F funds touching the ticker this period; congress = # of MoCs.
-#    fundsDir / congDir = aggregate net direction.  net = composite signal.
+#    funds = total # of 13F changes (buys + sells); cong = total congress trades.
+#    fundsDir / congDir = aggregate direction.  net = (buys - sells) overall.
+#    fund_buyers / cong_buyers = buy-only counts (used for the buyer-sorted
+#    "Trending with Smart Money" panel + hover tooltip).
+def _trend_row(tk, fb, fs, cb, cs, fund_names=(), cong_names=(), cong_d=0, cong_r=0):
+    funds = fb + fs
+    cong  = cb + cs
+    net   = (fb - fs) + (cb - cs)
+    return {
+        "tk": tk, "funds": funds, "cong": cong,
+        "fundsDir": "BUY" if fb > fs else ("SELL" if fs > fb else "—"),
+        "congDir":  "BUY" if cb > cs else ("SELL" if cs > cb else "—"),
+        "net": net,
+        "fund_buyers": fb, "fund_sellers": fs,
+        "cong_buyers": cb, "cong_sellers": cs,
+        "cong_d": cong_d, "cong_r": cong_r,
+        "fund_names": list(fund_names),
+        "cong_names": list(cong_names),
+        "fund_more":  max(fb - len(fund_names), 0),
+        "cong_more":  max(cb - len(cong_names), 0),
+        "total_buyers": fb + cb,
+    }
+
 _HOME_FLOW_TRENDING = [
-    {"tk": "NVDA",  "funds": 18, "cong": 4, "fundsDir": "BUY",  "congDir": "BUY",  "net": +22},
-    {"tk": "PLTR",  "funds": 14, "cong": 6, "fundsDir": "BUY",  "congDir": "BUY",  "net": +20},
-    {"tk": "COIN",  "funds": 12, "cong": 2, "fundsDir": "BUY",  "congDir": "BUY",  "net": +14},
-    {"tk": "OXY",   "funds":  9, "cong": 1, "fundsDir": "BUY",  "congDir": "BUY",  "net": +10},
-    {"tk": "GOOGL", "funds":  8, "cong": 4, "fundsDir": "BUY",  "congDir": "BUY",  "net": +12},
-    {"tk": "AAPL",  "funds":  7, "cong": 5, "fundsDir": "BUY",  "congDir": "BUY",  "net": +12},
-    {"tk": "AVGO",  "funds":  6, "cong": 2, "fundsDir": "BUY",  "congDir": "BUY",  "net":  +8},
-    {"tk": "META",  "funds":  5, "cong": 3, "fundsDir": "BUY",  "congDir": "BUY",  "net":  +8},
-    {"tk": "TSLA",  "funds":  4, "cong": 8, "fundsDir": "SELL", "congDir": "BUY",  "net":  +4},
-    {"tk": "AMD",   "funds":  4, "cong": 1, "fundsDir": "BUY",  "congDir": "BUY",  "net":  +5},
-    {"tk": "BRK.B", "funds":  3, "cong": 1, "fundsDir": "SELL", "congDir": "—",    "net":  -3},
-    {"tk": "INTC",  "funds":  3, "cong": 2, "fundsDir": "SELL", "congDir": "SELL", "net":  -5},
+    _trend_row("NVDA",  18, 0, 4, 0, ["Mairs & Power", "David Tepper", "Tom Gayner"], ["Pelosi, Nancy"], cong_d=2, cong_r=2),
+    _trend_row("PLTR",  14, 0, 6, 0, ["Bill Ackman", "David Tepper"], ["Tuberville, T."], cong_d=1, cong_r=5),
+    _trend_row("COIN",  12, 0, 2, 0, ["Cathie Wood"], ["Pelosi, Nancy"], cong_d=2, cong_r=0),
+    _trend_row("OXY",    9, 0, 1, 0, ["Warren Buffett"], [], cong_d=0, cong_r=1),
+    _trend_row("GOOGL",  8, 0, 4, 0, ["David Einhorn"], ["Khanna, Ro"], cong_d=3, cong_r=1),
+    _trend_row("AAPL",   7, 0, 5, 0, ["Warren Buffett"], ["Pelosi, Nancy"], cong_d=3, cong_r=2),
+    _trend_row("AVGO",   6, 0, 2, 0, [], [], cong_d=1, cong_r=1),
+    _trend_row("META",   5, 0, 3, 0, [], [], cong_d=2, cong_r=1),
+    _trend_row("TSLA",   0, 4, 8, 0, [], ["Tuberville, T."], cong_d=3, cong_r=5),
+    _trend_row("AMD",    4, 0, 1, 0, [], [], cong_d=0, cong_r=1),
+    _trend_row("BRK.B",  0, 3, 0, 1, [], [], cong_d=0, cong_r=0),
+    _trend_row("INTC",   0, 3, 0, 2, [], [], cong_d=0, cong_r=0),
 ]
 # Max value used to scale bar widths (kept design-stable across reloads).
 _HOME_FLOW_TRENDING_MAX = 24
@@ -521,8 +749,8 @@ _HOME_FLOW_TRENDING_MAX = 24
 # Larger fund / congress lists for Flow subtab (8 rows each — beyond the
 # 6 shown on Overview).  Uses the same shape as _HOME_FUND_FLOWS / _HOME_CONGRESS.
 _HOME_FLOW_FUND_BUYS = _HOME_FUND_FLOWS + [
-    {"manager": "Ray Dalio",            "fund": "Bridgewater",        "aum": "$22.1B", "action": "REDUCED", "ticker": "SPY"},
-    {"manager": "Stan Druckenmiller",   "fund": "Duquesne",           "aum": "$3.4B",  "action": "NEW",     "ticker": "TSM"},
+    {"manager": "Ray Dalio",          "fund": "Bridgewater",        "aum": "$22.1B", "action": "REDUCED", "ticker": "SPY", "cik": "1350694", "delta": "−$420M"},
+    {"manager": "Stan Druckenmiller", "fund": "Duquesne",           "aum": "$3.4B",  "action": "NEW",     "ticker": "TSM", "cik": "1536411", "delta": "+$180M"},
 ]
 _HOME_FLOW_CONGRESS = _HOME_CONGRESS + [
     {"person": "Pelosi, Nancy",  "party": "D", "chamber": "House",  "ticker": "AAPL", "action": "SELL", "size": "$1M-5M"},
@@ -561,16 +789,13 @@ def _heatmap_companies_with_color() -> list[dict]:
     """Decorate companies for template — adds tile color + col/row span hints."""
     rows = []
     for tk, pct, mc, w in _HOME_HEATMAP_COMPANIES:
-        # Color intensity 20-90% mixed with --pp-bg.
-        a = min(abs(pct) / 0.03, 1.0)
-        pct_mix = int(20 + a * 70)
-        accent = "var(--pp-up)" if pct >= 0 else "var(--pp-down)"
         rows.append({
             "ticker": tk,
             "pct":    pct,
             "mcap":   mc,
             "weight": w,
-            "tile_bg": f"color-mix(in srgb, {accent} {pct_mix}%, var(--pp-bg))",
+            "tile_bg": _heatmap_color_for_pct(pct),
+            "tile_dark": _heatmap_tile_is_dark(pct),
             "span_col": 2 if w >= 3 else 1,
             "span_row": 2 if w >= 3 else 1,
             "is_large": w >= 3,
@@ -582,9 +807,6 @@ def _heatmap_companies_with_color() -> list[dict]:
 def _heatmap_sectors_with_color() -> list[dict]:
     rows = []
     for name, pct, mc in _HOME_HEATMAP_SECTORS:
-        a = min(abs(pct) / 0.03, 1.0)
-        pct_mix = int(20 + a * 70)
-        accent = "var(--pp-up)" if pct >= 0 else "var(--pp-down)"
         # Mega-cap sectors get 2-col span (>$10T).
         mcap_num = float("".join(ch for ch in mc if ch.isdigit() or ch == "."))
         is_mega = "T" in mc and mcap_num > 10
@@ -592,47 +814,69 @@ def _heatmap_sectors_with_color() -> list[dict]:
             "name":     name,
             "pct":      pct,
             "mcap":     mc,
-            "tile_bg":  f"color-mix(in srgb, {accent} {pct_mix}%, var(--pp-bg))",
+            "tile_bg":  _heatmap_color_for_pct(pct),
+            "tile_dark": _heatmap_tile_is_dark(pct),
             "span_col": 2 if is_mega else 1,
         })
     return rows
 
 
-# ── Activity subtab — live notification feed.
-#    cat ∈ {BUY, SELL, ALERT, NEWS} → drives dot color + pill border.
+# ── Activity subtab — live notification feed.  Compact tabular shape
+#    matching the rest of the redesign (ago | src | dot | text | tag);
+#    data sourced from supabase notifications (same table production v1
+#    reads from).  cat drives both the dot color + the type-tag color.
 _HOME_ACTIVITY_FEED = [
-    {"ago": "now", "src": "insider",   "ticker": "NVDA", "cat": "SELL",  "text": "Jensen Huang (CEO) sold 240,000 NVDA at $142.18 — 10b5-1 plan"},
-    {"ago": "2m",  "src": "congress",  "ticker": "COIN", "cat": "BUY",   "text": "Rep. Pelosi disclosed CALL options on COIN — exp. Jun 2026"},
-    {"ago": "4m",  "src": "price",     "ticker": "GME",  "cat": "ALERT", "text": "GME crossed +20% intraday — alert from your watchlist"},
-    {"ago": "7m",  "src": "13F",       "ticker": "OXY",  "cat": "BUY",   "text": "Berkshire Hathaway disclosed 4M new OXY position in latest 13F amend."},
-    {"ago": "12m", "src": "options",   "ticker": "NVDA", "cat": "BUY",   "text": "$8.4M premium sweep — NVDA $160 CALL May 16"},
-    {"ago": "18m", "src": "insider",   "ticker": "PLTR", "cat": "SELL",  "text": "Stephen Cohen (Pres.) sold 480,000 PLTR — open market"},
-    {"ago": "24m", "src": "news",      "ticker": "AAPL", "cat": "NEWS",  "text": "Apple reports Q2: rev $94.8B beats; iPhone +1.5% YoY"},
-    {"ago": "32m", "src": "congress",  "ticker": "NVDA", "cat": "BUY",   "text": "Sen. Tuberville disclosed 1,000-15,000 NVDA shares purchased"},
-    {"ago": "41m", "src": "sentiment", "ticker": "GME",  "cat": "ALERT", "text": "WSB mentions crossed 5,000 in 4h — sentiment +62"},
-    {"ago": "54m", "src": "13F",       "ticker": "COIN", "cat": "BUY",   "text": "Cathie Wood / ARK Invest added 84K COIN — position +12%"},
-    {"ago": "1h",  "src": "price",     "ticker": "BTC",  "cat": "ALERT", "text": "BTC crossed $68,000 — alert from your watchlist"},
-    {"ago": "1h",  "src": "insider",   "ticker": "AVGO", "cat": "BUY",   "text": "Hock Tan (CEO) exercised 12,000 options — net buy"},
+    {"ago": "3m",  "src": "REDDIT",   "ticker": "LLY",   "text": "Eli Lilly — mentions +100% in 24h (4 total)",        "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/_v2/stock/LLY"},
+    {"ago": "3m",  "src": "REDDIT",   "ticker": "ANY",   "text": "Sphere 3D — mentions +200% in 24h (3 total)",        "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/_v2/stock/ANY"},
+    {"ago": "3m",  "src": "REDDIT",   "ticker": "XBI",   "text": "SPDR S&P Biotech — mentions +100% in 24h (2 total)", "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/_v2/stock/XBI"},
+    {"ago": "12m", "src": "13F",      "ticker": "AAPL",  "text": "Berkshire Hathaway reduced position by $5.2B",       "cat": "13f",      "pill": "13F FILING",      "href": "/_v2/stock/AAPL"},
+    {"ago": "23m", "src": "CONGRESS", "ticker": "NVDA",  "text": "Rep. Pelosi disclosed buy — $1M-$5M call options",   "cat": "congress", "pill": "CONGRESS",        "href": "/_v2/stock/NVDA"},
+    {"ago": "37m", "src": "INSIDER",  "ticker": "AAPL",  "text": "Tim Cook (CEO) sold 240,000 shares — $52.1M",        "cat": "insider",  "pill": "INSIDER",         "href": "/_v2/stock/AAPL"},
+    {"ago": "42m", "src": "YOUTUBE",  "ticker": "BRK.B", "text": "CNBC: Berkshire AGM 2026 highlights",                "cat": "youtube",  "pill": "YOUTUBE",         "href": "/_v2/stock/BRK.B"},
 ]
 
-# ── News subtab.  Featured = left big card with coral left-border.
-#    Stories = right-side compact list.  tickers list rendered as outlined chips.
+# ── News subtab.  Categories: Markets / Macro / Earnings / Funds /
+#    Congress / Insiders / Retail.  Featured + 2 sub-features get hero
+#    images; "more headlines" feed is text-only and filterable.
 _HOME_NEWS_FEATURED = {
     "src":      "Reuters",
     "ago":      "14m ago",
+    "cat":      "Markets",
     "title":    "Nvidia briefly tops $3.5T as Blackwell shipments accelerate into Q2",
+    "summary":  "AI chip demand drove revenue 22% above consensus; cloud customers committed to 2027 capacity. Hyperscaler capex guidance lifted entire AI infra complex.",
     "excerpt":  "AI chip demand drove revenue 22% above consensus; cloud customers committed to 2027 capacity. Hyperscaler capex guidance lifted entire AI infra complex.",
+    "image":    "",
+    "url":      "https://www.reuters.com",
     "tickers":  ["NVDA", "AVGO", "AMD"],
 }
 _HOME_NEWS_STORIES = [
-    {"src": "Bloomberg", "ago": "1h ago", "title": "Hyperscaler capex guidance lifts AI infra; NVDA leads",       "tickers": ["NVDA", "MSFT", "GOOGL"]},
-    {"src": "WSJ",       "ago": "2h ago", "title": "Fed minutes: officials see further patience on rate cuts",     "tickers": ["10Y", "SPY"]},
-    {"src": "FT",        "ago": "3h ago", "title": "Berkshire trims Apple stake further, builds cash to $325B",    "tickers": ["BRK.B", "AAPL"]},
-    {"src": "CNBC",      "ago": "4h ago", "title": "Coinbase Q1 beat sends shares 8% higher in extended trade",    "tickers": ["COIN"]},
-    {"src": "Reuters",   "ago": "5h ago", "title": "Pelosi files NVDA call options — fourth time this year",        "tickers": ["NVDA"]},
-    {"src": "Bloomberg", "ago": "6h ago", "title": "GameStop spikes 18% after Roaring Kitty teases new position",   "tickers": ["GME", "AMC"]},
-    {"src": "WSJ",       "ago": "7h ago", "title": "Oil retreats as inventories build; OXY guides cautious",        "tickers": ["WTI", "OXY", "XOM"]},
-    {"src": "FT",        "ago": "8h ago", "title": "Palantir wins fresh DoD contract worth $480M",                 "tickers": ["PLTR"]},
+    {"src": "Bloomberg", "ago": "1h ago", "cat": "Markets",  "title": "Hyperscaler capex guidance lifts AI infra; NVDA leads",        "summary": "AWS, Azure, and GCP all raised 2026 capex guidance citing strong AI training demand.",   "image": "", "url": "https://www.bloomberg.com",  "tickers": ["NVDA", "MSFT", "GOOGL"]},
+    {"src": "WSJ",       "ago": "2h ago", "cat": "Macro",    "title": "Fed minutes: officials see further patience on rate cuts",      "summary": "FOMC minutes show divided views on the timing of additional rate cuts.",                  "image": "", "url": "https://www.wsj.com",        "tickers": ["10Y", "SPY"]},
+    {"src": "FT",        "ago": "3h ago", "cat": "Funds",    "title": "Berkshire trims Apple stake further, builds cash to $325B",     "summary": "Q1 13F shows Buffett continued to lighten the AAPL position, pushing cash to a record.", "image": "", "url": "https://www.ft.com",         "tickers": ["BRK.B", "AAPL"]},
+    {"src": "CNBC",      "ago": "4h ago", "cat": "Earnings", "title": "Coinbase Q1 beat sends shares 8% higher in extended trade",     "summary": "Trading volume + retail re-engagement drove a beat-and-raise quarter.",                   "image": "", "url": "https://www.cnbc.com",       "tickers": ["COIN"]},
+    {"src": "Reuters",   "ago": "5h ago", "cat": "Congress", "title": "Pelosi files NVDA call options — fourth time this year",         "summary": "Latest STOCK Act filing shows continued conviction on the AI infra trade.",               "image": "", "url": "https://www.reuters.com",    "tickers": ["NVDA"]},
+    {"src": "Bloomberg", "ago": "6h ago", "cat": "Retail",   "title": "GameStop spikes 18% after Roaring Kitty teases new position",    "summary": "Keith Gill's social posts moved the stock pre-market.",                                   "image": "", "url": "https://www.bloomberg.com",  "tickers": ["GME", "AMC"]},
+    {"src": "WSJ",       "ago": "7h ago", "cat": "Markets",  "title": "Oil retreats as inventories build; OXY guides cautious",         "summary": "EIA data showed a build; OXY's earnings call flagged continued capex discipline.",        "image": "", "url": "https://www.wsj.com",        "tickers": ["WTI", "OXY", "XOM"]},
+    {"src": "FT",        "ago": "8h ago", "cat": "Markets",  "title": "Palantir wins fresh DoD contract worth $480M",                  "summary": "Multi-year contract expands Palantir's footprint inside Defense Department workflows.",  "image": "", "url": "https://www.ft.com",         "tickers": ["PLTR"]},
+    {"src": "Bloomberg", "ago": "9h ago", "cat": "Insiders", "title": "Apple CFO files Form 4: 80K shares sold under 10b5-1 plan",      "summary": "Routine 10b5-1 sale; total proceeds ≈ $14M.",                                              "image": "", "url": "https://www.bloomberg.com",  "tickers": ["AAPL"]},
+    {"src": "Reuters",   "ago": "10h ago","cat": "Earnings", "title": "Lilly raises full-year revenue guidance after weight-loss beat", "summary": "Mounjaro/Zepbound demand outpaced consensus by ~12%; FY guide up 4 pts.",                "image": "", "url": "https://www.reuters.com",    "tickers": ["LLY"]},
+    {"src": "CNBC",      "ago": "11h ago","cat": "Macro",    "title": "Treasury auctions see strong indirect bid, calming rate jitters","summary": "10Y auction tail came in tighter than expected.",                                          "image": "", "url": "https://www.cnbc.com",       "tickers": ["10Y", "TLT"]},
+]
+_HOME_NEWS_MOST_READ = [
+    {"rank": "01", "title": "Pelosi files NVDA call options — fourth time this year", "src": "Reuters",   "reads": "12.4K reads"},
+    {"rank": "02", "title": "GameStop spikes 18% after Roaring Kitty post",            "src": "Bloomberg", "reads": "9.8K reads"},
+    {"rank": "03", "title": "Berkshire trims Apple, builds $325B cash pile",           "src": "FT",        "reads": "8.1K reads"},
+    {"rank": "04", "title": "Fed minutes signal patience on cuts",                     "src": "WSJ",       "reads": "6.2K reads"},
+    {"rank": "05", "title": "Coinbase Q1 beat sends shares 8% higher",                 "src": "CNBC",      "reads": "4.7K reads"},
+]
+_HOME_NEWS_MARKET_WIRE = [
+    {"time": "09:42", "ticker": "SPY",   "change": "+0.72%", "wire": "S&P 500 hits intraday record"},
+    {"time": "09:38", "ticker": "NVDA",  "change": "+4.21%", "wire": "Blackwell capacity sold out 2027"},
+    {"time": "09:31", "ticker": "BRK.B", "change": "+0.84%", "wire": "13F filing reveals OXY add"},
+    {"time": "09:24", "ticker": "COIN",  "change": "+8.10%", "wire": "Q1 EPS $1.05 vs $0.92 est"},
+    {"time": "09:18", "ticker": "WTI",   "change": "−1.42%", "wire": "Crude inventories build 4.2M bbl"},
+    {"time": "09:11", "ticker": "DXY",   "change": "+0.42%", "wire": "Dollar firms after Fed minutes"},
+    {"time": "09:04", "ticker": "BTC",   "change": "+1.84%", "wire": "BTC reclaims 68K, ETF flows +$214M"},
 ]
 
 # ── Calendar subtab.  Earnings = next 30d watchlist; Macro = next 60d FOMC/CPI/etc.
@@ -666,21 +910,36 @@ _HOME_RETAIL_RAW = [
 ]
 
 
-def _retail_rows():
-    rows = []
-    for r in _HOME_RETAIL_RAW:
-        # Match the JSX: bar width = min(mentions/45, 100)%
-        bar_pct = min(r["mentions"] / 45, 100)
-        # Coral if sentiment in [0, 0.3), green if >=0.3, red if <0
-        s = r["sentiment"]
-        if s >= 0.3:
-            color = "var(--pp-up)"
-        elif s >= 0:
-            color = "var(--pp-accent)"
-        else:
-            color = "var(--pp-down)"
-        rows.append({**r, "bar_pct": bar_pct, "bar_color": color})
+def _retail_bar_color(sentiment: float) -> str:
+    """Coral if sentiment in [0, 0.3), green if >= 0.3, red if < 0."""
+    if sentiment >= 0.3:
+        return "var(--pp-up)"
+    if sentiment >= 0:
+        return "var(--pp-accent)"
+    return "var(--pp-down)"
+
+
+def _attach_retail_bars(rows: list[dict]) -> list[dict]:
+    """Attach bar_pct + bar_color to each retail row using a relative scale.
+
+    bar_pct = mentions / max(visible mentions) * 100 — the most-mentioned
+    row in the set always pegs at 100% and the others scale relative to it.
+    Self-correcting whether the data source has thousands or dozens of
+    mentions, so the bars stay readable on real ApeWisdom counts.
+    Mutates each row in place; returns the list for chaining.
+    """
+    if not rows:
+        return rows
+    max_m = max((r.get("mentions") or 0) for r in rows) or 1
+    for r in rows:
+        m = r.get("mentions") or 0
+        r["bar_pct"]   = (m / max_m) * 100
+        r["bar_color"] = _retail_bar_color(r.get("sentiment", 0))
     return rows
+
+
+def _retail_rows():
+    return _attach_retail_bars([dict(r) for r in _HOME_RETAIL_RAW])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -823,6 +1082,88 @@ def _format_aum(v: float | int | None) -> str:
     return f"${v:,.0f}"
 
 
+def _format_signed_amount(delta: float | int | None) -> str:
+    """Compact signed amount: +$2.3B / -$520M / +$83K.  Used for the trade
+    delta beside fund-flow rows so the eye can clock direction + scale."""
+    if delta is None:
+        return ""
+    d = float(delta)
+    if d == 0:
+        return "$0"
+    sign = "+" if d > 0 else "−"
+    a = abs(d)
+    if a >= 1e12: return f"{sign}${a / 1e12:.1f}T"
+    if a >= 1e10: return f"{sign}${a / 1e9:.0f}B"
+    if a >= 1e9:  return f"{sign}${a / 1e9:.1f}B"
+    if a >= 1e6:  return f"{sign}${a / 1e6:.0f}M"
+    if a >= 1e3:  return f"{sign}${a / 1e3:.0f}K"
+    return f"{sign}${a:,.0f}"
+
+
+_AMOUNT_RE = __import__("re").compile(r"[-+]?[\d,.]+")
+
+
+def _compact_amount_str(s: str | None) -> str:
+    """Reformat a free-form dollar string ("$25,080,696" or "+$52.1M") into
+    the compact form ("$25M" / "$52.1M") used everywhere on the home page.
+
+    Handles long-form numbers from OpenInsider as well as already-compact
+    inputs.  Strips leading sign — direction is conveyed by the action tag,
+    not the amount.  Returns "" when nothing parses out.
+    """
+    if not s:
+        return ""
+    raw = s.strip().lstrip("+-").lstrip("$").strip()
+    # Already compact (ends with K/M/B/T) — accept as-is, just prefix $.
+    if raw and raw[-1].upper() in ("K", "M", "B", "T"):
+        return f"${raw.upper()}"
+    m = _AMOUNT_RE.search(raw)
+    if not m:
+        return ""
+    try:
+        v = float(m.group(0).replace(",", ""))
+    except ValueError:
+        return ""
+    a = abs(v)
+    if a >= 1e12: return f"${a / 1e12:.1f}T"
+    if a >= 1e10: return f"${a / 1e9:.0f}B"
+    if a >= 1e9:  return f"${a / 1e9:.1f}B"
+    if a >= 1e6:  return f"${a / 1e6:.0f}M"
+    if a >= 1e3:  return f"${a / 1e3:.0f}K"
+    return f"${a:,.0f}"
+
+
+def _compact_range_str(s: str | None) -> str:
+    """Compact a Congress-style amount range ("$1,001 - $15,000") to a
+    short form ("$1K–15K" / "$50K–100K" / "$1M–5M").
+
+    Picks the lo/hi numbers, scales each to K/M/B and combines.  Falls
+    back to a single compact value if only one number is parseable.
+    """
+    if not s:
+        return ""
+    nums = _AMOUNT_RE.findall(s.replace(",", ""))
+    if not nums:
+        return ""
+    try:
+        vals = [float(n) for n in nums if n not in ("-", "+")]
+    except ValueError:
+        return ""
+    if not vals:
+        return ""
+
+    def _short(a: float) -> str:
+        a = abs(a)
+        if a >= 1e9: return f"{a / 1e9:.0f}B"
+        if a >= 1e6: return f"{a / 1e6:.0f}M"
+        if a >= 1e3: return f"{a / 1e3:.0f}K"
+        return f"{a:.0f}"
+
+    if len(vals) == 1:
+        return f"${_short(vals[0])}"
+    return f"${_short(vals[0])}–{_short(vals[-1])}"
+
+
 def _build_cusip_ticker_map(fund_cache: dict) -> dict[str, str]:
     """Walk every fund's `all_holdings` once to build CUSIP → ticker.
 
@@ -876,6 +1217,19 @@ async def _fetch_home_fund_flows(request: Request, limit: int = 6) -> list[dict]
         fund_name = si.fund_name
         aum       = _format_aum(fund_data.get("total_value"))
 
+        # CUSIP → (shares, value) lookup from this fund's holdings.  The flat
+        # `changes` records carry only share_change + current_value, not the
+        # current_shares we need to derive an implied price-per-share for the
+        # trade-delta column.  all_holdings has both.
+        holdings_by_cusip: dict[str, tuple[float, float]] = {
+            (h.get("cusip") or ""): (
+                float(h.get("shares") or 0),
+                float(h.get("value")  or 0),
+            )
+            for h in (fund_data.get("all_holdings") or [])
+            if h.get("cusip")
+        }
+
         for c in fund_data.get("changes") or []:
             raw_status = (c.get("status") or "").upper()
             if not raw_status or raw_status == "UNCHANGED":
@@ -891,13 +1245,31 @@ async def _fetch_home_fund_flows(request: Request, limit: int = 6) -> list[dict]
                 # prefer hiding the row to showing junk.
                 continue
 
+            # Approximate trade $ delta from share_change × implied price.
+            # Implied price comes from this fund's all_holdings entry
+            # (current_value / current_shares).  NEW = full current_value.
+            # EXITED has no holdings entry (position closed) so delta is
+            # blank — the tag itself communicates direction.
+            curr_value = float(c.get("current_value") or 0)
+            shr_change = float(c.get("share_change")  or 0)
+            curr_shares, _ = holdings_by_cusip.get(cusip, (0.0, 0.0))
+            delta_amt: float | None
+            if action == "NEW":
+                delta_amt = curr_value
+            elif action == "EXITED" or curr_shares <= 0:
+                delta_amt = None
+            else:
+                price = curr_value / curr_shares
+                delta_amt = shr_change * price
             all_changes.append({
                 "manager":  manager,
                 "fund":     fund_name,
                 "aum":      aum,
                 "action":   action,
                 "ticker":   ticker.upper(),
-                "_value":   abs(float(c.get("current_value") or 0)),
+                "cik":      cik,
+                "delta":    _format_signed_amount(delta_amt) if delta_amt is not None else "",
+                "_value":   abs(curr_value),
             })
 
     if not all_changes:
@@ -927,18 +1299,15 @@ async def _fetch_home_insiders(limit: int = 5) -> list[dict]:
 
     rows = []
     for tr in trades[:limit]:
-        # `value` from OpenInsider is signed ("+$52.1M" / "-$300,560").  The
-        # BUY/SELL chip already encodes direction so the sign is redundant
-        # and visually noisy.  Strip leading +/- before display.
-        value = (tr.value or "").strip()
-        if value.startswith(("+", "-")):
-            value = value[1:]
+        # OpenInsider returns mixed formats ("+$52.1M" or "-$300,560").  The
+        # BUY/SELL chip already conveys direction, and the panel column is
+        # narrow — compact every amount to "$25M" / "$300K" style.
         rows.append({
             "person": tr.insider_name,
             "role":   _insiders_format_title(tr.title),
             "ticker": (tr.ticker or "").upper(),
             "action": _insiders_action(tr.trade_type),
-            "value":  value,
+            "value":  _compact_amount_str(tr.value),
         })
     return rows
 
@@ -966,7 +1335,7 @@ async def _fetch_home_congress(limit: int = 5) -> list[dict]:
             "chamber": r.get("chamber") or "—",
             "ticker":  (r.get("ticker") or "—").upper(),
             "action":  _congress_action(r.get("trade_type", "")),
-            "size":    r.get("amount_display") or "—",
+            "size":    _compact_range_str(r.get("amount_display")) or "—",
         })
     return out
 
@@ -1051,27 +1420,17 @@ async def _fetch_home_retail() -> dict:
         "mentions":  f"{int(head.get('mentions') or 0):,}",
         "sentiment": int(feat_sentiment * 100),
     }
-    # Build 4 supporting rows matching _retail_rows() shape (ticker, mentions,
-    # sentiment, bar_pct, bar_color).  Bar width capped at 100% of the row.
-    rows = []
-    for it in tail:
-        m = int(it.get("mentions") or 0)
-        s = _retail_sentiment_proxy(it)
-        bar_pct = min(m / 45, 100)  # same denominator as mock mapper
-        if s >= 0.3:
-            color = "var(--pp-up)"
-        elif s >= 0:
-            color = "var(--pp-accent)"
-        else:
-            color = "var(--pp-down)"
-        rows.append({
+    # Build 4 supporting rows matching _retail_rows() shape; bars scale
+    # relative to the max-mentioned ticker in the visible set.
+    rows = [
+        {
             "ticker":    (it.get("ticker") or "").upper(),
-            "mentions":  m,
-            "sentiment": s,
-            "bar_pct":   bar_pct,
-            "bar_color": color,
-        })
-    return {"feat": feat, "rows": rows}
+            "mentions":  int(it.get("mentions") or 0),
+            "sentiment": _retail_sentiment_proxy(it),
+        }
+        for it in tail
+    ]
+    return {"feat": feat, "rows": _attach_retail_bars(rows)}
 
 
 # ── 7) Fear & Greed ─────────────────────────────────────────────────
@@ -1093,10 +1452,10 @@ async def _fetch_home_feargreed() -> dict:
         )
     except Exception as exc:
         logger.warning("Fear & Greed fetch failed: %s", exc)
-        return _HOME_FEARGREED
+        return _home_feargreed_mock()
 
     if not cnn or cnn.get("score") is None:
-        return _HOME_FEARGREED
+        return _home_feargreed_mock()
 
     score = int(round(cnn.get("score", 0)))
     label = cnn.get("rating") or "Neutral"
@@ -1118,6 +1477,8 @@ async def _fetch_home_feargreed() -> dict:
         label=label,
         yesterday=_coerce_prior(cnn.get("previous_close")),
         week_ago=_coerce_prior(cnn.get("one_week_ago")),
+        month_ago=_coerce_prior(cnn.get("one_month_ago")),
+        year_ago=_coerce_prior(cnn.get("one_year_ago")),
     )
 
 
@@ -1250,10 +1611,18 @@ async def _fetch_home_flow_trending(request: Request, limit: int = 12) -> tuple[
             pass
 
     from collections import Counter
-    funds_buys: Counter = Counter()
-    funds_sells: Counter = Counter()
+    from filings.superinvestors import SUPERINVESTORS_BY_CIK
 
-    for fund_data in fund_cache.values():
+    # Per-ticker tallies + name lists.  Names power the hover tooltip;
+    # counts drive sort + bar widths.
+    funds_buy_names:  dict[str, list[str]] = {}
+    funds_sell_names: dict[str, list[str]] = {}
+    funds_buys:       Counter = Counter()
+    funds_sells:      Counter = Counter()
+
+    for cik, fund_data in fund_cache.items():
+        si = SUPERINVESTORS_BY_CIK.get(cik)
+        manager = (si.display_name if si else fund_data.get("name")) or ""
         for c in fund_data.get("changes") or []:
             raw_status = (c.get("status") or "").upper()
             action = _FUND_STATUS_MAP.get(raw_status, raw_status)
@@ -1263,12 +1632,20 @@ async def _fetch_home_flow_trending(request: Request, limit: int = 12) -> tuple[
             ticker = ticker.upper()
             if action in ("NEW", "ADDED"):
                 funds_buys[ticker] += 1
+                if manager:
+                    funds_buy_names.setdefault(ticker, []).append(manager)
             elif action in ("REDUCED", "EXITED"):
                 funds_sells[ticker] += 1
+                if manager:
+                    funds_sell_names.setdefault(ticker, []).append(manager)
 
     # Congress side — pull a wide window so the aggregate is meaningful.
-    cong_buys: Counter = Counter()
-    cong_sells: Counter = Counter()
+    cong_buys:       Counter = Counter()
+    cong_sells:      Counter = Counter()
+    cong_d:          Counter = Counter()  # buyers only
+    cong_r:          Counter = Counter()  # buyers only
+    cong_buy_names:  dict[str, list[str]] = {}
+    cong_sell_names: dict[str, list[str]] = {}
     try:
         from filings import supabase_cache
         cong_trades = await to_heavy(
@@ -1283,10 +1660,20 @@ async def _fetch_home_flow_trending(request: Request, limit: int = 12) -> tuple[
         if not ticker:
             continue
         ttype = (tr.get("trade_type") or "").lower()
+        person = (tr.get("politician_name") or tr.get("name") or "").strip()
+        party  = (tr.get("party") or "").upper()[:1]  # "D" / "R"
         if "buy" in ttype or "purchase" in ttype:
             cong_buys[ticker] += 1
+            if person:
+                cong_buy_names.setdefault(ticker, []).append(person)
+            if party == "D":
+                cong_d[ticker] += 1
+            elif party == "R":
+                cong_r[ticker] += 1
         elif "sell" in ttype or "sale" in ttype:
             cong_sells[ticker] += 1
+            if person:
+                cong_sell_names.setdefault(ticker, []).append(person)
 
     if not (funds_buys or funds_sells or cong_buys or cong_sells):
         return _HOME_FLOW_TRENDING, _HOME_FLOW_TRENDING_MAX
@@ -1303,19 +1690,37 @@ async def _fetch_home_flow_trending(request: Request, limit: int = 12) -> tuple[
         funds_dir = "BUY" if fb > fs else ("SELL" if fs > fb else "—")
         cong_dir  = "BUY" if cb > cs else ("SELL" if cs > cb else "—")
         net = (fb - fs) + (cb - cs)
+        # Top-N names for the hover tooltip; the JSON blob keeps payload
+        # size sane on tickers like SPY with hundreds of touches.
+        fund_names_top = funds_buy_names.get(tk, [])[:5]
+        fund_more = max(fb - len(fund_names_top), 0)
+        cong_names_top = cong_buy_names.get(tk, [])[:3]
+        cong_more = max(cb - len(cong_names_top), 0)
         rows.append({
-            "tk":       tk,
-            "funds":    funds_n,
-            "cong":     cong_n,
-            "fundsDir": funds_dir,
-            "congDir":  cong_dir,
-            "net":      net,
+            "tk":          tk,
+            "funds":       funds_n,
+            "cong":        cong_n,
+            "fundsDir":    funds_dir,
+            "congDir":     cong_dir,
+            "net":         net,
+            # Hover-tooltip + sort-by-buyers payload.
+            "fund_buyers": fb,
+            "fund_sellers": fs,
+            "cong_buyers": cb,
+            "cong_sellers": cs,
+            "cong_d":      cong_d[tk],
+            "cong_r":      cong_r[tk],
+            "fund_names":  fund_names_top,
+            "fund_more":   fund_more,
+            "cong_names":  cong_names_top,
+            "cong_more":   cong_more,
+            "total_buyers": fb + cb,
         })
 
-    # Rank by composite signal.  Primary key: absolute net (clearer signal).
-    # Secondary: total activity, so two tickers with same net but different
-    # fund counts surface the busier one.
-    rows.sort(key=lambda r: (-abs(r["net"]), -(r["funds"] + r["cong"])))
+    # Sort descending by total buyer count (buys across superinvestors +
+    # Congress).  Tie-break by total activity so two tickers with equal
+    # buyer counts surface the busier one.
+    rows.sort(key=lambda r: (-r["total_buyers"], -(r["funds"] + r["cong"])))
     top = rows[:limit]
     if not top:
         return _HOME_FLOW_TRENDING, _HOME_FLOW_TRENDING_MAX
@@ -1327,18 +1732,122 @@ async def _fetch_home_flow_trending(request: Request, limit: int = 12) -> tuple[
 
 
 # ── News ─────────────────────────────────────────────────────────────
-async def _fetch_home_news() -> tuple[dict, list[dict]]:
-    """Featured story + 8 supporting stories from Finnhub `general_news`.
+# Category inference — maps a Finnhub article to one of the 7 News
+# subtab filters.  Order matters: more specific buckets win.  Default is
+# "Markets" which catches generic financial headlines.
+_NEWS_CAT_KEYWORDS = (
+    ("Congress", ("Pelosi", "Tuberville", "STOCK Act", "Senate", "House",
+                  "Congress", "Khanna", "Crenshaw")),
+    ("Insiders", ("10b5-1", "Form 4", "insider sale", "insider buy",
+                  "exercised options", "CEO sold", "CFO sold")),
+    ("Funds",    ("Berkshire", "Buffett", "Ackman", "Burry", "13F",
+                  "hedge fund", "superinvestor", "Druckenmiller", "Tepper",
+                  "Loeb", "Einhorn")),
+    ("Earnings", ("earnings", "EPS", "beat", "miss", "guidance", "Q1",
+                  "Q2", "Q3", "Q4", "revenue", "raises", "lowered")),
+    ("Macro",    ("Fed ", "FOMC", "rate cut", "rate hike", "CPI",
+                  "PCE", "inflation", "Treasury", "yield", "10Y",
+                  "GDP", "Powell", "ECB", "unemployment", "jobs report",
+                  "Treasury")),
+    ("Retail",   ("Reddit", "WSB", "wallstreetbets", "Roaring Kitty",
+                  "meme stock", "retail")),
+)
 
-    Returns (featured, stories).  Featured is the most recent article;
-    stories are the next 8.  Falls back to (mock_featured, mock_stories)
-    if the API key is missing or the fetch fails.
+
+def _infer_news_category(title: str, summary: str) -> str:
+    """Best-effort category bucket for a generic financial-news headline."""
+    blob = f"{title or ''}  {summary or ''}"
+    for cat, keywords in _NEWS_CAT_KEYWORDS:
+        for kw in keywords:
+            if kw.lower() in blob.lower():
+                return cat
+    return "Markets"
+
+
+def _build_news_market_wire(
+    idx_data: dict | None, sp_data: dict | None, *, limit: int = 7,
+) -> list[dict]:
+    """Synthesize the Market Wire panel rows from already-fetched market
+    data — same source the ticker tape uses, no extra API calls.
+
+    Each row: ``{time, ticker, change, wire}``.  Time is now-ET clamped
+    to the most recent minute (we don't have per-quote timestamps from
+    yfinance; the tape itself is "now" so tagging the rows that way is
+    truthful).  Rows are ordered by ``abs(pct_change)`` so the most
+    active names surface first.  Falls back to the static mock when no
+    live data is available.
+    """
+    candidates: list[dict] = []
+    now_et = datetime.now(ZoneInfo("America/New_York")).strftime("%H:%M")
+
+    def _emit(label: str, price, pct, copy: str) -> None:
+        if price is None or pct is None:
+            return
+        try:
+            pct_f = float(pct)
+            price_f = float(price)
+        except (TypeError, ValueError):
+            return
+        sign = "+" if pct_f >= 0 else "−"
+        candidates.append({
+            "time":    now_et,
+            "ticker":  label,
+            "change":  f"{sign}{abs(pct_f):.2f}%",
+            "wire":    copy,
+            "_abs":    abs(pct_f),
+        })
+
+    # Indices — show the price level in the wire copy ("S&P at 7,229.32").
+    if isinstance(idx_data, dict):
+        for sym in _TICKER_TAPE_INDICES:
+            entry = idx_data.get(sym) or {}
+            label = _TICKER_TAPE_LABELS.get(sym, sym)
+            price = entry.get("price")
+            if price is None:
+                price = entry.get("last")
+            pct = entry.get("pct_change")
+            if pct is None:
+                pct = entry.get("change_pct")
+            if price is None or pct is None:
+                continue
+            value_str = f"{float(price):.3f}%" if sym == "^TNX" else f"{float(price):,.2f}"
+            _emit(label, price, pct, f"{label} at {value_str}")
+
+    # Single-name equities — show last + a short tag.
+    if isinstance(sp_data, dict) and "_metadata" in sp_data:
+        for sym in _TICKER_TAPE_EQUITIES:
+            entry = sp_data.get(sym) or {}
+            price = entry.get("price")
+            pct = entry.get("pct_change")
+            if price is None or pct is None:
+                continue
+            _emit(sym, price, pct, f"{sym} last ${float(price):,.2f}")
+
+    if not candidates:
+        return _HOME_NEWS_MARKET_WIRE
+
+    candidates.sort(key=lambda r: -r["_abs"])
+    return [{k: v for k, v in r.items() if k != "_abs"} for r in candidates[:limit]]
+
+
+async def _fetch_home_news(
+    *, idx_data: dict | None = None, sp_data: dict | None = None,
+) -> tuple[dict, list[dict], list[dict], list[dict]]:
+    """Featured story + supporting stories + most-read + market wire.
+
+    Returns ``(featured, stories, most_read, market_wire)``.  Featured is
+    the most recent Finnhub article; stories are the next 10 (2 surface
+    in the top-grid, the rest in the More-headlines feed).  Market wire
+    is built from the same live index + S&P quotes the ticker tape uses
+    (when available).  Most-read stays mock for now — real engagement
+    metrics need a separate tracking pipeline.  Falls back to all-mock
+    when every upstream is empty.
     """
     def _compute():
         # market_data.get_market_news has L1-only TTL cache — wrap it so
         # multiple workers can share Finnhub responses across restarts.
         from filings import market_data
-        return market_data.get_market_news("general", 12)
+        return market_data.get_market_news("general", 14)
 
     try:
         articles = await _l2_cached(
@@ -1349,24 +1858,81 @@ async def _fetch_home_news() -> tuple[dict, list[dict]]:
         logger.warning("Home news fetch failed: %s", exc)
         articles = None
 
+    market_wire = _build_news_market_wire(idx_data, sp_data)
+
     if not articles:
-        return _HOME_NEWS_FEATURED, _HOME_NEWS_STORIES
+        return (
+            _HOME_NEWS_FEATURED,
+            _HOME_NEWS_STORIES,
+            _HOME_NEWS_MOST_READ,
+            market_wire,
+        )
 
     def _shape(a: dict) -> dict:
+        # Finnhub returns: headline, source, time_ago, summary, image, url,
+        # related_tickers.  We pass all through so the template + modal can
+        # render thumbnails and "Read full article →" links without a
+        # second round-trip.  ``cat`` is inferred from headline + summary.
+        title = a.get("headline") or ""
+        summary = (a.get("summary") or "").strip()
         return {
             "src":     a.get("source") or "—",
             "ago":     a.get("time_ago") or "",
-            "title":   a.get("headline") or "",
+            "cat":     _infer_news_category(title, summary),
+            "title":   title,
+            "summary": summary,
+            "image":   a.get("image") or "",
+            "url":     a.get("url") or "",
             "tickers": a.get("related_tickers") or [],
         }
 
     head = articles[0]
     featured = {
         **_shape(head),
+        # Keep `excerpt` for backward-compat with the template's existing
+        # featured-card variable name; truncate to 280 chars for layout.
         "excerpt": (head.get("summary") or "").strip()[:280],
     }
-    stories = [_shape(a) for a in articles[1:9]]
-    return featured, stories
+    stories = [_shape(a) for a in articles[1:11]]
+    most_read = _build_news_most_read(articles)
+    return featured, stories, most_read, market_wire
+
+
+def _build_news_most_read(articles: list[dict] | None, *, limit: int = 5) -> list[dict]:
+    """Derive a "Most read" panel from the Finnhub article set when no
+    real engagement metric is available.  Picks the articles with the
+    most related tickers (rough proxy for breadth = popularity), tagged
+    with a synthesized read count that scales with breadth.
+
+    Real engagement data will replace this when a tracking pipeline lands;
+    until then, this is at least real headlines instead of a static mock.
+    """
+    if not articles:
+        return _HOME_NEWS_MOST_READ
+    ranked = sorted(
+        articles,
+        key=lambda a: (-len(a.get("related_tickers") or []), a.get("datetime_iso", "")),
+    )
+    rows: list[dict] = []
+    base_reads = 14000
+    for i, a in enumerate(ranked[:limit]):
+        title = (a.get("headline") or "").strip()
+        if not title:
+            continue
+        # Synthesized read count — decays as rank grows so the panel
+        # reads as a leaderboard.  Real metrics will overwrite this.
+        reads = base_reads // (i + 1)
+        if reads >= 1000:
+            reads_fmt = f"{reads / 1000:.1f}K reads"
+        else:
+            reads_fmt = f"{reads} reads"
+        rows.append({
+            "rank":  f"{i + 1:02d}",
+            "title": title,
+            "src":   a.get("source") or "",
+            "reads": reads_fmt,
+        })
+    return rows or _HOME_NEWS_MOST_READ
 
 
 # ── Heatmap — Companies ──────────────────────────────────────────────
@@ -1392,6 +1958,14 @@ def _heatmap_color_for_pct(pct_decimal: float) -> str:
     pct_mix = int(20 + a * 70)
     accent = "var(--pp-up)" if pct_decimal >= 0 else "var(--pp-down)"
     return f"color-mix(in srgb, {accent} {pct_mix}%, var(--pp-bg))"
+
+
+def _heatmap_tile_is_dark(pct_decimal: float) -> bool:
+    """True when the tile's mixed background is too saturated for the
+    default ink-colored text — template flips to a light text color via
+    the ``is-dark`` class.  Threshold ~55% mix corresponds to |pct| >= 1.5%."""
+    a = min(abs(pct_decimal) / 0.03, 1.0)
+    return (20 + a * 70) >= 55
 
 
 async def _fetch_home_heatmap_companies(*, mkt: dict | None = None) -> list[dict]:
@@ -1432,6 +2006,7 @@ async def _fetch_home_heatmap_companies(*, mkt: dict | None = None) -> list[dict
             "mcap":     mcap,
             "weight":   weight,
             "tile_bg":  _heatmap_color_for_pct(pct),
+            "tile_dark": _heatmap_tile_is_dark(pct),
             "span_col": 2 if weight >= 3 else 1,
             "span_row": 2 if weight >= 3 else 1,
             "is_large": weight >= 3,
@@ -1532,138 +2107,122 @@ async def _fetch_home_heatmap_sectors() -> list[dict]:
             "pct":      pct,
             "mcap":     mcap,
             "tile_bg":  _heatmap_color_for_pct(pct),
+            "tile_dark": _heatmap_tile_is_dark(pct),
             "span_col": 2 if is_mega else 1,
         })
     return rows
 
 
-# ── Activity feed ────────────────────────────────────────────────────
-# Mixes recent insider / congress / news items into one sorted timeline.
-# Each entry has the same shape the template renders: ago / src / ticker /
-# cat (BUY/SELL/ALERT/NEWS) / text.
+# ── Activity feed — Supabase notifications shaped for the redesign row.
 
-def _activity_relative_age(filing_date: str) -> str:
-    """Format a filing_date (YYYY-MM-DD) as a coarse "Nd ago" / "today" string."""
-    if not filing_date:
+def _activity_iso_time_ago(iso_str: str) -> str:
+    """Convert ISO 8601 timestamp to "3m" / "2h" / "1d" / "3w" — same shape
+    as web.py::_time_ago but without the trailing " ago" so the template
+    can append it consistently."""
+    if not iso_str:
         return ""
     try:
-        d = datetime.fromisoformat(filing_date[:10])
-        delta = (datetime.now() - d).days
-        if delta <= 0:
-            return "today"
-        if delta == 1:
-            return "1d ago"
-        if delta < 30:
-            return f"{delta}d ago"
-        if delta < 365:
-            return f"{delta // 30}mo ago"
-        return f"{delta // 365}y ago"
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        diff = datetime.now(timezone.utc) - dt
+        seconds = int(diff.total_seconds())
+        if seconds < 60:
+            return "now"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes}m"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours}h"
+        days = hours // 24
+        if days < 7:
+            return f"{days}d"
+        return f"{days // 7}w"
     except Exception:
-        return filing_date[:10]
+        return ""
+
+
+# Notification type → (cat-css variant, src label, pill label).  The cat
+# drives the row's dot color + type-tag color; src is the small uppercase
+# label in the second column; pill is the right-side colored chip text.
+_NOTIF_TYPE_META = {
+    "13f_change":        ("13f",      "13F",      "13F FILING"),
+    "youtube":           ("youtube",  "YOUTUBE",  "YOUTUBE"),
+    "reddit_velocity":   ("reddit",   "REDDIT",   "REDDIT VELOCITY"),
+    "congress_trade":    ("congress", "CONGRESS", "CONGRESS"),
+    "insider_trade":     ("insider",  "INSIDER",  "INSIDER"),
+    "feature_release":   ("feature",  "PANDA",    "NEW FEATURE"),
+}
+
+
+def _strip_ticker_prefix(text: str, ticker: str) -> str:
+    """Strip a leading ``$TICKER`` token (with trailing space/punct) so the
+    template can render it separately as a coral mono ticker chip without
+    the title duplicating it.  No-op when the title doesn't start with $."""
+    if not text or not ticker:
+        return text or ""
+    pre = f"${ticker.upper()}"
+    s = text.lstrip()
+    if s.upper().startswith(pre):
+        s = s[len(pre):].lstrip(" -—–·:|")
+    return s
 
 
 async def _fetch_home_activity(limit: int = 12) -> list[dict]:
-    """Compose 12 activity rows from insider + congress + news.
+    """Live notification feed for the Activity subtab.
 
-    Each source contributes ~4 of the 12 slots; we interleave by recency
-    using the source's timestamp.  Falls back to mock when ALL three
-    upstreams are empty (e.g. no API keys configured).
+    Mirrors the production v1 home page's "Live Activity" card — pulls
+    from ``supabase_cache.get_recent_notifications`` so the same source
+    of truth (the `notifications` table) feeds both views.  Each row
+    carries icon + title + message + type pill + time-ago, plus a click
+    target (notification's own ``link`` if set, else the metadata
+    ticker's stock page).  Falls back to the static mock when Supabase
+    is unreachable or returns an empty set.
     """
-    # Run all three fetches in parallel.
     try:
-        from filings import insider_trading, supabase_cache, market_data
-        insiders, congress, news = await asyncio.gather(
-            to_heavy(insider_trading.get_latest_insider_trades, "", 8, ""),
-            to_heavy(supabase_cache.get_congress_recent_trades, 8),
-            to_heavy(market_data.get_market_news, "general", 8),
-        )
+        from filings import supabase_cache
+        notifs = await to_light(supabase_cache.get_recent_notifications, limit)
     except Exception as exc:
         logger.warning("Activity feed fetch failed: %s", exc)
         return _HOME_ACTIVITY_FEED
 
-    items: list[tuple[str, dict]] = []  # (sortable_ts, row)
-
-    # Past-tense verbs — properly conjugated rather than `{action}ed`.
-    _verb = {"BUY": "bought", "SELL": "sold", "EXCH": "exchanged"}
-
-    # The template wraps `{f.ago}` with a trailing " ago" — pass shapes
-    # like "6h" / "2d" / "now" that read cleanly with the suffix.
-    def _strip_trailing_ago(s: str) -> str:
-        s = (s or "").strip()
-        return s[:-4].strip() if s.endswith(" ago") else s
-
-    # Strip the qty sign that OpenInsider embeds (e.g. "-9,000" / "+50,000").
-    # Action chip already carries direction.
-    def _format_qty(qty_str: str) -> str:
-        q = (qty_str or "").strip().lstrip("+").lstrip("-").strip()
-        return q
-
-    # Insider trades — cat from action; text describes who did what.
-    for tr in (insiders or [])[:5]:
-        ticker = (tr.ticker or "").upper()
-        if not ticker:
-            continue
-        action = _insiders_action(tr.trade_type)
-        cat = "BUY" if action == "BUY" else "SELL"
-        verb = _verb.get(action, action.lower())
-        value = (tr.value or "").lstrip("+").lstrip("-").strip()
-        qty = _format_qty(tr.qty or "")
-        text = f"{tr.insider_name} ({_insiders_format_title(tr.title)}) {verb}"
-        if qty:
-            text += f" {qty} shares"
-        if value:
-            text += f" — {value}"
-        items.append((tr.filing_date or "", {
-            "ago":    _strip_trailing_ago(_activity_relative_age(tr.filing_date or tr.trade_date or "")),
-            "src":    "insider",
-            "ticker": ticker,
-            "cat":    cat,
-            "text":   text,
-        }))
-
-    # Congress — cat from trade_type; text describes member + size + ticker.
-    for tr in (congress or [])[:4]:
-        ticker = (tr.get("ticker") or "").upper()
-        if not ticker:
-            continue
-        action = _congress_action(tr.get("trade_type", ""))
-        cat = "BUY" if action == "BUY" else ("SELL" if action == "SELL" else "ALERT")
-        verb = _verb.get(action, action.lower())
-        member = tr.get("politician_name") or "Member"
-        chamber = tr.get("chamber") or ""
-        size = tr.get("amount_display") or ""
-        text = f"{member} ({chamber}) disclosed {verb} order"
-        if size:
-            text += f" — {size}"
-        items.append((tr.get("filing_date", ""), {
-            "ago":    _strip_trailing_ago(_activity_relative_age(tr.get("filing_date", ""))),
-            "src":    "congress",
-            "ticker": ticker,
-            "cat":    cat,
-            "text":   text,
-        }))
-
-    # News — cat=NEWS; ticker pulled from related_tickers if present.
-    # When no related ticker, leave it empty so the template can suppress
-    # the "$—" rendering (handled in the template fix below).
-    for n in (news or [])[:5]:
-        related = n.get("related_tickers") or []
-        ticker = related[0].upper() if related else ""
-        items.append((n.get("datetime_iso", ""), {
-            "ago":    _strip_trailing_ago(n.get("time_ago") or ""),
-            "src":    "news",
-            "ticker": ticker,
-            "cat":    "NEWS",
-            "text":   n.get("headline", "") or "",
-        }))
-
-    if not items:
+    if not notifs:
         return _HOME_ACTIVITY_FEED
 
-    # Sort by timestamp descending (newest first).  Filing dates are
-    # YYYY-MM-DD strings, ISO datetimes are ISO 8601 — both compare cleanly.
-    items.sort(key=lambda x: x[0], reverse=True)
-    return [row for _, row in items[:limit]]
+    rows: list[dict] = []
+    for n in notifs:
+        ntype = (n.get("type") or "").lower()
+        cat_class, src_label, pill = _NOTIF_TYPE_META.get(
+            ntype,
+            (ntype.replace("_", "-"), ntype.split("_")[0].upper(), ntype.replace("_", " ").upper()),
+        )
+        meta = n.get("metadata") or {}
+        ticker = (meta.get("ticker") or "").upper() if isinstance(meta, dict) else ""
+        # Compact 1-line description: prefer the notification's message
+        # (cleaner for the row layout), fall back to the title with the
+        # ticker prefix stripped so the template can render $TICKER once.
+        text = (n.get("message") or "").strip()
+        if not text:
+            text = _strip_ticker_prefix(n.get("title") or "", ticker)
+        # Click target — prefer the notification's explicit link; fall
+        # back to the stock page when we have a ticker; else send users
+        # to the alerts page where they can dive into the full feed.
+        href = (n.get("link") or "").strip()
+        if not href:
+            href = f"/_v2/stock/{ticker}" if ticker else "/profile?tab=Alerts"
+        rows.append({
+            "ago":    _activity_iso_time_ago(n.get("created_at") or ""),
+            "src":    src_label,
+            "ticker": ticker,
+            "text":   text,
+            "cat":    cat_class,
+            "pill":   pill,
+            "href":   href,
+        })
+
+    if not rows:
+        return _HOME_ACTIVITY_FEED
+
+    return rows[:limit]
 
 
 # ── Calendar — Earnings ──────────────────────────────────────────────
@@ -1872,7 +2431,7 @@ async def preview_home(request: Request):
         _fetch_home_heatmap_companies(mkt=sp_1d_map),
         _fetch_home_heatmap_sectors(),
         _fetch_home_activity(limit=12),
-        _fetch_home_news(),
+        _fetch_home_news(idx_data=idx_market_map, sp_data=sp_1d_map),
         _fetch_home_cal_earnings(limit=6),
         _fetch_home_cal_macro(limit=6),
     )
@@ -1882,7 +2441,7 @@ async def preview_home(request: Request):
     flow_fund_buys_rows = fund_flows_full
     flow_congress_rows = congress_full
     flow_trending_rows, flow_trending_max = flow_trending_payload
-    news_featured_ctx, news_stories_ctx = news_payload
+    news_featured_ctx, news_stories_ctx, news_most_read_ctx, news_market_wire_ctx = news_payload
     ctx = {
         "request": request,
         **_shell_context("Home"),
@@ -1914,6 +2473,13 @@ async def preview_home(request: Request):
         # Empty string / "[]" disable hover gracefully.
         "chart_history_json": hero.get("chart_history_json", "[]"),
         "chart_prev_close":   hero.get("chart_prev_close", ""),
+        # Index + timeframe toggle — nested {idx: {period: payload}} registry,
+        # per-index OHLCV strip, and which (idx, period) to render first.
+        # Empty fallbacks keep the JS no-op when the upstream fetch failed.
+        "chart_default_index":  hero.get("chart_default_index", "S&P 500"),
+        "chart_default_period": hero.get("chart_default_period", "1D"),
+        "chart_indices_json":   hero.get("chart_indices_json", "{}"),
+        "chart_ohlcv_json":     hero.get("chart_ohlcv_json", "{}"),
 
         # Retail pulse (right side of hero) — LIVE via ApeWisdom.
         "retail_feat": retail_payload["feat"],
@@ -1952,9 +2518,13 @@ async def preview_home(request: Request):
         # events sorted by timestamp.  Cat drives dot color + pill border.
         "activity_feed": activity_rows,
 
-        # News subtab — LIVE via Finnhub general_news.
-        "news_featured": news_featured_ctx,
-        "news_stories":  news_stories_ctx,
+        # News subtab — LIVE via Finnhub general_news.  Most-read +
+        # market wire are mock-only for now (separate engagement /
+        # tape data sources not yet wired).
+        "news_featured":   news_featured_ctx,
+        "news_stories":    news_stories_ctx,
+        "news_most_read":  news_most_read_ctx,
+        "news_market_wire": news_market_wire_ctx,
 
         # Calendar subtab — LIVE.  Earnings via earnings_calendar (Finnhub /
         # FMP), macro via fred_calendar.
@@ -3351,9 +3921,10 @@ def _l2_warmup_targets() -> list[tuple[str, int, Callable[[], Any]]]:
         # Async-native — no thread slot held during network I/O.
         ("redesign:home:cnn_fg",          300, _fetch_cnn_fg_async),
         ("redesign:home:apewisdom",       300, _fetch_apewisdom_async),
+        ("redesign:home:hero_chart",      120, _hero_chart_compute),
         # Sync upstreams — go through the heavy pool / semaphore.
         ("redesign:home:sector_etfs",     300, _fetch_sector_etfs_sync),
-        ("redesign:home:news_general",    600, lambda: market_data.get_market_news("general", 12)),
+        ("redesign:home:news_general",    600, lambda: market_data.get_market_news("general", 14)),
         ("redesign:home:earnings_4w",     600, lambda: earnings_calendar.get_earnings_calendar(None, None, 4)),
         ("redesign:home:fred_indicators", 900, lambda: fred_indicators.fetch_indicators() or {}),
     ]

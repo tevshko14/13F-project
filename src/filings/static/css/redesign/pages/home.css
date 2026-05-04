@@ -179,19 +179,27 @@
 .pp-hero-search-results:not(:empty) { display: block; }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * Page nav row — Segment (left) + RangeChip (right).  Sits between
- * masthead and KPI strip.
+ * Page nav row — Subtab segment + Ticker tape, two equal-width slots.
+ * Sits between masthead and KPI strip.  Gap matches the body grid gap.
  * ───────────────────────────────────────────────────────────────────────────*/
 
 .pp-home-navrow {
-  display: flex;
-  align-items: center;
+  display: grid;
+  /* Subtab segment stays at its natural content width; ticker tape fills
+     the remaining row (~3/4 of the row at desktop). */
+  grid-template-columns: auto 1fr;
+  align-items: stretch;
   padding: 14px 24px;
   border-bottom: var(--pp-border-w) solid var(--pp-line2);
-  gap: 14px;
+  gap: 18px;
 }
 
-.pp-home-navrow-spacer { flex: 1; }
+/* ``min-width: 0`` lets the grid actually shrink the ticker's slot when the
+   viewport gets narrow (without it, the ticker's nowrap track would force
+   overflow). */
+.pp-home-navrow > * {
+  min-width: 0;
+}
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * Body — KPI strip + grids.  Page padding 22px 24px 32px.
@@ -365,7 +373,16 @@
  * Retail pulse hero — featured ticker + 4 trending rows.
  * ───────────────────────────────────────────────────────────────────────────*/
 
-.pp-home-retail { display: flex; flex-direction: column; }
+.pp-home-retail {
+  display: flex;
+  flex-direction: column;
+  /* Container-query parent for the F&G section so the left-half layout
+     can adapt to the panel's actual width — at narrow widths the
+     "67 · Greed" value can't fit beside the 100px gauge, so we collapse
+     to a vertical stack.  See the @container rule near the F&G styles. */
+  container-type: inline-size;
+  container-name: pp-retail;
+}
 
 .pp-home-retail-feat {
   padding: 14px 18px;
@@ -414,11 +431,24 @@
 
 .pp-home-list-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  /* Fixed widths on cols 2-4 so the delta / tag / ticker line up
+     vertically across rows.  Without these, each row is an independent
+     grid and ``auto`` columns size to per-row content — meaning a
+     "REDUCED" row's delta column starts at a different x than an
+     "ADDED" row's delta column. */
+  grid-template-columns: 1fr 64px 78px 50px;
   gap: 12px;
   align-items: center;
   padding: 10px 18px;
   border-bottom: var(--pp-border-w) solid var(--pp-line);
+}
+/* Inline-level grid children (the tag span) get blockified by the grid
+   layout, which combined with the default ``justify-items: stretch``
+   makes them fill the entire fixed-width cell.  Pin to content size and
+   right-align: the chip then sits flush against the ticker column with
+   a constant tight gap regardless of the tag's text width. */
+.pp-home-list-row > .pp-tag {
+  justify-self: end;
 }
 .pp-home-list-row:last-child { border-bottom: 0; }
 
@@ -430,6 +460,28 @@
 .pp-home-list-meta {
   font-size: 11px;
   color: var(--pp-dim);
+}
+/* Inline name + tag block — used by the Insider flow row to put a role
+   chip ("CEO", "CFO", etc.) right beside the person's name on a single
+   line.  ``min-width: 0`` lets the name truncate gracefully if needed. */
+.pp-home-list-name-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* Trade delta — signed compact dollar amount sitting between the
+   name/meta block and the action tag.  Left-aligned within a fixed
+   column so signs + values line up vertically across rows; tabular
+   numerics keep the digits flush.  Grid hands every cell in this
+   column the same width (== widest delta), so left-align means every
+   row's value starts at the same x-position. */
+.pp-home-list-delta {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  min-width: 64px;
 }
 .pp-home-list-tkr {
   font-family: var(--pp-font-mono);
@@ -534,18 +586,39 @@
   font-size: 11px;
 }
 
+/* Generic helper — any element carrying ``data-row-href`` becomes
+   clickable (table rows, div list rows, anything).  JS handler in
+   home.html navigates on click; this rule is the visual + a11y
+   companion (cursor, hover bg, keyboard focus ring). */
+[data-row-href] {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+[data-row-href]:hover {
+  background: var(--pp-sub);
+}
+[data-row-href]:focus-visible {
+  outline: 2px solid var(--pp-accent);
+  outline-offset: -2px;
+}
+
 /* ============================================================================
- * TICKER TAPE — always-on horizontal scroll above subtab nav
+ * TICKER TAPE — horizontal marquee that lives in the navrow next to the
+ * subtab segment (right slot).  Same visual height as the segment so the
+ * row reads as a single horizontal band.  `overflow: hidden` clips the
+ * marquee at the borders so cells don't bleed past the box.
  * ==========================================================================*/
 
 .pp-home-ticker {
-  border-bottom: 1px solid var(--pp-line2);
-  border-top: 1px solid var(--pp-line2);
+  border: 1px solid var(--pp-line2);
   background: var(--pp-sub);
   overflow: hidden;
-  height: 34px;
   display: flex;
   align-items: center;
+  /* On desktop the navrow stretches us to the segment's row height; on
+     mobile the grid stacks segment + ticker so the row height collapses to
+     content (~15px).  min-height keeps the ticker readable in both modes. */
+  min-height: 30px;
 }
 .pp-home-ticker-track {
   display: flex;
@@ -647,13 +720,29 @@
  * FEAR & GREED GAUGE (Overview / retail panel)
  * ==========================================================================*/
 
+/* Outer container — 50/50 split, gauge + kicker + value + timestamp on
+   the left, 3 timeframe rows on the right.  The hero grid was widened
+   (1.7fr 1fr → 1.2fr 1fr) so each half has room for full-length labels
+   without text wrapping. */
 .pp-home-feargreed {
   padding: 16px 18px;
   border-bottom: 1px solid var(--pp-line);
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 18px;
   align-items: center;
+}
+
+/* LEFT half — original horizontal layout: gauge on its own (col 1),
+   kicker + big value (col 2), timestamp on row 2 spanning both columns
+   so it gets the full half-width and doesn't wrap awkwardly. */
+.pp-home-feargreed-main {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 6px;
+  align-items: center;
+  min-width: 0;
 }
 .pp-home-feargreed-svg { display: block; }
 .pp-home-feargreed-text { min-width: 0; }
@@ -663,15 +752,73 @@
   font-weight: 700;
   color: var(--pp-ink);
   letter-spacing: -0.5px;
-  margin-top: 4px;
+  margin-top: 2px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.pp-home-feargreed-meta {
-  display: block;
+.pp-home-feargreed-asof {
+  grid-column: 1 / -1;
   font-size: 10px;
   color: var(--pp-dim);
-  margin-top: 4px;
+  letter-spacing: 0.02em;
 }
+
+/* When the retail panel is too narrow for the horizontal "gauge | text"
+   layout (panel < ~595px → left half < ~270px → text column < ~159px,
+   which is the natural width of "67 · Greed" at 24px), collapse the
+   left half to a vertical stack: gauge centered on top, kicker + value
+   + timestamp below.  Right half stays as-is.  At 1920px the panel is
+   ~597px so the horizontal layout stays active; below ~1900px it flips. */
+@container pp-retail (max-width: 595px) {
+  .pp-home-feargreed-main {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+    row-gap: 4px;
+  }
+  .pp-home-feargreed-value { font-size: 22px; }
+  .pp-home-feargreed-asof { font-size: 9px; }
+}
+
+/* At very narrow widths (panel < ~360px → halves < ~150px) the timestamp
+   no longer fits on a single line — let it wrap quietly. */
+@container pp-retail (max-width: 360px) {
+  .pp-home-feargreed-asof { white-space: normal; }
+}
+
+/* RIGHT half — 3 stacked timeframe rows, label-left / score-right.
+   Tabular numerics so the scores share a vertical column.  Score color
+   class (.pp-up / .pp-down) is set server-side from the F&G band. */
+.pp-home-feargreed-history {
+  margin: 0;
+  min-width: 0;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: center;
+}
+.pp-home-feargreed-history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.pp-home-feargreed-history dt {
+  color: var(--pp-dim);
+  letter-spacing: 0.04em;
+}
+.pp-home-feargreed-history dd {
+  margin: 0;
+  color: var(--pp-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* Per-row score colors — pp-up / pp-down classes are set server-side
+   based on the F&G band (>=55 greed, <=44 fear, else neutral).  These
+   selectors win over the bare-dd rule above on specificity. */
+.pp-home-feargreed-history dd.pp-up   { color: var(--pp-up);   }
+.pp-home-feargreed-history dd.pp-down { color: var(--pp-down); }
 
 /* ============================================================================
  * FLOW SUBTAB
@@ -682,14 +829,31 @@
 }
 .pp-home-flow-legend {
   display: flex;
-  gap: 18px;
+  gap: 14px;
   font-size: 11px;
   margin-bottom: 14px;
 }
+/* Legend cell is a real <button> so it's keyboard-focusable + has built-in
+   pressed semantics.  Toggling .is-on filters that data source out of the
+   table — bars hide, counts dim, rows re-sort by the visible source. */
 .pp-home-flow-legend-cell {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--pp-line2);
+  background: transparent;
+  color: var(--pp-dim);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  transition: opacity 0.12s ease;
+}
+.pp-home-flow-legend-cell.is-on { color: var(--pp-text); }
+.pp-home-flow-legend-cell:not(.is-on) { opacity: 0.45; }
+.pp-home-flow-legend-cell:focus-visible {
+  outline: 2px solid var(--pp-accent);
+  outline-offset: -2px;
 }
 .pp-home-flow-legend-swatch {
   width: 14px;
@@ -706,8 +870,85 @@
   align-items: center;
   padding: 7px 0;
   border-bottom: 1px solid var(--pp-line);
+  position: relative;  /* Anchor for the absolutely-positioned tooltip. */
 }
 .pp-home-flow-row:last-child { border-bottom: none; }
+/* Legend toggle: hide the corresponding bar + count for whichever source
+   is filtered out.  Driven by ``data-show-funds`` / ``data-show-cong`` on
+   the panel container set by the legend-toggle IIFE. */
+#pp-flow-trending[data-show-funds="0"] .pp-home-flow-bar[data-source="funds"],
+#pp-flow-trending[data-show-funds="0"] .pp-home-flow-count[data-count="funds"] { display: none; }
+#pp-flow-trending[data-show-cong="0"]  .pp-home-flow-bar[data-source="cong"],
+#pp-flow-trending[data-show-cong="0"]  .pp-home-flow-count[data-count="cong"]  { display: none; }
+
+/* Hover tooltip — positioned absolutely from the row, revealed on hover
+   (or keyboard focus).  Mirrors the production design's flyout. */
+.pp-home-flow-tooltip {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translate(-50%, 6px);
+  z-index: 10;
+  min-width: 220px;
+  padding: 12px 14px;
+  background: var(--pp-panel);
+  border: 1px solid var(--pp-line2);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--pp-text);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+.pp-home-flow-row:hover .pp-home-flow-tooltip,
+.pp-home-flow-row:focus-visible .pp-home-flow-tooltip,
+.pp-home-flow-row:focus-within .pp-home-flow-tooltip {
+  opacity: 1;
+}
+.pp-home-flow-tooltip-tk {
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--pp-ink);
+  margin-bottom: 8px;
+}
+.pp-home-flow-tooltip-section { margin-top: 8px; }
+.pp-home-flow-tooltip-section:first-of-type { margin-top: 0; }
+.pp-home-flow-tooltip-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--pp-text);
+}
+.pp-home-flow-tooltip-head b { color: var(--pp-ink); font-weight: 700; }
+.pp-home-flow-tooltip-dot {
+  width: 8px; height: 8px;
+  display: inline-block;
+}
+.pp-home-flow-tooltip-head-funds .pp-home-flow-tooltip-dot { background: var(--pp-ink); }
+.pp-home-flow-tooltip-head-cong  .pp-home-flow-tooltip-dot { background: var(--pp-accent); }
+.pp-home-flow-tooltip-party {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.pp-home-flow-tooltip-names {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-family: var(--pp-font-mono);
+  color: var(--pp-text);
+}
+.pp-home-flow-tooltip-names li { padding: 1px 0; }
+.pp-home-flow-tooltip-total {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pp-line);
+  font-size: 11px;
+}
+.pp-home-flow-tooltip-total b { color: var(--pp-ink); font-weight: 700; }
 .pp-home-flow-tk {
   color: var(--pp-ink);
   font-weight: 700;
@@ -757,6 +998,20 @@
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
+  /* Default ink-colored text — readable on the lighter (low-pct) tiles. */
+  color: var(--pp-ink);
+}
+/* Saturated tiles (mix >= 55%, i.e. |pct| >= 1.5%) flip every text
+   element inside the tile to a high-contrast white so the percentage,
+   ticker, and market cap stay legible against the saturated up/down bg. */
+.pp-home-heatmap-tile.is-dark,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-tk,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-pct,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-mcap,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-sector-name,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-sector-pct,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-sector-mcap {
+  color: #fff;
 }
 .pp-home-heatmap-tile.is-large {
   min-height: 140px;
@@ -773,6 +1028,7 @@
 }
 .pp-home-heatmap-pct {
   display: block;
+  color: var(--pp-ink);
   font-size: 12px;
   font-weight: 700;
   margin-top: 2px;
@@ -800,6 +1056,7 @@
 }
 .pp-home-heatmap-sector-pct {
   display: block;
+  color: var(--pp-ink);
   font-size: 18px;
   font-weight: 700;
   margin-top: 6px;
@@ -817,6 +1074,11 @@
  * ACTIVITY SUBTAB — live feed
  * ==========================================================================*/
 
+/* Live activity feed — compact tabular layout matching the rest of the
+   redesign.  Each row: ago | src label | colored dot | text+ticker | type
+   tag.  Whole row is click-to-navigate via the shared row-link IIFE
+   (``data-row-href`` set server-side from the notification's link or the
+   metadata ticker's stock page). */
 .pp-home-activity-live {
   font-size: 10px;
   color: var(--pp-up);
@@ -826,9 +1088,9 @@
 
 .pp-home-activity-row {
   display: grid;
-  grid-template-columns: 60px 90px 12px 1fr 70px;
+  grid-template-columns: 60px 90px 8px 1fr auto;
   gap: 14px;
-  padding: 12px 22px;
+  padding: 11px 22px;
   align-items: center;
   border-bottom: 1px solid var(--pp-line);
   font-size: 12px;
@@ -853,14 +1115,17 @@
   border-radius: 50%;
   background: var(--pp-dim);
 }
-.pp-home-activity-cat-buy   .pp-home-activity-dot { background: var(--pp-up); }
-.pp-home-activity-cat-sell  .pp-home-activity-dot { background: var(--pp-down); }
-.pp-home-activity-cat-alert .pp-home-activity-dot { background: var(--pp-accent); }
-.pp-home-activity-cat-news  .pp-home-activity-dot { background: var(--pp-dim); }
+.pp-home-activity-cat-reddit   .pp-home-activity-dot { background: #f97316; }
+.pp-home-activity-cat-13f      .pp-home-activity-dot { background: var(--pp-accent); }
+.pp-home-activity-cat-congress .pp-home-activity-dot { background: var(--pp-party-d); }
+.pp-home-activity-cat-insider  .pp-home-activity-dot { background: var(--pp-up); }
+.pp-home-activity-cat-youtube  .pp-home-activity-dot { background: var(--pp-down); }
+.pp-home-activity-cat-feature  .pp-home-activity-dot { background: var(--pp-accent); }
 
 .pp-home-activity-text {
   color: var(--pp-text);
-  line-height: 1.5;
+  line-height: 1.4;
+  min-width: 0;
 }
 .pp-home-activity-tkr {
   color: var(--pp-ink);
@@ -868,106 +1133,474 @@
   margin-right: 6px;
 }
 
-.pp-home-activity-pill {
-  font-size: 10px;
-  font-weight: 700;
-  text-align: center;
-  letter-spacing: 1px;
-  padding: 2px 7px;
-  /* Border + color pulled from the row's category modifier. */
-  border: 1px solid var(--pp-dim);
+/* The action tag pinned to the row's right edge needs a constant gap to
+   the right border — same trick as the list-row tag. */
+.pp-home-activity-row > .pp-tag {
+  justify-self: end;
+}
+
+/* Notification type pills — color per source.  Outlined chips so they
+   sit lightly without competing for attention.  Same palette the legacy
+   /notifications page uses. */
+.pp-tag-notif {
+  border-color: var(--pp-dim2);
   color: var(--pp-dim);
 }
-.pp-home-activity-cat-buy   .pp-home-activity-pill {
-  border-color: var(--pp-up);
-  color: var(--pp-up);
-}
-.pp-home-activity-cat-sell  .pp-home-activity-pill {
-  border-color: var(--pp-down);
-  color: var(--pp-down);
-}
-.pp-home-activity-cat-alert .pp-home-activity-pill {
-  border-color: var(--pp-accent);
+.pp-tag-notif-reddit   { color: #f97316; border-color: #f97316; }
+.pp-tag-notif-13f      { color: var(--pp-accent); border-color: var(--pp-accent); }
+.pp-tag-notif-congress { color: var(--pp-party-d); border-color: var(--pp-party-d); }
+.pp-tag-notif-insider  { color: var(--pp-up); border-color: var(--pp-up); }
+.pp-tag-notif-youtube  { color: var(--pp-down); border-color: var(--pp-down); }
+.pp-tag-notif-feature  { color: var(--pp-accent); border-color: var(--pp-accent); }
+
+/* Footer link sitting under the last activity row — coral, centered,
+   matches the production v1 "View all activity →" pattern. */
+.pp-home-activity-footer {
+  display: block;
+  padding: 14px 22px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--pp-accent);
+  text-decoration: none;
+  border-top: 1px solid var(--pp-line);
 }
+.pp-home-activity-footer:hover { text-decoration: underline; }
 
 /* ============================================================================
- * NEWS SUBTAB — featured + top stories
+ * NEWS SUBTAB — editorial 3-zone grid
+ *   Filter rail (top) | Left column (1fr) | Right rail (340px)
+ *   Image discipline: every image slot has a fixed aspect-ratio + cover.
  * ==========================================================================*/
 
-.pp-home-news-grid {
+/* ── Filter rail ───────────────────────────────────────────────────── */
+.pp-news-filter-rail {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 0 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-news-filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+}
+.pp-news-filter-pill {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  padding: 5px 11px;
+  background: transparent;
+  color: var(--pp-text);
+  border: 1px solid var(--pp-line2);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+  font-weight: 500;
+}
+.pp-news-filter-pill:hover { color: var(--pp-ink); border-color: var(--pp-dim2); }
+.pp-news-filter-pill.is-on {
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  border-color: var(--pp-ink);
+  font-weight: 700;
+}
+.pp-news-filter-pill:focus-visible {
+  outline: 2px solid var(--pp-accent);
+  outline-offset: -2px;
+}
+.pp-news-filter-count {
+  font-size: 10px;
+  color: var(--pp-dim2);
+}
+
+/* ── Outer 1fr / 340px grid ────────────────────────────────────────── */
+/* gap: 18px matches the standard component-to-component spacing used
+   throughout the home page (hero grid, row2, row3, retail panel). */
+.pp-news-grid {
   display: grid;
-  grid-template-columns: 1.6fr 1fr;
+  grid-template-columns: 1fr 340px;
+  gap: 18px;
+  align-items: start;
+}
+.pp-news-left { min-width: 0; }
+.pp-news-rail {
+  display: flex;
+  flex-direction: column;
   gap: 18px;
 }
 
-.pp-home-news-featured {
-  padding: 22px 26px;
-  border-left: 3px solid var(--pp-accent);
+/* ── Featured story ────────────────────────────────────────────────── */
+.pp-news-feat {
+  border-top: 2px solid var(--pp-ink);
+  padding: 18px 0 28px;
+  margin-bottom: 28px;
+  cursor: pointer;
 }
-.pp-home-news-byline {
-  font-size: 10px;
-  color: var(--pp-accent);
-  letter-spacing: 1.5px;
-  font-weight: 700;
+.pp-news-feat-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.pp-news-feat-badge {
+  font-size: 9px;
   text-transform: uppercase;
-}
-.pp-home-news-feat-title {
-  font-family: var(--pp-font-display);
-  font-size: 28px;
-  line-height: 1.1;
+  letter-spacing: 1.2px;
   font-weight: 700;
-  letter-spacing: -1px;
-  margin: 8px 0 12px;
+  padding: 3px 8px;
+  border: 1px solid var(--pp-accent);
+  color: var(--pp-accent);
+}
+.pp-news-kicker {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  color: var(--pp-dim);
+}
+.pp-news-kicker-coral { color: var(--pp-accent); }
+
+.pp-news-feat-thumb {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  background: var(--pp-sub);
+  border: 1px solid var(--pp-line2);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.pp-news-feat-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.pp-news-feat-thumb.is-empty img { display: none; }
+.pp-news-feat-headline {
+  font-family: var(--pp-font-display);
+  font-size: 32px;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -1.2px;
   color: var(--pp-ink);
   text-wrap: balance;
+  max-width: 760px;
+  margin: 0 0 12px;
 }
-.pp-home-news-feat-excerpt {
+.pp-news-feat-dek {
   font-size: 14px;
-  color: var(--pp-text);
   line-height: 1.55;
-  margin: 0;
+  color: var(--pp-text);
+  text-wrap: pretty;
+  max-width: 680px;
+  margin: 0 0 14px;
 }
-.pp-home-news-tickers {
+.pp-news-tickers {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  margin-top: 14px;
 }
-.pp-home-news-ticker {
-  font-size: 11px;
-  color: var(--pp-ink);
+.pp-news-ticker {
+  font-size: 10px;
   font-weight: 700;
-  padding: 2px 8px;
-  border: 1px solid var(--pp-line2);
-}
-
-/* Right-side story rows */
-.pp-home-news-row {
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--pp-line);
-}
-.pp-home-news-row:last-child { border-bottom: none; }
-.pp-home-news-row .pp-home-news-byline {
-  letter-spacing: 1px;
-}
-.pp-home-news-row-title {
-  font-size: 13px;
-  font-weight: 600;
   color: var(--pp-ink);
-  margin-top: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--pp-line2);
+  text-decoration: none;
+}
+.pp-news-ticker:hover { border-color: var(--pp-ink); }
+
+/* ── Top stories 1×2 grid ──────────────────────────────────────────── */
+/* Top stories + the More-headlines feed below share the same 90% width
+   so they line up.  Two equal cards inside the top grid. */
+.pp-news-topgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 28px;
+  border-top: 2px solid var(--pp-ink);
+  padding-top: 18px;
+  width: 90%;
+}
+.pp-news-more { width: 90%; }
+@media (max-width: 720px) {
+  .pp-news-topgrid { grid-template-columns: 1fr; width: 100%; }
+  .pp-news-more { width: 100%; }
+}
+/* (legacy) 2-up sub-features grid — kept in case other panes reuse it. */
+.pp-news-subgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 28px;
+}
+.pp-news-sub {
+  border-top: 1px solid var(--pp-line2);
+  padding-top: 14px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+}
+.pp-news-sub-thumb {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  background: var(--pp-sub);
+  border: 1px solid var(--pp-line2);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.pp-news-sub-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.pp-news-sub-thumb.is-empty img { display: none; }
+.pp-news-sub-headline {
+  font-family: var(--pp-font-display);
+  font-size: 17px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  color: var(--pp-ink);
+  text-wrap: balance;
+  margin: 6px 0 0;
+}
+.pp-news-sub-tickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pp-news-ticker-inline {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--pp-dim);
+  text-decoration: none;
+}
+.pp-news-ticker-inline:hover { color: var(--pp-ink); }
+
+/* ── More headlines feed ────────────────────────────────────────────── */
+.pp-news-more-head {
+  border-bottom: 1px solid var(--pp-line2);
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+.pp-news-more-row {
+  display: grid;
+  grid-template-columns: 56px 90px 1fr auto;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--pp-line);
+  align-items: baseline;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+}
+.pp-news-more-row:last-child { border-bottom: none; }
+.pp-news-more-row:hover { background: var(--pp-sub); }
+.pp-news-more-row[hidden] { display: none; }
+.pp-news-more-row:focus-visible {
+  outline: 2px solid var(--pp-accent);
+  outline-offset: -2px;
+}
+.pp-news-more-time {
+  font-size: 10px;
+  color: var(--pp-dim);
+}
+.pp-news-more-src {
+  font-size: 10px;
+  color: var(--pp-accent);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 700;
+}
+.pp-news-more-title {
+  font-size: 14px;
+  color: var(--pp-ink);
+  font-weight: 500;
   line-height: 1.4;
   text-wrap: pretty;
 }
-.pp-home-news-row-tickers {
-  display: flex;
-  gap: 5px;
-  margin-top: 6px;
+.pp-news-more-cat {
+  font-size: 9px;
+  color: var(--pp-dim2);
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  font-weight: 600;
+  text-align: right;
 }
-.pp-home-news-ticker-inline {
+
+/* ── Most read panel ────────────────────────────────────────────────── */
+.pp-news-mread-row {
+  display: grid;
+  grid-template-columns: 22px 1fr 50px;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--pp-line);
+  align-items: start;
+}
+.pp-news-mread-row:last-child { border-bottom: none; }
+.pp-news-mread-rank {
+  font-size: 14px;
+  color: var(--pp-dim2);
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.pp-news-mread-body { min-width: 0; }
+.pp-news-mread-title {
+  font-size: 12px;
+  color: var(--pp-ink);
+  line-height: 1.4;
+  font-weight: 500;
+  text-wrap: pretty;
+}
+.pp-news-mread-body .pp-news-kicker { margin-top: 3px; display: inline-block; }
+.pp-news-mread-reads {
   font-size: 10px;
   color: var(--pp-dim);
-  font-weight: 600;
+  text-align: right;
+  align-self: end;
 }
+
+/* ── Market wire panel ──────────────────────────────────────────────── */
+.pp-news-wire-row {
+  display: grid;
+  grid-template-columns: 40px 50px 56px 1fr;
+  gap: 10px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--pp-line);
+  align-items: baseline;
+  font-size: 11px;
+}
+.pp-news-wire-row:last-child { border-bottom: none; }
+.pp-news-wire-time { color: var(--pp-dim2); }
+.pp-news-wire-tk {
+  color: var(--pp-ink);
+  font-weight: 700;
+}
+.pp-news-wire-chg {
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pp-news-wire-copy {
+  color: var(--pp-text);
+  line-height: 1.4;
+}
+
+/* Click affordance on every news card. */
+.pp-news-card { transition: background-color 0.12s ease; }
+.pp-news-card:focus-visible {
+  outline: 2px solid var(--pp-accent);
+  outline-offset: -2px;
+}
+
+/* Responsive — collapse the right rail under the left column on
+   narrower viewports.  Panels still render, just stacked. */
+@media (max-width: 1080px) {
+  .pp-news-grid { grid-template-columns: 1fr; }
+}
+
+/* ── News modal ───────────────────────────────────────────────────────
+   Mirrors the v1 article-preview modal but in the redesign's clean
+   border-and-bg aesthetic (no rounded corners, no drop-shadow blur).
+   Backdrop dims the page; modal centers; content scrolls if tall. */
+.pp-news-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.pp-news-modal-backdrop[hidden] { display: none; }
+.pp-news-modal {
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  width: 100%;
+  max-width: 560px;
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 24px 26px 22px;
+  position: relative;
+}
+.pp-news-modal-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: none;
+  border: 0;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--pp-dim);
+  cursor: pointer;
+  padding: 4px 8px;
+}
+.pp-news-modal-close:hover { color: var(--pp-ink); }
+.pp-news-modal-img-wrap {
+  margin: 0 -2px 14px;
+  border: 1px solid var(--pp-line2);
+  background: var(--pp-sub);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+}
+.pp-news-modal-img-wrap[hidden] { display: none; }
+.pp-news-modal-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.pp-news-modal-headline {
+  font-family: var(--pp-font-display);
+  font-size: 22px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  color: var(--pp-ink);
+  margin: 0 24px 8px 0;  /* leave room for the close button */
+}
+.pp-news-modal-meta {
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 0.4px;
+  margin-bottom: 12px;
+}
+.pp-news-modal-source {
+  color: var(--pp-accent);
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.pp-news-modal-dot { margin: 0 6px; }
+.pp-news-modal-summary {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--pp-text);
+  margin: 0 0 14px;
+}
+.pp-news-modal-tickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.pp-news-modal-extlink {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pp-accent);
+  text-decoration: none;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+.pp-news-modal-extlink:hover { text-decoration: underline; }
 
 /* ============================================================================
  * CALENDAR SUBTAB — earnings + macro
@@ -977,6 +1610,9 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 18px;
+}
+@media (max-width: 720px) {
+  .pp-home-cal-grid { grid-template-columns: 1fr; }
 }
 
 .pp-home-cal-earn-row {
@@ -1077,6 +1713,16 @@
   .pp-home-row2 { grid-template-columns: 1fr; }
 }
 
+@media (max-width: 768px) {
+  /* KPI strip — at tablet portrait (~768px) the 5-cell grid starts
+     truncating six-digit index values ("49,499.…"); drop to 3 cells
+     so S&P / NASDAQ / DOW stay legible.  10Y + VIX still readable in
+     the ticker tape directly above. */
+  .pp-kpi-strip { grid-template-columns: repeat(3, 1fr) !important; }
+  .pp-kpi-cell:nth-child(n+4) { display: none; }
+  .pp-kpi-value { font-size: 18px; }
+}
+
 @media (max-width: 600px) {
   /* Row 3 (insider / congress / macro) stack to single column. */
   .pp-home-row3 { grid-template-columns: 1fr; }
@@ -1098,18 +1744,13 @@
   .pp-hero-search-btn { padding: 0 16px; }
   .pp-hero-search-btn-label { display: none; }
 
-  /* Subtab + range nav — wrap rather than horizontal scroll. */
+  /* Subtab + ticker — stack vertically rather than horizontal scroll. */
   .pp-home-navrow {
-    flex-wrap: wrap;
+    grid-template-columns: 1fr;
     gap: 10px;
   }
 
-  /* KPI strip — hide bottom 2 cells (10Y / VIX) at very narrow widths so
-     S&P / Nasdaq / Dow stay legible.  Better than ellipsis-truncation
-     across all 5.  Numbers still readable in the ticker tape above. */
-  .pp-kpi-strip { grid-template-columns: repeat(3, 1fr) !important; }
-  .pp-kpi-cell:nth-child(n+4) { display: none; }
-  .pp-kpi-value { font-size: 18px; }
+  /* (KPI strip rule cascades from the 768px breakpoint above.) */
 
   /* Body padding tighter. */
   .pp-home-body { padding: 16px 16px 24px; }

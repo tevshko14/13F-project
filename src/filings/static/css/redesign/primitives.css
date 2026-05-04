@@ -224,6 +224,9 @@
  *   EXITED       → filled red
  * ───────────────────────────────────────────────────────────────────────────*/
 
+/* Base + neutral fallback for unknown kinds.  Defined first so the
+   kind-specific rules below win the cascade tie (same specificity, but
+   later source order). */
 .pp-tag {
   display: inline-block;
   font-family: var(--pp-font-mono);
@@ -231,47 +234,62 @@
   font-weight: 700;
   letter-spacing: var(--pp-ls-mono-loose);
   padding: 2px 7px;
-  border: 1px solid transparent;
+  border: 1px solid var(--pp-dim2);
+  color: var(--pp-dim);
   text-transform: uppercase;
   white-space: nowrap;
 }
 
+/* Bullish actions — buy / added / new — share a single green palette.
+   ``.pp-tag-new`` stays filled to set apart "first position" from
+   "topped up", but uses the same green so the overall semantic reads
+   consistently across home, fund pages, insider, congress, options. */
 .pp-tag-buy,
 .pp-tag-added {
   color: var(--pp-up);
   border-color: var(--pp-up);
 }
 
+.pp-tag-new {
+  background: var(--pp-up);
+  color: var(--pp-accent-ink);
+  border-color: var(--pp-up);
+}
+
+/* Bearish actions — sell / reduced / exited / sold — share red.
+   Filled vs outlined keeps the "moderate vs extreme" hierarchy. */
 .pp-tag-sell,
 .pp-tag-reduced {
   color: var(--pp-down);
   border-color: var(--pp-down);
 }
 
-.pp-tag-new {
-  background: var(--pp-accent);
-  color: var(--pp-accent-ink);
-  border-color: var(--pp-accent);
-}
-
-.pp-tag-exited {
+.pp-tag-exited,
+.pp-tag-sold {
   background: var(--pp-down);
   color: var(--pp-accent-ink);
   border-color: var(--pp-down);
 }
 
-/* Fallback for unknown kind — neutral dim */
-.pp-tag {
+/* Generic neutral chip — used for non-action labels like an insider's
+   role ("CEO", "CFO", "Director") sitting beside their name. */
+.pp-tag-role {
   color: var(--pp-dim);
   border-color: var(--pp-dim2);
+  font-weight: 600;
 }
-.pp-tag-buy,
-.pp-tag-added,
-.pp-tag-sell,
-.pp-tag-reduced,
-.pp-tag-new,
-.pp-tag-exited {
-  /* re-apply specific kinds to override the catch-all above */
+
+/* Party-affiliation chips for Congress rows — outlined blue for
+   Democrats, red for Republicans.  Shows alongside the chamber as
+   "D - HOUSE" / "R - SENATE" so the eye picks up party + chamber in
+   one glance.  Color tokens are theme-aware (light + dark). */
+.pp-tag-party-d {
+  color: var(--pp-party-d);
+  border-color: var(--pp-party-d);
+}
+.pp-tag-party-r {
+  color: var(--pp-party-r);
+  border-color: var(--pp-party-r);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────

@@ -128,10 +128,10 @@
 
 {#-
   RangeChip — convenience wrapper for date-range pickers.
-  Defaults to 1D/1W/1M/3M/1Y/ALL with mono+accent styling.
+  Defaults to 1D/1W/1M/3M/1Y/5Y with mono+accent styling.
 -#}
 {%- macro range_chip(value="1M", id="", on_click_js="") -%}
-{{ segment(["1D","1W","1M","3M","1Y","ALL"], value=value, mono=True, accent=True, id=id, on_click_js=on_click_js) }}
+{{ segment(["1D","1W","1M","3M","1Y","5Y"], value=value, mono=True, accent=True, id=id, on_click_js=on_click_js) }}
 {%- endmacro -%}
 
 
