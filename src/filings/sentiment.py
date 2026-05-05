@@ -319,12 +319,12 @@ def _build_apewisdom_index(data: list[dict]) -> dict[str, dict]:
         t = (item.get("ticker") or "").upper()
         if t:
             idx[t] = {
-                "rank": item.get("rank", 0),
+                "rank": item.get("rank") or 0,
                 "name": item.get("name", ""),
-                "mentions": int(item.get("mentions", 0)),
-                "upvotes": int(item.get("upvotes", 0)),
-                "rank_24h_ago": item.get("rank_24h_ago", 0),
-                "mentions_24h_ago": int(item.get("mentions_24h_ago", 0)),
+                "mentions": int(item.get("mentions") or 0),
+                "upvotes": int(item.get("upvotes") or 0),
+                "rank_24h_ago": item.get("rank_24h_ago") or 0,
+                "mentions_24h_ago": int(item.get("mentions_24h_ago") or 0),
             }
     return idx
 

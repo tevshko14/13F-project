@@ -86,6 +86,19 @@
   display: flex;
 }
 
+/* Disabled state — used for "coming soon" features that should look greyed
+   but still surface a tooltip via the native `title` attribute. */
+.pp-btn[disabled],
+.pp-btn.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: auto;  /* keep tooltip hover; click is swallowed by [disabled] */
+}
+.pp-btn[disabled]:hover,
+.pp-btn.is-disabled:hover {
+  opacity: 0.5;          /* override default :hover lighten */
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * Containers — Panel / PanelHead
  * ───────────────────────────────────────────────────────────────────────────*/

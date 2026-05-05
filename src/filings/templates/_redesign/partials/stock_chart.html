@@ -1,0 +1,40 @@
+<svg class="pp-stock-chart-svg"
+     viewBox="0 0 600 280" preserveAspectRatio="none"
+     aria-label="{{ ticker }} {{ period }} candlestick chart">
+  {# Gridlines (5 dashed). #}
+  {% for i in range(5) %}
+    <line class="pp-home-chart-grid"
+          x1="0" x2="600"
+          y1="{{ i * 46 + 10 }}" y2="{{ i * 46 + 10 }}"/>
+  {% endfor %}
+  {% if stock_chart and stock_chart.bars %}
+    {% for b in stock_chart.bars %}
+      {% set _color = "var(--pp-up)" if b.up else "var(--pp-down)" %}
+      <line class="pp-stock-wick"
+            x1="{{ b.x }}" x2="{{ b.x }}"
+            y1="{{ b.wick_y1 }}" y2="{{ b.wick_y2 }}"
+            stroke="{{ _color }}"/>
+      <rect class="pp-stock-body"
+            x="{{ b.body_x }}" y="{{ b.body_y }}"
+            width="{{ b.body_w }}" height="{{ b.body_h }}"
+            fill="{{ _color }}"
+            fill-opacity="{{ '0.85' if b.up else '1' }}"
+            stroke="{{ _color }}"/>
+      <rect class="pp-stock-vol"
+            x="{{ b.vol_x }}" y="{{ b.vol_y }}"
+            width="6" height="{{ b.vol_h }}"
+            fill="{{ _color }}"
+            fill-opacity="0.35"/>
+    {% endfor %}
+    <line class="pp-stock-chart-crosshair"
+          x1="0" x2="0" y1="0" y2="280"
+          vector-effect="non-scaling-stroke"/>
+  {% else %}
+    <text x="300" y="140" text-anchor="middle" class="pp-stock-chart-empty">
+      No candle data for {{ period }}.
+    </text>
+  {% endif %}
+</svg>
+<script type="application/json" class="pp-stock-chart-bars-data">
+  {{ stock_chart.bars|tojson if stock_chart else '[]' }}
+</script>

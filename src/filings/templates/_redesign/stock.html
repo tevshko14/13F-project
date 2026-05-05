@@ -12,7 +12,7 @@
 {% extends "_redesign/base.html" %}
 {% from "_redesign/macros/_primitives.html" import
      mono, kicker, label, btn, panel, panel_head, segment,
-     range_chip, kpi_strip %}
+     range_chip, kpi_strip, tag %}
 
 {% block title %}{{ stock_ticker }} · PaperPanda{% endblock %}
 
@@ -30,7 +30,17 @@
    + delayed flag · ticker + name baseline · sub stats · big price + change
    on right · Compare/Watch action buttons. #}
 <header class="pp-page-hero pp-stock-hero">
-  <div class="pp-page-hero-icon pp-stock-badge" aria-hidden="true">{{ stock_ticker }}</div>
+  <div class="pp-page-hero-icon pp-stock-badge" aria-hidden="true">
+    {% if stock_logo %}
+      {# Real company logo via Clearbit / Finnhub.  onerror falls back to
+         the ticker text if the URL 404s, so the badge slot never goes blank. #}
+      <img src="{{ stock_logo }}" alt="{{ stock_ticker }} logo"
+           class="pp-stock-badge-img"
+           onerror="this.parentNode.replaceChild(document.createTextNode('{{ stock_ticker }}'), this);"/>
+    {% else %}
+      {{ stock_ticker }}
+    {% endif %}
+  </div>
   <div class="pp-page-hero-text pp-stock-id">
     <div class="pp-stock-pill-row">
       <span class="pp-mono pp-page-hero-crumb">
@@ -48,7 +58,10 @@
       <span class="pp-stock-name">{{ stock_name }}</span>
     </h1>
     <div class="pp-page-hero-sub pp-stock-sub">
-      Equity · 1Y candle history loaded
+      {% if stock_sector and stock_sector != stock_industry %}{{ stock_sector }} · {% endif %}
+      {{ stock_industry|default('—') }} ·
+      {{ stock_mcap|default('—') }} mkt cap ·
+      held by <span class="pp-stock-sub-strong">{{ stock_holders|default(0) }} superinvestors</span>
     </div>
   </div>
   <div class="pp-stock-price-block">
@@ -62,8 +75,11 @@
     {% endif %}
   </div>
   <div class="pp-stock-actions">
-    {{ btn("+ Compare", kind="ghost") }}
-    {{ btn("★ Watch",  kind="accent") }}
+    {{ btn("+ Compare", kind="ghost", id="pp-stock-compare", cls="is-disabled",
+           attrs='disabled aria-disabled="true" title="Coming soon"') }}
+    {{ btn(("★ Watching" if stock_watching else "★ Watch"),
+           kind="accent", id="pp-stock-watch",
+           attrs=('data-watching="' ~ ('1' if stock_watching else '0') ~ '"')) }}
   </div>
 </header>
 
@@ -72,8 +88,6 @@
   {{ segment(["Overview","Financials","Ownership","Forecasts","Signals","Vitals"],
              value=stock_tab|default("Overview"),
              id="pp-stock-tabs") }}
-  <div style="flex:1"></div>
-  {{ range_chip(value="1Y") }}
 </div>
 
 {# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
@@ -82,23 +96,27 @@
   {# ── OVERVIEW (default) ── #}
   <section class="pp-page-pane is-active" data-tab-pane="Overview">
 
-    {# 8-cell KPI strip — Open/High/Low/Volume/Avg Vol/Mkt Cap/P/E/52W H/L. #}
-    <section class="pp-page-section-kpi">
-      {{ kpi_strip(stock_kpi) }}
-    </section>
-
-    {# 1.7fr/1fr: candlestick chart + news list. #}
+    {# 1.7fr/1fr: candlestick chart + news list. The 8-cell KPI strip
+       (Open / High / Low / Volume / Avg Vol / Mkt Cap / P/E / 52W H/L)
+       lives inside the chart panel as a foot now — saves the standalone
+       row and keeps the metrics anchored to the chart they describe. #}
     <section class="pp-stock-row-hero">
       {% call panel(cls="pp-stock-chart-panel") %}
-        {% call panel_head("Price · Candlestick + Volume", sub="1Y · daily") %}
+        {# Custom chart panel head: title · range chip · OHLC stats.
+           Mirrors the home page hero chart layout — range chip lives
+           inside the chart panel rather than in the page tabs row. #}
+        <div class="pp-panel-head pp-stock-chart-head">
+          <div class="pp-panel-head-title">Price · Candlestick + Volume</div>
+          {{ range_chip(value="1Y", id="pp-stock-range") }}
+          <div class="pp-panel-head-spacer"></div>
           <span class="pp-mono pp-stock-chart-stats">
-            O <span class="pp-stock-chart-stat-num">{{ stock_kpi[0].value }}</span>
-            H <span class="pp-stock-chart-stat-num">{{ stock_kpi[1].value }}</span>
-            L <span class="pp-stock-chart-stat-num">{{ stock_kpi[2].value }}</span>
-            C <span class="pp-stock-chart-stat-close pp-up">{{ stock_close }}</span>
+            O <span class="pp-stock-chart-stat-num" data-stat="o">{{ stock_kpi[0].value }}</span>
+            H <span class="pp-stock-chart-stat-num" data-stat="h">{{ stock_kpi[1].value }}</span>
+            L <span class="pp-stock-chart-stat-num" data-stat="l">{{ stock_kpi[2].value }}</span>
+            C <span class="pp-stock-chart-stat-close pp-up" data-stat="c">{{ stock_close }}</span>
           </span>
-        {% endcall %}
-        <div class="pp-stock-chart-body">
+        </div>
+        <div class="pp-stock-chart-body" data-vb-w="600" data-vb-h="280">
           <svg class="pp-stock-chart-svg"
                viewBox="0 0 600 280" preserveAspectRatio="none"
                aria-label="{{ stock_ticker }} 1-year candlestick chart">
@@ -129,17 +147,48 @@
                       fill="{{ _color }}"
                       fill-opacity="0.35"/>
               {% endfor %}
+              {# Hover crosshair (vertical line) — JS toggles visibility. #}
+              <line class="pp-stock-chart-crosshair"
+                    x1="0" x2="0" y1="0" y2="280"
+                    vector-effect="non-scaling-stroke"/>
             {% else %}
               <text x="300" y="140" text-anchor="middle" class="pp-stock-chart-empty">
                 Loading 1Y candles…
               </text>
             {% endif %}
           </svg>
+          {# OHLC tooltip — HTML overlay so the text isn't warped by
+             preserveAspectRatio="none".  JS positions on mousemove. #}
+          <div class="pp-stock-chart-tooltip" hidden>
+            <span class="pp-stock-chart-tooltip-date"></span>
+            <span class="pp-stock-chart-tooltip-row">
+              O <b class="pp-stock-chart-tooltip-o"></b>
+              H <b class="pp-stock-chart-tooltip-h"></b>
+              L <b class="pp-stock-chart-tooltip-l"></b>
+              C <b class="pp-stock-chart-tooltip-c"></b>
+            </span>
+            <span class="pp-stock-chart-tooltip-row">
+              VOL <b class="pp-stock-chart-tooltip-v"></b>
+              <span class="pp-stock-chart-tooltip-chg"></span>
+            </span>
+          </div>
+          {# Bar data — read by hover JS (timestamp + OHLCV per bar +
+             pre-computed x-coordinate). Replaced by partial on period swap. #}
+          <script type="application/json" class="pp-stock-chart-bars-data">
+            {{ stock_chart.bars|tojson if stock_chart else '[]' }}
+          </script>
           <div class="pp-stock-chart-axis">
             {% for d in ["Apr '25","Jun","Aug","Oct","Dec","Feb '26","Apr"] %}
               <span class="pp-mono pp-stock-chart-tick">{{ d }}</span>
             {% endfor %}
           </div>
+        </div>
+        {# Foot strip — 8 KPI cells (Open / High / Low / Volume / Avg Vol /
+           Mkt Cap / P/E / 52W H/L), sized to the chart panel's width.
+           Moved here from a standalone row above the chart so the metrics
+           stay anchored to the chart they describe. #}
+        <div class="pp-stock-chart-foot">
+          {{ kpi_strip(stock_kpi) }}
         </div>
       {% endcall %}
 
@@ -149,10 +198,17 @@
         {% endcall %}
         {% if stock_news %}
           {% for n in stock_news %}
-            <div class="pp-stock-news-row">
-              <span class="pp-mono pp-stock-news-byline">{{ n.src }}{% if n.ago %} · {{ n.ago }}{% endif %}</span>
-              <div class="pp-stock-news-title">{{ n.title }}</div>
-            </div>
+            {% if n.url %}
+              <a class="pp-stock-news-row" href="{{ n.url }}" target="_blank" rel="noopener noreferrer">
+                <span class="pp-mono pp-stock-news-byline">{{ n.src }}{% if n.ago %} · {{ n.ago }}{% endif %}</span>
+                <div class="pp-stock-news-title">{{ n.title }}</div>
+              </a>
+            {% else %}
+              <div class="pp-stock-news-row">
+                <span class="pp-mono pp-stock-news-byline">{{ n.src }}{% if n.ago %} · {{ n.ago }}{% endif %}</span>
+                <div class="pp-stock-news-title">{{ n.title }}</div>
+              </div>
+            {% endif %}
           {% endfor %}
         {% else %}
           <div class="pp-page-placeholder">
@@ -167,19 +223,21 @@
       {% call panel() %}
         {{ panel_head("Retail sentiment", sub="r/wallstreetbets · 24h") }}
         <div class="pp-stock-sentiment-body">
+          {% if sentiment.has_data %}
           <div class="pp-stock-sentiment-head">
-            <span class="pp-mono pp-stock-sentiment-score">+71</span>
+            <span class="pp-mono pp-stock-sentiment-score {{ sentiment.score_class }}">{{ sentiment.score_str }}</span>
             <div>
               {{ label("Sentiment score") }}
               <span class="pp-mono pp-stock-sentiment-meta">
-                2,891 mentions · #3 most discussed
+                {{ sentiment.mentions }} mentions{% if sentiment.rank_str %} · {{ sentiment.rank_str }}{% endif %}
               </span>
             </div>
           </div>
-          {# Centered-zero sentiment bar — extracted to primitive in audit. #}
+          {# Centered-zero sentiment bar — fill width + offset are dynamic. #}
           <div class="pp-stock-sentiment-bar">
             <div class="pp-stock-sentiment-tick"></div>
-            <div class="pp-stock-sentiment-fill"></div>
+            <div class="pp-stock-sentiment-fill {{ sentiment.score_class }}"
+                 style="left: {{ sentiment.fill_left }}%; width: {{ sentiment.fill_pct }}%;"></div>
           </div>
           <div class="pp-stock-sentiment-axis">
             <span class="pp-mono">BEARISH</span>
@@ -187,28 +245,33 @@
             <span class="pp-mono">BULLISH</span>
           </div>
           <div class="pp-stock-sentiment-note">
-            Top tickers mentioned alongside:
-            <span class="pp-mono pp-stock-sentiment-cohort">SMCI, AVGO, AMD</span>.
-            Sentiment +14pp WoW driven by Blackwell shipment optimism.
+            {% if sentiment.cohort %}
+              Top tickers mentioned alongside:
+              <span class="pp-mono pp-stock-sentiment-cohort">{{ sentiment.cohort | join(", ") }}</span>.
+            {% endif %}
+            {{ sentiment.note }}
           </div>
+          {% else %}
+          <p class="pp-stock-sentiment-note">
+            {{ stock_ticker }} is not currently trending on r/WallStreetBets — no mentions in the last 24 hours.
+          </p>
+          {% endif %}
         </div>
       {% endcall %}
 
       {% call panel() %}
         {{ panel_head("About", sub="company") }}
         <div class="pp-stock-about-body">
-          <p class="pp-stock-about-blurb">
-            {{ stock_name }} — full company description from fundamentals.get_company_overview()
-            will populate here.  Coming next pass with the SEC company-facts join.
-          </p>
+          {% if about_blurb %}
+            <p class="pp-stock-about-blurb">{{ about_blurb }}</p>
+          {% endif %}
           <div class="pp-stock-about-grid">
             {% for k, v in [
-                 ("CEO",       "—"),
-                 ("Founded",   "—"),
-                 ("Employees", "—"),
-                 ("HQ",        "—"),
-                 ("IPO",       "—"),
-                 ("Website",   "—"),
+                 ("CEO",       about_ceo),
+                 ("Employees", about_employees),
+                 ("HQ",        about_hq),
+                 ("IPO",       about_ipo),
+                 ("Website",   about_website),
                ] %}
               <div>
                 {{ label(k) }}
@@ -222,41 +285,629 @@
 
   </section>
 
-  {# 5 placeholder panes. #}
+  {# ━━━━━━━━━━ FINANCIALS TAB ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Financials">
-    {% call panel() %}<div class="pp-page-placeholder">
-      <div class="pp-page-placeholder-icon">$</div>
-      <div class="pp-page-placeholder-title">Financials — coming soon</div>
-      <div class="pp-page-placeholder-sub">Income statement / Balance sheet / Cash flow tables. fundamentals.get_fundamentals already wires this.</div>
-    </div>{% endcall %}
+    {# 4-cell KPI summary strip (Revenue / Net Income / FCF / Gross Margin). #}
+    <div class="pp-stock-fin-kpis">
+      {% for k in fin_kpis %}
+        <div class="pp-stock-fin-kpi">
+          {{ label(k.label) }}
+          <span class="pp-mono pp-stock-fin-kpi-val">{{ k.value }}</span>
+          <span class="pp-mono pp-stock-fin-kpi-delta {{ 'pp-up' if k.up else 'pp-down' }}">▲ {{ k.delta }}</span>
+        </div>
+      {% endfor %}
+    </div>
+
+    {# Statement controls — Income/Balance/Cash + Annual/Quarterly. #}
+    <div class="pp-stock-fin-controls">
+      {{ segment(["Income","Balance","Cash flow"], value="Income", id="pp-stock-fin-stmt") }}
+      {{ segment(["Annual","Quarterly"], value="Annual", mono=True, id="pp-stock-fin-period") }}
+      <div class="pp-stock-fin-controls-spacer"></div>
+      <span class="pp-mono pp-stock-fin-unit">$B except where noted</span>
+    </div>
+
+    {# Statement tables — only the active one is visible. #}
+    {% set statements = [
+         ("Income",     "Income statement",  fin_income),
+         ("Balance",    "Balance statement", fin_balance),
+         ("Cash flow",  "Cash flow",         fin_cash),
+       ] %}
+    {% for kind, title, rows in statements %}
+      {% call panel(cls="pp-stock-fin-table-panel") %}
+        <table class="pp-stock-fin-table" data-stmt="{{ kind }}">
+          <thead>
+            <tr>
+              <th class="pp-stock-fin-th-label">{{ title }}</th>
+              {% for p in fin_periods %}
+                <th class="pp-stock-fin-th-num{% if loop.last %} is-ttm{% endif %}">{{ p }}</th>
+              {% endfor %}
+              <th class="pp-stock-fin-th-trend">Trend</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+              <tr class="{{ 'is-bold ' if r.bold else '' }}{{ 'is-hl' if r.hl else '' }}">
+                <td class="pp-stock-fin-cell-label">{{ r.label }}</td>
+                {% for v in r.vals %}
+                  {% set _last = loop.last %}
+                  <td class="pp-stock-fin-cell-num{% if _last %} is-ttm{% endif %}">
+                    <span class="pp-mono">
+                      {%- if r.unit == "$" -%}
+                        ${{ "%.2f"|format(v) }}
+                      {%- elif r.unit == "%" -%}
+                        {{ "%.1f"|format(v) }}%
+                      {%- elif r.unit == "ratio" -%}
+                        {{ "%.2f"|format(v) }}
+                      {%- else -%}
+                        {%- if v < 0 -%}({{ "%.1f"|format(v|abs) }}){%- else -%}{{ "%.1f"|format(v) }}{%- endif -%}
+                      {%- endif %}
+                    </span>
+                  </td>
+                {% endfor %}
+                {# Inline mini-bars showing last 5 values, highlighted last bar. #}
+                {% set _abs = r.vals|map('abs')|list %}
+                {% set _max = _abs|max %}
+                <td class="pp-stock-fin-cell-trend">
+                  <div class="pp-stock-fin-bars">
+                    {% for v in r.vals[-5:] %}
+                      {% set _h = (v|abs / (_max if _max > 0 else 1)) * 16 + 2 %}
+                      <span class="pp-stock-fin-bar{% if v < 0 %} is-neg{% endif %}{% if loop.last %} is-current{% endif %}{% if r.hl %} is-hl{% endif %}"
+                            style="height: {{ _h|round(1) }}px;"></span>
+                    {% endfor %}
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    {% endfor %}
+
+    {# Revenue split (segments) + Margin trend (line chart). #}
+    <div class="pp-stock-fin-row">
+      {% call panel() %}
+        {{ panel_head("Revenue by segment", sub="FY25") }}
+        <div class="pp-stock-rev-segments">
+          {% for s in rev_segments %}
+            {% set _pct = (s.value / rev_total) * 100 %}
+            <div class="pp-stock-rev-row">
+              <div class="pp-stock-rev-label">
+                <span>{{ s.name }}</span>
+                <span class="pp-mono pp-stock-rev-num">${{ "%.2f"|format(s.value) }}B
+                  <span class="pp-stock-rev-pct">{{ "%.1f"|format(_pct) }}%</span></span>
+              </div>
+              <div class="pp-stock-rev-bar">
+                <span class="pp-stock-rev-fill" style="width: {{ "%.1f"|format(_pct) }}%; background: {{ s.color }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Margin trend", sub="5-year") }}
+        <div class="pp-stock-margin-chart">
+          <svg viewBox="0 0 500 180" preserveAspectRatio="none" class="pp-stock-margin-svg" aria-label="Margin trend chart">
+            {% for i in range(4) %}
+              <line class="pp-home-chart-grid" x1="0" x2="500" y1="{{ i * 45 + 10 }}" y2="{{ i * 45 + 10 }}"/>
+            {% endfor %}
+            <path class="pp-stock-margin-line pp-stock-margin-gross" d="{{ margin_paths.gross }}"/>
+            <path class="pp-stock-margin-line pp-stock-margin-op"    d="{{ margin_paths.op }}"/>
+            <path class="pp-stock-margin-line pp-stock-margin-net"   d="{{ margin_paths.net }}"/>
+            {% for p in margin_paths.gross_pts %}
+              <circle class="pp-stock-margin-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"/>
+            {% endfor %}
+          </svg>
+          <div class="pp-stock-margin-axis">
+            {% for d in margin_trend.labels %}<span class="pp-mono">{{ d }}</span>{% endfor %}
+          </div>
+          <div class="pp-stock-margin-legend">
+            <span class="pp-stock-margin-leg pp-stock-margin-leg-gross"><span class="pp-stock-margin-swatch"></span>Gross</span>
+            <span class="pp-stock-margin-leg pp-stock-margin-leg-op"><span class="pp-stock-margin-swatch"></span>Operating</span>
+            <span class="pp-stock-margin-leg pp-stock-margin-leg-net"><span class="pp-stock-margin-swatch"></span>Net</span>
+          </div>
+        </div>
+      {% endcall %}
+    </div>
   </section>
+
+  {# ━━━━━━━━━━ OWNERSHIP TAB ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Ownership">
-    {% call panel() %}<div class="pp-page-placeholder">
-      <div class="pp-page-placeholder-icon">▣</div>
-      <div class="pp-page-placeholder-title">Ownership — coming soon</div>
-      <div class="pp-page-placeholder-sub">Funds · Congress · Insiders · SEC filings sub-pills.  Existing client.get_holders + insider_trading + congress_trading drive this.</div>
-    </div>{% endcall %}
+    {# Sub-pills + counter on the right. #}
+    <div class="pp-stock-own-controls">
+      {{ segment(["Funds","Congress","Insiders","SEC Filings"], value="Funds", accent=True, id="pp-stock-own-sub") }}
+      <div class="pp-stock-own-controls-spacer"></div>
+      <span class="pp-mono pp-stock-own-counter" id="pp-stock-own-counter"
+            data-funds="{{ own_funds_count }} institutional holders · combined {{ own_funds_value }}"
+            data-congress="{{ own_congress_count }} trades · all-time"
+            data-insiders="{{ own_insiders_count }} Form 4 trades"
+            data-filings="Recent filings · EDGAR">
+        {{ own_funds_count }} institutional holders · combined {{ own_funds_value }}
+      </span>
+    </div>
+
+    {# ── Funds sub-tab ── #}
+    <div class="pp-stock-own-pane is-active" data-own-pane="Funds">
+      {% call panel() %}
+        {% call panel_head("Top institutional holders", sub="Q1 2026 13F") %}
+          <div class="pp-stock-own-head-right">
+            {{ segment(["All","Adds","Cuts","New","Exits"], value="All", mono=True) }}
+            <a class="pp-link-coral" href="/_v2/funds">View all {{ own_funds_count }} →</a>
+          </div>
+        {% endcall %}
+        <table class="pp-stock-own-table">
+          <thead>
+            <tr>
+              <th class="pp-stock-own-th-rank">#</th>
+              <th class="pp-stock-own-th-l">Holder</th>
+              <th class="pp-stock-own-th-l">Manager</th>
+              <th class="pp-stock-own-th-r">Shares</th>
+              <th class="pp-stock-own-th-r">Value</th>
+              <th class="pp-stock-own-th-r">Port % of fund</th>
+              <th class="pp-stock-own-th-r pp-stock-own-th-chg">QoQ Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in own_funds %}
+              <tr>
+                <td class="pp-stock-own-rank pp-mono">{{ r.rank }}</td>
+                <td class="pp-stock-own-fund">{{ r.fund }}</td>
+                <td class="pp-stock-own-mgr">{{ r.manager }}</td>
+                <td class="pp-stock-own-num pp-mono">{{ r.shares }}</td>
+                <td class="pp-stock-own-num pp-stock-own-val pp-mono">{{ r.value }}</td>
+                <td class="pp-stock-own-num pp-mono">{{ r.port }}</td>
+                <td class="pp-stock-own-num pp-stock-own-chg">
+                  {%- if r.chg == 0 -%}
+                    <span class="pp-mono pp-dim">—</span>
+                  {%- elif r.chg == 1 -%}
+                    {{ tag("new") }}
+                  {%- else -%}
+                    {{ tag("added" if r.chg > 0 else "reduced",
+                            text=("+" if r.chg > 0 else "") ~ "%.1f"|format(r.chg * 100) ~ "%") }}
+                  {%- endif -%}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    </div>
+
+    {# ── Congress sub-tab ── #}
+    <div class="pp-stock-own-pane" data-own-pane="Congress">
+      {% call panel() %}
+        {{ panel_head("Congressional trading activity", sub="STOCK Act disclosures") }}
+        <table class="pp-stock-own-table">
+          <thead>
+            <tr>
+              <th class="pp-stock-own-th-l">Member</th>
+              <th class="pp-stock-own-th-l">Chamber</th>
+              <th class="pp-stock-own-th-l">Action</th>
+              <th class="pp-stock-own-th-r">Trade size</th>
+              <th class="pp-stock-own-th-r">Filed</th>
+              <th class="pp-stock-own-th-r">Disclosure delay</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in own_congress %}
+              <tr>
+                <td class="pp-stock-own-cong-person">
+                  <span class="pp-stock-own-party-dot pp-stock-own-party-{{ r.party|lower }}"></span>
+                  <span class="pp-stock-own-fund">{{ r.person }}</span>
+                </td>
+                <td class="pp-stock-own-mgr">{{ r.chamber }}</td>
+                <td>{{ tag(r.action) }}</td>
+                <td class="pp-stock-own-num pp-stock-own-val pp-mono">{{ r.size }}</td>
+                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date }}</td>
+                <td class="pp-stock-own-num pp-mono pp-stock-own-days {{ 'is-fast' if r.days < 10 else ('is-mid' if r.days < 30 else 'is-slow') }}">
+                  {{ r.days }} days
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    </div>
+
+    {# ── Insiders sub-tab ── #}
+    <div class="pp-stock-own-pane" data-own-pane="Insiders">
+      {% call panel() %}
+        {{ panel_head("Insider transactions", sub="Form 4 · last 6 months") }}
+        <table class="pp-stock-own-table">
+          <thead>
+            <tr>
+              <th class="pp-stock-own-th-l">Person</th>
+              <th class="pp-stock-own-th-l">Role</th>
+              <th class="pp-stock-own-th-l">Action</th>
+              <th class="pp-stock-own-th-r">Shares</th>
+              <th class="pp-stock-own-th-r">Value</th>
+              <th class="pp-stock-own-th-r">Date</th>
+              <th class="pp-stock-own-th-r">Remaining</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in own_insiders %}
+              <tr>
+                <td class="pp-stock-own-fund">{{ r.person }}</td>
+                <td class="pp-stock-own-mgr">{{ r.role }}</td>
+                <td>{{ tag(r.action) }}</td>
+                <td class="pp-stock-own-num pp-mono">{{ r.shares }}</td>
+                <td class="pp-stock-own-num pp-stock-own-val pp-mono">{{ r.value }}</td>
+                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date }}</td>
+                <td class="pp-stock-own-num pp-mono">{{ r.remaining }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    </div>
+
+    {# ── SEC Filings sub-tab ── #}
+    <div class="pp-stock-own-pane" data-own-pane="SEC Filings">
+      {% call panel() %}
+        {% call panel_head("EDGAR filings", sub="all forms · " ~ stock_ticker) %}
+          {{ segment(["All","10-K/Q","8-K","Form 4","13F","Proxy"], value="All", mono=True) }}
+        {% endcall %}
+        <table class="pp-stock-own-table">
+          <thead>
+            <tr>
+              <th class="pp-stock-own-th-l pp-stock-own-th-form">Form</th>
+              <th class="pp-stock-own-th-l">Filed</th>
+              <th class="pp-stock-own-th-l">Period</th>
+              <th class="pp-stock-own-th-l">Description</th>
+              <th class="pp-stock-own-th-r">Size</th>
+              <th class="pp-stock-own-th-r"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in own_filings %}
+              <tr>
+                <td><span class="pp-stock-own-form-pill pp-mono">{{ r.type }}</span></td>
+                <td class="pp-stock-own-mgr pp-mono">{{ r.filed }}</td>
+                <td class="pp-stock-own-fund">{{ r.period }}</td>
+                <td class="pp-stock-own-mgr">{{ r.desc }}</td>
+                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.size }}</td>
+                <td class="pp-stock-own-num"><span class="pp-stock-own-link">↗</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    </div>
   </section>
+
+  {# ━━━━━━━━━━ FORECASTS TAB ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Forecasts">
-    {% call panel() %}<div class="pp-page-placeholder">
-      <div class="pp-page-placeholder-icon">∿</div>
-      <div class="pp-page-placeholder-title">Forecasts — coming soon</div>
-      <div class="pp-page-placeholder-sub">Analyst price targets, EPS / revenue estimates.  analysts.py already populates these.</div>
-    </div>{% endcall %}
+    {# Top: consensus + price-target distribution. #}
+    <div class="pp-stock-fct-top">
+      {% call panel() %}
+        {{ panel_head("Analyst consensus", sub=fct_ratings_total ~ " analysts") }}
+        <div class="pp-stock-fct-consensus">
+          {% set _verdict_class = "pp-up" if "BUY" in fct_consensus else ("pp-down" if "SELL" in fct_consensus else "pp-stock-fct-coral") %}
+          <span class="pp-mono pp-stock-fct-consensus-verdict {{ _verdict_class }}">{{ fct_consensus }}</span>
+          <div class="pp-stock-fct-consensus-sub">{{ fct_ratings_total }} firms covering · {{ fct_consensus|lower }} consensus</div>
+          <div class="pp-stock-fct-rating-bars">
+            {% for name, count, color in fct_ratings %}
+              <div class="pp-stock-fct-rating">
+                <div class="pp-stock-fct-rating-row">
+                  <span>{{ name }}</span>
+                  <span class="pp-mono pp-stock-fct-rating-count">{{ count }}</span>
+                </div>
+                <div class="pp-stock-fct-rating-bar">
+                  <span class="pp-stock-fct-rating-fill"
+                        style="width: {{ "%.1f"|format(count / fct_ratings_total * 100) }}%; background: {{ color }};"></span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Price target distribution", sub="12-month forward") }}
+        <div class="pp-stock-fct-targets">
+          <div class="pp-stock-fct-target-grid">
+            <div>{{ label("Low") }}<span class="pp-mono pp-stock-fct-target-num pp-down">${{ "%.0f"|format(fct_target_low) }}</span></div>
+            <div>{{ label("Avg") }}<span class="pp-mono pp-stock-fct-target-num pp-stock-fct-coral">${{ "%.0f"|format((fct_target_low + fct_target_high) / 2) }}</span></div>
+            <div>{{ label("High") }}<span class="pp-mono pp-stock-fct-target-num pp-up">${{ "%.0f"|format(fct_target_high) }}</span></div>
+          </div>
+          <div class="pp-stock-fct-numberline">
+            <div class="pp-stock-fct-axis"></div>
+            <div class="pp-stock-fct-now" style="left: {{ fct_now_pct }}%;">${{ stock_price|default('142') }} NOW</div>
+            <div class="pp-stock-fct-now-line" style="left: {{ fct_now_pct }}%;"></div>
+            {% for a in fct_analysts %}
+              {% set _col = "var(--pp-up)" if a.rating in ("BUY","OVERWEIGHT") else ("var(--pp-accent)" if a.rating == "HOLD" else "var(--pp-down)") %}
+              <span class="pp-stock-fct-tick" style="left: {{ a.pct }}%; background: {{ _col }};"></span>
+            {% endfor %}
+            <div class="pp-stock-fct-axis-labels">
+              <span class="pp-mono">$80</span><span class="pp-mono">$120</span>
+              <span class="pp-mono">$160</span><span class="pp-mono">$200</span>
+              <span class="pp-mono">$220</span>
+            </div>
+          </div>
+          <div class="pp-stock-fct-implied">
+            <span>Implied upside (avg)</span>
+            <span class="pp-mono pp-up">+21.0% to $172</span>
+          </div>
+        </div>
+      {% endcall %}
+    </div>
+
+    {# Recent analyst actions table. #}
+    {% call panel(cls="pp-stock-fct-table-panel") %}
+      {{ panel_head("Recent analyst actions", sub="last 30 days") }}
+      <table class="pp-stock-fct-analysts">
+        <thead>
+          <tr>
+            <th class="pp-stock-own-th-l">Firm</th>
+            <th class="pp-stock-own-th-l">Analyst</th>
+            <th class="pp-stock-own-th-l">Rating</th>
+            <th class="pp-stock-own-th-r">Target</th>
+            <th class="pp-stock-own-th-r">Prior</th>
+            <th class="pp-stock-own-th-r">Δ</th>
+            <th class="pp-stock-own-th-r">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in fct_analysts %}
+            {% set _bull = r.rating in ("BUY","OVERWEIGHT") %}
+            {% set _bear = r.rating in ("SELL","UNDERWEIGHT") %}
+            <tr>
+              <td class="pp-stock-own-fund">{{ r.firm }}</td>
+              <td class="pp-stock-own-mgr">{{ r.analyst }}</td>
+              <td>
+                <span class="pp-mono pp-stock-fct-rating-pill {{ 'pp-up' if _bull else ('pp-down' if _bear else 'pp-stock-fct-coral') }}">
+                  {{ r.rating }}
+                </span>
+              </td>
+              <td class="pp-stock-own-num pp-mono pp-stock-fct-target-cell">${{ r.target }}</td>
+              <td class="pp-stock-own-num pp-mono pp-dim">${{ r.prev }}</td>
+              <td class="pp-stock-own-num pp-mono">
+                {% if r.delta == 0 %}
+                  <span class="pp-dim">—</span>
+                {% else %}
+                  <span class="{{ 'pp-up' if r.delta > 0 else 'pp-down' }}">
+                    {{- '▲' if r.delta > 0 else '▼' }} ${{ r.delta|abs }}
+                  </span>
+                {% endif %}
+              </td>
+              <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endcall %}
+
+    {# Estimates: revenue table + EPS revisions chart. #}
+    <div class="pp-stock-fin-row">
+      {% call panel() %}
+        {{ panel_head("Revenue estimates", sub="next 4 quarters") }}
+        <table class="pp-stock-fct-rev">
+          <thead>
+            <tr>
+              <th class="pp-stock-own-th-l">Period</th>
+              <th class="pp-stock-own-th-r">Estimate</th>
+              <th class="pp-stock-own-th-r">Low</th>
+              <th class="pp-stock-own-th-r">High</th>
+              <th class="pp-stock-own-th-r">YoY</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in fct_rev_est %}
+              <tr class="{{ 'is-total' if r.is_total else '' }}">
+                <td class="pp-stock-own-fund">{{ r.period }}</td>
+                <td class="pp-stock-own-num pp-mono pp-stock-own-val">{{ r.est }}</td>
+                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.low }}</td>
+                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.high }}</td>
+                <td class="pp-stock-own-num pp-mono pp-up">{{ r.yoy }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Estimate revisions", sub="last 90 days") }}
+        <div class="pp-stock-eps-chart">
+          <svg viewBox="0 0 500 180" preserveAspectRatio="none" class="pp-stock-eps-svg" aria-label="EPS revisions chart">
+            {% for i in range(4) %}
+              <line class="pp-home-chart-grid" x1="0" x2="500" y1="{{ i * 45 + 10 }}" y2="{{ i * 45 + 10 }}"/>
+            {% endfor %}
+            <path class="pp-stock-eps-area" d="{{ fct_eps_path }} L 480 170 L 20 170 Z"/>
+            <path class="pp-stock-eps-line" d="{{ fct_eps_path }}"/>
+            {% for p in fct_eps_pts %}
+              <circle class="pp-stock-eps-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"/>
+            {% endfor %}
+          </svg>
+          <div class="pp-stock-eps-axis">
+            <span class="pp-mono">90d ago</span>
+            <span class="pp-mono">60d</span>
+            <span class="pp-mono">30d</span>
+            <span class="pp-mono">Now</span>
+          </div>
+          <div class="pp-stock-eps-note">
+            FY26 EPS estimate revised <span class="pp-mono pp-up">+27.2%</span> over 90 days.
+            <span class="pp-dim">34 upgrades, 2 downgrades.</span>
+          </div>
+        </div>
+      {% endcall %}
+    </div>
   </section>
+
+  {# ━━━━━━━━━━ SIGNALS TAB ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Signals">
-    {% call panel() %}<div class="pp-page-placeholder">
-      <div class="pp-page-placeholder-icon">⚡</div>
-      <div class="pp-page-placeholder-title">Signals — coming soon</div>
-      <div class="pp-page-placeholder-sub">Smart-money / insider / congress / retail / options signals.  Cross-aggregation; needs primitives `notable_panel` + `cluster_card`.</div>
-    </div>{% endcall %}
+    {# Composite header — sig_composite_score is precomputed (weighted). #}
+    {% set _composite = sig_composite_score %}
+    {% set _bullish = sig_signals|selectattr('score','>',0)|list|length %}
+    {% set _vclass = "pp-up" if "BULL" in sig_composite else ("pp-down" if "BEAR" in sig_composite else "pp-stock-fct-coral") %}
+    {% call panel(cls="pp-stock-sig-composite-panel") %}
+      <div class="pp-stock-sig-composite">
+        <div>
+          {{ kicker("Paperpanda composite signal") }}
+          <span class="pp-mono pp-stock-sig-composite-verdict {{ _vclass }}">{{ sig_composite }}</span>
+          <span class="pp-stock-sig-composite-sub">
+            Score <span class="pp-mono pp-stock-sig-composite-score">{{ '+' if _composite >= 0 }}{{ (_composite * 100)|round(0)|int }}</span>
+            of ±100 · {{ _bullish }} of {{ sig_signals|length }} signals positive
+          </span>
+        </div>
+        <div class="pp-stock-sig-balance">
+          {{ label("Signal balance") }}
+          <div class="pp-stock-sig-balance-track">
+            <span class="pp-stock-sig-balance-zero"></span>
+            <span class="pp-stock-sig-balance-fill {{ 'is-up' if _composite >= 0 else 'is-down' }}"
+                  style="width: {{ (_composite|abs * 50)|round(1) }}%;"></span>
+            <span class="pp-stock-sig-balance-needle"
+                  style="left: {{ (50 + _composite * 50)|round(1) }}%;"></span>
+          </div>
+          <div class="pp-stock-sig-balance-axis">
+            <span class="pp-mono">STRONG SELL</span>
+            <span class="pp-mono">NEUTRAL</span>
+            <span class="pp-mono">STRONG BUY</span>
+          </div>
+        </div>
+      </div>
+    {% endcall %}
+
+    {# Individual signals table. #}
+    {% call panel() %}
+      {{ panel_head("Individual signals", sub="weighted aggregate") }}
+      <table class="pp-stock-sig-table">
+        <thead>
+          <tr>
+            <th class="pp-stock-own-th-l">Signal</th>
+            <th class="pp-stock-own-th-l">Detail</th>
+            <th class="pp-stock-own-th-l">Weight</th>
+            <th class="pp-stock-own-th-l">Score</th>
+            <th class="pp-stock-own-th-r">Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sig_signals %}
+            {% set _vc = "pp-up" if s.verdict == "BULLISH" else
+                          ("pp-down" if s.verdict == "BEARISH" else
+                          ("pp-stock-fct-coral" if s.verdict == "CAUTION" else "pp-dim")) %}
+            <tr>
+              <td class="pp-stock-own-fund">{{ s.name }}</td>
+              <td class="pp-stock-sig-detail">{{ s.detail }}</td>
+              <td><span class="pp-mono pp-stock-sig-weight">{{ s.weight }}</span></td>
+              <td>
+                <div class="pp-stock-sig-score">
+                  <span class="pp-stock-sig-score-zero"></span>
+                  <span class="pp-stock-sig-score-fill {{ 'is-up' if s.score >= 0 else 'is-down' }}"
+                        style="width: {{ (s.score|abs * 50)|round(1) }}%;"></span>
+                </div>
+              </td>
+              <td class="pp-stock-own-num">
+                <span class="pp-mono pp-stock-fct-rating-pill {{ _vc }}">{{ s.verdict }}</span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endcall %}
   </section>
+
+  {# ━━━━━━━━━━ VITALS TAB ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Vitals">
-    {% call panel() %}<div class="pp-page-placeholder">
-      <div class="pp-page-placeholder-icon">●</div>
-      <div class="pp-page-placeholder-title">Vitals — coming soon</div>
-      <div class="pp-page-placeholder-sub">Liquidity / valuation / quality / momentum scorecards.  Existing earnings_scorecard + screener fields.</div>
-    </div>{% endcall %}
+    {# Dividends + upcoming events. #}
+    <div class="pp-stock-fin-row">
+      {% call panel() %}
+        {% call panel_head("Dividends", sub="quarterly") %}
+          <span class="pp-mono pp-dim pp-stock-vit-dividend-sub">Yield 0.03% · Payout 0.5%</span>
+        {% endcall %}
+        <table class="pp-stock-own-table">
+          <thead>
+            <tr>
+              <th class="pp-stock-own-th-l">Ex-date</th>
+              <th class="pp-stock-own-th-l">Pay date</th>
+              <th class="pp-stock-own-th-r">Amount</th>
+              <th class="pp-stock-own-th-r">Yield</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in vit_dividends %}
+              <tr>
+                <td class="pp-stock-own-fund pp-mono">{{ d.ex }}</td>
+                <td class="pp-stock-own-mgr pp-mono">{{ d.pay }}</td>
+                <td class="pp-stock-own-num pp-stock-own-val pp-mono">{{ d.amount }}</td>
+                <td class="pp-stock-own-num pp-mono">{{ d.yield }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Upcoming events", sub="calendar") }}
+        <div class="pp-stock-vit-events">
+          {% for e in vit_events %}
+            <div class="pp-stock-vit-event">
+              <span class="pp-mono pp-stock-vit-event-date">{{ e.date }}</span>
+              <div>
+                <div class="pp-stock-vit-event-name">{{ e.event }}</div>
+                <span class="pp-mono pp-stock-vit-event-when">{{ e.when }}</span>
+              </div>
+              <span class="pp-mono pp-stock-vit-event-est">{{ e.est }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endcall %}
+    </div>
+
+    {# Peers + share statistics. #}
+    <div class="pp-stock-vit-bottom">
+      {% call panel() %}
+        {{ panel_head("Peers", sub="Semiconductors") }}
+        <table class="pp-stock-own-table">
+          <thead>
+            <tr>
+              <th class="pp-stock-own-th-l">Ticker</th>
+              <th class="pp-stock-own-th-l">Name</th>
+              <th class="pp-stock-own-th-r">Price</th>
+              <th class="pp-stock-own-th-r">Day</th>
+              <th class="pp-stock-own-th-r">P/E</th>
+              <th class="pp-stock-own-th-r">Mkt cap</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="pp-stock-vit-peer-self">
+              <td><span class="pp-stock-vit-peer-tk pp-stock-fct-coral">{{ stock_ticker }}</span></td>
+              <td class="pp-stock-vit-peer-self-name">{{ stock_name }}</td>
+              <td class="pp-stock-own-num pp-mono pp-stock-own-val">{{ stock_price }}</td>
+              <td class="pp-stock-own-num pp-mono {{ 'pp-up' if stock_chg_up else 'pp-down' }}">
+                {{ '+' if stock_chg_up else '-' }}{{ "%.2f"|format((stock_chg_pct or 0) * 100|abs) }}%
+              </td>
+              <td class="pp-stock-own-num pp-mono">68.4</td>
+              <td class="pp-stock-own-num pp-mono pp-stock-own-val">{{ stock_mcap }}</td>
+            </tr>
+            {% for r in vit_peers %}
+              <tr>
+                <td><span class="pp-stock-vit-peer-tk">{{ r.ticker }}</span></td>
+                <td class="pp-stock-own-mgr">{{ r.name }}</td>
+                <td class="pp-stock-own-num pp-mono">{{ r.price }}</td>
+                <td class="pp-stock-own-num pp-mono {{ 'pp-up' if r.chg >= 0 else 'pp-down' }}">
+                  {{ '+' if r.chg >= 0 else '' }}{{ "%.2f"|format(r.chg * 100) }}%
+                </td>
+                <td class="pp-stock-own-num pp-mono pp-text">{{ r.pe }}</td>
+                <td class="pp-stock-own-num pp-mono">{{ r.mc }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Share statistics") }}
+        <div class="pp-stock-vit-stats">
+          {% for k, v in vit_share_stats %}
+            <div class="pp-stock-vit-stat">
+              <span class="pp-stock-vit-stat-key">{{ k }}</span>
+              <span class="pp-mono pp-stock-vit-stat-val">{{ v }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endcall %}
+    </div>
   </section>
 
 </div>
@@ -285,6 +936,294 @@
     if (!opt) return;
     var name = opt.getAttribute('data-value');
     if (name) activate(name);
+  });
+})();
+
+/* ── Financials statement toggle (Income / Balance / Cash flow) ── */
+(function () {
+  var seg = document.getElementById('pp-stock-fin-stmt');
+  if (!seg) return;
+  var tables = document.querySelectorAll('.pp-stock-fin-table');
+  function applyStmt(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o.getAttribute('data-value') === name);
+    });
+    tables.forEach(function (t) {
+      t.style.display = t.getAttribute('data-stmt') === name ? '' : 'none';
+    });
+  }
+  applyStmt('Income');
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (opt) applyStmt(opt.getAttribute('data-value'));
+  });
+})();
+
+/* ── Watch button → toggle watchlist via /api/watchlist. ── */
+(function () {
+  var btn = document.getElementById('pp-stock-watch');
+  if (!btn) return;
+  var ticker = '{{ stock_ticker }}';
+  var signedIn = {{ 'true' if stock_user_signed_in else 'false' }};
+  btn.addEventListener('click', function () {
+    if (!signedIn) {
+      window.location.href = '/sign-in?redirect=' + encodeURIComponent(window.location.pathname);
+      return;
+    }
+    if (btn.disabled) return;
+    btn.disabled = true;
+    var watching = btn.getAttribute('data-watching') === '1';
+    var req = watching
+      ? fetch('/api/watchlist/' + encodeURIComponent(ticker), {method: 'DELETE'})
+      : fetch('/api/watchlist', {method: 'POST',
+                                 headers: {'Content-Type': 'application/json'},
+                                 body: JSON.stringify({ticker: ticker})});
+    req.then(function (r) {
+      if (!r.ok) throw new Error('watchlist toggle failed');
+      var nowWatching = !watching;
+      btn.setAttribute('data-watching', nowWatching ? '1' : '0');
+      btn.textContent = nowWatching ? '★ Watching' : '★ Watch';
+    }).catch(function () {
+      /* keep current state on error */
+    }).finally(function () {
+      btn.disabled = false;
+    });
+  });
+})();
+
+/* Compare button is currently disabled ("coming soon" tooltip — see hero
+   markup).  No click handler is needed; native `disabled` swallows clicks
+   and the `title` attribute provides the hover tooltip. */
+
+/* ── Chart range chip (1D/1W/1M/3M/1Y/5Y) → swap candlestick SVG. ── */
+(function () {
+  var seg = document.getElementById('pp-stock-range');
+  if (!seg) return;
+  var ticker = '{{ stock_ticker }}';
+  var body = document.querySelector('.pp-stock-chart-body');
+  if (!body) return;
+  if (!body.querySelector('.pp-stock-chart-svg')) return;
+  var inflight = false;
+  function applyPeriod(name) {
+    if (inflight) return;
+    inflight = true;
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o.getAttribute('data-value') === name);
+    });
+    fetch('/_v2/stock/' + encodeURIComponent(ticker) + '/chart/' + encodeURIComponent(name))
+      .then(function (r) { return r.text(); })
+      .then(function (html) {
+        /* Replace SVG + bars JSON together — partial returns both. */
+        var existingSvg = body.querySelector('.pp-stock-chart-svg');
+        var existingData = body.querySelector('.pp-stock-chart-bars-data');
+        if (existingSvg)  existingSvg.remove();
+        if (existingData) existingData.remove();
+        var tooltip = body.querySelector('.pp-stock-chart-tooltip');
+        body.insertAdjacentHTML(
+          tooltip ? 'afterbegin' : 'beforeend', html.trim()
+        );
+        body.dispatchEvent(new CustomEvent('pp-stock-chart-swapped',
+                                           {bubbles: true}));
+      })
+      .catch(function () { /* leave existing chart in place on error */ })
+      .finally(function () { inflight = false; });
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (opt) {
+      var v = opt.getAttribute('data-value');
+      if (v) applyPeriod(v);
+    }
+  });
+})();
+
+/* ── Candlestick hover (crosshair + OHLC tooltip).  Mirrors the home
+   chart hover: maps mousemove → nearest bar by x-distance, updates the
+   crosshair x-position inside the SVG, and positions the HTML tooltip
+   above the chart with the bar's date / OHLCV / change-since-open. ── */
+(function () {
+  var body = document.querySelector('.pp-stock-chart-body');
+  if (!body) return;
+
+  var vbW = parseFloat(body.getAttribute('data-vb-w')) || 600;
+  var tooltip = body.querySelector('.pp-stock-chart-tooltip');
+  if (!tooltip) return;
+  var ttDate  = tooltip.querySelector('.pp-stock-chart-tooltip-date');
+  var ttO = tooltip.querySelector('.pp-stock-chart-tooltip-o');
+  var ttH = tooltip.querySelector('.pp-stock-chart-tooltip-h');
+  var ttL = tooltip.querySelector('.pp-stock-chart-tooltip-l');
+  var ttC = tooltip.querySelector('.pp-stock-chart-tooltip-c');
+  var ttV = tooltip.querySelector('.pp-stock-chart-tooltip-v');
+  var ttChg = tooltip.querySelector('.pp-stock-chart-tooltip-chg');
+
+  var bars = [];
+  var crosshair = null;
+  var svg = null;
+  var lastIdx = -1;          /* short-circuit re-renders when the cursor
+                                 sits on the same bar across many pixels */
+
+  /* Chart-head OHL stats — update on hover, restore to today's bar on leave. */
+  var headStats = {
+    o: document.querySelector('.pp-stock-chart-head [data-stat="o"]'),
+    h: document.querySelector('.pp-stock-chart-head [data-stat="h"]'),
+    l: document.querySelector('.pp-stock-chart-head [data-stat="l"]'),
+    c: document.querySelector('.pp-stock-chart-head [data-stat="c"]'),
+  };
+  var headDefaults = headStats.o ? {
+    o: headStats.o.textContent,
+    h: headStats.h.textContent,
+    l: headStats.l.textContent,
+    c: headStats.c.textContent,
+    cClass: headStats.c.className,
+  } : null;
+
+  function loadBars() {
+    var dataEl = body.querySelector('.pp-stock-chart-bars-data');
+    try { bars = JSON.parse(dataEl ? dataEl.textContent : '[]'); }
+    catch (e) { bars = []; }
+    if (!Array.isArray(bars)) bars = [];
+    svg = body.querySelector('.pp-stock-chart-svg');
+    crosshair = svg && svg.querySelector('.pp-stock-chart-crosshair');
+  }
+
+  var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function fmtDate(tsMs) {
+    var d = new Date(tsMs);
+    return MONTHS[d.getMonth()] + ' ' + d.getDate() + ', ' + d.getFullYear();
+  }
+  function fmtPrice(p) {
+    return p.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  }
+  function fmtVol(v) {
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+    return String(v);
+  }
+
+  function nearestBar(relX, rectWidth) {
+    if (!bars.length) return -1;
+    /* Pixel x → viewBox x → nearest bar by precomputed bar.x. */
+    var vbx = (relX / rectWidth) * vbW;
+    var bestIdx = 0;
+    var bestDist = Math.abs(bars[0].x - vbx);
+    for (var i = 1; i < bars.length; i++) {
+      var d = Math.abs(bars[i].x - vbx);
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    return bestIdx;
+  }
+
+  function updateAt(idx, mouseX) {
+    var b = bars[idx];
+    if (!b || !crosshair || !svg) return;
+
+    crosshair.setAttribute('x1', b.x);
+    crosshair.setAttribute('x2', b.x);
+
+    /* Position the HTML tooltip above the bar.  Clamp to the body bounds
+       so it stays inside the chart panel near the edges. */
+    var rect = body.getBoundingClientRect();
+    var ttRect = tooltip.getBoundingClientRect();
+    var halfW = ttRect.width / 2 || 100;
+    var clampedX = Math.max(halfW + 4, Math.min(mouseX, rect.width - halfW - 4));
+    tooltip.style.left = clampedX + 'px';
+    tooltip.hidden = false;
+
+    ttDate.textContent = fmtDate(b.t);
+    ttO.textContent = fmtPrice(b.o);
+    ttH.textContent = fmtPrice(b.h);
+    ttL.textContent = fmtPrice(b.l);
+    ttC.textContent = fmtPrice(b.c);
+    ttV.textContent = fmtVol(b.v);
+
+    var chg = b.c - b.o;
+    var pct = b.o ? (chg / b.o) * 100 : 0;
+    var sign = chg >= 0 ? '+' : '−';
+    ttChg.textContent = sign + fmtPrice(Math.abs(chg)) +
+                        ' (' + sign + Math.abs(pct).toFixed(2) + '%)';
+    ttChg.classList.toggle('pp-up',   chg >= 0);
+    ttChg.classList.toggle('pp-down', chg < 0);
+
+    /* Mirror the bar's OHLC into the chart-head summary so the user
+       always sees numbers tied to whatever the cursor is pointing at. */
+    if (headStats.o) {
+      headStats.o.textContent = fmtPrice(b.o);
+      headStats.h.textContent = fmtPrice(b.h);
+      headStats.l.textContent = fmtPrice(b.l);
+      headStats.c.textContent = fmtPrice(b.c);
+      headStats.c.className = 'pp-stock-chart-stat-close pp-mono '
+                              + (chg >= 0 ? 'pp-up' : 'pp-down');
+    }
+  }
+
+  function onMove(ev) {
+    if (!bars.length || !svg) return;
+    var rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    var relX = ev.clientX - rect.left;
+    if (relX < 0) relX = 0;
+    if (relX > rect.width) relX = rect.width;
+    var idx = nearestBar(relX, rect.width);
+    if (idx < 0) return;
+    body.classList.add('is-hovering');
+    /* Skip the DOM update if the cursor is still on the same bar — saves
+       ~5-10ms of textContent / classList writes per mousemove tick when
+       the user is dragging horizontally inside one bar's slot. */
+    if (idx !== lastIdx) {
+      lastIdx = idx;
+      updateAt(idx, relX);
+    }
+  }
+
+  function onLeave() {
+    body.classList.remove('is-hovering');
+    tooltip.hidden = true;
+    lastIdx = -1;
+    /* Restore the head OHL summary to today's bar values. */
+    if (headDefaults) {
+      headStats.o.textContent = headDefaults.o;
+      headStats.h.textContent = headDefaults.h;
+      headStats.l.textContent = headDefaults.l;
+      headStats.c.textContent = headDefaults.c;
+      headStats.c.className = headDefaults.cClass;
+    }
+  }
+
+  loadBars();
+  body.addEventListener('mousemove', onMove);
+  body.addEventListener('mouseleave', onLeave);
+  body.addEventListener('pp-stock-chart-swapped', function () {
+    loadBars();
+    lastIdx = -1;
+    onLeave();
+  });
+})();
+
+/* ── Ownership sub-pill toggle (Funds / Congress / Insiders / SEC Filings) ── */
+(function () {
+  var seg = document.getElementById('pp-stock-own-sub');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-stock-own-pane');
+  var counter = document.getElementById('pp-stock-own-counter');
+  var counterMap = {
+    'Funds':       counter && counter.getAttribute('data-funds'),
+    'Congress':    counter && counter.getAttribute('data-congress'),
+    'Insiders':    counter && counter.getAttribute('data-insiders'),
+    'SEC Filings': counter && counter.getAttribute('data-filings'),
+  };
+  function applySub(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o.getAttribute('data-value') === name);
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-own-pane') === name);
+    });
+    if (counter && counterMap[name]) counter.textContent = counterMap[name];
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (opt) applySub(opt.getAttribute('data-value'));
   });
 })();
 </script>

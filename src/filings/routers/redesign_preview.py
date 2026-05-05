@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import logging
 import math
 import os
@@ -2943,6 +2944,1706 @@ def _stock_format_volume(v: float | None) -> str:
     return f"{int(v):,}"
 
 
+def _stock_format_mcap(v: int | float | None) -> str:
+    if not v:
+        return "—"
+    a = abs(float(v))
+    if a >= 1e12: return f"${a / 1e12:.2f}T"
+    if a >= 1e9:  return f"${a / 1e9:.1f}B"
+    if a >= 1e6:  return f"${a / 1e6:.0f}M"
+    return f"${a:,.0f}"
+
+
+def _stock_format_pe(v: float | None) -> str:
+    if v is None or v <= 0:
+        return "—"
+    return f"{v:.1f}"
+
+
+def _stock_format_employees(n: int | float | None) -> str:
+    if not n:
+        return "—"
+    try:
+        return f"{int(n):,}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _stock_format_hq(info: dict, finnhub_profile: dict) -> str:
+    parts = [info.get("city"), info.get("state"), info.get("country")]
+    parts = [p for p in parts if p]
+    if parts:
+        return ", ".join(parts)
+    fh_country = (finnhub_profile or {}).get("country")
+    return fh_country or "—"
+
+
+def _stock_format_ipo(info: dict, finnhub_profile: dict) -> str:
+    """Format IPO date — yfinance gives an epoch, Finnhub gives "YYYY-MM-DD"."""
+    from datetime import datetime, timezone
+
+    epoch = info.get("firstTradeDateEpochUtc") or info.get("firstTradeDateMilliseconds")
+    if epoch:
+        try:
+            ts = float(epoch)
+            if ts > 1e11:  # millis
+                ts /= 1000
+            return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%b %-d, %Y")
+        except (TypeError, ValueError, OSError):
+            pass
+    fh_ipo = (finnhub_profile or {}).get("ipo")
+    if fh_ipo:
+        try:
+            return datetime.strptime(fh_ipo, "%Y-%m-%d").strftime("%b %-d, %Y")
+        except (TypeError, ValueError):
+            return str(fh_ipo)
+    return "—"
+
+
+def _stock_resolve_logo(info: dict, finnhub_profile: dict) -> str:
+    """Pick a company-logo URL.
+
+    Order of preference:
+    1. yfinance ``website`` → ``https://logo.clearbit.com/<domain>`` (sharp,
+       transparent PNG).
+    2. Finnhub ``logo`` URL (always available when profile2 returned).
+    3. ``""`` — caller should fall back to the ticker badge.
+    """
+    from urllib.parse import urlparse
+    website = (info.get("website") or "").strip()
+    if website:
+        parsed = urlparse(website if "://" in website else f"https://{website}")
+        domain = parsed.netloc or parsed.path
+        if domain.startswith("www."):
+            domain = domain[4:]
+        if domain:
+            return f"https://logo.clearbit.com/{domain}"
+    return (finnhub_profile or {}).get("logo") or ""
+
+
+def _stock_format_website(info: dict, finnhub_profile: dict) -> str:
+    """Strip protocol/www so the panel shows just the bare domain."""
+    from urllib.parse import urlparse
+    url = (info.get("website") or (finnhub_profile or {}).get("weburl") or "").strip()
+    if not url:
+        return "—"
+    parsed = urlparse(url if "://" in url else f"https://{url}")
+    domain = parsed.netloc or parsed.path
+    return domain[4:] if domain.startswith("www.") else domain or "—"
+
+
+def _stock_extract_ceo(info: dict) -> str:
+    """Find the CEO entry in yfinance ``companyOfficers``.  Falls back to the
+    first listed officer if no title contains "CEO" (common for Berkshire-style
+    holdings that list executives without a CEO line)."""
+    officers = info.get("companyOfficers") or []
+    for o in officers:
+        title = (o.get("title") or "").lower()
+        if "chief executive" in title or "ceo" in title:
+            return o.get("name") or "—"
+    if officers and officers[0].get("name"):
+        return officers[0]["name"]
+    return "—"
+
+
+def _stock_truncate_blurb(text: str | None, max_len: int = 280) -> str:
+    if not text:
+        return ""
+    text = text.strip()
+    if len(text) <= max_len:
+        return text
+    cut = text[:max_len].rsplit(" ", 1)[0]
+    return cut + "…"
+
+
+# yfinance returns short codes (NMS, NYQ, …); map to display labels.
+_EXCHANGE_LABELS = {
+    "NMS": "NASDAQ", "NGM": "NASDAQ", "NCM": "NASDAQ",
+    "NYQ": "NYSE",   "NYE": "NYSE",
+    "ASE": "AMEX",   "PCX": "NYSE Arca",
+    "BATS": "BATS",  "CXI": "CBOE",
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STOCK PAGE — secondary-tab mock data.  Mirrors design_handoff stock-tab-*.jsx
+# fixtures.  Used as visual scaffolding while the real wiring lands tab by tab.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_STOCK_MOCK_FIN_KPIS = [
+    {"label": "Revenue (TTM)",    "value": "$158.2B", "delta": "+109% YoY", "up": True},
+    {"label": "Net Income (TTM)", "value": "$88.4B",  "delta": "+121% YoY", "up": True},
+    {"label": "FCF (TTM)",        "value": "$76.0B",  "delta": "+24% QoQ",  "up": True},
+    {"label": "Gross Margin",     "value": "75.7%",   "delta": "+0.7pp",    "up": True},
+]
+
+_STOCK_FIN_PERIODS = ["FY21", "FY22", "FY23", "FY24", "FY25", "TTM"]
+
+_STOCK_FIN_INCOME = [
+    {"label": "Revenue",          "vals": [16.7, 26.9, 26.97, 60.92, 130.50, 158.20], "bold": True},
+    {"label": "Cost of revenue",  "vals": [6.3, 9.4, 11.6, 16.6, 32.6, 38.4]},
+    {"label": "Gross profit",     "vals": [10.4, 17.5, 15.4, 44.3, 97.9, 119.8], "bold": True},
+    {"label": "R&D",              "vals": [3.9, 5.3, 7.3, 8.7, 12.9, 14.4]},
+    {"label": "SG&A",             "vals": [2.2, 2.4, 2.4, 2.7, 3.5, 3.8]},
+    {"label": "Operating income", "vals": [4.5, 10.0, 5.6, 33.0, 81.5, 101.6], "bold": True},
+    {"label": "Net income",       "vals": [4.3, 9.8, 4.4, 29.8, 72.9, 88.4], "bold": True, "hl": True},
+    {"label": "EPS (diluted)",    "vals": [1.73, 3.85, 1.74, 11.93, 29.16, 35.23], "unit": "$"},
+    {"label": "Gross margin",     "vals": [62.3, 65.0, 56.9, 72.7, 75.0, 75.7], "unit": "%"},
+    {"label": "Operating margin", "vals": [26.9, 37.2, 20.7, 54.2, 62.4, 64.2], "unit": "%"},
+    {"label": "Net margin",       "vals": [25.7, 36.4, 16.3, 48.9, 55.9, 55.9], "unit": "%"},
+]
+
+_STOCK_FIN_BALANCE = [
+    {"label": "Cash & equivalents",   "vals": [11.6, 17.0, 13.3, 25.9, 38.5, 42.1], "bold": True},
+    {"label": "Total assets",         "vals": [28.8, 44.2, 41.2, 65.7, 96.4, 103.2], "bold": True},
+    {"label": "Total debt",           "vals": [7.2, 11.7, 10.95, 8.5, 8.4, 8.4]},
+    {"label": "Stockholders' equity", "vals": [16.9, 26.6, 22.1, 42.9, 65.9, 73.8], "bold": True, "hl": True},
+    {"label": "Working capital",      "vals": [12.4, 19.8, 17.5, 33.4, 51.0, 56.4]},
+    {"label": "Debt / Equity",        "vals": [0.43, 0.44, 0.50, 0.20, 0.13, 0.11], "unit": "ratio"},
+    {"label": "Current ratio",        "vals": [4.1, 6.6, 3.5, 4.2, 4.4, 4.5], "unit": "ratio"},
+]
+
+_STOCK_FIN_CASH = [
+    {"label": "Operating cash flow", "vals": [5.8, 9.1, 5.6, 28.1, 64.1, 79.4], "bold": True},
+    {"label": "Capex",               "vals": [-1.0, -1.8, -1.1, -1.1, -2.7, -3.4]},
+    {"label": "Free cash flow",      "vals": [4.8, 7.3, 4.5, 27.0, 61.4, 76.0], "bold": True, "hl": True},
+    {"label": "Stock buybacks",      "vals": [-0.0, -9.5, -10.0, -9.7, -33.7, -41.2]},
+    {"label": "Dividends paid",      "vals": [-0.4, -0.4, -0.4, -0.4, -0.5, -0.6]},
+    {"label": "Share count (B)",     "vals": [2.50, 2.51, 2.50, 2.49, 2.46, 2.43], "unit": "ratio"},
+]
+
+_STOCK_REVENUE_SEGMENTS = [
+    {"name": "Data Center",       "value": 115.20, "color": "var(--pp-accent)"},
+    {"name": "Gaming",            "value":  11.40, "color": "var(--pp-ink)"},
+    {"name": "Pro Visualization", "value":   1.92, "color": "var(--pp-up)"},
+    {"name": "Automotive",        "value":   1.74, "color": "var(--pp-dim)"},
+    {"name": "OEM & Other",       "value":   0.24, "color": "var(--pp-dim2)"},
+]
+_STOCK_REVENUE_TOTAL = 130.50
+
+_STOCK_MARGIN_TREND = {
+    "gross": [62.3, 65.0, 56.9, 72.7, 75.0, 75.7],
+    "op":    [26.9, 37.2, 20.7, 54.2, 62.4, 64.2],
+    "net":   [25.7, 36.4, 16.3, 48.9, 55.9, 55.9],
+    "labels": ["FY21", "FY22", "FY23", "FY24", "FY25", "TTM"],
+}
+
+_STOCK_OWN_FUNDS = [
+    {"rank": "01", "fund": "Vanguard Group",      "manager": "—",                  "shares": "212.4M", "value": "$30.2B",  "port": "4.1%",  "chg":  0.012},
+    {"rank": "02", "fund": "BlackRock Inc.",      "manager": "—",                  "shares": "189.7M", "value": "$26.9B",  "port": "3.8%",  "chg":  0.024},
+    {"rank": "03", "fund": "Berkshire Hathaway",  "manager": "Warren Buffett",     "shares":  "32.1M", "value":  "$4.6B",  "port": "0.9%",  "chg":  0.084},
+    {"rank": "04", "fund": "Pershing Square",     "manager": "Bill Ackman",        "shares":  "18.4M", "value":  "$2.6B",  "port": "22.4%", "chg":  0.214},
+    {"rank": "05", "fund": "Coatue Management",   "manager": "Philippe Laffont",   "shares":  "12.9M", "value":  "$1.8B",  "port": "14.2%", "chg":  0.0  },
+    {"rank": "06", "fund": "Tiger Global",        "manager": "Chase Coleman",      "shares":  "11.2M", "value":  "$1.6B",  "port": "11.4%", "chg": -0.041},
+    {"rank": "07", "fund": "Citadel Advisors",    "manager": "Ken Griffin",        "shares":   "9.4M", "value":  "$1.3B",  "port": "1.8%",  "chg":  1.0  },
+    {"rank": "08", "fund": "Bridgewater",         "manager": "Ray Dalio",          "shares":   "6.8M", "value":  "$0.97B", "port": "4.4%",  "chg": -0.094},
+    {"rank": "09", "fund": "Third Point",         "manager": "Daniel Loeb",        "shares":   "5.2M", "value":  "$0.74B", "port": "12.6%", "chg":  0.318},
+    {"rank": "10", "fund": "Appaloosa",           "manager": "David Tepper",       "shares":   "4.1M", "value":  "$0.58B", "port": "9.4%",  "chg":  0.158},
+]
+
+_STOCK_OWN_CONGRESS = [
+    {"person": "Pelosi, Nancy",    "party": "D", "chamber": "House",  "action": "BUY",  "size": "$1M–5M",    "date": "Apr 28, 2026", "days":  4},
+    {"person": "Tuberville, T.",   "party": "R", "chamber": "Senate", "action": "BUY",  "size": "$50K–100K", "date": "Apr 27, 2026", "days":  5},
+    {"person": "Crenshaw, Dan",    "party": "R", "chamber": "House",  "action": "BUY",  "size": "$15K–50K",  "date": "Apr 26, 2026", "days":  6},
+    {"person": "Khanna, Ro",       "party": "D", "chamber": "House",  "action": "BUY",  "size": "$15K–50K",  "date": "Apr 18, 2026", "days": 14},
+    {"person": "Bresnahan, Rob",   "party": "R", "chamber": "House",  "action": "BUY",  "size": "$1K–15K",   "date": "Apr 12, 2026", "days": 20},
+    {"person": "Marshall, Roger",  "party": "R", "chamber": "Senate", "action": "SELL", "size": "$15K–50K",  "date": "Mar 28, 2026", "days": 34},
+]
+
+_STOCK_OWN_INSIDERS = [
+    {"person": "Huang, Jen-Hsun", "role": "CEO",                  "action": "SELL", "shares": "120,000", "value": "$17.0M", "date": "Apr 28, 2026", "remaining": "877.5M"},
+    {"person": "Kress, Colette",  "role": "CFO",                  "action": "SELL", "shares":  "25,000", "value":  "$3.6M", "date": "Apr 25, 2026", "remaining":   "4.2M"},
+    {"person": "Dally, William",  "role": "Chief Scientist",      "action": "SELL", "shares":  "18,500", "value":  "$2.6M", "date": "Apr 22, 2026", "remaining":   "1.8M"},
+    {"person": "Coxe, Tench",     "role": "Director",             "action": "SELL", "shares":  "50,000", "value":  "$7.1M", "date": "Apr 18, 2026", "remaining":   "0.8M"},
+    {"person": "Perry, Aarti",    "role": "Chief People Officer", "action": "SELL", "shares":   "4,200", "value":  "$0.6M", "date": "Apr 14, 2026", "remaining":   "0.2M"},
+]
+
+_STOCK_OWN_FILINGS = [
+    {"type": "10-Q",    "filed": "Feb 26, 2026", "period": "Q4 2025",            "desc": "Quarterly report",                                "size": "4.2 MB"},
+    {"type": "8-K",     "filed": "Feb 26, 2026", "period": "Earnings release",   "desc": "Q4 2025 results: $39.3B revenue, +78% YoY",        "size": "612 KB"},
+    {"type": "DEF 14A", "filed": "Feb 03, 2026", "period": "Proxy 2026",         "desc": "Annual meeting · executive comp",                  "size": "2.1 MB"},
+    {"type": "10-K",    "filed": "Feb 21, 2025", "period": "FY 2025",            "desc": "Annual report",                                    "size": "6.8 MB"},
+    {"type": "4",       "filed": "Apr 28, 2026", "period": "Insider — Huang J.", "desc": "Sale 120,000 sh",                                  "size": "38 KB"},
+    {"type": "4",       "filed": "Apr 25, 2026", "period": "Insider — Kress C.", "desc": "Sale 25,000 sh",                                   "size": "36 KB"},
+    {"type": "13F-HR",  "filed": "Apr 15, 2026", "period": "Holders Q1 2026",    "desc": "87 institutional holders",                         "size": "—"},
+]
+
+_STOCK_FCT_RATINGS = [
+    ("Buy",         24, "var(--pp-up)"),
+    ("Overweight",  18, "var(--pp-up)"),
+    ("Hold",         7, "var(--pp-accent)"),
+    ("Underweight",  2, "var(--pp-down)"),
+    ("Sell",         1, "var(--pp-down)"),
+]
+
+_STOCK_FCT_ANALYSTS = [
+    {"firm": "Morgan Stanley", "analyst": "Joseph Moore",  "rating": "OVERWEIGHT", "target": 200, "prev": 170, "date": "Apr 28"},
+    {"firm": "Goldman Sachs",  "analyst": "Toshiya Hari",  "rating": "BUY",        "target": 185, "prev": 185, "date": "Apr 24"},
+    {"firm": "BofA",           "analyst": "Vivek Arya",    "rating": "BUY",        "target": 190, "prev": 165, "date": "Apr 22"},
+    {"firm": "Wells Fargo",    "analyst": "Aaron Rakers",  "rating": "OVERWEIGHT", "target": 175, "prev": 150, "date": "Apr 18"},
+    {"firm": "Barclays",       "analyst": "Tom O'Malley",  "rating": "OVERWEIGHT", "target": 160, "prev": 160, "date": "Apr 15"},
+    {"firm": "Citi",           "analyst": "Atif Malik",    "rating": "BUY",        "target": 180, "prev": 170, "date": "Apr 12"},
+    {"firm": "Mizuho",         "analyst": "Vijay Rakesh",  "rating": "BUY",        "target": 165, "prev": 140, "date": "Apr 08"},
+    {"firm": "HSBC",           "analyst": "Frank Lee",     "rating": "HOLD",       "target": 120, "prev": 120, "date": "Apr 04"},
+    {"firm": "DZ Bank",        "analyst": "Ingo Wermann",  "rating": "SELL",       "target": 100, "prev": 110, "date": "Mar 28"},
+]
+
+_STOCK_FCT_REV_EST = [
+    {"period": "Q1 2026", "est": "$43.5B",  "low": "$41.2B",  "high": "$46.0B",  "yoy": "+78%", "is_total": False},
+    {"period": "Q2 2026", "est": "$48.2B",  "low": "$45.8B",  "high": "$51.6B",  "yoy": "+62%", "is_total": False},
+    {"period": "Q3 2026", "est": "$52.4B",  "low": "$48.1B",  "high": "$56.2B",  "yoy": "+54%", "is_total": False},
+    {"period": "FY2026",  "est": "$182.4B", "low": "$172.5B", "high": "$198.0B", "yoy": "+40%", "is_total": True},
+]
+
+_STOCK_FCT_EPS_REVISIONS = [29.4, 30.1, 31.2, 32.4, 33.1, 33.8, 34.5, 35.2, 35.8, 36.4, 36.9, 37.4]
+
+_STOCK_SIGNALS = [
+    {"name": "Insider activity",   "score": -0.4, "weight": "high",   "detail": "5 SELL Form 4s · 0 BUYs · 6mo",                            "verdict": "BEARISH"},
+    {"name": "Congressional flow", "score": +0.7, "weight": "medium", "detail": "5 BUYs · 1 SELL · 90d (Pelosi $1-5M Apr 28)",              "verdict": "BULLISH"},
+    {"name": "13F adds vs. cuts",  "score": +0.5, "weight": "high",   "detail": "42 funds added · 18 cut · Q1 2026",                        "verdict": "BULLISH"},
+    {"name": "Analyst revisions",  "score": +0.8, "weight": "high",   "detail": "+27% EPS revision over 90d · 34 upgrades",                 "verdict": "BULLISH"},
+    {"name": "Retail sentiment",   "score": +0.6, "weight": "low",    "detail": "WSB +71 · 2,891 mentions · #3 most discussed",             "verdict": "BULLISH"},
+    {"name": "Price momentum",     "score": +0.4, "weight": "medium", "detail": "50d > 200d MA · RSI 64 · uptrend intact",                  "verdict": "BULLISH"},
+    {"name": "Valuation",          "score": -0.3, "weight": "medium", "detail": "P/E 68.4 vs sector 32.1 · PEG 1.4",                        "verdict": "CAUTION"},
+    {"name": "Short interest",     "score": +0.1, "weight": "low",    "detail": "1.2% of float · stable WoW",                               "verdict": "NEUTRAL"},
+]
+
+_STOCK_VITALS_DIVS = [
+    {"ex": "Mar 12, 2026", "pay": "Apr 02, 2026", "amount": "$0.01", "yield": "0.03%"},
+    {"ex": "Dec 11, 2025", "pay": "Jan 02, 2026", "amount": "$0.01", "yield": "0.03%"},
+    {"ex": "Sep 12, 2025", "pay": "Oct 02, 2025", "amount": "$0.01", "yield": "0.03%"},
+    {"ex": "Jun 12, 2025", "pay": "Jul 03, 2025", "amount": "$0.01", "yield": "0.03%"},
+]
+
+_STOCK_VITALS_EVENTS = [
+    {"date": "May 21", "event": "Q1 2026 Earnings",  "when": "After close",      "est": "EPS $1.01 · Rev $43.5B"},
+    {"date": "Jun 12", "event": "Ex-dividend $0.01", "when": "Pay Jul 03",        "est": "Yield 0.03%"},
+    {"date": "Jun 25", "event": "Annual meeting",    "when": "Webcast 11:00 PT", "est": "Proxy items: 5"},
+    {"date": "Aug 27", "event": "Q2 2026 Earnings",  "when": "After close",      "est": "EPS $1.18 · Rev $48.2B (consensus)"},
+]
+
+_STOCK_VITALS_PEERS = [
+    {"ticker": "AMD",  "name": "Advanced Micro Devices", "price": "172.41", "chg":  0.022, "pe": "42.1", "mc": "$278B"},
+    {"ticker": "AVGO", "name": "Broadcom Inc.",          "price": "218.92", "chg":  0.018, "pe": "38.4", "mc": "$1.02T"},
+    {"ticker": "INTC", "name": "Intel Corp.",            "price":  "21.84", "chg": -0.012, "pe": "—",   "mc": "$94B"},
+    {"ticker": "TSM",  "name": "Taiwan Semi",            "price": "218.10", "chg":  0.014, "pe": "32.8", "mc": "$1.13T"},
+    {"ticker": "MRVL", "name": "Marvell Technology",     "price": "112.32", "chg":  0.031, "pe": "68.2", "mc": "$98B"},
+]
+
+_STOCK_FCT_TARGET_BAND = {"low": 80, "high": 220}
+_STOCK_FCT_PRICE_PCT = (142.18 - 80) / (220 - 80) * 100  # current price tick
+
+_STOCK_VITALS_SHARE_STATS = [
+    ("Shares outstanding",  "24.66B"),
+    ("Float",               "24.06B"),
+    ("Insider holdings",    "3.9%"),
+    ("Institutional own.",  "65.8%"),
+    ("Short interest",      "1.2%"),
+    ("Days to cover",       "0.4"),
+    ("Beta (5Y)",           "1.74"),
+    ("52-week change",      "+58.2%"),
+    ("Last split",          "10:1 (Jun 2024)"),
+]
+
+
+def _stock_line_path(values: list[float], y_min: float, y_max: float,
+                     vb_w: int = 500, vb_h: int = 180,
+                     pad_left: int = 20, pad_right: int = 20,
+                     pad_top: int = 10, pad_bottom: int = 10) -> str:
+    """Build an SVG path 'M x y L x y …' from a list of values, stretching
+    them across the given viewBox.  Used by the margin-trend + EPS-revision
+    charts on the Forecasts/Financials tabs."""
+    if not values:
+        return ""
+    n = len(values)
+    inner_w = vb_w - pad_left - pad_right
+    inner_h = vb_h - pad_top - pad_bottom
+    span = max(y_max - y_min, 1e-6)
+
+    def _x(i: int) -> float:
+        return pad_left + (i / max(n - 1, 1)) * inner_w
+
+    def _y(v: float) -> float:
+        return pad_top + inner_h - ((v - y_min) / span) * inner_h
+
+    parts = [
+        f"{'M' if i == 0 else 'L'}{_x(i):.1f} {_y(v):.1f}"
+        for i, v in enumerate(values)
+    ]
+    return " ".join(parts)
+
+
+def _stock_chart_points(values: list[float], y_min: float, y_max: float,
+                        vb_w: int = 500, vb_h: int = 180,
+                        pad_left: int = 20, pad_right: int = 20,
+                        pad_top: int = 10, pad_bottom: int = 10) -> list[dict]:
+    """Companion to _stock_line_path — emits ``[{x, y}, …]`` so the template
+    can render dots at each point of the line."""
+    if not values:
+        return []
+    n = len(values)
+    inner_w = vb_w - pad_left - pad_right
+    inner_h = vb_h - pad_top - pad_bottom
+    span = max(y_max - y_min, 1e-6)
+    return [
+        {
+            "x": round(pad_left + (i / max(n - 1, 1)) * inner_w, 1),
+            "y": round(pad_top + inner_h - ((v - y_min) / span) * inner_h, 1),
+        }
+        for i, v in enumerate(values)
+    ]
+
+
+_RATING_BUCKETS = [
+    ("Buy",          {"buy", "strong buy", "strongbuy", "outperform", "overweight",
+                      "positive", "accumulate", "sector outperform", "market outperform",
+                      "top pick", "conviction buy"},                                 "var(--pp-up)"),
+    ("Overweight",   {"overweight"},                                                  "var(--pp-up)"),
+    ("Hold",         {"hold", "neutral", "equal-weight", "equal weight", "equalweight",
+                      "market perform", "sector perform", "in-line", "inline",
+                      "peer perform", "sector weight"},                              "var(--pp-accent)"),
+    ("Underweight",  {"underweight"},                                                 "var(--pp-down)"),
+    ("Sell",         {"sell", "strong sell", "strongsell", "underperform",
+                      "negative", "reduce", "sector underperform",
+                      "market underperform"},                                        "var(--pp-down)"),
+]
+
+
+def _stock_build_forecasts(ticker: str, current_price: float | None) -> dict:
+    """Real analyst consensus + ratings + price targets via ``analysts``.
+
+    Fans out across the three sources (yfinance + Finnhub merged into a
+    single view inside ``get_analyst_ratings`` and consensus computed by
+    ``get_consensus_summary_from_raw``).  Falls back to the mock fixtures
+    when the analyst pipeline returns nothing — common when both data
+    sources hit a rate limit or the ticker isn't covered.
+    """
+    from datetime import datetime
+    from filings import analysts
+
+    try:
+        ratings_objs = analysts.get_analyst_ratings(ticker) or []
+    except Exception as exc:
+        logger.warning("get_analyst_ratings(%s) failed: %s", ticker, exc)
+        ratings_objs = []
+
+    if not ratings_objs:
+        return {"has_data": False,
+                "ratings":      _STOCK_FCT_RATINGS,
+                "ratings_total": sum(r[1] for r in _STOCK_FCT_RATINGS),
+                "analysts":     _STOCK_FCT_ANALYSTS,
+                "rev_est":      _STOCK_FCT_REV_EST,
+                "eps":          _STOCK_FCT_EPS_REVISIONS,
+                "target_band":  _STOCK_FCT_TARGET_BAND,
+                "now_pct":      _STOCK_FCT_PRICE_PCT,
+                "consensus":    "BUY"}
+
+    # Dedupe by firm — keep the most-recent rating per firm (ratings_objs
+    # already arrives sorted date-desc from get_analyst_ratings).
+    seen_firms: set[str] = set()
+    deduped: list = []
+    for r in ratings_objs:
+        firm_key = (r.firm or "").strip().lower()
+        if not firm_key or firm_key in seen_firms:
+            continue
+        seen_firms.add(firm_key)
+        deduped.append(r)
+    ratings_objs = deduped
+
+    # ── Bucket counts ──
+    bucket_counts = {b[0]: 0 for b in _RATING_BUCKETS}
+    for r in ratings_objs:
+        grade = (r.to_grade or "").lower().strip()
+        for label, grades, _ in _RATING_BUCKETS:
+            # Skip the broad "Buy" bucket if grade matches the narrower
+            # "Overweight" bucket so each rating lands in exactly one row.
+            if label == "Buy" and grade == "overweight":
+                continue
+            if grade in grades:
+                bucket_counts[label] += 1
+                break
+
+    ratings_dist = [
+        (label, bucket_counts[label], color)
+        for label, _, color in _RATING_BUCKETS
+        if bucket_counts[label] > 0
+    ]
+    ratings_total = sum(c for _, c, _ in ratings_dist) or 1
+
+    # ── Consensus label ──
+    rating_dicts = [
+        {"to_grade": r.to_grade, "firm": r.firm, "price_target": r.current_price_target}
+        for r in ratings_objs
+    ]
+    consensus = analysts.get_consensus_summary_from_raw(rating_dicts, "firm")
+    consensus_label = (consensus.get("consensus_label") or "Hold").upper().replace(" ", " ")
+
+    # ── Price target band + current-price tick ──
+    targets = [r.current_price_target for r in ratings_objs if r.current_price_target]
+    if targets:
+        low, high = min(targets), max(targets)
+        if low == high:
+            low, high = low * 0.9, high * 1.1
+        target_band = {"low": round(low, 2), "high": round(high, 2)}
+    else:
+        target_band = _STOCK_FCT_TARGET_BAND
+    span = target_band["high"] - target_band["low"] or 1
+    now_pct = round(((current_price or target_band["low"]) - target_band["low"]) / span * 100, 1)
+    now_pct = max(0.0, min(100.0, now_pct))
+
+    # ── Recent analyst actions (top 9 by date desc) ──
+    sorted_ratings = sorted(ratings_objs, key=lambda r: r.date or "", reverse=True)
+    analyst_rows: list[dict] = []
+    for r in sorted_ratings[:9]:
+        try:
+            d = datetime.strptime((r.date or "")[:10], "%Y-%m-%d").strftime("%b %-d")
+        except (TypeError, ValueError):
+            d = (r.date or "")[:10]
+        target = r.current_price_target or 0
+        prev = r.prior_price_target if r.prior_price_target is not None else target
+        analyst_rows.append({
+            "firm":     r.firm or "—",
+            "analyst":  r.firm or "—",  # firm-level view doesn't carry analyst name
+            "rating":   (r.to_grade or "").upper() or "—",
+            "target":   round(target, 2),
+            "prev":     round(prev, 2),
+            "date":     d,
+        })
+
+    return {
+        "has_data":       True,
+        "ratings":        ratings_dist,
+        "ratings_total":  ratings_total,
+        "analysts":       analyst_rows,
+        # Revenue estimates + EPS revisions: no reliable free source for
+        # forward-looking estimates without yfinance, so keep the design
+        # fixture as scaffolding until a source lands.
+        "rev_est":        _STOCK_FCT_REV_EST,
+        "eps":            _STOCK_FCT_EPS_REVISIONS,
+        "target_band":    target_band,
+        "now_pct":        now_pct,
+        "consensus":      consensus_label,
+    }
+
+
+def _stock_compute_signals(
+    *,
+    sentiment: dict,
+    ownership_funds: dict,
+    ownership_insiders: dict,
+    ownership_congress: dict,
+    forecasts: dict,
+    payload: dict,
+    meta: dict,
+    vitals: dict,
+) -> dict:
+    """Synthesize the 8-row Signals table from already-fetched context.
+
+    Each signal returns a normalized score in ``[-1, 1]`` plus a verdict
+    string ("BULLISH" / "BEARISH" / "NEUTRAL" / "CAUTION") and a one-line
+    detail string for the table cell.  The composite header above the
+    table is the weight-averaged signed score across all rows that have
+    enough data to score (rows with ``score=None`` are skipped from the
+    average and rendered as NEUTRAL).
+    """
+    def _verdict(score: float, *, neutral_band: float = 0.15) -> str:
+        if score is None: return "NEUTRAL"
+        if score >  neutral_band: return "BULLISH"
+        if score < -neutral_band: return "BEARISH"
+        return "NEUTRAL"
+
+    rows: list[dict] = []
+
+    # 1) Insider activity — Form 4 BUYs vs SELLs.
+    ins = ownership_insiders.get("rows") or []
+    buys  = sum(1 for r in ins if r.get("action") == "BUY")
+    sells = sum(1 for r in ins if r.get("action") == "SELL")
+    total = buys + sells
+    if total:
+        score = (buys - sells) / total
+        detail = f"{sells} SELL Form 4s · {buys} BUYs · last {min(total, 10)}"
+    else:
+        score, detail = None, "No recent Form 4 activity"
+    rows.append({"name": "Insider activity", "score": score, "weight": "high",
+                 "detail": detail, "verdict": _verdict(score) if score is not None else "NEUTRAL"})
+
+    # 2) Congressional flow.
+    cg = ownership_congress.get("rows") or []
+    cg_buys  = sum(1 for r in cg if r.get("action") == "BUY")
+    cg_sells = sum(1 for r in cg if r.get("action") == "SELL")
+    cg_total = cg_buys + cg_sells
+    if cg_total:
+        score = (cg_buys - cg_sells) / cg_total
+        detail = f"{cg_buys} BUYs · {cg_sells} SELLs"
+    else:
+        score, detail = None, "No congressional trades"
+    rows.append({"name": "Congressional flow", "score": score, "weight": "medium",
+                 "detail": detail, "verdict": _verdict(score) if score is not None else "NEUTRAL"})
+
+    # 3) 13F adds vs cuts — counts of NEW/ADD vs REDUCE/SOLD across funds.
+    funds = ownership_funds.get("rows") or []
+    adds  = sum(1 for r in funds if r.get("chg") and r["chg"] > 0)
+    cuts  = sum(1 for r in funds if r.get("chg") and r["chg"] < 0)
+    f_total = adds + cuts
+    if f_total:
+        score = (adds - cuts) / f_total
+        detail = f"{adds} funds added · {cuts} cut · top 10"
+    else:
+        score, detail = None, f"{ownership_funds.get('total_count', 0)} institutional holders"
+    rows.append({"name": "13F adds vs. cuts", "score": score, "weight": "high",
+                 "detail": detail, "verdict": _verdict(score) if score is not None else "NEUTRAL"})
+
+    # 4) Analyst revisions — ratio of buy-leaning to sell-leaning grades.
+    if forecasts.get("has_data"):
+        ratings = forecasts.get("ratings") or []
+        bull = sum(c for label, c, _ in ratings if label in ("Buy", "Overweight"))
+        bear = sum(c for label, c, _ in ratings if label in ("Sell", "Underweight"))
+        denom = bull + bear + sum(c for label, c, _ in ratings if label == "Hold")
+        if denom:
+            score = (bull - bear) / denom
+            detail = f"{bull} bullish · {bear} bearish · {forecasts.get('consensus','')}"
+        else:
+            score, detail = None, "No analyst coverage"
+    else:
+        score, detail = None, "No analyst coverage"
+    rows.append({"name": "Analyst revisions", "score": score, "weight": "high",
+                 "detail": detail, "verdict": _verdict(score) if score is not None else "NEUTRAL"})
+
+    # 5) Retail sentiment — already a -100..100 score we normalize.
+    if sentiment.get("has_data"):
+        s_score = sentiment["score"] / 100
+        detail = f"WSB {sentiment['score_str']} · {sentiment['mentions']} mentions"
+        rank_str = sentiment.get("rank_str") or ""
+        if rank_str:
+            detail += f" · {rank_str}"
+    else:
+        s_score, detail = None, "Not trending on r/WallStreetBets"
+    rows.append({"name": "Retail sentiment", "score": s_score, "weight": "low",
+                 "detail": detail, "verdict": _verdict(s_score) if s_score is not None else "NEUTRAL"})
+
+    # 6) Price momentum — 50d vs 200d MA on the cached candles.
+    candles = payload.get("candles") or []
+    p_score, p_detail = None, "Not enough price history"
+    if len(candles) >= 200:
+        closes = [c[4] for c in candles if len(c) >= 5 and c[4] is not None]
+        if len(closes) >= 200:
+            ma50  = sum(closes[-50:])  / 50
+            ma200 = sum(closes[-200:]) / 200
+            spread = (ma50 - ma200) / ma200 if ma200 else 0
+            p_score = max(-1.0, min(1.0, spread * 4))  # ±25% spread maps to ±1.0
+            arrow = "▲" if ma50 > ma200 else "▼"
+            p_detail = f"50d {arrow} 200d MA · spread {spread*100:+.1f}%"
+    rows.append({"name": "Price momentum", "score": p_score, "weight": "medium",
+                 "detail": p_detail, "verdict": _verdict(p_score) if p_score is not None else "NEUTRAL"})
+
+    # 7) Valuation — P/E inversion (high P/E = bearish signal).
+    pe_str = meta.get("pe") or "—"
+    v_score, v_detail = None, "P/E unavailable"
+    try:
+        pe_val = float(pe_str)
+        # 0 P/E (loss) = strong bearish; <15 cheap; 15-30 fair; >50 stretched.
+        if pe_val <= 0:
+            v_score = -0.6; v_detail = f"P/E {pe_val:.1f} (loss-making)"
+        elif pe_val < 15:
+            v_score = +0.5; v_detail = f"P/E {pe_val:.1f} (cheap)"
+        elif pe_val < 30:
+            v_score = +0.2; v_detail = f"P/E {pe_val:.1f} (fair)"
+        elif pe_val < 50:
+            v_score = -0.1; v_detail = f"P/E {pe_val:.1f} (premium)"
+        else:
+            v_score = -0.3; v_detail = f"P/E {pe_val:.1f} (stretched)"
+    except (TypeError, ValueError):
+        pass
+    v_verdict = "CAUTION" if v_score is not None and -0.3 <= v_score < 0 else _verdict(v_score)
+    rows.append({"name": "Valuation", "score": v_score, "weight": "medium",
+                 "detail": v_detail,
+                 "verdict": v_verdict if v_score is not None else "NEUTRAL"})
+
+    # 8) Short interest — high short = bearish; low = bullish.
+    si_str = ""
+    si_score = None
+    for label, val in (vitals.get("share_stats") or []):
+        if label == "Short interest" and val and val != "—":
+            si_str = val
+            try:
+                pct = float(val.rstrip("% "))
+                # >5% = bearish, <2% = bullish
+                if pct < 2:    si_score = +0.3
+                elif pct < 5:  si_score = +0.1
+                elif pct < 10: si_score = -0.2
+                else:          si_score = -0.5
+            except (TypeError, ValueError):
+                pass
+            break
+    si_detail = f"{si_str} of float" if si_str else "Short interest unavailable"
+    rows.append({"name": "Short interest", "score": si_score, "weight": "low",
+                 "detail": si_detail,
+                 "verdict": _verdict(si_score) if si_score is not None else "NEUTRAL"})
+
+    # Replace None scores with 0.0 so the template's |sum / |abs filters
+    # don't blow up when a signal had no data to score on.
+    for r in rows:
+        if r["score"] is None:
+            r["score"] = 0.0
+
+    # Composite — weight-average over scored rows.
+    weights = {"high": 1.5, "medium": 1.0, "low": 0.5}
+    num, den = 0.0, 0.0
+    for r in rows:
+        if r["score"] is None: continue
+        w = weights.get(r["weight"], 1.0)
+        num += r["score"] * w
+        den += w
+    composite = num / den if den else 0.0
+    if   composite >=  0.4: composite_label = "STRONG BULLISH"
+    elif composite >=  0.15: composite_label = "BULLISH"
+    elif composite > -0.15: composite_label = "NEUTRAL"
+    elif composite > -0.4:  composite_label = "BEARISH"
+    else:                   composite_label = "STRONG BEARISH"
+
+    return {"signals": rows, "composite": composite_label,
+            "composite_score": round(composite, 2)}
+
+
+async def _stock_build_vitals(request: Request, ticker: str) -> dict:
+    """Real share statistics + peers + upcoming events.
+
+    Three independent fetches (yfinance share stats / Finnhub peers + their
+    prices / Finnhub earnings calendar) all run concurrently so the panel
+    isn't gated on the slowest one.  Dividends still mock — no clean free
+    source.
+    """
+    from filings import client
+
+    t_up = ticker.upper()
+
+    # ── Fan out: yfinance info + peers + events in parallel.  Each is
+    #    L2-cached on its own key, so warm hits short-circuit. ──
+    async def _yf_info() -> dict:
+        try:
+            return await to_heavy(client.get_yfinance_info, t_up) or {}
+        except Exception:
+            return {}
+
+    async def _peer_tickers() -> list[str]:
+        async def _compute() -> list[str]:
+            key = os.environ.get("FINNHUB_API_KEY", "").strip()
+            if not key:
+                return []
+            from filings.http_client import get_async_client
+            try:
+                r = await get_async_client().get(
+                    "https://finnhub.io/api/v1/stock/peers",
+                    params={"symbol": t_up, "token": key},
+                )
+                r.raise_for_status()
+                return [p for p in (r.json() or []) if p and p.upper() != t_up][:6]
+            except Exception as exc:
+                logger.debug("Finnhub peers fetch failed for %s: %s", ticker, exc)
+                return []
+        try:
+            return await _l2_cached(
+                f"redesign:stock:peers:{t_up}", ttl_seconds=86400,
+                compute=_compute, category="redesign_stock",
+            ) or []
+        except Exception:
+            return []
+
+    async def _events() -> list[dict]:
+        async def _compute() -> list[dict]:
+            return await _fetch_stock_events_async(t_up)
+        try:
+            return await _l2_cached(
+                f"redesign:stock:events:{t_up}", ttl_seconds=86400,
+                compute=_compute, category="redesign_stock",
+            ) or []
+        except Exception as exc:
+            logger.debug("Stock events L2 cache failed for %s: %s", ticker, exc)
+            return []
+
+    info, peer_tickers, events_rows = await asyncio.gather(
+        _yf_info(), _peer_tickers(), _events(),
+    )
+
+    # ── Institutional ownership: count of distinct super-fund holdings. ──
+    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    inst_pct = info.get("heldPercentInstitutions")
+
+    def _pct_str(v: float | None) -> str:
+        if v is None: return "—"
+        # yfinance gives 0.658 for 65.8%; we accept either form.
+        if abs(v) <= 1.0: v *= 100
+        return f"{v:.1f}%"
+
+    def _shares_str(n: int | float | None) -> str:
+        if not n: return "—"
+        return _stock_format_volume(n)
+
+    last_split = "—"
+    split_factor = info.get("lastSplitFactor")
+    split_date_epoch = info.get("lastSplitDate")
+    if split_factor and split_date_epoch:
+        from datetime import datetime, timezone
+        try:
+            sd = datetime.fromtimestamp(float(split_date_epoch), tz=timezone.utc)
+            last_split = f"{split_factor} ({sd.strftime('%b %Y')})"
+        except (TypeError, ValueError):
+            last_split = split_factor
+
+    chg_52w = info.get("52WeekChange") or info.get("fiftyTwoWeekChange")
+
+    share_stats = [
+        ("Shares outstanding", _shares_str(info.get("sharesOutstanding"))),
+        ("Float",              _shares_str(info.get("floatShares"))),
+        ("Insider holdings",   _pct_str(info.get("heldPercentInsiders"))),
+        ("Institutional own.", _pct_str(inst_pct)),
+        ("Short interest",     _pct_str(info.get("shortPercentOfFloat"))),
+        ("Days to cover",      f"{info.get('shortRatio'):.1f}" if info.get("shortRatio") else "—"),
+        ("Beta (5Y)",          f"{info.get('beta'):.2f}" if info.get("beta") else "—"),
+        ("52-week change",     f"{chg_52w*100:+.1f}%" if chg_52w is not None else "—"),
+        ("Last split",         last_split),
+    ]
+    # If yfinance returned nothing, keep the design fixture as scaffold so
+    # the panel doesn't show a wall of em-dashes.
+    if not info:
+        share_stats = list(_STOCK_VITALS_SHARE_STATS)
+
+    # ── Peer prices: enrich the peer ticker list with current prices. ──
+    peers_rows: list[dict] = []
+    if peer_tickers:
+        try:
+            from filings import market_data
+            prices = await to_heavy(market_data.get_current_prices_batch, peer_tickers) or {}
+        except Exception:
+            prices = {}
+        for pt in peer_tickers[:5]:
+            price = prices.get(pt)
+            peers_rows.append({
+                "ticker": pt,
+                "name":   pt,  # market_data batch doesn't include name; ticker as fallback
+                "price":  f"{price:.2f}" if price else "—",
+                "chg":    0.0,
+                "pe":     "—",
+                "mc":     "—",
+            })
+    if not peers_rows:
+        peers_rows = list(_STOCK_VITALS_PEERS)
+
+    if not events_rows:
+        events_rows = list(_STOCK_VITALS_EVENTS)
+
+    return {
+        "share_stats": share_stats,
+        "peers":       peers_rows,
+        "dividends":   _STOCK_VITALS_DIVS,   # no reliable free source
+        "events":      events_rows,
+    }
+
+
+def _stock_build_financials(ticker: str) -> dict:
+    """Real financial statements for *ticker* via SEC XBRL.
+
+    Pulls 10-K annual data from ``fundamentals.get_fundamentals`` and
+    transforms it into the shape the redesign template expects (FYxx
+    columns, rows with ``vals`` lists, ``bold``/``hl``/``unit`` flags),
+    plus the 4-cell KPI strip and the gross/op/net margin trend used by
+    the SVG line chart.  Returns ``has_data=False`` when XBRL is empty.
+    """
+    from datetime import datetime
+
+    try:
+        from filings import fundamentals
+        data = fundamentals.get_fundamentals(ticker)
+    except Exception as exc:
+        logger.warning("get_fundamentals(%s) failed: %s", ticker, exc)
+        data = None
+
+    annual = (data or {}).get("annual")
+    if not annual:
+        return {"has_data": False, "kpis": _STOCK_MOCK_FIN_KPIS,
+                "periods": _STOCK_FIN_PERIODS, "income": _STOCK_FIN_INCOME,
+                "balance": _STOCK_FIN_BALANCE, "cash": _STOCK_FIN_CASH,
+                "margin_trend": _STOCK_MARGIN_TREND}
+
+    # Sort periods chronologically (oldest → newest) and keep last 5.
+    raw_periods = sorted(annual["income"]["periods"])[-5:]
+
+    def _label_for(period_end: str) -> str:
+        try:
+            yy = datetime.strptime(period_end, "%Y-%m-%d").year % 100
+            return f"FY{yy:02d}"
+        except (TypeError, ValueError):
+            return period_end[-2:] if period_end else "?"
+
+    period_labels = [_label_for(p) for p in raw_periods]
+
+    # Highlight rows the design singles out as "key" (bold + accent fill).
+    HL = {"Net Income", "Total Equity", "Free Cash Flow"}
+
+    # Statement labels from fundamentals → display label mapping (drop
+    # XBRL-ese; preserve order from the source list).
+    INCOME_LABELS = {
+        "Revenue":               "Revenue",
+        "Cost of Revenue":       "Cost of revenue",
+        "Gross Profit":          "Gross profit",
+        "R&D Expenses":          "R&D",
+        "SG&A Expenses":         "SG&A",
+        "Operating Income":      "Operating income",
+        "Net Income":            "Net income",
+        "EPS Basic":             "EPS (basic)",
+        "EPS Diluted":           "EPS (diluted)",
+    }
+    BALANCE_LABELS = {
+        "Cash and Equivalents":     "Cash & equivalents",
+        "Total Current Assets":     "Total current assets",
+        "Total Assets":             "Total assets",
+        "Total Current Liabilities": "Total current liabilities",
+        "Total Debt":               "Total debt",
+        "Total Equity":             "Stockholders' equity",
+    }
+    CASH_LABELS = {
+        "Operating Cash Flow":      "Operating cash flow",
+        "Capital Expenditures":     "Capex",
+        "Free Cash Flow":           "Free cash flow",
+        "Cash from Financing":      "Cash from financing",
+        "Stock Buybacks":           "Stock buybacks",
+        "Dividends Paid":           "Dividends paid",
+    }
+
+    def _vals_for(row: dict, scale: float = 1e9, decimals: int = 2) -> list[float]:
+        out: list[float] = []
+        for p in raw_periods:
+            v = (row.get("values") or {}).get(p)
+            if v is None:
+                out.append(0.0)
+            else:
+                out.append(round(float(v) / scale, decimals))
+        return out
+
+    def _build_rows(src_rows: list[dict], label_map: dict[str, str], *,
+                    is_eps_check: bool = True) -> list[dict]:
+        rows: list[dict] = []
+        for src in src_rows:
+            label = src.get("label")
+            if label not in label_map:
+                continue
+            display = label_map[label]
+            is_eps = bool(src.get("is_eps")) if is_eps_check else False
+            scale = 1.0 if is_eps else 1e9
+            rows.append({
+                "label": display,
+                "vals":  _vals_for(src, scale=scale, decimals=2),
+                "bold":  bool(src.get("is_subtotal")),
+                "hl":    label in HL,
+                "unit":  "$" if is_eps else "",
+            })
+        return rows
+
+    income_rows  = _build_rows(annual["income"]["rows"],   INCOME_LABELS)
+    balance_rows = _build_rows(annual["balance"]["rows"],  BALANCE_LABELS,  is_eps_check=False)
+    cash_rows    = _build_rows(annual["cashflow"]["rows"], CASH_LABELS,     is_eps_check=False)
+
+    # Append margin rows (from ratios) onto income for the Income tab.
+    ratios_by_label = {r["label"]: r for r in annual.get("ratios", {}).get("rows") or []}
+    for r_label, display in [
+        ("Gross Margin",     "Gross margin"),
+        ("Operating Margin", "Operating margin"),
+        ("Net Margin",       "Net margin"),
+    ]:
+        if r_label in ratios_by_label:
+            r = ratios_by_label[r_label]
+            income_rows.append({
+                "label": display,
+                "vals":  [round((r.get("values") or {}).get(p) or 0, 1) for p in raw_periods],
+                "bold":  False, "hl": False, "unit": "%",
+            })
+
+    # KPI strip (top-of-tab) — pull latest annual values + simple YoY deltas.
+    def _latest_two(label: str, src_rows: list[dict]) -> tuple[float | None, float | None]:
+        for src in src_rows:
+            if src.get("label") == label:
+                values = src.get("values") or {}
+                last     = values.get(raw_periods[-1])
+                prev     = values.get(raw_periods[-2]) if len(raw_periods) > 1 else None
+                return last, prev
+        return None, None
+
+    def _yoy_pct(curr: float | None, prev: float | None) -> str:
+        if curr is None or prev is None or prev == 0:
+            return ""
+        pct = (curr - prev) / abs(prev) * 100
+        sign = "+" if pct >= 0 else ""
+        return f"{sign}{pct:.0f}% YoY"
+
+    rev_curr, rev_prev = _latest_two("Revenue",    annual["income"]["rows"])
+    ni_curr,  ni_prev  = _latest_two("Net Income", annual["income"]["rows"])
+    fcf_row = ratios_by_label.get("Free Cash Flow") or {}
+    fcf_values = fcf_row.get("values") or {}
+    fcf_curr   = fcf_values.get(raw_periods[-1])
+    fcf_prev   = fcf_values.get(raw_periods[-2]) if len(raw_periods) > 1 else None
+    gm_row = ratios_by_label.get("Gross Margin") or {}
+    gm_values = gm_row.get("values") or {}
+    gm_curr   = gm_values.get(raw_periods[-1])
+    gm_prev   = gm_values.get(raw_periods[-2]) if len(raw_periods) > 1 else None
+    gm_delta  = ""
+    if gm_curr is not None and gm_prev is not None:
+        gm_delta = f"{'+' if gm_curr >= gm_prev else ''}{gm_curr - gm_prev:.1f}pp"
+
+    kpis = [
+        {"label": f"Revenue ({period_labels[-1]})",
+         "value": _stock_format_mcap(rev_curr) if rev_curr else "—",
+         "delta": _yoy_pct(rev_curr, rev_prev),
+         "up":    (rev_curr or 0) >= (rev_prev or 0)},
+        {"label": f"Net Income ({period_labels[-1]})",
+         "value": _stock_format_mcap(ni_curr) if ni_curr else "—",
+         "delta": _yoy_pct(ni_curr, ni_prev),
+         "up":    (ni_curr or 0) >= (ni_prev or 0)},
+        {"label": f"FCF ({period_labels[-1]})",
+         "value": _stock_format_mcap(fcf_curr) if fcf_curr else "—",
+         "delta": _yoy_pct(fcf_curr, fcf_prev),
+         "up":    (fcf_curr or 0) >= (fcf_prev or 0)},
+        {"label": "Gross Margin",
+         "value": f"{gm_curr:.1f}%" if gm_curr is not None else "—",
+         "delta": gm_delta,
+         "up":    (gm_curr or 0) >= (gm_prev or 0)},
+    ]
+
+    # Margin-trend chart: pull margin series across the 5 periods.
+    def _series(label: str) -> list[float]:
+        r = ratios_by_label.get(label) or {}
+        values = r.get("values") or {}
+        return [round(values.get(p) or 0, 1) for p in raw_periods]
+
+    margin_trend = {
+        "gross":  _series("Gross Margin"),
+        "op":     _series("Operating Margin"),
+        "net":    _series("Net Margin"),
+        "labels": period_labels,
+    }
+
+    return {
+        "has_data":      True,
+        "kpis":          kpis,
+        "periods":       period_labels,
+        "income":        income_rows,
+        "balance":       balance_rows,
+        "cash":          cash_rows,
+        "margin_trend":  margin_trend,
+    }
+
+
+def _stock_build_ownership_funds(request: Request, ticker: str) -> dict:
+    """Real top-10 13F holders for *ticker* from ``app.state.fund_cache``.
+
+    Walks every cached fund's ``all_holdings`` (zero API calls), sorts by
+    position value descending, formats numbers, and computes QoQ share
+    change as a fraction (NEW = 1.0, exits = -1.0).  Returns a dict with
+    ``rows`` (top-10), ``total_count`` (all funds holding this ticker),
+    and ``total_value`` (combined position value, formatted).
+    """
+    from filings.superinvestors import SUPERINVESTORS_BY_CIK
+
+    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    if not fund_cache:
+        return {"rows": [], "total_count": 0, "total_value": "—"}
+
+    t_up = ticker.upper()
+    rows_raw: list[dict] = []
+    combined_value = 0
+
+    for cik, fund_data in fund_cache.items():
+        si = SUPERINVESTORS_BY_CIK.get(cik)
+        if not si:
+            continue
+
+        change_by_cusip: dict[str, dict] = {
+            ch["cusip"]: ch for ch in fund_data.get("changes") or []
+        }
+        total_val = fund_data.get("total_value") or 0
+
+        for h in fund_data.get("all_holdings") or []:
+            if (h.get("ticker") or "").upper() != t_up:
+                continue
+            value  = h.get("value")  or 0
+            shares = h.get("shares") or 0
+            pct    = h.get("pct")    or 0.0
+            if not pct and total_val > 0:
+                pct = round(value / total_val * 100, 2)
+
+            change = change_by_cusip.get(h.get("cusip") or "")
+            status = (change or {}).get("status")
+            share_change = (change or {}).get("share_change") or 0
+            if status == "NEW":
+                chg = 1.0
+            elif status == "CLOSED":
+                chg = -1.0
+            elif status == "INCREASED" or status == "DECREASED":
+                prev = shares - share_change
+                chg = (share_change / prev) if prev > 0 else 0
+            else:
+                chg = 0.0
+
+            combined_value += value
+            rows_raw.append({
+                "fund":     si.fund_name,
+                "manager":  si.display_name,
+                "shares":   shares,
+                "value":    value,
+                "port":     pct,
+                "chg":      chg,
+            })
+
+    rows_raw.sort(key=lambda r: -r["value"])
+    rows = [{
+        "rank":    f"{i+1:02d}",
+        "fund":    r["fund"],
+        "manager": r["manager"],
+        "shares":  _stock_format_volume(r["shares"]),
+        "value":   _stock_format_mcap(r["value"]),
+        "port":    f"{r['port']:.1f}%" if r["port"] else "—",
+        "chg":     r["chg"],
+    } for i, r in enumerate(rows_raw[:10])]
+
+    return {
+        "rows":        rows,
+        "total_count": len(rows_raw),
+        "total_value": _stock_format_mcap(combined_value),
+    }
+
+
+def _stock_build_ownership_insiders(ticker: str) -> dict:
+    """Real Form 4 insider trades for *ticker* via ``insider_trading``.
+
+    Returns top-10 most-recent trades formatted for the Ownership > Insiders
+    sub-tab.  Falls back to ``{rows: [], total_count: 0}`` on any error.
+    """
+    from filings import insider_trading
+    from datetime import datetime
+
+    try:
+        trades = insider_trading.get_ticker_insider_trades(ticker) or []
+    except Exception as exc:
+        logger.warning("get_ticker_insider_trades(%s) failed: %s", ticker, exc)
+        return {"rows": [], "total_count": 0}
+
+    rows: list[dict] = []
+    for t in trades[:10]:
+        # Trade type: "Sale", "Sale+OE", "Purchase" → "SELL" / "BUY"
+        ttype = (t.trade_type or "").lower()
+        if "sale" in ttype:    action = "SELL"
+        elif "purchas" in ttype: action = "BUY"
+        else:                   action = (t.trade_type or "").upper()
+
+        # Format date from ISO → "Apr 28, 2026"
+        date_str = t.trade_date or t.filing_date or ""
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            date_str = dt.strftime("%b %-d, %Y")
+        except (TypeError, ValueError):
+            pass
+
+        # Strip leading "+/-" from qty and value — action tag conveys direction.
+        qty   = (t.qty   or "—").lstrip("+-")
+        value = (t.value or "—").replace("-$", "$").lstrip("+")
+
+        rows.append({
+            "person":    t.insider_name or "—",
+            "role":      t.title or "—",
+            "action":    action,
+            "shares":    qty,
+            "value":     value,
+            "date":      date_str,
+            "remaining": t.owned or "—",
+        })
+
+    return {"rows": rows, "total_count": len(trades)}
+
+
+def _stock_build_ownership_congress(ticker: str) -> dict:
+    """Real STOCK Act congressional trades for *ticker* from Supabase.
+
+    Returns top-10 most-recent trades, with disclosure delay (days between
+    trade_date and filing_date) and a compact dollar range.
+    """
+    from filings import supabase_cache
+    from datetime import datetime
+
+    try:
+        rows_db = supabase_cache.get_congress_trades_by_ticker(ticker, limit=200) or []
+    except Exception as exc:
+        logger.warning("get_congress_trades_by_ticker(%s) failed: %s", ticker, exc)
+        rows_db = []
+
+    rows: list[dict] = []
+    for r in rows_db[:10]:
+        party_full = (r.get("party") or "").lower()
+        if "democrat" in party_full:   party = "D"
+        elif "republican" in party_full: party = "R"
+        else:                            party = "I"
+
+        action = "BUY" if (r.get("trade_type") or "").lower() == "buy" else "SELL"
+
+        td = r.get("trade_date") or ""
+        fd = r.get("filing_date") or ""
+        try:
+            t_dt = datetime.strptime(td, "%Y-%m-%d") if td else None
+            f_dt = datetime.strptime(fd, "%Y-%m-%d") if fd else None
+            days = (f_dt - t_dt).days if t_dt and f_dt else 0
+            date_str = (f_dt or t_dt).strftime("%b %-d, %Y") if (f_dt or t_dt) else ""
+        except (TypeError, ValueError):
+            days, date_str = 0, fd or td
+
+        rows.append({
+            "person":  r.get("politician_name") or "—",
+            "party":   party,
+            "chamber": (r.get("chamber") or "").title() or "—",
+            "action":  action,
+            "size":    _compact_range_str(r.get("amount_display")) or "—",
+            "date":    date_str,
+            "days":    max(0, days),
+        })
+
+    return {"rows": rows, "total_count": len(rows_db)}
+
+
+async def _stock_build_ownership_filings(ticker: str) -> dict:
+    """Recent EDGAR filings for *ticker* via SEC submissions.json (24h L2-cached).
+
+    Pulls the company's most recent 12 filings, filters out routine
+    ownership reports (Form 3/5), and returns them formatted for the
+    Ownership > SEC Filings sub-tab.
+    """
+    from datetime import datetime
+
+    async def _compute() -> dict:
+        try:
+            from filings import fundamentals
+            cik = fundamentals._resolve_cik(ticker)
+        except Exception as exc:
+            logger.debug("CIK resolution failed for %s: %s", ticker, exc)
+            return {"rows": []}
+        if not cik:
+            return {"rows": []}
+
+        from filings.http_client import get_async_client
+        url = f"https://data.sec.gov/submissions/CIK{int(cik):010d}.json"
+        headers = {
+            "User-Agent": os.environ.get("SEC_IDENTITY",
+                                         "PaperPanda/1.0 (contact@paperpanda.io)"),
+            "Accept": "application/json",
+        }
+        try:
+            r = await get_async_client().get(url, headers=headers, timeout=8.0)
+            r.raise_for_status()
+            payload = r.json() or {}
+        except Exception as exc:
+            logger.debug("SEC submissions.json failed for %s: %s", ticker, exc)
+            return {"rows": []}
+
+        recent = (payload.get("filings") or {}).get("recent") or {}
+        forms        = recent.get("form") or []
+        dates        = recent.get("filingDate") or []
+        descriptions = recent.get("primaryDocDescription") or []
+        accessions   = recent.get("accessionNumber") or []
+        periods      = recent.get("reportDate") or []
+
+        rows: list[dict] = []
+        skip_forms = {"3", "3/A", "5", "5/A"}  # routine; surfaced in Insiders tab
+        for i in range(min(len(forms), 50)):
+            form = forms[i]
+            if form in skip_forms or len(rows) >= 12:
+                continue
+            try:
+                d = datetime.strptime(dates[i], "%Y-%m-%d").strftime("%b %-d, %Y")
+            except (TypeError, ValueError, IndexError):
+                d = dates[i] if i < len(dates) else ""
+
+            rows.append({
+                "type":   form,
+                "filed":  d,
+                "period": periods[i] if i < len(periods) and periods[i] else "—",
+                "desc":   descriptions[i] if i < len(descriptions) else "—",
+                "size":   "—",
+            })
+        return {"rows": rows}
+
+    try:
+        return await _l2_cached(
+            f"redesign:stock:filings:{ticker.upper()}", ttl_seconds=86400,
+            compute=_compute, category="redesign_stock",
+        ) or {"rows": []}
+    except Exception as exc:
+        logger.debug("filings L2 cache failed for %s: %s", ticker, exc)
+        return await _compute()
+
+
+def _stock_build_sentiment(ticker: str) -> dict:
+    """Per-ticker retail sentiment derived from ApeWisdom.
+
+    Score is the 24-hour mention velocity (% change vs ``mentions_24h_ago``)
+    clamped to ±100 — positive = trending up, negative = falling out of
+    favor.  Cohort is the top-3 r/WallStreetBets tickers ranked above
+    *ticker* (or top-3 overall when this ticker is the leader).  Returns
+    a dict the template can render directly; ``has_data=False`` lets the
+    template show a graceful "no data" state.
+    """
+    from filings import sentiment
+
+    t_up = ticker.upper()
+    item = None
+    try:
+        item = sentiment._get_apewisdom_for_ticker(t_up)
+    except Exception as exc:
+        logger.debug("ApeWisdom lookup failed for %s: %s", ticker, exc)
+
+    if not item or not item.get("mentions"):
+        return {"has_data": False, "score": 0, "score_str": "—", "score_class": "",
+                "mentions": "—", "rank_str": "", "cohort": [],
+                "note": "", "fill_pct": 0, "fill_left": 50}
+
+    mentions = int(item.get("mentions") or 0)
+    mentions_24h = int(item.get("mentions_24h_ago") or 0)
+    rank = int(item.get("rank") or 0)
+
+    # Velocity score: 24h mention % change, clamped to ±100.
+    if mentions_24h > 0:
+        score = round((mentions - mentions_24h) / mentions_24h * 100)
+    else:
+        score = 100 if mentions > 0 else 0
+    score = max(-100, min(100, score))
+
+    # Bar geometry — bar is centered on 50%; positive fills right, negative left.
+    fill_w = abs(score) / 2  # half the score % so ±100 fills half the bar each side
+    fill_left = 50 if score >= 0 else 50 - fill_w
+
+    score_class = "pp-up" if score > 0 else ("pp-down" if score < 0 else "")
+    score_str = f"+{score}" if score > 0 else (str(score) if score < 0 else "0")
+
+    # Cohort: the next-most-discussed tickers above this one (or top 3 if this is #1).
+    cohort: list[str] = []
+    try:
+        all_data = sentiment._get_apewisdom_all() or []
+    except Exception:
+        all_data = []
+    for r in all_data:
+        rt = (r.get("ticker") or "").upper()
+        if not rt or rt == t_up:
+            continue
+        if int(r.get("rank") or 9999) < rank or rank == 0:
+            cohort.append(rt)
+        if len(cohort) >= 3:
+            break
+    if len(cohort) < 3:
+        # Fill from the top of the leaderboard.
+        for r in all_data:
+            rt = (r.get("ticker") or "").upper()
+            if rt and rt != t_up and rt not in cohort:
+                cohort.append(rt)
+            if len(cohort) >= 3:
+                break
+
+    rank_str = f"#{rank} most discussed" if rank else ""
+    direction = "up" if score > 0 else ("down" if score < 0 else "flat")
+    note = (
+        f"Mentions {direction} {abs(score)}% vs. 24 hours ago"
+        f" ({mentions_24h:,} → {mentions:,})." if mentions_24h else
+        f"{mentions:,} mentions in the last 24 hours."
+    )
+
+    return {
+        "has_data":    True,
+        "score":       score,
+        "score_str":   score_str,
+        "score_class": score_class,
+        "mentions":    f"{mentions:,}",
+        "rank_str":    rank_str,
+        "cohort":      cohort[:3],
+        "note":        note,
+        "fill_pct":    round(fill_w, 1),
+        "fill_left":   round(fill_left, 1),
+    }
+
+
+_COMPANY_NAME_SUFFIX_RE = re.compile(
+    r"\b(?:inc\.?|corp\.?|corporation|ltd\.?|limited|plc|llc|holdings?|"
+    r"company|co\.?|n\.v\.|s\.a\.|gmbh|ag|sa)\b\.?",
+    re.IGNORECASE,
+)
+
+
+def _company_name_token(name: str | None) -> str:
+    """Strip "Inc / Corp / Ltd / …" off a company name so the filter can
+    match the *brand* word in headlines (e.g. ``"NVIDIA Corporation"`` →
+    ``"NVIDIA"``).  Returns empty string when nothing useful remains."""
+    if not name:
+        return ""
+    cleaned = _COMPANY_NAME_SUFFIX_RE.sub("", name)
+    cleaned = re.sub(r"[,.&]+", " ", cleaned)
+    return cleaned.strip().split()[0] if cleaned.strip() else ""
+
+
+async def _fetch_stock_events_async(ticker: str, *, months_ahead: int = 6,
+                                    max_items: int = 4) -> list[dict]:
+    """Per-ticker forward earnings calendar from Finnhub /calendar/earnings.
+
+    Free-tier endpoint takes ``symbol=`` for filtering; we ask for the next
+    *months_ahead* and trim to *max_items*.  Returns rows shaped for the
+    Vitals "Upcoming events" panel: ``{date, event, when, est}``.
+
+    L2-cached 24h via the caller — earnings dates are firmed up well in
+    advance and rarely change inside that window.
+    """
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return []
+
+    from datetime import datetime, timedelta, timezone
+    from filings.http_client import get_async_client
+
+    today = datetime.now(timezone.utc).date()
+    end = today + timedelta(days=months_ahead * 31)
+    params = {
+        "symbol": ticker.upper(), "token": key,
+        "from": today.isoformat(), "to": end.isoformat(),
+    }
+    try:
+        r = await get_async_client().get(
+            "https://finnhub.io/api/v1/calendar/earnings", params=params,
+        )
+        r.raise_for_status()
+        raw = (r.json() or {}).get("earningsCalendar") or []
+    except Exception as exc:
+        logger.debug("Finnhub earnings calendar failed for %s: %s", ticker, exc)
+        return []
+
+    raw.sort(key=lambda e: e.get("date") or "")  # ascending by date
+
+    out: list[dict] = []
+    for ent in raw[:max_items]:
+        try:
+            d = datetime.strptime(ent["date"], "%Y-%m-%d")
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        # "amc" = after market close · "bmo" = before market open · "" = unset
+        hour = (ent.get("hour") or "").lower()
+        when = "After close" if hour == "amc" else (
+            "Before open" if hour == "bmo" else "TBD"
+        )
+
+        # Compose "EPS $X.XX · Rev $YY.YB" from the consensus estimates.
+        eps_est = ent.get("epsEstimate")
+        rev_est = ent.get("revenueEstimate")
+        est_parts: list[str] = []
+        if eps_est is not None:
+            est_parts.append(f"EPS ${float(eps_est):.2f}")
+        if rev_est is not None:
+            est_parts.append(f"Rev {_stock_format_mcap(float(rev_est))}")
+        est = " · ".join(est_parts) or "Consensus pending"
+
+        # Quarter / year from the entry; falls back to month-derived label.
+        q_num = ent.get("quarter")
+        y_num = ent.get("year")
+        if q_num and y_num:
+            event_label = f"Q{int(q_num)} {int(y_num)} Earnings"
+        else:
+            event_label = "Earnings"
+
+        out.append({
+            "date":  d.strftime("%b %-d"),
+            "event": event_label,
+            "when":  when,
+            "est":   est,
+        })
+    return out
+
+
+async def _fetch_company_news_async(ticker: str, *, name: str | None = None,
+                                    days_back: int = 21,
+                                    max_items: int = 6) -> list[dict]:
+    """Per-ticker news from Finnhub /company-news, normalised to the shape
+    the stock-page right-rail expects ({src, ago, title, url}).
+
+    Finnhub tags articles where the symbol is one of the *related* tickers
+    — that pulls in Broadcom-vs-Nvidia comparisons under both symbols, so
+    we also filter the headline for the ticker symbol or the brand word
+    (e.g. "NVIDIA").  Uses the shared async HTTP client; L2-cached 30min
+    via the caller."""
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return []
+
+    from datetime import datetime, timedelta, timezone
+    from filings.http_client import get_async_client
+
+    today = datetime.now(timezone.utc).date()
+    sym = ticker.upper()
+    params = {
+        "symbol": sym, "token": key,
+        "from": (today - timedelta(days=days_back)).isoformat(),
+        "to":   today.isoformat(),
+    }
+
+    try:
+        r = await get_async_client().get(
+            "https://finnhub.io/api/v1/company-news", params=params,
+        )
+        r.raise_for_status()
+        raw = r.json() or []
+    except Exception as exc:
+        logger.debug("Finnhub company-news failed for %s: %s", ticker, exc)
+        return []
+
+    # Filter: keep only articles where the ticker or brand-name word
+    # appears in the headline (case-insensitive whole-word match).  This
+    # drops articles where NVDA is just a "related" tag on a Magna/Ford
+    # piece.
+    brand = _company_name_token(name)
+    needles = {sym}
+    if brand:
+        needles.add(brand.upper())
+
+    def _matches(headline: str) -> bool:
+        if not headline:
+            return False
+        upper = headline.upper()
+        for n in needles:
+            if re.search(rf"\b{re.escape(n)}\b", upper):
+                return True
+        return False
+
+    raw.sort(key=lambda a: a.get("datetime") or 0, reverse=True)
+    items: list[dict] = []
+    for art in raw:
+        if not _matches(art.get("headline") or ""):
+            continue
+        ts = art.get("datetime") or 0
+        try:
+            from filings.market_data import _time_ago
+            ago = _time_ago(ts) if ts else ""
+        except Exception:
+            ago = ""
+        items.append({
+            "src":   art.get("source") or "—",
+            "ago":   ago,
+            "title": art.get("headline") or "",
+            "url":   art.get("url") or "",
+        })
+        if len(items) >= max_items:
+            break
+    return items
+
+
+async def _fetch_stock_news(ticker: str, name: str | None) -> list[dict]:
+    """Wrapper: per-ticker company news with a 30min L2 read-through cache.
+
+    Cache key includes the brand token so a name-resolved fetch doesn't
+    overwrite a ticker-only fetch (and vice versa); both surface different
+    filter results."""
+    brand = _company_name_token(name) or ""
+    key_suffix = f"{ticker.upper()}:{brand.upper()}" if brand else ticker.upper()
+    async def _compute() -> list[dict]:
+        return await _fetch_company_news_async(ticker, name=name, max_items=6)
+    try:
+        return await _l2_cached(
+            f"redesign:stock:news:{key_suffix}", ttl_seconds=1800,
+            compute=_compute, category="redesign_stock",
+        ) or []
+    except Exception as exc:
+        logger.debug("Stock news L2 cache failed for %s: %s", ticker, exc)
+        return await _fetch_company_news_async(ticker, name=name, max_items=6)
+
+
+async def _fetch_finnhub_profile(ticker: str) -> dict:
+    """Finnhub /stock/profile2 + /stock/metric — yfinance fallback.
+
+    Returns ``{"profile": {...}, "metric": {...}}``.  Empty dicts on miss
+    (no API key, network failure, unknown ticker).  Both endpoints are
+    fetched concurrently via the shared async HTTP client.
+    """
+    key = os.environ.get("FINNHUB_API_KEY", "").strip()
+    if not key:
+        return {"profile": {}, "metric": {}}
+
+    from filings.http_client import get_async_client
+    cli = get_async_client()
+    sym = ticker.upper()
+
+    async def _profile() -> dict:
+        try:
+            r = await cli.get(
+                "https://finnhub.io/api/v1/stock/profile2",
+                params={"symbol": sym, "token": key},
+            )
+            r.raise_for_status()
+            return r.json() or {}
+        except Exception as exc:
+            logger.debug("Finnhub profile2 fetch failed for %s: %s", ticker, exc)
+            return {}
+
+    async def _metric() -> dict:
+        try:
+            r = await cli.get(
+                "https://finnhub.io/api/v1/stock/metric",
+                params={"symbol": sym, "metric": "all", "token": key},
+            )
+            r.raise_for_status()
+            return (r.json() or {}).get("metric") or {}
+        except Exception as exc:
+            logger.debug("Finnhub metric fetch failed for %s: %s", ticker, exc)
+            return {}
+
+    profile, metric = await asyncio.gather(_profile(), _metric())
+    return {"profile": profile, "metric": metric}
+
+
+async def _fetch_stock_meta(request: Request, ticker: str) -> dict:
+    """Resolve hero/KPI metadata + About-panel fields for *ticker*.
+
+    Read order:
+      1. ``company_about`` Supabase row (filled by ``scripts/backfill_about.py``
+         every 6 months; covers CEO / employees / HQ / IPO / website / blurb /
+         logo).  When present, we skip yfinance entirely.
+      2. Finnhub /stock/profile2 + /stock/metric — always called for
+         sector / industry / exchange / mcap / P/E.
+      3. yfinance .info — only called when no ``company_about`` row exists.
+         On miss we kick off an async writeback so the next visitor reads
+         from Supabase instead.
+
+    CUSIP + holders count come from a one-pass walk over
+    ``app.state.fund_cache`` (zero network).
+    """
+    from filings import client, company_about as ca
+
+    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    t_up = ticker.upper()
+
+    async def _about_row() -> dict | None:
+        return await to_light(ca.get_row, t_up)
+
+    async def _finnhub() -> dict:
+        async def _compute() -> dict:
+            return await _fetch_finnhub_profile(t_up)
+        try:
+            return await _l2_cached(
+                f"redesign:stock:finnhub:{t_up}", ttl_seconds=86400,
+                compute=_compute, category="redesign_stock",
+            ) or {"profile": {}, "metric": {}}
+        except Exception as exc:
+            logger.debug("Finnhub L2 cache failed for %s: %s", ticker, exc)
+            return await _fetch_finnhub_profile(t_up)
+
+    about_row, fh = await asyncio.gather(_about_row(), _finnhub())
+    fh_profile = (fh or {}).get("profile") or {}
+    fh_metric  = (fh or {}).get("metric")  or {}
+
+    # yfinance is only needed when company_about hasn't been backfilled
+    # for this ticker.  Skip the call entirely on hot path — the table
+    # is the canonical source.
+    info: dict = {}
+    if not about_row:
+        try:
+            info = await to_heavy(client.get_yfinance_info, t_up) or {}
+        except Exception as exc:
+            logger.warning("get_yfinance_info failed for %s: %s", ticker, exc)
+        # Write back to Supabase so the next reader skips yfinance.
+        if info or fh_profile:
+            async def _writeback() -> None:
+                row = await to_heavy(ca.fetch_live, t_up)
+                if row.get("source") != "empty":
+                    await to_light(ca.upsert_row, row)
+            asyncio.create_task(_writeback())
+
+    # Walk fund_cache once for holders count + CUSIP/issuer fallback.
+    holders = 0
+    cusip_from_cache: str | None = None
+    for fund_data in fund_cache.values():
+        match = False
+        for h in fund_data.get("all_holdings") or []:
+            if (h.get("ticker") or "").upper() == t_up:
+                if not cusip_from_cache and h.get("cusip"):
+                    cusip_from_cache = h["cusip"]
+                match = True
+                break
+        if match:
+            holders += 1
+
+    industry = info.get("industry") or fh_profile.get("finnhubIndustry") or "—"
+
+    # Sector resolution: prefer yfinance, then GICS lookup from _FALLBACK_SP500
+    # for top-200 tickers (Finnhub doesn't provide a GICS-level sector field).
+    sector = info.get("sector") or ""
+    if not sector:
+        try:
+            from filings.market_data import _FALLBACK_SP500
+            for entry in _FALLBACK_SP500:
+                if entry.get("ticker", "").upper() == t_up:
+                    sector = entry.get("sector") or ""
+                    break
+        except Exception:
+            pass
+    if not sector or sector == industry:
+        sector = industry
+
+    exch_code = (info.get("exchange") or "").upper()
+    exchange  = _EXCHANGE_LABELS.get(exch_code, exch_code) if exch_code else ""
+    if not exchange or exchange == "—":
+        # Finnhub returns full names like "NASDAQ NMS - GLOBAL SELECT MARKET".
+        fh_exch = (fh_profile.get("exchange") or "").upper()
+        if "NASDAQ" in fh_exch: exchange = "NASDAQ"
+        elif "NEW YORK" in fh_exch or "NYSE" in fh_exch: exchange = "NYSE"
+        elif fh_exch: exchange = fh_exch.split()[0]
+        else: exchange = "—"
+
+    cusip = cusip_from_cache or "—"
+
+    mcap_raw = info.get("marketCap")
+    if not mcap_raw and fh_profile.get("marketCapitalization"):
+        # Finnhub returns mcap in millions of USD.
+        mcap_raw = float(fh_profile["marketCapitalization"]) * 1e6
+
+    pe_raw = info.get("trailingPE")
+    if (pe_raw is None or pe_raw <= 0) and fh_metric.get("peTTM"):
+        try:
+            pe_raw = float(fh_metric["peTTM"])
+        except (TypeError, ValueError):
+            pass
+
+    # About panel: prefer the company_about row when we have one, otherwise
+    # fall back to the live yfinance + Finnhub merge (the writeback above
+    # populates the row asynchronously so subsequent reads use the table).
+    if about_row:
+        about = ca.format_for_template(about_row)
+    else:
+        about = {
+            "about_blurb":     _stock_truncate_blurb(info.get("longBusinessSummary")),
+            "about_ceo":       _stock_extract_ceo(info),
+            "about_employees": _stock_format_employees(
+                info.get("fullTimeEmployees") or fh_profile.get("employeeTotal")
+            ),
+            "about_hq":        _stock_format_hq(info, fh_profile),
+            "about_ipo":       _stock_format_ipo(info, fh_profile),
+            "about_website":   _stock_format_website(info, fh_profile),
+            "logo_url":        _stock_resolve_logo(info, fh_profile),
+        }
+
+    return {
+        # Hero + KPI strip
+        "sector":   sector,
+        "industry": industry,
+        "exchange": exchange,
+        "cusip":    cusip,
+        "mcap":     _stock_format_mcap(mcap_raw),
+        "pe":       _stock_format_pe(pe_raw),
+        "holders":  holders,
+        # About panel (from company_about table or live fallback)
+        **{k: about[k] for k in (
+            "about_blurb", "about_ceo", "about_employees",
+            "about_hq", "about_ipo", "about_website", "logo_url",
+        )},
+    }
+
+
 async def _fetch_stock_overview(ticker: str) -> dict:
     """Fetch OHLCV + quote for a stock.  Returns rich context dict.
 
@@ -2956,12 +4657,10 @@ async def _fetch_stock_overview(ticker: str) -> dict:
         logger.warning("Stock OHLCV fetch failed for %s: %s", ticker, exc)
         ohlcv = None
 
-    try:
-        from filings import market_data
-        news = await to_heavy(market_data.get_market_news, "general", 6)
-    except Exception as exc:
-        logger.warning("Market news fetch failed: %s", exc)
-        news = []
+    # News is fetched separately via _fetch_stock_news so it can use the
+    # resolved company name from meta to filter related-but-off-topic
+    # headlines (Broadcom-vs-Nvidia, etc.).
+    news: list[dict] = []
 
     if not ohlcv or not ohlcv.get("ohlcv"):
         # Demo fallback (NVDA-shaped).
@@ -3105,7 +4804,7 @@ def _stock_candlestick_paths(candles: list, vb_w: int = 600, vb_h: int = 200) ->
     for i, row in enumerate(sampled):
         if len(row) < 6:
             continue
-        _, o, h, l, c, v = row[:6]
+        ts, o, h, l, c, v = row[:6]
         if any(x is None for x in [o, h, l, c]):
             continue
         x = 12 + i * w_x
@@ -3126,49 +4825,283 @@ def _stock_candlestick_paths(candles: list, vb_w: int = 600, vb_h: int = 200) ->
             "vol_x":   round(x - 3, 1),
             "vol_y":   round(v_strip_top + v_strip_h - vol_h, 1),
             "vol_h":   round(vol_h, 1),
+            # Raw OHLCV for the hover tooltip — kept separate from the SVG
+            # geometry so the JSON payload stays readable.
+            "t":       int(ts) if ts is not None else 0,
+            "o":       round(float(o), 2),
+            "h":       round(float(h), 2),
+            "l":       round(float(l), 2),
+            "c":       round(float(c), 2),
+            "v":       int(v) if v is not None else 0,
         })
 
-    return {"bars": bars, "n": n_s}
+    return {"bars": bars, "n": n_s, "vb_w": vb_w}
 
 
 @router.get("/stock/{ticker}", response_class=HTMLResponse)
 async def preview_stock(request: Request, ticker: str):
-    """Stock detail — Overview tab is wired (chart, news, KPIs).
-    Other 5 tabs are placeholders."""
-    payload = await _fetch_stock_overview(ticker)
+    """Stock detail — wires real data into every tab with hard per-source
+    timeouts so a single slow upstream (yfinance rate-limit, OpenInsider
+    scrape) can't stall the whole page."""
+
+    async def _bounded(coro, *, timeout: float, fallback, name: str):
+        """Race *coro* against *timeout*; on miss, log + return *fallback*."""
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning("Stock %s: %s timed out after %.1fs", ticker, name, timeout)
+        except Exception as exc:
+            logger.warning("Stock %s: %s failed: %s", ticker, name, exc)
+        return fallback
+
+    payload, meta, sentiment_data, ownership_funds, ownership_insiders, ownership_congress, ownership_filings, financials, forecasts, vitals = await asyncio.gather(
+        _bounded(_fetch_stock_overview(ticker),                      timeout=8.0,
+                 fallback={"ticker": ticker.upper(), "name": ticker.upper(),
+                           "exchange": "—", "cusip": "—", "price": None,
+                           "chg_pct": None, "chg_abs": None,
+                           "open": "—", "high": "—", "low": "—", "close": "—",
+                           "volume": "—", "avg_vol": "—", "mcap": "—", "pe": "—",
+                           "high_52": "—", "low_52": "—", "candles": [],
+                           "news": [], "is_mock": True},
+                 name="overview"),
+        _bounded(_fetch_stock_meta(request, ticker),                 timeout=6.0,
+                 fallback={"sector": "—", "industry": "—", "exchange": "—",
+                           "cusip": "—", "mcap": "—", "pe": "—", "holders": 0,
+                           "about_blurb": "", "about_ceo": "—",
+                           "about_employees": "—", "about_hq": "—",
+                           "about_ipo": "—", "about_website": "—",
+                           "logo_url": ""},
+                 name="meta"),
+        _bounded(to_light(_stock_build_sentiment, ticker),           timeout=4.0,
+                 fallback={"has_data": False, "score": 0, "score_str": "—",
+                           "score_class": "", "mentions": "—", "rank_str": "",
+                           "cohort": [], "note": "", "fill_pct": 0, "fill_left": 50},
+                 name="sentiment"),
+        _bounded(to_light(_stock_build_ownership_funds, request, ticker), timeout=2.0,
+                 fallback={"rows": [], "total_count": 0, "total_value": "—"},
+                 name="ownership_funds"),
+        _bounded(to_heavy(_stock_build_ownership_insiders, ticker),  timeout=2.0,
+                 fallback={"rows": [], "total_count": 0},
+                 name="ownership_insiders"),
+        _bounded(to_light(_stock_build_ownership_congress, ticker),  timeout=3.0,
+                 fallback={"rows": [], "total_count": 0},
+                 name="ownership_congress"),
+        _bounded(_stock_build_ownership_filings(ticker),             timeout=4.0,
+                 fallback={"rows": []},
+                 name="ownership_filings"),
+        _bounded(to_heavy(_stock_build_financials, ticker),          timeout=6.0,
+                 fallback={"has_data": False, "kpis": _STOCK_MOCK_FIN_KPIS,
+                           "periods": _STOCK_FIN_PERIODS,
+                           "income": _STOCK_FIN_INCOME, "balance": _STOCK_FIN_BALANCE,
+                           "cash": _STOCK_FIN_CASH, "margin_trend": _STOCK_MARGIN_TREND},
+                 name="financials"),
+        _bounded(to_heavy(_stock_build_forecasts, ticker, None),     timeout=5.0,
+                 fallback={"has_data": False, "ratings": _STOCK_FCT_RATINGS,
+                           "ratings_total": sum(r[1] for r in _STOCK_FCT_RATINGS),
+                           "analysts": _STOCK_FCT_ANALYSTS,
+                           "rev_est": _STOCK_FCT_REV_EST,
+                           "eps": _STOCK_FCT_EPS_REVISIONS,
+                           "target_band": _STOCK_FCT_TARGET_BAND,
+                           "now_pct": _STOCK_FCT_PRICE_PCT,
+                           "consensus": "BUY"},
+                 name="forecasts"),
+        _bounded(_stock_build_vitals(request, ticker),               timeout=7.0,
+                 fallback={"share_stats": list(_STOCK_VITALS_SHARE_STATS),
+                           "peers": list(_STOCK_VITALS_PEERS),
+                           "dividends": _STOCK_VITALS_DIVS,
+                           "events": _STOCK_VITALS_EVENTS},
+                 name="vitals"),
+    )
+    # Re-anchor the price tick on the analyst target distribution once the
+    # live quote has landed (forecasts ran in parallel without it).
+    cur_price = payload.get("price")
+    if forecasts.get("has_data") and cur_price:
+        band = forecasts["target_band"]
+        span = band["high"] - band["low"] or 1
+        forecasts["now_pct"] = max(0.0, min(100.0,
+            round((cur_price - band["low"]) / span * 100, 1)))
+
+    # News — runs serially after meta so the brand-name filter has access
+    # to the resolved company name, dropping articles where the ticker is
+    # only a Finnhub-related tag (Broadcom-vs-Nvidia comparisons etc.).
+    payload["news"] = await _bounded(
+        _fetch_stock_news(ticker, payload.get("name") or meta.get("name") or ticker),
+        timeout=8.0, fallback=[], name="news",
+    )
+
+    # Watchlist state — used by the hero "★ Watch" button toggle.
+    stock_watching = False
+    user = getattr(request.state, "user", None)
+    user_id = (user or {}).get("sub") if user else None
+    if user_id:
+        try:
+            from filings import supabase_cache
+            stock_watching = await asyncio.to_thread(
+                supabase_cache.is_ticker_watched, user_id, ticker.upper()
+            )
+        except Exception as exc:
+            logger.debug("is_ticker_watched(%s) failed: %s", ticker, exc)
+
+    signals_data = _stock_compute_signals(
+        sentiment=sentiment_data, ownership_funds=ownership_funds,
+        ownership_insiders=ownership_insiders, ownership_congress=ownership_congress,
+        forecasts=forecasts, payload=payload, meta=meta, vitals=vitals,
+    )
+    # Overlay real metadata (mcap, P/E, exchange, CUSIP) onto the payload so
+    # the KPI strip + hero pills render live values instead of em-dashes.
+    payload["mcap"]     = meta["mcap"]
+    payload["pe"]       = meta["pe"]
+    if meta["exchange"] != "—":
+        payload["exchange"] = meta["exchange"]
+    if meta["cusip"] != "—":
+        payload["cusip"] = meta["cusip"]
     chart = _stock_candlestick_paths(payload.get("candles") or [])
     kpis = _stock_kpi_strip(payload)
 
-    # Format news for the right-rail panel.
+    # Format news for the right-rail panel.  _fetch_company_news_async
+    # already returns ``{src, ago, title, url}``; the alternate keys cover
+    # the legacy market_data fallback shape used in demo mode.
     news_items = []
     for n in payload.get("news") or []:
         news_items.append({
-            "src":   n.get("source") or n.get("publisher") or "—",
-            "ago":   n.get("ago") or n.get("relative_time") or "",
+            "src":   n.get("src") or n.get("source") or n.get("publisher") or "—",
+            "ago":   n.get("ago") or n.get("relative_time") or n.get("time_ago") or "",
             "title": n.get("title") or n.get("headline") or "",
+            "url":   n.get("url") or "",
         })
+
+    # Precompute chart path geometry server-side — keeps the template
+    # arithmetic-free and lets us reuse the same _stock_line_path helper
+    # across the margin-trend + EPS-revisions charts.
+    mt = financials["margin_trend"]
+    margin_paths = {
+        "gross": _stock_line_path(mt["gross"], 0, 100),
+        "op":    _stock_line_path(mt["op"],    0, 100),
+        "net":   _stock_line_path(mt["net"],   0, 100),
+        "gross_pts": _stock_chart_points(mt["gross"], 0, 100),
+    }
+    eps_series = forecasts["eps"]
+    eps_min = min(eps_series) - 1
+    eps_max = max(eps_series) + 1
+    eps_path = _stock_line_path(eps_series, eps_min, eps_max)
+    eps_pts = _stock_chart_points(eps_series, eps_min, eps_max)
+    # Analyst price-target ticks for the number-line in Forecasts.
+    band = forecasts["target_band"]
+    span = (band["high"] - band["low"]) or 1
+    analyst_ticks = [
+        {**a, "pct": max(0.0, min(100.0,
+                          round((a["target"] - band["low"]) / span * 100, 1))),
+         "delta": round(a["target"] - a["prev"], 2)}
+        for a in forecasts["analysts"]
+    ]
 
     ctx = {
         "request":      request,
         **_shell_context(""),  # Stock page doesn't highlight a sidebar item
-        # Header
+        # Header — design adds sector / industry / "held by N superinvestors"
+        # below the title; mock until fundamentals + holders join lands.
         "stock_ticker":   payload["ticker"],
         "stock_name":     payload["name"],
         "stock_exchange": payload["exchange"],
         "stock_cusip":    payload["cusip"],
+        "stock_sector":   meta["sector"],
+        "stock_industry": meta["industry"],
+        "stock_mcap":     meta["mcap"],
+        "stock_holders":  meta["holders"],
+        "stock_logo":     meta["logo_url"],
+        # About panel
+        "about_blurb":     meta["about_blurb"],
+        "about_ceo":       meta["about_ceo"],
+        "about_employees": meta["about_employees"],
+        "about_hq":        meta["about_hq"],
+        "about_ipo":       meta["about_ipo"],
+        "about_website":   meta["about_website"],
+        # Retail sentiment panel (ApeWisdom-backed)
+        "sentiment":      sentiment_data,
         "stock_price":    _stock_format_price(payload["price"]),
         "stock_chg_pct":  payload["chg_pct"],
         "stock_chg_abs":  payload["chg_abs"],
         "stock_chg_up":   (payload.get("chg_pct") or 0) >= 0,
         "stock_close":    payload["close"],
-        # Body
+        # Overview body
         "stock_kpi":      kpis,
         "stock_chart":    chart,
         "stock_news":     news_items[:6],
         "stock_is_mock":  payload.get("is_mock", False),
         "stock_tab":      "Overview",
+        # Financials tab
+        "fin_kpis":       financials["kpis"],
+        "fin_periods":    financials["periods"],
+        "fin_income":     financials["income"],
+        "fin_balance":    financials["balance"],
+        "fin_cash":       financials["cash"],
+        "rev_segments":   _STOCK_REVENUE_SEGMENTS,
+        "rev_total":      _STOCK_REVENUE_TOTAL,
+        "margin_trend":   _STOCK_MARGIN_TREND,
+        # Ownership tab
+        "own_funds":          ownership_funds["rows"],
+        "own_funds_count":    ownership_funds["total_count"],
+        "own_funds_value":    ownership_funds["total_value"],
+        "own_insiders":       ownership_insiders["rows"],
+        "own_insiders_count": ownership_insiders["total_count"],
+        "own_congress":       ownership_congress["rows"],
+        "own_congress_count": ownership_congress["total_count"],
+        "own_filings":        ownership_filings["rows"],
+        # Forecasts tab
+        "fct_ratings":      forecasts["ratings"],
+        "fct_ratings_total": forecasts["ratings_total"],
+        "fct_analysts":     analyst_ticks,
+        "fct_rev_est":      forecasts["rev_est"],
+        "fct_eps_path":     eps_path,
+        "fct_eps_pts":      eps_pts,
+        "fct_target_low":   band["low"],
+        "fct_target_high":  band["high"],
+        "fct_now_pct":      forecasts["now_pct"],
+        "fct_consensus":    forecasts["consensus"],
+        # Financials tab — extras: margin trend SVG paths
+        "margin_paths":   margin_paths,
+        # Signals tab
+        "sig_signals":    signals_data["signals"],
+        "sig_composite":  signals_data["composite"],
+        "sig_composite_score": signals_data["composite_score"],
+        # Vitals tab
+        "vit_dividends":  vitals["dividends"],
+        "vit_events":     vitals["events"],
+        "vit_peers":      vitals["peers"],
+        "vit_share_stats": vitals["share_stats"],
+        # Watchlist state
+        "stock_watching": stock_watching,
+        "stock_user_signed_in": bool(user_id),
     }
     return templates.TemplateResponse("_redesign/stock.html", ctx)
+
+
+_CHART_PERIODS = {"1D", "1W", "1M", "3M", "1Y", "5Y"}
+
+
+@router.get("/stock/{ticker}/chart/{period}", response_class=HTMLResponse)
+async def preview_stock_chart(request: Request, ticker: str, period: str):
+    """Partial: just the candlestick + volume SVG bars + axis labels.
+
+    Powers the range-chip click handler — JS swaps the inner HTML of
+    ``.pp-stock-chart-body`` instead of refetching the whole page.
+    """
+    period_norm = period.upper() if period.upper() in _CHART_PERIODS else "1Y"
+
+    try:
+        from filings import market_data
+        ohlcv = await to_heavy(market_data.get_stock_ohlcv, ticker.upper(), period_norm)
+    except Exception as exc:
+        logger.warning("Stock OHLCV(%s, %s) failed: %s", ticker, period_norm, exc)
+        ohlcv = None
+
+    candles = (ohlcv or {}).get("ohlcv") or []
+    chart = _stock_candlestick_paths(candles)
+    return templates.TemplateResponse(
+        "_redesign/partials/stock_chart.html",
+        {"request": request, "stock_chart": chart, "period": period_norm,
+         "ticker": ticker.upper()},
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
