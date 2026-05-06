@@ -167,14 +167,14 @@
         <div class="pp-home-chart-wrap"
              data-history='{{ chart_history_json|default("[]")|safe }}'
              data-prev-close="{{ chart_prev_close|default('') }}"
-             data-vb-w="600" data-vb-h="200">
+             data-vb-w="800" data-vb-h="200">
           <svg class="pp-home-chart-svg"
-               viewBox="0 0 600 200" preserveAspectRatio="none"
+               viewBox="0 0 800 200" preserveAspectRatio="none"
                aria-label="S&P 500 intraday line chart">
             {# Grid lines — 4 horizontal dashes (these stretch but are decorative) #}
             {% for i in range(4) %}
               <line class="pp-home-chart-grid"
-                    x1="0" x2="600"
+                    x1="0" x2="800"
                     y1="{{ i * 55 + 10 }}" y2="{{ i * 55 + 10 }}"/>
             {% endfor %}
             {# Area fill (closed path) + line stroke.  vector-effect on the
@@ -185,7 +185,7 @@
                   vector-effect="non-scaling-stroke"/>
             {# Reference line — prev close for 1D, period-start close otherwise. #}
             <line class="pp-home-chart-ref" id="pp-home-chart-ref"
-                  x1="0" x2="600" y1="{{ _ref_y }}" y2="{{ _ref_y }}"
+                  x1="0" x2="800" y1="{{ _ref_y }}" y2="{{ _ref_y }}"
                   vector-effect="non-scaling-stroke"/>
             {# Hover crosshair (vertical line) — initially hidden, JS toggles. #}
             <line class="pp-home-chart-crosshair"
@@ -633,7 +633,7 @@
           {{ tag("notif-" + f.cat, text=f.pill) }}
         </div>
       {% endfor %}
-      <a class="pp-home-activity-footer" href="/profile?tab=Alerts">View all activity →</a>
+      <a class="pp-home-activity-footer" href="/_v2/notifications">View all activity →</a>
     {% endcall %}
   </section>{# end Activity pane #}
 
@@ -1028,7 +1028,7 @@
   var wrap = document.querySelector('.pp-home-chart-wrap');
   if (!wrap) return;
 
-  var vbW = parseFloat(wrap.getAttribute('data-vb-w')) || 600;
+  var vbW = parseFloat(wrap.getAttribute('data-vb-w')) || 800;
   var vbH = parseFloat(wrap.getAttribute('data-vb-h')) || 200;
 
   var svg = wrap.querySelector('.pp-home-chart-svg');
@@ -1115,7 +1115,7 @@
     var price = pt[1];
 
     /* Map history index → viewBox x.  Same as the Python path math:
-       last point sits at x = vbW (600), first at x = 0. */
+       last point sits at x = vbW, first at x = 0. */
     var vbx = (idx / (history.length - 1)) * vbW;
     var vby = yFor(price);
 

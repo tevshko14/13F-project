@@ -1,17 +1,12 @@
 {#-
   PaperPanda Redesign — Congress page
-  Mirrors design_handoff_paperpanda/page-congress.jsx
-
-  Tabs: Trades · Members · Leaderboard · Performance · Calendar
-  Default = Trades (live).  Other 4 tabs are placeholders.
-
-  Real data: supabase_cache.get_congress_recent_trades() — 30 most recent
-  STOCK Act disclosures from the existing scrape pipeline.
+  Three tabs: Congress (chamber dot grids + chart toggle) · Holdings · Activity
+  Mirrors the v1 /congress experience, wired through congress_trading.py.
 -#}
 {% extends "_redesign/base.html" %}
 {% from "_redesign/macros/_primitives.html" import
      mono, kicker, label, btn, panel, panel_head, segment,
-     range_chip, kpi_strip, tag %}
+     range_chip, kpi_strip, tag, spark %}
 
 {% block title %}Congress · PaperPanda{% endblock %}
 
@@ -52,156 +47,523 @@
 
 {# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
 <div class="pp-page-tabs">
-  {{ segment(["Trades","Members","Leaderboard","Performance","Calendar"],
-             value=congress_tab|default("Trades"),
+  {{ segment(["Congress","Holdings","Activity"],
+             value={"congress":"Congress","holdings":"Holdings","activity":"Activity"}.get(congress_view, "Congress"),
              id="pp-congress-tabs") }}
-  <div style="flex:1"></div>
-  {{ range_chip(value="90D") }}
 </div>
 
 {# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
 <div class="pp-page-body">
 
-  {# ── TRADES (default — LIVE) ── #}
-  <section class="pp-page-pane is-active" data-tab-pane="Trades">
+  {# ━━━━━━━━━━ CONGRESS — chamber dot grids + chart toggle ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if congress_view == 'congress' %} is-active{% endif %}"
+           data-tab-pane="Congress">
 
-    <div class="pp-insiders-filters">
-      <div class="pp-insiders-filter-group">
-        {{ label("Party") }}
-        {{ segment(["All","D","R","I"], value="All", mono=True) }}
-      </div>
-      <div class="pp-insiders-filter-group">
-        {{ label("Chamber") }}
-        {{ segment(["Both","House","Senate"], value="Both", mono=True) }}
-      </div>
-      <div class="pp-insiders-filter-group">
-        {{ label("Action") }}
-        {{ segment(["All","BUY","SELL","EXCH"], value="All", mono=True) }}
-      </div>
-      <div style="flex:1"></div>
-      <span class="pp-mono pp-insiders-count">
-        Showing <span class="pp-ink-strong">{{ congress_rows|length }}</span> of {{ congress_total }} trades · 30d
-      </span>
-    </div>
-
-    {# Notable callout — high-dollar BUY trade. #}
-    {% if congress_notable %}
-      {% set _n = congress_notable %}
-      {% call panel(cls="pp-insiders-notable-panel") %}
-        <div class="pp-insiders-notable">
-          <div class="pp-insiders-notable-text">
-            <span class="pp-mono pp-insiders-notable-kicker">★ Notable trade · {{ _n.date }}</span>
-            <div class="pp-insiders-notable-headline">
-              <span class="pp-accent-color">{{ _n.person }} ({{ _n.party }}-{{ _n.state }})</span> bought
-              <span class="pp-up">{{ _n.size }}</span> of
-              <span class="pp-mono pp-insiders-notable-tkr">{{ _n.ticker }}</span>
-              — STOCK Act disclosure.
-            </div>
-            <span class="pp-mono pp-insiders-notable-meta">
-              Trade {{ _n.date }} · Filed {{ _n.filed }}{% if _n.lag is not none %} · {{ _n.lag }}-day disclosure lag{% endif %}
-            </span>
+    {# ── Senate grid ── #}
+    {% if chamber_viz.senate and chamber_viz.senate.data %}
+      {% call panel(cls="pp-congress-chamber-panel") %}
+        <div class="pp-congress-chamber-head">
+          <div class="pp-congress-chamber-title">
+            <span class="pp-congress-chamber-icon" aria-hidden="true">🏛</span>
+            <span>Senate <span class="pp-dim2">({{ chamber_viz.senate.total }} members)</span></span>
           </div>
-          {{ btn("View profile →", kind="ghost") }}
+          <div class="pp-congress-chamber-legend">
+            <span><span class="pp-congress-party-dot pp-congress-party-democrat"></span>
+              Democrat <span class="pp-mono pp-dim2">{{ chamber_viz.senate.democrat }}</span></span>
+            <span><span class="pp-congress-party-dot pp-congress-party-republican"></span>
+              Republican <span class="pp-mono pp-dim2">{{ chamber_viz.senate.republican }}</span></span>
+            {% if chamber_viz.senate.independent %}
+              <span><span class="pp-congress-party-dot pp-congress-party-independent"></span>
+                Independent <span class="pp-mono pp-dim2">{{ chamber_viz.senate.independent }}</span></span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="pp-congress-grid pp-congress-grid-senate"
+             style="--pp-congress-cols: {{ chamber_viz.senate.cols }};">
+          {% for d in chamber_viz.senate.data %}
+            <span class="pp-congress-dot pp-congress-dot-{{ d.party|lower }}"
+                  data-name="{{ d.name }}"
+                  data-party="{{ d.party }}"
+                  data-state="{{ d.state }}"
+                  data-chamber="{{ d.chamber }}"
+                  data-trades="{{ d.total_trades }}"
+                  data-last="{{ d.last_trade }}"
+                  data-holdings='{{ d.top_holdings|tojson }}'>
+              {{ d.state }}
+            </span>
+          {% endfor %}
         </div>
       {% endcall %}
     {% endif %}
 
-    {# Trades table — 8 cols.  Notable rows get coral tint. #}
-    {% call panel() %}
-      <table class="pp-table pp-insiders-table pp-congress-table">
-        <thead>
-          <tr>
-            <th>Member</th>
-            <th>Chamber</th>
-            <th>Ticker</th>
-            <th>Action</th>
-            <th class="pp-num">Trade size</th>
-            <th class="pp-num">Trade date</th>
-            <th class="pp-num">Filed</th>
-            <th class="pp-num">Lag</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in congress_rows %}
-            <tr class="{% if r.notable %}pp-insiders-row-flagged{% endif %}">
-              <td>
-                <div class="pp-congress-member">
-                  <span class="pp-congress-party-dot pp-congress-party-{{ r.party|lower }}"
-                        aria-label="{{ 'Democrat' if r.party == 'D' else ('Republican' if r.party == 'R' else 'Independent') }}"></span>
-                  <span class="pp-insiders-name">{{ r.person }}</span>
-                  {% if r.notable %}<span class="pp-insiders-star">★</span>{% endif %}
-                  <span class="pp-mono pp-congress-state">{{ r.state }}</span>
-                </div>
-              </td>
-              <td class="pp-text">{{ r.chamber }}</td>
-              <td><span class="pp-mono pp-insiders-tkr">{{ r.ticker }}</span></td>
-              <td>{{ tag(r.action) }}</td>
-              <td class="pp-num pp-mono pp-insiders-value">{{ r.size }}</td>
-              <td class="pp-num pp-mono pp-text">{{ r.date }}</td>
-              <td class="pp-num pp-mono pp-dim">{{ r.filed }}</td>
-              <td class="pp-num">
-                <span class="pp-mono pp-congress-lag {% if r.lag is none %}pp-dim{% elif r.lag <= 3 %}pp-up{% elif r.lag <= 10 %}pp-accent-color{% else %}pp-down{% endif %}"
-                      style="font-weight:600;">
-                  {%- if r.lag is none -%}—{% else %}{{ r.lag }}d{% endif -%}
-                </span>
-              </td>
-            </tr>
+    {# ── House grid ── #}
+    {% if chamber_viz.house and chamber_viz.house.data %}
+      {% call panel(cls="pp-congress-chamber-panel") %}
+        <div class="pp-congress-chamber-head">
+          <div class="pp-congress-chamber-title">
+            <span class="pp-congress-chamber-icon" aria-hidden="true">🏛</span>
+            <span>House <span class="pp-dim2">({{ chamber_viz.house.total }} members)</span></span>
+          </div>
+          <div class="pp-congress-chamber-legend">
+            <span><span class="pp-congress-party-dot pp-congress-party-democrat"></span>
+              Democrat <span class="pp-mono pp-dim2">{{ chamber_viz.house.democrat }}</span></span>
+            <span><span class="pp-congress-party-dot pp-congress-party-republican"></span>
+              Republican <span class="pp-mono pp-dim2">{{ chamber_viz.house.republican }}</span></span>
+            {% if chamber_viz.house.independent %}
+              <span><span class="pp-congress-party-dot pp-congress-party-independent"></span>
+                Independent <span class="pp-mono pp-dim2">{{ chamber_viz.house.independent }}</span></span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="pp-congress-grid pp-congress-grid-house"
+             style="--pp-congress-cols: {{ chamber_viz.house.cols }};">
+          {% for d in chamber_viz.house.data %}
+            <span class="pp-congress-dot pp-congress-dot-{{ d.party|lower }}"
+                  data-name="{{ d.name }}"
+                  data-party="{{ d.party }}"
+                  data-state="{{ d.state }}"
+                  data-chamber="{{ d.chamber }}"
+                  data-trades="{{ d.total_trades }}"
+                  data-last="{{ d.last_trade }}"
+                  data-holdings='{{ d.top_holdings|tojson }}'>
+              {{ d.state }}
+            </span>
           {% endfor %}
-        </tbody>
-      </table>
+        </div>
+      {% endcall %}
+    {% endif %}
+
+    {# ── Chart toggle: Trade Frequency / Net Worth Leaderboard ── #}
+    {% call panel(cls="pp-congress-leader-panel") %}
+      <div class="pp-congress-leader-head">
+        <div class="pp-segment pp-segment-mono pp-congress-leader-toggle"
+             id="pp-congress-leader-toggle" role="tablist">
+          <span class="pp-segment-opt is-active" data-chart="frequency"
+                role="tab" aria-selected="true">📊 Trade Frequency</span>
+          <span class="pp-segment-opt" data-chart="networth"
+                role="tab" aria-selected="false">💰 Net Worth</span>
+        </div>
+      </div>
+
+      {# ── Trade Frequency view ── #}
+      <div class="pp-congress-leader-view is-active"
+           data-leader-view="frequency">
+        {{ panel_head("Trade Frequency",
+                      sub="Most active congressional traders in the last 12 months — colored by party") }}
+        {% if trade_frequency %}
+          {% set _max_freq = trade_frequency[0].trade_count if trade_frequency[0].trade_count else 1 %}
+          <div class="pp-congress-leader-bars">
+            {% for r in trade_frequency %}
+              <div class="pp-congress-leader-row pp-congress-leader-row-frequency"
+                   data-name="{{ r.name }}"
+                   data-party="{{ r.party }}"
+                   data-chamber="{{ r.chamber }}"
+                   data-state="{{ r.state }}"
+                   data-trades="{{ r.trade_count }}"
+                   data-top-holdings='{{ r.top_holdings|tojson }}'
+                   data-recent-buys='{{ r.recent_buys|tojson }}'>
+                <span class="pp-congress-leader-label" style="color: {{ r.color }};">
+                  {{ r.name }} <span class="pp-mono pp-dim2">({{ r.state }})</span>
+                </span>
+                <div class="pp-congress-leader-bar-wrap">
+                  <div class="pp-congress-leader-bar"
+                       style="width: {{ "{:.1f}".format(r.trade_count / _max_freq * 100) }}%; background: {{ r.color }};"></div>
+                  <span class="pp-mono pp-congress-leader-val">{{ r.trade_count }}</span>
+                  <span class="pp-mono pp-congress-leader-tag">
+                    {{ "H" if r.chamber == "House" else "S" }}
+                  </span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">No trade-frequency data yet.</div>
+          </div>
+        {% endif %}
+      </div>
+
+      {# ── Net Worth Leaderboard view ── #}
+      <div class="pp-congress-leader-view"
+           data-leader-view="networth">
+        {{ panel_head("Net Worth Leaderboard",
+                      sub="Estimated net worth of top congressional traders — colored by party, tagged by chamber") }}
+        {% if net_worth_leaderboard %}
+          {% set _max_nw = net_worth_leaderboard[0].net_worth if net_worth_leaderboard[0].net_worth else 1 %}
+          <div class="pp-congress-leader-bars">
+            {% for r in net_worth_leaderboard %}
+              <div class="pp-congress-leader-row pp-congress-leader-row-networth"
+                   data-name="{{ r.name }}"
+                   data-party="{{ r.party }}"
+                   data-chamber="{{ r.chamber }}"
+                   data-state="{{ r.state }}"
+                   data-networth="{{ r.net_worth_display }}">
+                <span class="pp-congress-leader-label" style="color: {{ r.color }};">
+                  {{ r.label }}
+                </span>
+                <div class="pp-congress-leader-bar-wrap">
+                  <div class="pp-congress-leader-bar"
+                       style="width: {{ "{:.1f}".format(r.net_worth / _max_nw * 100) }}%; background: {{ r.color }};"></div>
+                  <span class="pp-mono pp-congress-leader-val">{{ r.net_worth_display }}</span>
+                  <span class="pp-mono pp-congress-leader-tag">
+                    {{ "H" if r.chamber == "House" else "S" }}
+                  </span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">No net-worth estimates available.</div>
+          </div>
+        {% endif %}
+      </div>
     {% endcall %}
 
   </section>
 
-  {# ── 4 placeholder panes ── #}
-  <section class="pp-page-pane" data-tab-pane="Members">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">◐</div>
-        <div class="pp-page-placeholder-title">Members tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Per-member profile cards — track record, sectors, recent activity.
-          Wires to extract_members_from_trades; needs a `person_card` primitive.
+  {# ━━━━━━━━━━ HOLDINGS — Trending / Consensus / Momentum / All Holdings ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if congress_view == 'holdings' %} is-active{% endif %}"
+           data-tab-pane="Holdings">
+
+    {# ── Trending with Congress — top stocks bought (last 6mo) ── #}
+    {% call panel(cls="pp-congress-holdings-panel") %}
+      {{ panel_head("Trending with Congress",
+                    sub="Top stocks bought by Congress members in the last 6 months — by unique buyers") }}
+      {% if trending_chart.have_data %}
+        <div class="pp-congress-vbar-chart pp-congress-trending-chart"
+             data-vb-w="{{ trending_chart.vb_width|int }}"
+             data-vb-h="{{ trending_chart.vb_height|int }}">
+          <span class="pp-congress-vbar-axis-head pp-mono pp-dim">Buyers</span>
+          <svg class="pp-congress-vbar-svg"
+               viewBox="0 0 {{ trending_chart.vb_width|int }} {{ trending_chart.vb_height|int }}"
+               preserveAspectRatio="none"
+               aria-label="Trending with Congress chart">
+            {% for gy in trending_chart.grid_ys %}
+              <line class="pp-congress-vbar-grid"
+                    x1="{{ trending_chart.left_pad }}" x2="{{ trending_chart.vb_width|int }}"
+                    y1="{{ gy }}" y2="{{ gy }}"
+                    vector-effect="non-scaling-stroke"/>
+            {% endfor %}
+            {% for yl in trending_chart.y_labels %}
+              <text class="pp-congress-vbar-ylabel"
+                    x="{{ trending_chart.left_pad - 8 }}" y="{{ yl.y + 4 }}"
+                    text-anchor="end">{{ yl.label }}</text>
+            {% endfor %}
+            {% for b in trending_chart.bars %}
+              <rect class="pp-congress-vbar pp-congress-vbar-trending"
+                    x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                    data-ticker="{{ b.ticker }}"
+                    data-name="{{ b.name }}"
+                    data-count="{{ b.add_count }}"
+                    data-democrat="{{ b.democrat }}"
+                    data-republican="{{ b.republican }}"
+                    data-traders='{{ b.top_traders|tojson }}'/>
+              <text class="pp-congress-vbar-count"
+                    x="{{ b.label_x }}" y="{{ b.y - 4 }}" text-anchor="middle">{{ b.add_count }}</text>
+              <text class="pp-congress-vbar-tlabel"
+                    x="{{ b.label_x }}" y="{{ trending_chart.vb_height|int - 8 }}"
+                    text-anchor="middle">{{ b.ticker }}</text>
+            {% endfor %}
+          </svg>
         </div>
-      </div>
-    {% endcall %}
-  </section>
-  <section class="pp-page-pane" data-tab-pane="Leaderboard">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">▲</div>
-        <div class="pp-page-placeholder-title">Leaderboard tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Member ranking by performance + activity.  Performance attribution
-          job is a heavier build (flagged in audit).
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No trending data in the last 6 months.</div>
         </div>
-      </div>
+      {% endif %}
     {% endcall %}
-  </section>
-  <section class="pp-page-pane" data-tab-pane="Performance">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">∿</div>
-        <div class="pp-page-placeholder-title">Performance tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Member returns vs benchmarks (3M / 1Y / 3Y).  Needs the
-          attribution job over congress_trades + market_data history.
+
+    {# ── Consensus Leaders — top stocks by total ownership (horizontal) ── #}
+    {% call panel(cls="pp-congress-holdings-panel") %}
+      {{ panel_head("Consensus Leaders",
+                    sub="Top stocks by total congressional ownership — the most widely held names") }}
+      {% if consensus %}
+        {% set _max_h = consensus[0].holders if consensus[0].holders else 1 %}
+        <div class="pp-congress-consensus-bars">
+          {% for c in consensus %}
+            <div class="pp-congress-consensus-row"
+                 data-ticker="{{ c.ticker }}"
+                 data-name="{{ c.issuer }}"
+                 data-holders="{{ c.holders }}"
+                 data-est="{{ c.combined_value_fmt }}"
+                 data-top-holders='{{ c.top_holders|tojson }}'>
+              <span class="pp-mono pp-congress-consensus-tkr">{{ c.ticker }}</span>
+              <div class="pp-congress-consensus-bar-wrap">
+                <div class="pp-congress-consensus-bar"
+                     style="width: {{ "{:.1f}".format(c.holders / _max_h * 100) }}%;"></div>
+                <span class="pp-mono pp-congress-consensus-val">{{ c.holders }}</span>
+              </div>
+            </div>
+          {% endfor %}
         </div>
-      </div>
-    {% endcall %}
-  </section>
-  <section class="pp-page-pane" data-tab-pane="Calendar">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">◷</div>
-        <div class="pp-page-placeholder-title">Calendar tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Disclosure deadlines + recent filings calendar view.
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No consensus data yet.</div>
         </div>
-      </div>
+      {% endif %}
     {% endcall %}
+
+    {# ── Recent Momentum — net buys/sells last 90 days ── #}
+    {% call panel(cls="pp-congress-holdings-panel") %}
+      {{ panel_head("Recent Momentum",
+                    sub="Most actively bought stocks by Congress in the last 90 days") }}
+      {% if momentum_chart.have_data %}
+        <div class="pp-congress-momentum-legend">
+          <span><span class="pp-congress-momentum-swatch is-buy"></span> Buys</span>
+          <span><span class="pp-congress-momentum-swatch is-sell"></span> Sells</span>
+        </div>
+        <div class="pp-congress-vbar-chart pp-congress-momentum-chart"
+             data-vb-w="{{ momentum_chart.vb_width|int }}"
+             data-vb-h="{{ momentum_chart.vb_height|int }}">
+          <span class="pp-congress-vbar-axis-head pp-mono pp-dim">Trades</span>
+          <svg class="pp-congress-vbar-svg"
+               viewBox="0 0 {{ momentum_chart.vb_width|int }} {{ momentum_chart.vb_height|int }}"
+               preserveAspectRatio="none"
+               aria-label="Recent Momentum chart">
+            {% for gy in momentum_chart.grid_ys %}
+              <line class="pp-congress-vbar-grid"
+                    x1="{{ momentum_chart.left_pad }}" x2="{{ momentum_chart.vb_width|int }}"
+                    y1="{{ gy }}" y2="{{ gy }}"
+                    vector-effect="non-scaling-stroke"/>
+            {% endfor %}
+            <line class="pp-congress-vbar-zero"
+                  x1="{{ momentum_chart.left_pad }}" x2="{{ momentum_chart.vb_width|int }}"
+                  y1="{{ momentum_chart.zero_y }}" y2="{{ momentum_chart.zero_y }}"
+                  vector-effect="non-scaling-stroke"/>
+            {% for yl in momentum_chart.y_labels %}
+              <text class="pp-congress-vbar-ylabel"
+                    x="{{ momentum_chart.left_pad - 8 }}" y="{{ yl.y + 4 }}"
+                    text-anchor="end">{{ yl.label }}</text>
+            {% endfor %}
+            {% for b in momentum_chart.bars %}
+              <rect class="pp-congress-vbar pp-congress-vbar-momentum {% if b.is_pos %}is-buy{% else %}is-sell{% endif %}"
+                    x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                    data-ticker="{{ b.ticker }}"
+                    data-name="{{ b.name }}"
+                    data-buys="{{ b.buys }}"
+                    data-sells="{{ b.sells }}"
+                    data-net="{{ b.net }}"
+                    data-traders='{{ b.traders|tojson }}'/>
+              <text class="pp-congress-vbar-tlabel"
+                    x="{{ b.label_x }}" y="{{ momentum_chart.vb_height|int - 8 }}"
+                    text-anchor="middle">{{ b.ticker }}</text>
+            {% endfor %}
+          </svg>
+        </div>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No momentum activity in the last 90 days.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+
+    {# ── All Congressional Holdings — table ── #}
+    {% call panel(cls="pp-congress-holdings-panel") %}
+      {{ panel_head("All Congressional Holdings",
+                    sub="Stocks held by Congress members — ranked by number of holders") }}
+      {% if holdings_table %}
+        <table class="pp-table pp-insiders-table pp-congress-holdings-table">
+          <thead>
+            <tr>
+              <th>Ticker</th>
+              <th>Company</th>
+              <th class="pp-num"># Members</th>
+              <th class="pp-num">Est. Value</th>
+              <th>Top Holders</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for h in holdings_table %}
+              <tr>
+                <td><span class="pp-mono pp-insiders-tkr pp-congress-holdings-tkr">{{ h.ticker }}</span></td>
+                <td class="pp-text">{{ h.issuer }}</td>
+                <td class="pp-num pp-mono pp-congress-holdings-members">{{ h.holders }}</td>
+                <td class="pp-num pp-mono">{{ h.combined_value_fmt }}</td>
+                <td class="pp-text pp-congress-holdings-top">
+                  {{ h.top_holders[:3] | join(", ") if h.top_holders else "—" }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No holdings data yet.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+
   </section>
 
+  {# ━━━━━━━━━━ ACTIVITY — stats banner + filters + collapsible consensus moves ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if congress_view == 'activity' %} is-active{% endif %}"
+           data-tab-pane="Activity">
+
+    {%- set _astats = activity.stats or {} -%}
+    {%- set _afmt   = activity.stats_fmt or {} -%}
+    {%- set _net    = _astats.net_dollar_flow or 0 -%}
+    {%- set _sentiment = _astats.value_sentiment or "NEUTRAL" -%}
+
+    {# ── Stats banner ── #}
+    {% call panel(cls="pp-congress-act-stats-panel") %}
+      <div class="pp-congress-act-stats">
+        <div class="pp-congress-act-stat">
+          <span class="pp-mono pp-label">$Value Sentiment</span>
+          <span class="pp-mono pp-tag pp-congress-act-sentiment-{{ _sentiment|lower }}">{{ _sentiment }}</span>
+        </div>
+        <div class="pp-congress-act-stat">
+          <span class="pp-mono pp-label">Net Dollar Flow</span>
+          <span class="pp-mono pp-congress-act-stat-val {% if _net >= 0 %}pp-up{% else %}pp-down{% endif %}">
+            {{ _afmt.net_dollar_flow or "—" }}
+          </span>
+        </div>
+        <div class="pp-congress-act-stat">
+          <span class="pp-mono pp-label">Buying</span>
+          <span class="pp-mono pp-congress-act-stat-val pp-up">
+            {{ _astats.total_buys or 0 }} trades · {{ _afmt.buy_value or "—" }}
+          </span>
+        </div>
+        <div class="pp-congress-act-stat">
+          <span class="pp-mono pp-label">Selling</span>
+          <span class="pp-mono pp-congress-act-stat-val pp-down">
+            {{ _astats.total_sells or 0 }} trades · {{ _afmt.sell_value or "—" }}
+          </span>
+        </div>
+        <div class="pp-congress-act-stat">
+          <span class="pp-mono pp-label">Most Traded</span>
+          <span class="pp-mono pp-congress-act-stat-val">
+            {{ _astats.most_traded_ticker or "—" }}
+          </span>
+        </div>
+        <div class="pp-congress-act-stat">
+          <span class="pp-mono pp-label">Bipartisan Moves</span>
+          <span class="pp-mono pp-congress-act-stat-val">{{ _astats.bipartisan_count or 0 }}</span>
+        </div>
+        <div class="pp-congress-act-stat">
+          <span class="pp-mono pp-label">Total Activities</span>
+          <span class="pp-mono pp-congress-act-stat-val">{{ _astats.total_activities or 0 }}</span>
+        </div>
+      </div>
+    {% endcall %}
+
+    {# ── Filter row: Chamber · Time · Party ── #}
+    <div class="pp-congress-act-filters">
+      {%- set _q_tf = activity_timeframe -%}
+      {%- set _q_ch = activity_chamber -%}
+      {%- set _q_pt = activity_party -%}
+      <div class="pp-segment pp-segment-mono pp-congress-act-segment">
+        {% for k, lbl in [("all","All"),("house","House"),("senate","Senate")] %}
+          <a class="pp-segment-opt{% if k == _q_ch %} is-active{% endif %}"
+             href="?view=activity&timeframe={{ _q_tf }}&chamber={{ k }}&party={{ _q_pt }}#Activity">{{ lbl }}</a>
+        {% endfor %}
+      </div>
+      <div class="pp-segment pp-segment-mono pp-congress-act-segment pp-congress-act-segment-time">
+        {% for k in ["1W","1M","3M","ALL"] %}
+          <a class="pp-segment-opt{% if k == _q_tf %} is-active{% endif %}"
+             href="?view=activity&timeframe={{ k }}&chamber={{ _q_ch }}&party={{ _q_pt }}#Activity">{{ k }}</a>
+        {% endfor %}
+      </div>
+      <div class="pp-segment pp-segment-mono pp-congress-act-segment">
+        {% for k, lbl in [("all","All Parties"),("democrat","Democrat"),("republican","Republican")] %}
+          <a class="pp-segment-opt{% if k == _q_pt %} is-active{% endif %}"
+             href="?view=activity&timeframe={{ _q_tf }}&chamber={{ _q_ch }}&party={{ k }}#Activity">{{ lbl }}</a>
+        {% endfor %}
+      </div>
+    </div>
+
+    {# ── Consensus moves (collapsible cluster cards) ── #}
+    {% if activity.clusters %}
+      <div class="pp-label pp-congress-act-section-head">
+        Consensus moves <span class="pp-mono pp-dim2">({{ activity.clusters|length }})</span>
+      </div>
+      <div class="pp-congress-act-clusters">
+        {% for c in activity.clusters %}
+          {%- set _key = "cl-" ~ loop.index0 -%}
+          <div class="pp-congress-act-cluster">
+            <button class="pp-congress-act-cluster-summary"
+                    type="button"
+                    data-act-cluster="{{ _key }}"
+                    aria-expanded="false">
+              <span class="pp-mono pp-insiders-tkr pp-congress-act-cluster-tkr">{{ c.ticker }}</span>
+              <span class="pp-congress-act-cluster-name">{{ c.issuer_name }}</span>
+              <div class="pp-congress-act-cluster-tags">
+                <span class="pp-mono pp-tag pp-congress-act-sentiment-{{ c.net_sentiment|lower }}">{{ c.net_sentiment }}</span>
+                {% if c.bipartisan %}
+                  <span class="pp-mono pp-tag pp-congress-act-tag-bipartisan">BIPARTISAN</span>
+                {% endif %}
+              </div>
+              <span class="pp-mono pp-congress-act-cluster-meta">
+                {{ c.member_count }} members · {{ c.action_summary }}
+              </span>
+              <span class="pp-mono pp-congress-act-cluster-net {% if c.net_flow >= 0 %}pp-up{% else %}pp-down{% endif %}">
+                {{ c.net_flow_fmt or "—" }}
+              </span>
+              <span class="pp-congress-act-cluster-chev" aria-hidden="true">▶</span>
+            </button>
+            <div class="pp-congress-act-cluster-detail" data-act-cluster-detail="{{ _key }}" hidden>
+              <table class="pp-table pp-congress-act-detail-table">
+                <tbody>
+                  {% for tr in c.trades %}
+                    {%- set _is_buy = (tr.trade_type or '').lower() in ('buy','purchase') -%}
+                    <tr>
+                      <td class="pp-congress-act-detail-mem">
+                        <div class="pp-congress-act-detail-name">{{ tr.politician_name or "—" }}</div>
+                        <div class="pp-congress-act-detail-sub">
+                          <span class="pp-mono pp-congress-party-{{ (tr.party or '')|lower }}">
+                            {{ tr.party or "—" }}
+                          </span>
+                          <span class="pp-mono pp-dim2">·</span>
+                          <span class="pp-mono pp-dim">
+                            {{ tr.chamber or "—" }}{% if tr.state %}, {{ tr.state }}{% endif %}
+                          </span>
+                        </div>
+                      </td>
+                      <td class="pp-congress-act-detail-action">
+                        <span class="pp-mono pp-tag {% if _is_buy %}pp-congress-act-tag-buy{% else %}pp-congress-act-tag-sell{% endif %}">
+                          {{ "BUY" if _is_buy else "SELL" }}
+                        </span>
+                      </td>
+                      <td class="pp-num pp-mono pp-congress-act-detail-amt">{{ tr.amount_compact or "—" }}</td>
+                      <td class="pp-num pp-mono pp-dim pp-congress-act-detail-date">{{ tr.trade_date or tr.filing_date or "—" }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">
+            No consensus moves match the active filters. Try widening the timeframe or party.
+          </div>
+        </div>
+      {% endcall %}
+    {% endif %}
+
+  </section>
+
+</div>
+
+{# Shared floating tooltip — lives outside the tab panes so it stays
+   reachable when any tab is active.  Used by chamber dot grids AND the
+   Holdings tab charts; JS rewrites the row labels per consumer. #}
+<div class="pp-congress-tooltip" hidden>
+  <div class="pp-congress-tt-name"></div>
+  <div class="pp-mono pp-congress-tt-meta"></div>
+  <div class="pp-congress-tt-row pp-congress-tt-row-trades">
+    <span class="pp-mono pp-dim pp-congress-tt-lbl"></span>
+    <span class="pp-mono pp-congress-tt-trades"></span>
+  </div>
+  <div class="pp-congress-tt-row pp-congress-tt-row-last">
+    <span class="pp-mono pp-dim pp-congress-tt-lbl"></span>
+    <span class="pp-mono pp-congress-tt-last"></span>
+  </div>
+  <div class="pp-congress-tt-holdings-head pp-mono pp-dim">Top Holdings:</div>
+  <ul class="pp-congress-tt-holdings"></ul>
 </div>
 
 {% endblock %}
@@ -209,6 +571,7 @@
 {% block extra_scripts %}
 <script>
 (function () {
+  /* Top-level tab switcher — Congress / Holdings / Activity */
   var seg = document.getElementById('pp-congress-tabs');
   if (!seg) return;
   var panes = document.querySelectorAll('.pp-page-pane');
@@ -228,6 +591,324 @@
     if (!opt) return;
     var name = opt.getAttribute('data-value');
     if (name) activate(name);
+  });
+})();
+
+/* ── Tooltip wiring (shared across chamber dots + Holdings charts) ───
+   `.pp-congress-tooltip` is a single floating element.  Each consumer
+   sets the row labels and values, then calls placeTip() to position it
+   above the target.  Lookups via class selectors are stable regardless
+   of element order, unlike :nth-of-type which counts ALL same-tag siblings. */
+var ppCongressTip = (function () {
+  var tip = document.querySelector('.pp-congress-tooltip');
+  if (!tip) return null;
+  var rowTrades = tip.querySelector('.pp-congress-tt-row-trades');
+  var rowLast   = tip.querySelector('.pp-congress-tt-row-last');
+  return {
+    el:        tip,
+    nm:        tip.querySelector('.pp-congress-tt-name'),
+    meta:      tip.querySelector('.pp-congress-tt-meta'),
+    trades:    tip.querySelector('.pp-congress-tt-trades'),
+    last:      tip.querySelector('.pp-congress-tt-last'),
+    holdHd:    tip.querySelector('.pp-congress-tt-holdings-head'),
+    holds:     tip.querySelector('.pp-congress-tt-holdings'),
+    rowTrades: rowTrades,
+    rowLast:   rowLast,
+    lblTrades: rowTrades ? rowTrades.querySelector('.pp-congress-tt-lbl') : null,
+    lblLast:   rowLast   ? rowLast.querySelector('.pp-congress-tt-lbl')   : null,
+  };
+})();
+
+function ppCongressPlaceTip(target) {
+  if (!ppCongressTip) return;
+  var tip = ppCongressTip.el;
+  var r = target.getBoundingClientRect();
+  tip.hidden = false;
+  var tw = tip.offsetWidth;
+  var th = tip.offsetHeight;
+  var x = r.left + r.width / 2 - tw / 2;
+  var y = r.top - th - 10;
+  if (y < 8) y = r.bottom + 10;
+  if (x < 8) x = 8;
+  if (x + tw > window.innerWidth - 8) x = window.innerWidth - tw - 8;
+  tip.style.left = x + 'px';
+  tip.style.top  = y + 'px';
+}
+
+function ppCongressHideTip() {
+  if (ppCongressTip) ppCongressTip.el.hidden = true;
+}
+
+(function () {
+  /* Chamber dot hover — fills the tooltip with member profile.  Reads
+     name / party / chamber / state / total trades / last trade / top
+     holdings from data-* attributes on each .pp-congress-dot. */
+  if (!ppCongressTip) return;
+  var t = ppCongressTip;
+
+  document.querySelectorAll('.pp-congress-dot').forEach(function (dot) {
+    dot.addEventListener('mouseenter', function () {
+      t.nm.textContent   = dot.getAttribute('data-name') || '';
+      var party          = dot.getAttribute('data-party') || '';
+      var chamber        = dot.getAttribute('data-chamber') || '';
+      var state          = dot.getAttribute('data-state') || '';
+      t.meta.textContent = (party || '—') + ' — ' + (chamber || '—') +
+                           (state ? ', ' + state : '');
+      t.meta.className   = 'pp-mono pp-congress-tt-meta pp-congress-tt-party-' +
+                           party.toLowerCase();
+      if (t.lblTrades) t.lblTrades.textContent = 'Trades:';
+      t.trades.textContent = dot.getAttribute('data-trades') || '0';
+      if (t.lblLast)   t.lblLast.textContent   = 'Last trade:';
+      t.last.textContent   = dot.getAttribute('data-last') || '—';
+
+      /* Top holdings list — JSON array of {ticker, name, est_value}. */
+      t.holds.innerHTML = '';
+      var arr = [];
+      try { arr = JSON.parse(dot.getAttribute('data-holdings') || '[]'); }
+      catch (e) {}
+      if (arr.length) {
+        t.holdHd.hidden = false;
+        t.holdHd.textContent = 'Top Holdings:';
+        arr.forEach(function (h) {
+          var li = document.createElement('li');
+          li.innerHTML = '<span class="pp-mono pp-congress-tt-tkr">' + h.ticker +
+                         '</span> — <span class="pp-mono">' + (h.est_value || '—') + '</span>';
+          t.holds.appendChild(li);
+        });
+      } else {
+        t.holdHd.hidden = true;
+        t.holdHd.textContent = '';
+      }
+      ppCongressPlaceTip(dot);
+    });
+    dot.addEventListener('mouseleave', ppCongressHideTip);
+  });
+})();
+
+(function () {
+  /* Chart toggle: Trade Frequency ↔ Net Worth Leaderboard.  Server emits
+     both views; the toggle just flips the .is-active class. */
+  var toggle = document.getElementById('pp-congress-leader-toggle');
+  if (!toggle) return;
+  var views = document.querySelectorAll('.pp-congress-leader-view');
+  toggle.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-chart');
+    if (!name) return;
+    toggle.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-chart') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    views.forEach(function (v) {
+      v.classList.toggle('is-active', v.getAttribute('data-leader-view') === name);
+    });
+  });
+})();
+
+(function () {
+  /* Trade Frequency / Net Worth Leaderboard hover — both row sets share the
+     same .pp-congress-leader-row class, distinguished by `-frequency` /
+     `-networth` modifiers.  Each row carries its full payload in data-*
+     attrs so the handler stays purely DOM-driven (no globals). */
+  if (!ppCongressTip) return;
+  var t = ppCongressTip;
+
+  function listFromAttr(target, attr) {
+    try { return JSON.parse(target.getAttribute(attr) || '[]') || []; }
+    catch (e) { return []; }
+  }
+
+  function setMeta(row) {
+    var party   = row.getAttribute('data-party') || '';
+    var chamber = row.getAttribute('data-chamber') || '';
+    var state   = row.getAttribute('data-state') || '';
+    t.nm.textContent   = row.getAttribute('data-name') || '';
+    t.meta.textContent = (party || '—') + ' — ' + (chamber || '—') +
+                         (state ? ', ' + state : '');
+    t.meta.className   = 'pp-mono pp-congress-tt-meta pp-congress-tt-party-' +
+                         party.toLowerCase();
+  }
+
+  /* ── Trade Frequency rows ── */
+  document.querySelectorAll('.pp-congress-leader-row-frequency').forEach(function (row) {
+    row.addEventListener('mouseenter', function () {
+      setMeta(row);
+      t.lblTrades.textContent = 'Trades (12 mo):';
+      t.trades.textContent    = row.getAttribute('data-trades') || '0';
+
+      /* Recent Buys list goes into the rowLast slot; convert tickers into
+         green chips so they pop in the tooltip. */
+      var buys = listFromAttr(row, 'data-recent-buys');
+      if (buys.length) {
+        t.lblLast.textContent = 'Recent Buys:';
+        t.last.innerHTML = buys.map(function (tk) {
+          return '<span class="pp-up" style="font-weight:700">' + tk + '</span>';
+        }).join(', ');
+      } else {
+        t.lblLast.textContent = '';
+        t.last.innerHTML = '';
+      }
+
+      /* Top Holdings — render as ticker — name list. */
+      var hold = listFromAttr(row, 'data-top-holdings');
+      if (hold.length) {
+        t.holdHd.hidden = false;
+        t.holdHd.textContent = 'Top Holdings:';
+        t.holds.innerHTML = '';
+        hold.forEach(function (h) {
+          var li = document.createElement('li');
+          li.innerHTML = '<span class="pp-mono pp-congress-tt-tkr">' + h.ticker +
+                         '</span> — <span class="pp-mono">' + (h.name || '—') + '</span>';
+          t.holds.appendChild(li);
+        });
+      } else {
+        t.holdHd.hidden = true;
+        t.holdHd.textContent = '';
+        t.holds.innerHTML = '';
+      }
+      ppCongressPlaceTip(row);
+    });
+    row.addEventListener('mouseleave', function () {
+      ppCongressHideTip();
+      t.last.innerHTML = '';
+    });
+  });
+
+  /* ── Net Worth Leaderboard rows ──
+     Single fact: "Est. Net Worth: $X".  No source attribution per design. */
+  document.querySelectorAll('.pp-congress-leader-row-networth').forEach(function (row) {
+    row.addEventListener('mouseenter', function () {
+      setMeta(row);
+      t.lblTrades.textContent = 'Est. Net Worth:';
+      t.trades.textContent    = row.getAttribute('data-networth') || '—';
+      /* No second row + no holdings list for the net-worth view — clear them. */
+      t.lblLast.textContent = '';
+      t.last.textContent    = '';
+      t.holdHd.hidden       = true;
+      t.holdHd.textContent  = '';
+      t.holds.innerHTML     = '';
+      ppCongressPlaceTip(row);
+    });
+    row.addEventListener('mouseleave', ppCongressHideTip);
+  });
+})();
+
+(function () {
+  /* Activity tab — collapsible consensus moves.  Clicking a summary row
+     toggles its detail drawer (chevron rotates via CSS).  Single delegated
+     listener on the cluster list keeps memory footprint flat regardless of
+     how many cards render. */
+  var list = document.querySelector('.pp-congress-act-clusters');
+  if (!list) return;
+  list.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.pp-congress-act-cluster-summary');
+    if (!btn) return;
+    var key = btn.getAttribute('data-act-cluster');
+    var detail = list.querySelector('[data-act-cluster-detail="' + key + '"]');
+    if (!detail) return;
+    var open = !detail.hidden;
+    detail.hidden = open;
+    btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+  });
+})();
+
+(function () {
+  /* Holdings tab hover — Trending bars, Consensus rows, and Momentum bars
+     all share the same floating tooltip element used by the chamber dot
+     grids.  Field labels (lblTrades / lblLast) are reset on every hover
+     so consumers don't have to clean up after each other. */
+  if (!ppCongressTip) return;
+  var t = ppCongressTip;
+
+  function listFromAttr(target, attr) {
+    try { return JSON.parse(target.getAttribute(attr) || '[]') || []; }
+    catch (e) { return []; }
+  }
+
+  function renderNamesList(headLabel, names) {
+    if (!names.length) {
+      t.holdHd.hidden = true;
+      t.holdHd.textContent = '';
+      t.holds.innerHTML = '';
+      return;
+    }
+    t.holdHd.hidden = false;
+    t.holdHd.textContent = headLabel;
+    t.holds.innerHTML = '';
+    names.forEach(function (n) {
+      var li = document.createElement('li');
+      li.textContent = n;
+      t.holds.appendChild(li);
+    });
+  }
+
+  /* ── Trending bars (vertical, all-positive) ── */
+  document.querySelectorAll('.pp-congress-vbar-trending').forEach(function (bar) {
+    bar.addEventListener('mouseenter', function () {
+      bar.classList.add('is-active');
+      t.nm.textContent   = bar.getAttribute('data-ticker') || '';
+      t.meta.textContent = bar.getAttribute('data-name') || '';
+      t.meta.className   = 'pp-mono pp-congress-tt-meta';
+      t.lblTrades.textContent = 'Unique buyers:';
+      t.trades.textContent    = bar.getAttribute('data-count') || '0';
+      t.lblLast.textContent   = 'D / R:';
+      t.last.innerHTML        = '<span class="pp-congress-tt-d">D: ' +
+        (bar.getAttribute('data-democrat') || '0') +
+        '</span>  <span class="pp-congress-tt-r">R: ' +
+        (bar.getAttribute('data-republican') || '0') + '</span>';
+      renderNamesList('Top Buyers:', listFromAttr(bar, 'data-traders'));
+      ppCongressPlaceTip(bar);
+    });
+    bar.addEventListener('mouseleave', function () {
+      bar.classList.remove('is-active');
+      ppCongressHideTip();
+      t.last.innerHTML = '';
+    });
+  });
+
+  /* ── Consensus rows (horizontal) ── */
+  document.querySelectorAll('.pp-congress-consensus-row').forEach(function (row) {
+    row.addEventListener('mouseenter', function () {
+      t.nm.textContent   = row.getAttribute('data-ticker') || '';
+      t.meta.textContent = row.getAttribute('data-name') || '';
+      t.meta.className   = 'pp-mono pp-congress-tt-meta';
+      t.lblTrades.textContent = 'Held by:';
+      t.trades.textContent    = (row.getAttribute('data-holders') || '0') + ' members';
+      t.lblLast.textContent   = 'Est. value:';
+      t.last.textContent      = row.getAttribute('data-est') || '—';
+      renderNamesList('Top Holders:', listFromAttr(row, 'data-top-holders'));
+      ppCongressPlaceTip(row);
+    });
+    row.addEventListener('mouseleave', ppCongressHideTip);
+  });
+
+  /* ── Momentum bars (vertical, signed) ── */
+  document.querySelectorAll('.pp-congress-vbar-momentum').forEach(function (bar) {
+    bar.addEventListener('mouseenter', function () {
+      bar.classList.add('is-active');
+      t.nm.textContent   = bar.getAttribute('data-ticker') || '';
+      t.meta.textContent = bar.getAttribute('data-name') || '';
+      t.meta.className   = 'pp-mono pp-congress-tt-meta';
+      var net = parseInt(bar.getAttribute('data-net') || '0', 10);
+      t.lblTrades.textContent = 'Buys / Sells:';
+      t.trades.innerHTML      = '<span class="pp-up" style="font-weight:700">' +
+        (bar.getAttribute('data-buys') || '0') +
+        '</span> / <span class="pp-down" style="font-weight:700">' +
+        (bar.getAttribute('data-sells') || '0') + '</span>';
+      t.lblLast.textContent = 'Net:';
+      t.last.innerHTML      = '<span class="' + (net >= 0 ? 'pp-up' : 'pp-down') +
+        '" style="font-weight:700">' + (net >= 0 ? '+' : '') + net + '</span>';
+      renderNamesList('Active Traders:', listFromAttr(bar, 'data-traders'));
+      ppCongressPlaceTip(bar);
+    });
+    bar.addEventListener('mouseleave', function () {
+      bar.classList.remove('is-active');
+      ppCongressHideTip();
+      t.trades.innerHTML = '';
+      t.last.innerHTML = '';
+    });
   });
 })();
 </script>

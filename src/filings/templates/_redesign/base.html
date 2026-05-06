@@ -66,6 +66,57 @@
   {#- Global fuzzy search — populates window.ppGlobalSearch / ppSearchKeydown
       / tickerSearchGo / escHtml.  Defer ensures it runs after Fuse loads. -#}
   <script src="/static/js/redesign/global-search.js" defer></script>
+  {#- Auto-attach click-to-sort to every `.pp-table` across the v2
+      experience.  No-op for tables without a thead, idempotent on repeat
+      init (HTMX swaps re-run it).  See sortable-table.js for opt-out via
+      `data-sortable="false"` on a <th>. -#}
+  <script src="/static/js/redesign/sortable-table.js" defer></script>
+  {#- Lazy-load ECharts on demand — pages that don't chart pay nothing.
+       Mirrors the v1 base.html pattern; first caller pulls the CDN, the
+       rest queue until the script lands.  Used by the Financials tab on
+       the redesign stock page. -#}
+  <script>
+  (function () {
+    var CDN = 'https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js';
+    var loading = false;
+    var queue = [];
+    window.requireECharts = function (cb) {
+      if (window.echarts) { cb(); return; }
+      queue.push(cb);
+      if (loading) return;
+      loading = true;
+      var s = document.createElement('script');
+      s.src = CDN;
+      s.onload  = function () { while (queue.length) queue.shift()(); };
+      s.onerror = function () {
+        loading = false;
+        while (queue.length) queue.shift()('Chart library failed to load');
+      };
+      document.head.appendChild(s);
+    };
+  })();
+  /* Chart.js loader — used by the insider trading timeline on the
+     redesign stock page.  Same lazy pattern. */
+  (function () {
+    var CDN = 'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js';
+    var loading = false;
+    var queue = [];
+    window.requireChartJS = function (cb) {
+      if (window.Chart) { cb(); return; }
+      queue.push(cb);
+      if (loading) return;
+      loading = true;
+      var s = document.createElement('script');
+      s.src = CDN;
+      s.onload  = function () { while (queue.length) queue.shift()(); };
+      s.onerror = function () {
+        loading = false;
+        while (queue.length) queue.shift()('Chart library failed to load');
+      };
+      document.head.appendChild(s);
+    };
+  })();
+  </script>
   {% block extra_head_scripts %}{% endblock %}
 </head>
 <body>
@@ -92,20 +143,20 @@
       {%- set nav_active = nav_active|default("Home") -%}
       {%- set nav_groups = [
         {"hd": "Overview", "items": [
-          {"name": "Home",          "href": "/",              "badge": ""},
-          {"name": "Watchlist",     "href": "/profile?tab=Watchlist", "badge": ""},
-          {"name": "Notifications", "href": "/profile?tab=Alerts",    "badge": notif_unread|default("")},
+          {"name": "Home",          "href": "/_v2/home",                  "badge": ""},
+          {"name": "Watchlist",     "href": "/_v2/profile?tab=Watchlist", "badge": ""},
+          {"name": "Notifications", "href": "/_v2/notifications",         "badge": notif_unread|default("")},
         ]},
         {"hd": "Markets", "items": [
-          {"name": "Funds",    "href": "/funds",    "badge": ""},
-          {"name": "Screener", "href": "/screener", "badge": ""},
-          {"name": "Options",  "href": "/options",  "badge": ""},
+          {"name": "Funds",    "href": "/_v2/funds",    "badge": ""},
+          {"name": "Screener", "href": "/_v2/screener", "badge": ""},
+          {"name": "Options",  "href": "/_v2/options",  "badge": ""},
         ]},
         {"hd": "Signals", "items": [
-          {"name": "Insiders", "href": "/insider-trading", "badge": insiders_count|default("")},
-          {"name": "Congress", "href": "/congress",        "badge": congress_count|default("")},
-          {"name": "Retail",   "href": "/retail",          "badge": ""},
-          {"name": "Macro",    "href": "/macro",           "badge": ""},
+          {"name": "Insiders", "href": "/_v2/insiders", "badge": ""},
+          {"name": "Congress", "href": "/_v2/congress", "badge": ""},
+          {"name": "Retail",   "href": "/_v2/retail",   "badge": ""},
+          {"name": "Macro",    "href": "/_v2/macro",    "badge": ""},
         ]},
       ] -%}
 
@@ -162,9 +213,9 @@
       </span>
 
       {% from "_redesign/macros/_primitives.html" import btn, avatar %}
-      {{ btn("+ Alert", kind="accent", attrs='onclick="window.location.href=\'/profile?tab=Alerts\'"') }}
-      <a href="/profile" aria-label="Profile" style="text-decoration:none;">
-        {{ avatar(user_initials|default("PP"), accent=True) }}
+      {{ btn("+ Alert", kind="accent", attrs='onclick="window.location.href=\'/_v2/profile?tab=Alerts\'"') }}
+      <a href="/_v2/profile" aria-label="Profile" style="text-decoration:none;">
+        {{ avatar(user_initials|default("PP", true), accent=True) }}
       </a>
     </header>
 

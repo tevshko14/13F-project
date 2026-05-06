@@ -38,12 +38,45 @@
   cursor: pointer;
   font-family: inherit;
   font-weight: 500;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.pp-screener-preset:hover {
+  border-color: var(--pp-ink);
 }
 .pp-screener-preset.is-active {
   background: var(--pp-ink);
   color: var(--pp-bg);
   border-color: var(--pp-ink);
   font-weight: 700;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SORT SEGMENT (results header) + ticker link styling.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-screener-sort-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pp-screener-sort-label {
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.pp-screener-sort-seg .pp-segment-opt {
+  text-decoration: none;
+}
+.pp-screener-tkr {
+  font-weight: 700;
+  color: var(--pp-ink);
+  text-decoration: none;
+}
+.pp-screener-tkr:hover {
+  color: var(--pp-accent);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────

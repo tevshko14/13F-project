@@ -90,56 +90,263 @@
     </div>
   </section>
 
-  {# ── YIELDS (placeholder — coming next) ── #}
+  {# ━━━━━━━━━━ YIELDS ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Yields">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">∞</div>
-        <div class="pp-page-placeholder-title">Yields tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Treasury yield curve (today vs 1m ago), key spreads (2s10s, 3M-10Y, IG/HY OAS),
-          real yields and inflation expectations.
+    {% call panel(cls="pp-macro-yields-panel") %}
+      {{ panel_head("US Treasury yield curve",
+                    sub=("As of " ~ yields_curve.as_of) if yields_curve.as_of else "Daily par yield") }}
+      {% if yields_curve.have_data %}
+        <div class="pp-macro-yields-body pp-macro-yields-chart"
+             data-history='{{ yields_curve.chart_history|tojson }}'
+             data-vb-w="{{ yields_curve.vb_width|int }}"
+             data-vb-h="{{ yields_curve.vb_height|int }}">
+          <svg class="pp-macro-yields-svg"
+               viewBox="0 0 {{ yields_curve.vb_width|int }} {{ yields_curve.vb_height|int }}"
+               preserveAspectRatio="none"
+               aria-label="US Treasury yield curve">
+            {% for i in range(5) %}
+              <line class="pp-home-chart-grid"
+                    x1="0" x2="{{ yields_curve.vb_width|int }}"
+                    y1="{{ i * 50 + 15 }}" y2="{{ i * 50 + 15 }}"
+                    vector-effect="non-scaling-stroke"/>
+            {% endfor %}
+            <path d="{{ yields_curve.line_d }}"
+                  class="pp-macro-yields-line"
+                  vector-effect="non-scaling-stroke"/>
+            {% for d in yields_curve.dots %}
+              <circle class="pp-macro-yields-dot"
+                      cx="{{ d.x }}" cy="{{ d.y }}" r="3"
+                      vector-effect="non-scaling-stroke"/>
+            {% endfor %}
+            <line class="pp-macro-yields-crosshair"
+                  x1="0" x2="0" y1="0" y2="{{ yields_curve.vb_height|int }}"
+                  vector-effect="non-scaling-stroke"/>
+            <circle class="pp-macro-yields-hover-dot"
+                    cx="0" cy="0" r="4.5"
+                    vector-effect="non-scaling-stroke"/>
+          </svg>
+          <div class="pp-macro-yields-axis">
+            {% for r in yields_curve.rows %}
+              <span class="pp-mono pp-macro-yields-tick">
+                <span class="pp-macro-yields-tenor">{{ r.tenor }}</span>
+                <span class="pp-macro-yields-y">{{ r.yield_str }}</span>
+              </span>
+            {% endfor %}
+          </div>
+          <div class="pp-macro-yields-tooltip" hidden>
+            <span class="pp-funds-aum-tt-q"></span>
+            <span class="pp-mono pp-funds-aum-tt-value"></span>
+          </div>
+          {% if yields_curve.inverted %}
+            <div class="pp-macro-yields-flag">
+              <span class="pp-mono pp-down">▼ Yield curve inverted (2Y &gt; 10Y)</span>
+            </div>
+          {% endif %}
         </div>
-      </div>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">Yield curve data not available right now.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+
+    {% call panel() %}
+      {{ panel_head("Key spreads", sub="long-end minus short-end (positive = steepening)") }}
+      {% if yields_spreads %}
+        <div class="pp-macro-spreads-body">
+          {% for s in yields_spreads %}
+            <div class="pp-macro-spread-row">
+              <div class="pp-macro-spread-id">
+                <span class="pp-mono pp-macro-spread-name">{{ s.name }}</span>
+                <span class="pp-mono pp-macro-spread-desc">{{ s.desc }}</span>
+              </div>
+              <span class="pp-mono pp-macro-spread-value {% if s.inverted %}pp-down{% else %}pp-up{% endif %}">
+                {{ s.value_str }}
+              </span>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">Spread data warming up.</div>
+        </div>
+      {% endif %}
     {% endcall %}
   </section>
 
+  {# ━━━━━━━━━━ FX & COMMODITIES ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="FX &amp; Commodities">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">¤</div>
-        <div class="pp-page-placeholder-title">FX &amp; Commodities — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          DXY, EURUSD, USDJPY + WTI, Brent, Nat Gas, Gold, Silver, Copper —
-          wired to existing market_data feeds.
-        </div>
-      </div>
-    {% endcall %}
+    <div class="pp-macro-fx-row">
+      {% call panel() %}
+        {{ panel_head("FX", sub="majors · spot") }}
+        {% if fx_rows %}
+          <div class="pp-macro-fx-body">
+            {% for r in fx_rows %}
+              <div class="pp-macro-fx-rowx">
+                <span class="pp-mono pp-macro-fx-sym">{{ r.sym }}</span>
+                <span class="pp-macro-fx-name">{{ r.name }}</span>
+                {% if r.spark %}
+                  {{ spark(r.spark, color=("var(--pp-up)" if r.up else "var(--pp-down)"), w=100, h=22) }}
+                {% else %}
+                  <span></span>
+                {% endif %}
+                <span class="pp-mono pp-macro-fx-value">{{ r.value_str }}</span>
+                <span class="pp-mono pp-macro-fx-delta {% if r.up == True %}pp-up{% elif r.up == False %}pp-down{% else %}pp-dim{% endif %}">
+                  {%- if r.up == True %}▲ {% elif r.up == False %}▼ {% endif -%}
+                  {{ r.delta_str }}
+                </span>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">FX feed warming up.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Commodities", sub="front-month futures") }}
+        {% if commodity_rows %}
+          <div class="pp-macro-fx-body">
+            {% for r in commodity_rows %}
+              <div class="pp-macro-fx-rowx">
+                <span class="pp-mono pp-macro-fx-sym">{{ r.sym }}</span>
+                <span class="pp-macro-fx-name">
+                  {{ r.name }} <span class="pp-mono pp-dim2 pp-macro-fx-unit">{{ r.unit }}</span>
+                </span>
+                {% if r.spark %}
+                  {{ spark(r.spark, color=("var(--pp-up)" if r.up else "var(--pp-down)"), w=100, h=22) }}
+                {% else %}
+                  <span></span>
+                {% endif %}
+                <span class="pp-mono pp-macro-fx-value">{{ r.value_str }}</span>
+                <span class="pp-mono pp-macro-fx-delta {% if r.up == True %}pp-up{% elif r.up == False %}pp-down{% else %}pp-dim{% endif %}">
+                  {%- if r.up == True %}▲ {% elif r.up == False %}▼ {% endif -%}
+                  {{ r.delta_str }}
+                </span>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">Commodity feed warming up.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+    </div>
   </section>
 
+  {# ━━━━━━━━━━ CALENDAR ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Calendar">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">◷</div>
-        <div class="pp-page-placeholder-title">Calendar — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Macro releases (NFP, CPI, FOMC) with consensus + prior + impact.
-          Data lives in fred_calendar / economic_calendar.
+    {% if macro_calendar %}
+      {% call panel() %}
+        <div class="pp-macro-calendar">
+          {% for e in macro_calendar %}
+            <div class="pp-macro-cal-row">
+              <div class="pp-macro-cal-date">
+                <span class="pp-mono pp-macro-cal-d">{{ e.d }}</span>
+                <span class="pp-mono pp-macro-cal-when">{{ e.when }}</span>
+              </div>
+              <span class="pp-macro-cal-dot pp-macro-cal-impact-{{ e.impact }}" aria-hidden="true"></span>
+              <div class="pp-macro-cal-text">
+                <div class="pp-macro-cal-evt">{{ e.evt }}</div>
+                <span class="pp-mono pp-macro-cal-impact-label">{{ e.impact }} impact</span>
+              </div>
+              <div class="pp-macro-cal-cell">
+                {{ label("Consensus") }}
+                <span class="pp-mono pp-macro-cal-num">{{ e.consensus }}</span>
+              </div>
+              <div class="pp-macro-cal-cell">
+                {{ label("Prior") }}
+                <span class="pp-mono pp-macro-cal-num pp-dim">{{ e.prior }}</span>
+              </div>
+              <div class="pp-macro-cal-cell">
+                {{ label("Actual") }}
+                <span class="pp-mono pp-macro-cal-num {% if e.released %}pp-ink{% else %}pp-dim2{% endif %}">
+                  {{ e.actual }}
+                </span>
+              </div>
+            </div>
+          {% endfor %}
         </div>
-      </div>
-    {% endcall %}
+      {% endcall %}
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No upcoming macro releases found.</div>
+        </div>
+      {% endcall %}
+    {% endif %}
   </section>
 
+  {# ━━━━━━━━━━ HEATMAP ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Heatmap">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">▦</div>
-        <div class="pp-page-placeholder-title">Heatmap — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Sector-by-region today's-return matrix; reuses the heatmap_tile
-          primitive from Home/Heatmap.
+    {% call panel(cls="pp-macro-heat-panel") %}
+      {{ panel_head("Sector heatmap", sub="S&P 500 · today's average move per GICS sector") }}
+      {% if heatmap_sectors %}
+        <div class="pp-macro-heat-grid">
+          {% for s in heatmap_sectors %}
+            {%- set _abs = (s.delta if s.delta >= 0 else -s.delta) -%}
+            {%- set _alpha_int = (20 + ([_abs / 0.03, 1.0]|min) * 70)|round|int -%}
+            {%- set _bg = "color-mix(in srgb, var(--pp-up) " ~ _alpha_int ~ "%, var(--pp-bg))"
+                          if s.delta >= 0
+                          else "color-mix(in srgb, var(--pp-down) " ~ _alpha_int ~ "%, var(--pp-bg))" -%}
+            <div class="pp-macro-heat-tile"
+                 style="background: {{ _bg }};">
+              <div class="pp-macro-heat-tile-name">{{ s.name }}</div>
+              <span class="pp-mono pp-macro-heat-tile-pct {% if s.delta >= 0 %}pp-up{% else %}pp-down{% endif %}">
+                {{ s.delta_str }}
+              </span>
+              <span class="pp-mono pp-macro-heat-tile-meta">{{ s.n }} names</span>
+            </div>
+          {% endfor %}
         </div>
-      </div>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">Sector data warming up.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+
+    {% call panel() %}
+      {{ panel_head("Global regions", sub="major equity indices") }}
+      {% if heatmap_indices %}
+        <table class="pp-table pp-macro-regions-table">
+          <thead>
+            <tr>
+              <th>Region</th>
+              <th>Index</th>
+              <th class="pp-num">Last</th>
+              <th class="pp-num">Today</th>
+              <th class="pp-num pp-macro-th-spark">1Y</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in heatmap_indices %}
+              <tr>
+                <td class="pp-dim">{{ r.region }}</td>
+                <td class="pp-ink-strong"><span class="pp-mono">{{ r.name }}</span></td>
+                <td class="pp-num pp-mono pp-ink-strong">{{ r.price_str }}</td>
+                <td class="pp-num pp-mono {% if r.today_up == True %}pp-up{% elif r.today_up == False %}pp-down{% else %}pp-dim{% endif %}">
+                  {{ r.today_str }}
+                </td>
+                <td class="pp-num">
+                  {% if r.spark %}
+                    {{ spark(r.spark, color=("var(--pp-up)" if r.today_up else "var(--pp-down)"), w=80, h=20) }}
+                  {% else %}
+                    <span class="pp-mono pp-dim2">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">Index data warming up.</div>
+        </div>
+      {% endif %}
     {% endcall %}
   </section>
 
@@ -172,6 +379,77 @@
     var name = opt.getAttribute('data-value');
     if (name) activate(name);
   });
+})();
+
+(function () {
+  /* Yield curve hover — same pattern as the Funds AUM chart.  History array
+     of {x,y,tenor,yield_str} → mousemove finds nearest point, updates the
+     SVG crosshair + dot + HTML tooltip.  Tooltip lives outside the SVG so
+     `preserveAspectRatio="none"` doesn't stretch the text. */
+  var wrap = document.querySelector('.pp-macro-yields-chart');
+  if (!wrap) return;
+  var svg     = wrap.querySelector('.pp-macro-yields-svg');
+  var cross   = wrap.querySelector('.pp-macro-yields-crosshair');
+  var dot     = wrap.querySelector('.pp-macro-yields-hover-dot');
+  var tooltip = wrap.querySelector('.pp-macro-yields-tooltip');
+  if (!svg || !cross || !dot || !tooltip) return;
+  var ttQ = tooltip.querySelector('.pp-funds-aum-tt-q');
+  var ttV = tooltip.querySelector('.pp-funds-aum-tt-value');
+
+  var vbW = parseFloat(wrap.getAttribute('data-vb-w')) || 1500;
+  var vbH = parseFloat(wrap.getAttribute('data-vb-h')) || 240;
+  var history = [];
+  try { history = JSON.parse(wrap.getAttribute('data-history') || '[]'); }
+  catch (e) {}
+  if (!history.length) return;
+
+  function show()  { cross.classList.add('is-visible');  dot.classList.add('is-visible'); tooltip.hidden = false; }
+  function hide()  { cross.classList.remove('is-visible'); dot.classList.remove('is-visible'); tooltip.hidden = true; }
+
+  /* Binary search — history.x is monotonically increasing (Python emits points
+     in order), so O(log n) beats the linear scan on every mousemove tick. */
+  function nearest(vbx) {
+    var lo = 0, hi = history.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (history[mid].x < vbx) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(history[lo - 1].x - vbx) < Math.abs(history[lo].x - vbx)) return lo - 1;
+    return lo;
+  }
+
+  /* Cache rects on mouseenter — they're stable until the next layout. */
+  var svgRect = null, wrapRect = null;
+  function snapshotRects() {
+    svgRect  = svg.getBoundingClientRect();
+    wrapRect = wrap.getBoundingClientRect();
+  }
+  window.addEventListener('resize', function () { svgRect = null; wrapRect = null; });
+
+  function update(ev) {
+    if (!svgRect) snapshotRects();
+    if (svgRect.width <= 0) return;
+    var px = ev.clientX - svgRect.left;
+    if (px < 0 || px > svgRect.width) { hide(); return; }
+    var vbx = (px / svgRect.width) * vbW;
+    var pt = history[nearest(vbx)];
+    if (!pt) { hide(); return; }
+    cross.setAttribute('x1', pt.x);
+    cross.setAttribute('x2', pt.x);
+    dot.setAttribute('cx', pt.x);
+    dot.setAttribute('cy', pt.y);
+    ttQ.textContent = pt.tenor;
+    ttV.textContent = pt.yield_str;
+    var ttX = px + (svgRect.left - wrapRect.left);
+    var ttY = (pt.y / vbH) * svgRect.height + (svgRect.top - wrapRect.top);
+    tooltip.style.left = ttX + 'px';
+    tooltip.style.top  = ttY + 'px';
+    show();
+  }
+  svg.addEventListener('mousemove',  update);
+  svg.addEventListener('mouseenter', function (ev) { snapshotRects(); update(ev); });
+  svg.addEventListener('mouseleave', hide);
 })();
 </script>
 {% endblock %}

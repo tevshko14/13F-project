@@ -89,3 +89,191 @@
 /* Helper: accent text utility used by alert pills (no module owns it yet). */
 .pp-accent-color { color: var(--pp-accent); }
 .pp-text         { color: var(--pp-text); }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * ALERTS TAB
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-profile-alerts-count { font-size: 13px; font-weight: 700; color: var(--pp-ink); }
+.pp-profile-alerts-table { width: 100%; }
+.pp-profile-alerts-table thead th {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pp-dim);
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line2);
+}
+.pp-profile-alerts-table thead th.pp-num { text-align: right; }
+.pp-profile-alerts-table tbody td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.pp-profile-alerts-table tbody tr:last-child td { border-bottom: none; }
+.pp-profile-alerts-paused { opacity: 0.55; }
+.pp-profile-alerts-type {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--pp-accent);
+  padding: 2px 7px;
+  border: 1px solid var(--pp-accent);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.pp-profile-alerts-status {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.pp-profile-alerts-act {
+  font-size: 11px;
+  color: var(--pp-text);
+  cursor: pointer;
+  margin-right: 10px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * ACCOUNT TAB — 2x2 panel grid of key/value rows.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-profile-account-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.pp-profile-kv { padding: 18px 22px; }
+.pp-profile-kv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-profile-kv-row:last-child { border-bottom: none; }
+.pp-profile-kv-key  { font-size: 12px; color: var(--pp-dim); }
+.pp-profile-kv-val  {
+  color: var(--pp-ink);
+  font-weight: 600;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-profile-kv-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 14px;
+}
+.pp-profile-conn-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-profile-conn-row:last-child { border-bottom: none; }
+.pp-profile-conn-name {
+  font-size: 13px;
+  color: var(--pp-ink);
+  font-weight: 600;
+}
+.pp-profile-conn-val {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+}
+.pp-profile-conn-status {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SUBSCRIPTION TAB — 3 plan cards over billing + invoices grid.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-profile-plans-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.pp-profile-plan-card { /* panel scoping */ }
+.pp-profile-plan-current { border-color: var(--pp-accent); border-width: 2px; }
+.pp-profile-plan-body { padding: 22px 24px; }
+.pp-profile-plan-kicker {
+  font-size: 10px;
+  color: var(--pp-accent);
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  display: block;
+  margin-bottom: 8px;
+}
+.pp-profile-plan-name {
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 1.2px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.pp-profile-plan-price {
+  margin-top: 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.pp-profile-plan-amount {
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--pp-ink);
+  letter-spacing: -1.5px;
+}
+.pp-profile-plan-period {
+  font-size: 13px;
+  color: var(--pp-dim);
+}
+.pp-profile-plan-features {
+  list-style: none;
+  margin: 0;
+  padding: 14px 0 0 0;
+  border-top: 1px solid var(--pp-line);
+  margin-top: 14px;
+}
+.pp-profile-plan-features li {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--pp-text);
+  padding: 5px 0;
+}
+.pp-profile-plan-bullet {
+  color: var(--pp-accent);
+  font-weight: 700;
+}
+.pp-profile-plan-cta { margin-top: 18px; }
+
+.pp-profile-billing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.pp-profile-invoices-table { width: 100%; }
+.pp-profile-invoices-table tbody td {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 12px;
+}
+.pp-profile-invoices-table tbody tr:last-child td { border-bottom: none; }
+.pp-profile-invoices-status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}

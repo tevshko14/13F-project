@@ -1,0 +1,124 @@
+{#-
+  PaperPanda Redesign — Notifications / Activity feed
+  Chronological feed of platform notifications grouped by day, with type
+  filter chips at the top.  Reads from supabase_cache.get_recent_notifications.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head %}
+
+{% block title %}Notifications · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/notifications.css?v={{ range(1, 10**9) | random }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━ #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">◉</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">
+      Inbox <span class="pp-page-hero-crumb-sep">/</span> Activity
+    </span>
+    <h1 class="pp-page-hero-title">Notifications</h1>
+    <div class="pp-page-hero-sub">
+      Filings, sentiment spikes, congressional activity and product updates
+      in one stream · last 48 hours
+    </div>
+  </div>
+  {{ btn("Settings", kind="ghost",
+         attrs='onclick="window.location.href=\'/_v2/profile?tab=Alerts\'"') }}
+</header>
+
+{# ━━━━━━━━━━ TYPE FILTER CHIPS ━━━━━━━━━━ #}
+<div class="pp-notif-filters">
+  <a href="/_v2/notifications"
+     class="pp-notif-chip {% if not notif_active_types %}is-active{% endif %}">
+    All
+  </a>
+  {% for t in notif_types %}
+    <a href="/_v2/notifications?types={{ t.key }}"
+       class="pp-notif-chip {% if t.key in notif_active_types %}is-active{% endif %}"
+       style="--chip-color: {{ t.color }};">
+      {{ t.label }}
+    </a>
+  {% endfor %}
+</div>
+
+{# ━━━━━━━━━━ FEED BODY ━━━━━━━━━━ #}
+<div class="pp-page-body">
+  {% if notif_groups %}
+    {% for day_label, items in notif_groups %}
+      <div class="pp-notif-group">
+        <div class="pp-notif-day">
+          <span class="pp-mono pp-notif-day-label">{{ day_label }}</span>
+          <span class="pp-notif-day-rule"></span>
+          <span class="pp-mono pp-notif-day-count">{{ items|length }}</span>
+        </div>
+        {% call panel(cls="pp-notif-list-panel") %}
+          <ul class="pp-notif-list">
+            {% for n in items %}
+              <li class="pp-notif-row">
+                <a class="pp-notif-link" href="{{ n.link or '#' }}">
+                  <span class="pp-notif-icon" style="color: {{ n.type_color }};">{{ n.icon or '•' }}</span>
+                  <div class="pp-notif-body">
+                    <div class="pp-notif-title">{{ n.title }}</div>
+                    {% if n.message %}
+                      <div class="pp-notif-msg">{{ n.message }}</div>
+                    {% endif %}
+                    <div class="pp-notif-meta">
+                      <span class="pp-mono pp-notif-type"
+                            style="color: {{ n.type_color }}; border-color: {{ n.type_color }};">
+                        {{ n.type_label }}
+                      </span>
+                      {% if n.ticker %}
+                        <span class="pp-mono pp-notif-ticker">{{ n.ticker }}</span>
+                      {% endif %}
+                      <span class="pp-mono pp-notif-time">{{ n.time_ago }}</span>
+                    </div>
+                  </div>
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endcall %}
+      </div>
+    {% endfor %}
+  {% else %}
+    {% call panel() %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">📭</div>
+        <div class="pp-page-placeholder-title">No notifications yet</div>
+        <div class="pp-page-placeholder-sub">
+          Set up alerts on the Profile page and they'll show up here as
+          they fire.
+        </div>
+      </div>
+    {% endcall %}
+  {% endif %}
+
+  {# Pagination — preserves filter chip selection. #}
+  {% if notif_has_prev or notif_has_next %}
+    {%- set _q = "&types=" ~ (notif_active_types|join(",")) if notif_active_types else "" -%}
+    <div class="pp-notif-pagination">
+      {% if notif_has_prev %}
+        <a href="/_v2/notifications?page={{ notif_page - 1 }}{{ _q }}" class="pp-btn pp-btn-ghost">← Previous</a>
+      {% else %}
+        <span class="pp-btn pp-btn-ghost pp-btn-disabled">← Previous</span>
+      {% endif %}
+      <span class="pp-mono pp-notif-page-marker">Page {{ notif_page }}</span>
+      {% if notif_has_next %}
+        <a href="/_v2/notifications?page={{ notif_page + 1 }}{{ _q }}" class="pp-btn pp-btn-accent">Next →</a>
+      {% else %}
+        <span class="pp-btn pp-btn-ghost pp-btn-disabled">Next →</span>
+      {% endif %}
+    </div>
+  {% endif %}
+</div>
+
+{% endblock %}

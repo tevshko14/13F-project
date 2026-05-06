@@ -481,83 +481,703 @@ a.pp-stock-news-row:hover .pp-stock-news-title { color: var(--pp-accent); }
 .pp-stock-fin-bar.is-neg { background: var(--pp-down); }
 .pp-stock-fin-bar.is-hl { background: var(--pp-accent); }
 
-.pp-stock-fin-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-}
+/* Per-tab pane — only the .is-active one is visible.  Each pane carries
+   a chart panel + the (annual/quarterly) statement table, both swapped
+   by JS when the sub-pills or freq toggle change. */
+.pp-stock-fin-pane { display: none; }
+.pp-stock-fin-pane.is-active { display: block; }
 
-/* Revenue segments. */
-.pp-stock-rev-segments { padding: 18px; }
-.pp-stock-rev-row { margin-bottom: 14px; }
-.pp-stock-rev-row:last-child { margin-bottom: 0; }
-.pp-stock-rev-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 5px;
-  font-size: 13px;
-  color: var(--pp-text);
-}
-.pp-stock-rev-num { color: var(--pp-ink); font-weight: 600; font-size: 12px; }
-.pp-stock-rev-pct { color: var(--pp-dim); font-weight: 400; margin-left: 6px; }
-.pp-stock-rev-bar {
-  height: 5px;
-  background: var(--pp-sub);
-  overflow: hidden;
-}
-.pp-stock-rev-fill { height: 100%; display: block; }
-
-/* Margin trend chart. */
-.pp-stock-margin-chart { padding: 18px; }
-.pp-stock-margin-svg {
+/* Chart container hosts an ECharts canvas; the panel head sits above it
+   and matches every other panel head's typography. */
+.pp-stock-fin-chart-panel { margin-bottom: 18px; }
+.pp-stock-fin-chart {
   width: 100%;
-  height: 180px;
-  display: block;
+  height: 280px;
+  padding: 12px 18px;
 }
-.pp-stock-margin-line {
-  fill: none;
-  stroke-width: 1.6;
-}
-.pp-stock-margin-gross { stroke: var(--pp-ink); }
-.pp-stock-margin-op    { stroke: var(--pp-accent); }
-.pp-stock-margin-net   { stroke: var(--pp-up); stroke-dasharray: 3 3; }
-.pp-stock-margin-dot {
-  fill: var(--pp-bg);
-  stroke: var(--pp-ink);
-  stroke-width: 1.4;
-}
-.pp-stock-margin-axis {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 6px;
-  font-size: 10px;
+
+/* Empty-state copy when XBRL has no data for a freq (rare). */
+.pp-stock-fin-empty {
+  padding: 28px 18px;
+  text-align: center;
   color: var(--pp-dim);
+  font-size: 12px;
 }
-.pp-stock-margin-legend {
-  display: flex;
-  gap: 14px;
-  margin-top: 14px;
-  font-size: 11px;
-  color: var(--pp-text);
-}
-.pp-stock-margin-leg {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.pp-stock-margin-swatch {
-  width: 14px;
-  height: 2px;
-  display: inline-block;
-}
-.pp-stock-margin-leg-gross .pp-stock-margin-swatch { background: var(--pp-ink); }
-.pp-stock-margin-leg-op    .pp-stock-margin-swatch { background: var(--pp-accent); }
-.pp-stock-margin-leg-net   .pp-stock-margin-swatch { background: var(--pp-up); }
+
+/* Negative cell colour — mirrors v1's fin-neg class. */
+.pp-stock-fin-cell-num.pp-down .pp-mono { color: var(--pp-down); }
 
 /* ============================================================================
  * OWNERSHIP TAB
  * ==========================================================================*/
+
+/* Quarterly Activity Chart — ECharts hosts a 280px container, panel head
+   shows a coral helper line on the right. */
+.pp-stock-own-chart-panel { margin-bottom: 18px; }
+.pp-stock-own-chart {
+  width: 100%;
+  height: 280px;
+  padding: 12px 18px;
+}
+.pp-stock-own-chart-foot {
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* Per-quarter history pill nav + table panes. */
+.pp-stock-own-qhist { padding: 0; }
+.pp-stock-own-qhist-pills {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--pp-line);
+  overflow-x: auto;
+  padding: 4px 14px 0;
+}
+.pp-stock-own-qhist-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 18px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--pp-dim);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-bottom: -1px;
+}
+.pp-stock-own-qhist-pill:hover { color: var(--pp-text); }
+.pp-stock-own-qhist-pill.is-active {
+  color: var(--pp-accent);
+  border-bottom-color: var(--pp-accent);
+}
+.pp-stock-own-qhist-pill-sub {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--pp-dim2);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.pp-stock-own-qhist-pane { display: none; }
+.pp-stock-own-qhist-pane.is-active { display: block; }
+
+/* ── Congress sub-tab — party-volume bar + members grid ──────────── */
+.pp-stock-own-cong-party-panel { margin-bottom: 18px; }
+.pp-stock-own-cong-party-bar {
+  display: flex;
+  height: 28px;
+  margin: 14px 18px 0;
+  overflow: hidden;
+}
+.pp-stock-own-cong-party-dem,
+.pp-stock-own-cong-party-rep {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--pp-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+}
+.pp-stock-own-cong-party-dem { background: var(--pp-party-d, #2563eb); }
+.pp-stock-own-cong-party-rep { background: var(--pp-party-r, #dc2626); }
+.pp-stock-own-cong-party-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 18px 16px;
+  font-size: 11px;
+}
+.pp-stock-own-cong-party-dem-label { color: var(--pp-party-d, #2563eb); }
+.pp-stock-own-cong-party-rep-label { color: var(--pp-party-r, #dc2626); }
+
+/* Members grid — clickable cards with avatar + name + trade count. */
+.pp-stock-own-cong-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0;
+  padding: 0;
+}
+.pp-stock-own-cong-card {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--pp-line);
+  border-right: 1px solid var(--pp-line);
+  color: inherit;
+  text-decoration: none;
+  transition: background 80ms ease-out;
+}
+.pp-stock-own-cong-card:hover { background: var(--pp-sub); }
+.pp-stock-own-cong-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  font-family: var(--pp-font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+.pp-stock-own-cong-avatar--dem { background: var(--pp-party-d, #2563eb); }
+.pp-stock-own-cong-avatar--rep { background: var(--pp-party-r, #dc2626); }
+.pp-stock-own-cong-avatar--ind { background: var(--pp-dim2);          }
+.pp-stock-own-cong-card-name {
+  font-weight: 600;
+  color: var(--pp-ink);
+  font-size: 13px;
+}
+.pp-stock-own-cong-card-meta {
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.pp-stock-own-cong-card-trades {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+}
+.pp-stock-own-cong-card-count {
+  font-size: 11px;
+  color: var(--pp-text);
+  font-weight: 600;
+}
+
+/* ── Insiders sub-tab ────────────────────────────────────────────── */
+
+/* 4-card insights grid. */
+.pp-stock-own-ins-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.pp-stock-own-ins-card {
+  padding: 14px 18px;
+  border-right: 1px solid var(--pp-line);
+}
+.pp-stock-own-ins-card:last-child { border-right: 0; }
+.pp-stock-own-ins-card-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  line-height: 1.2;
+  margin: 4px 0 6px;
+}
+.pp-stock-own-ins-card-unit {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--pp-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-left: 4px;
+}
+.pp-stock-own-ins-card-detail {
+  font-size: 11px;
+  line-height: 1.5;
+}
+@media (max-width: 900px) {
+  .pp-stock-own-ins-cards { grid-template-columns: repeat(2, 1fr); }
+  .pp-stock-own-ins-card:nth-child(2) { border-right: 0; }
+  .pp-stock-own-ins-card:nth-child(1),
+  .pp-stock-own-ins-card:nth-child(2) { border-bottom: 1px solid var(--pp-line); }
+}
+
+/* Horizontal-scrolling insider summary row. */
+.pp-stock-own-ins-people {
+  display: flex;
+  gap: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-stock-own-ins-person {
+  flex: 0 0 220px;
+  padding: 12px 16px;
+  border-right: 1px solid var(--pp-line);
+  cursor: default;
+  position: relative;
+}
+.pp-stock-own-ins-person-name {
+  font-weight: 600;
+  color: var(--pp-ink);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-stock-own-ins-person-title {
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-stock-own-ins-person-stats {
+  font-size: 11px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pp-stock-own-ins-person-date {
+  font-size: 10px;
+  margin-top: 6px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* Activity timeline chart container. */
+.pp-stock-own-ins-chart-wrap {
+  position: relative;
+  height: 220px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--pp-line);
+}
+
+/* Filter row — buy/sell pills + insider dropdown. */
+.pp-stock-own-ins-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--pp-line);
+  flex-wrap: wrap;
+}
+.pp-stock-own-ins-filter {
+  background: transparent;
+  border: 1px solid var(--pp-line2);
+  color: var(--pp-text);
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+.pp-stock-own-ins-filter:hover { border-color: var(--pp-ink); }
+.pp-stock-own-ins-filter.is-active {
+  background: var(--pp-accent);
+  color: #fff;
+  border-color: var(--pp-accent);
+}
+.pp-stock-own-ins-select {
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  color: var(--pp-text);
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  padding: 5px 8px;
+  margin-left: auto;
+}
+
+/* Per-quarter expandable groups. */
+.pp-stock-own-ins-quarter {
+  border-top: 1px solid var(--pp-line);
+}
+.pp-stock-own-ins-quarter[open] .pp-stock-own-ins-quarter-head {
+  background: var(--pp-sub);
+}
+.pp-stock-own-ins-quarter-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  cursor: pointer;
+  font-size: 13px;
+  list-style: none;
+  user-select: none;
+}
+.pp-stock-own-ins-quarter-head::-webkit-details-marker { display: none; }
+.pp-stock-own-ins-quarter-head::before {
+  content: "▸";
+  margin-right: 4px;
+  color: var(--pp-dim);
+  transition: transform 80ms;
+}
+.pp-stock-own-ins-quarter[open] .pp-stock-own-ins-quarter-head::before {
+  transform: rotate(90deg);
+  display: inline-block;
+}
+.pp-stock-own-ins-table {
+  border-top: 1px solid var(--pp-line);
+}
+.pp-stock-own-link {
+  color: var(--pp-accent);
+  text-decoration: none;
+}
+.pp-stock-own-link:hover { color: var(--pp-ink); }
+
+/* ── Forecasts sub-pane visibility (Analysts / Earnings / Estimates) ─ */
+.pp-stock-fct-pane { display: none; }
+.pp-stock-fct-pane.is-active { display: block; }
+
+/* Per-firm analyst rating expandables — same pattern as the Insiders
+   quarter-expandables, but with avatar + action pill + grade + PT. */
+.pp-stock-fct-firm {
+  border-top: 1px solid var(--pp-line);
+}
+.pp-stock-fct-firm:first-of-type { border-top: 0; }
+.pp-stock-fct-firm[open] .pp-stock-fct-firm-head { background: var(--pp-sub); }
+.pp-stock-fct-firm-head {
+  display: grid;
+  grid-template-columns: 32px 1fr auto auto;
+  gap: 12px;
+  padding: 12px 18px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  align-items: center;
+}
+.pp-stock-fct-firm-head::-webkit-details-marker { display: none; }
+.pp-stock-fct-firm-head::before {
+  content: "▸";
+  margin-right: 0;
+  color: var(--pp-dim);
+  font-size: 11px;
+  display: none; /* keep avatar as the leading element instead */
+}
+.pp-stock-fct-firm-avatar {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pp-sub2);
+  color: var(--pp-text);
+  font-family: var(--pp-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+.pp-stock-fct-firm-name {
+  font-weight: 600;
+  color: var(--pp-ink);
+  font-size: 13px;
+  min-width: 0;
+}
+.pp-stock-fct-firm-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.pp-stock-fct-firm-action {
+  color: var(--pp-text);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+.pp-stock-fct-firm-grade {
+  font-size: 12px;
+  color: var(--pp-text);
+}
+.pp-stock-fct-firm-pt {
+  font-size: 12px;
+  color: var(--pp-text);
+}
+.pp-stock-fct-firm-arrow {
+  color: var(--pp-dim2);
+  margin: 0 4px;
+}
+.pp-stock-fct-firm-meta {
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.pp-stock-fct-firm-table {
+  border-top: 1px solid var(--pp-line);
+}
+@media (max-width: 900px) {
+  .pp-stock-fct-firm-head {
+    grid-template-columns: 32px 1fr;
+    grid-template-rows: auto auto;
+  }
+  .pp-stock-fct-firm-actions,
+  .pp-stock-fct-firm-meta {
+    grid-column: 2;
+  }
+}
+
+/* ── Earnings sub-pane: 5 KPI scorecards + chart container ─────── */
+.pp-stock-fct-earn-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  border: 1px solid var(--pp-line2);
+  margin-bottom: 18px;
+}
+.pp-stock-fct-earn-kpi {
+  padding: 14px 18px;
+  border-right: 1px solid var(--pp-line);
+  text-align: center;
+}
+.pp-stock-fct-earn-kpi:last-child { border-right: 0; }
+.pp-stock-fct-earn-kpi-val {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.pp-stock-fct-earn-kpi-label {
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.pp-stock-fct-earn-kpi-sub {
+  font-size: 10px;
+  margin-top: 2px;
+  letter-spacing: 0.5px;
+}
+@media (max-width: 900px) {
+  .pp-stock-fct-earn-kpis { grid-template-columns: repeat(2, 1fr); }
+  .pp-stock-fct-earn-kpi:nth-child(2) { border-right: 0; }
+  .pp-stock-fct-earn-kpi:nth-child(odd):nth-last-child(n+2),
+  .pp-stock-fct-earn-kpi:nth-child(even):nth-last-child(n+2) {
+    border-bottom: 1px solid var(--pp-line);
+  }
+}
+.pp-stock-fct-earn-chart-panel { margin-bottom: 18px; }
+.pp-stock-fct-earn-chart {
+  width: 100%;
+  height: 280px;
+  padding: 12px 18px;
+}
+
+/* ── Estimates sub-pane: transposed-period tables — first column is
+   the row label, periods march across ─────────────────────────── */
+.pp-stock-fct-est-table tbody td:first-child {
+  text-align: left;
+}
+
+/* ── Signals sub-panes (Sentiment / Short Interest) ─────────────── */
+.pp-stock-sig-pane { display: none; }
+.pp-stock-sig-pane.is-active { display: block; }
+
+/* Sentiment overview — 4-card row beneath the composite + signals table. */
+.pp-stock-sig-sent-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.pp-stock-sig-sent-card {
+  padding: 14px 18px;
+  border-right: 1px solid var(--pp-line);
+}
+.pp-stock-sig-sent-card:last-child { border-right: 0; }
+.pp-stock-sig-sent-val {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 4px 0 4px;
+  color: var(--pp-ink);
+}
+.pp-stock-sig-sent-meta {
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+.pp-stock-sig-sent-meta-inline {
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 4px;
+}
+@media (max-width: 900px) {
+  .pp-stock-sig-sent-grid { grid-template-columns: repeat(2, 1fr); }
+  .pp-stock-sig-sent-card:nth-child(2) { border-right: 0; }
+  .pp-stock-sig-sent-card:nth-child(odd):nth-last-child(n+2),
+  .pp-stock-sig-sent-card:nth-child(even):nth-last-child(n+2) {
+    border-bottom: 1px solid var(--pp-line);
+  }
+}
+
+/* Search Interest — keyword chips + sparkline. */
+.pp-stock-sig-gt {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 24px;
+  padding: 14px 18px;
+}
+@media (max-width: 900px) {
+  .pp-stock-sig-gt { grid-template-columns: 1fr; }
+}
+.pp-stock-sig-gt-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  align-items: center;
+}
+.pp-stock-sig-gt-row:last-child { margin-bottom: 0; }
+.pp-stock-sig-gt-row-label {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-weight: 600;
+  width: 100%;
+  margin-bottom: 2px;
+}
+.pp-stock-sig-gt-intent     { color: #2563eb; }
+.pp-stock-sig-gt-product    { color: #7c3aed; }
+.pp-stock-sig-gt-comparison { color: var(--pp-accent); }
+.pp-stock-sig-gt-chip {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border: 1px solid var(--pp-line2);
+  white-space: nowrap;
+  color: var(--pp-text);
+}
+.pp-stock-sig-gt-chip--intent     { color: #2563eb; border-color: rgba(37,99,235,0.4); background: rgba(37,99,235,0.08); }
+.pp-stock-sig-gt-chip--product    { color: #7c3aed; border-color: rgba(124,58,237,0.4); background: rgba(124,58,237,0.08); }
+.pp-stock-sig-gt-chip--comparison { color: var(--pp-accent); border-color: rgba(217,119,87,0.4); background: rgba(217,119,87,0.08); }
+
+.pp-stock-sig-gt-spark {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.pp-stock-sig-gt-svg {
+  width: 100%;
+  height: 64px;
+  display: block;
+  overflow: visible;
+}
+.pp-stock-sig-gt-line {
+  stroke: var(--pp-up);
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  fill: none;
+}
+.pp-stock-sig-gt-spark-meta {
+  font-size: 10px;
+  margin-top: 6px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.pp-stock-sig-gt-now { color: var(--pp-ink); }
+.pp-stock-sig-gt-empty {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  text-align: center;
+  padding: 14px 0;
+}
+
+/* Web Traffic — Tranco card + Wikipedia event detector card. */
+.pp-stock-sig-wt-row {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr;
+  gap: 18px;
+}
+@media (max-width: 900px) {
+  .pp-stock-sig-wt-row { grid-template-columns: 1fr; }
+}
+.pp-stock-sig-wt-card { padding: 14px 18px; }
+.pp-stock-sig-wt-stats {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 10px;
+}
+.pp-stock-sig-wt-num {
+  display: block;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--pp-ink);
+  margin-bottom: 2px;
+}
+.pp-stock-sig-wt-blurb {
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 8px;
+}
+.pp-stock-sig-wt-chart {
+  width: 100%;
+  height: 140px;
+}
+
+/* ── Short Interest sub-pane ─────────────────────────────────────── */
+.pp-stock-sig-si-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  border: 1px solid var(--pp-line2);
+  margin-bottom: 18px;
+}
+.pp-stock-sig-si-kpi {
+  padding: 14px 18px;
+  border-right: 1px solid var(--pp-line);
+}
+.pp-stock-sig-si-kpi:last-child { border-right: 0; }
+.pp-stock-sig-si-val {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--pp-ink);
+  margin: 4px 0 4px;
+}
+.pp-stock-sig-si-val--date { font-size: 18px; }
+.pp-stock-sig-si-pill {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+.pp-stock-sig-si-sub {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.pp-stock-sig-si-chart-panel { margin-bottom: 18px; }
+.pp-stock-sig-si-chart {
+  width: 100%;
+  height: 280px;
+  padding: 12px 18px;
+}
+@media (max-width: 900px) {
+  .pp-stock-sig-si-kpis { grid-template-columns: repeat(2, 1fr); }
+  .pp-stock-sig-si-kpi:nth-child(2) { border-right: 0; }
+  .pp-stock-sig-si-kpi:nth-child(odd):nth-last-child(n+2),
+  .pp-stock-sig-si-kpi:nth-child(even):nth-last-child(n+2) {
+    border-bottom: 1px solid var(--pp-line);
+  }
+}
+
+/* ── SEC Filings — form-type filter pills ────────────────────────── */
+.pp-stock-own-fil-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.pp-stock-own-fil-pill {
+  background: transparent;
+  border: 1px solid var(--pp-line2);
+  color: var(--pp-text);
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+.pp-stock-own-fil-pill:hover { border-color: var(--pp-ink); }
+.pp-stock-own-fil-pill.is-active {
+  background: var(--pp-accent);
+  color: #fff;
+  border-color: var(--pp-accent);
+}
+
 
 .pp-stock-own-controls {
   display: flex;

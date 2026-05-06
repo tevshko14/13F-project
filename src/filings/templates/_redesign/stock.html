@@ -2,8 +2,8 @@
   PaperPanda Redesign — Stock detail page
   Mirrors design_handoff_paperpanda/page-stock.jsx + stock-tab-overview.jsx
 
-  Tabs: Overview · Financials · Ownership · Forecasts · Signals · Vitals
-  Default = Overview.  Other 5 tabs are placeholders.
+  Tabs: Overview · Financials · Ownership · Forecasts · Signals
+  Default = Overview.
 
   Real data: market_data.get_stock_ohlcv() drives candlestick chart + KPI
   derivations (Open/High/Low/Volume/Avg Vol/52W H/L).  Mkt Cap + P/E +
@@ -85,7 +85,7 @@
 
 {# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
 <div class="pp-page-tabs">
-  {{ segment(["Overview","Financials","Ownership","Forecasts","Signals","Vitals"],
+  {{ segment(["Overview","Financials","Ownership","Forecasts","Signals"],
              value=stock_tab|default("Overview"),
              id="pp-stock-tabs") }}
 </div>
@@ -107,7 +107,7 @@
            inside the chart panel rather than in the page tabs row. #}
         <div class="pp-panel-head pp-stock-chart-head">
           <div class="pp-panel-head-title">Price · Candlestick + Volume</div>
-          {{ range_chip(value="1Y", id="pp-stock-range") }}
+          {{ range_chip(value="1M", id="pp-stock-range") }}
           <div class="pp-panel-head-spacer"></div>
           <span class="pp-mono pp-stock-chart-stats">
             O <span class="pp-stock-chart-stat-num" data-stat="o">{{ stock_kpi[0].value }}</span>
@@ -116,14 +116,14 @@
             C <span class="pp-stock-chart-stat-close pp-up" data-stat="c">{{ stock_close }}</span>
           </span>
         </div>
-        <div class="pp-stock-chart-body" data-vb-w="600" data-vb-h="280">
+        <div class="pp-stock-chart-body" data-vb-w="800" data-vb-h="280">
           <svg class="pp-stock-chart-svg"
-               viewBox="0 0 600 280" preserveAspectRatio="none"
-               aria-label="{{ stock_ticker }} 1-year candlestick chart">
+               viewBox="0 0 800 280" preserveAspectRatio="none"
+               aria-label="{{ stock_ticker }} candlestick chart">
             {# Gridlines (5 dashed). #}
             {% for i in range(5) %}
               <line class="pp-home-chart-grid"
-                    x1="0" x2="600"
+                    x1="0" x2="800"
                     y1="{{ i * 46 + 10 }}" y2="{{ i * 46 + 10 }}"/>
             {% endfor %}
             {# Candlesticks. #}
@@ -143,7 +143,7 @@
                 {# Volume strip below at y=220-270. #}
                 <rect class="pp-stock-vol"
                       x="{{ b.vol_x }}" y="{{ b.vol_y }}"
-                      width="6" height="{{ b.vol_h }}"
+                      width="{{ b.body_w }}" height="{{ b.vol_h }}"
                       fill="{{ _color }}"
                       fill-opacity="0.35"/>
               {% endfor %}
@@ -286,6 +286,21 @@
   </section>
 
   {# ━━━━━━━━━━ FINANCIALS TAB ━━━━━━━━━━ #}
+  {# Cell formatter — mirrors v1's fmt_num macro so number formatting
+     stays consistent with the production stock page.  Format flags ride
+     on each row so margin/EPS/ratio rows don't get the $B abbreviation. #}
+  {%- macro fmt_fin_num(val, is_pct=false, is_eps=false, is_ratio=false, is_cash=false) -%}
+    {%- if val is none -%}—
+    {%- elif is_pct -%}{{ "%.1f"|format(val) }}%
+    {%- elif is_eps -%}${{ "%.2f"|format(val) }}
+    {%- elif is_ratio -%}{{ "%.2f"|format(val) }}x
+    {%- elif val|abs >= 1e9 -%}${{ "%.2f"|format(val / 1e9) }}B
+    {%- elif val|abs >= 1e6 -%}${{ "%.1f"|format(val / 1e6) }}M
+    {%- elif val|abs >= 1e3 -%}${{ "%.1f"|format(val / 1e3) }}K
+    {%- else -%}${{ "{:,.0f}".format(val|int) }}
+    {%- endif -%}
+  {%- endmacro -%}
+
   <section class="pp-page-pane" data-tab-pane="Financials">
     {# 4-cell KPI summary strip (Revenue / Net Income / FCF / Gross Margin). #}
     <div class="pp-stock-fin-kpis">
@@ -293,122 +308,92 @@
         <div class="pp-stock-fin-kpi">
           {{ label(k.label) }}
           <span class="pp-mono pp-stock-fin-kpi-val">{{ k.value }}</span>
-          <span class="pp-mono pp-stock-fin-kpi-delta {{ 'pp-up' if k.up else 'pp-down' }}">▲ {{ k.delta }}</span>
+          {% if k.delta %}
+            <span class="pp-mono pp-stock-fin-kpi-delta {{ 'pp-up' if k.up else 'pp-down' }}">{{ '▲' if k.up else '▼' }} {{ k.delta }}</span>
+          {% endif %}
         </div>
       {% endfor %}
     </div>
 
-    {# Statement controls — Income/Balance/Cash + Annual/Quarterly. #}
+    {# 4 sub-pills (Income / Balance / Cash Flow / Key Ratios) +
+       Annual/Quarterly toggle on the right. #}
     <div class="pp-stock-fin-controls">
-      {{ segment(["Income","Balance","Cash flow"], value="Income", id="pp-stock-fin-stmt") }}
-      {{ segment(["Annual","Quarterly"], value="Annual", mono=True, id="pp-stock-fin-period") }}
+      {{ segment(["Income Statement","Balance Sheet","Cash Flow","Key Ratios"],
+                 value="Income Statement", accent=True, id="pp-stock-fin-stmt") }}
       <div class="pp-stock-fin-controls-spacer"></div>
-      <span class="pp-mono pp-stock-fin-unit">$B except where noted</span>
+      {{ segment(["Annual","Quarterly"], value="Annual", mono=True, id="pp-stock-fin-freq") }}
     </div>
 
-    {# Statement tables — only the active one is visible. #}
-    {% set statements = [
-         ("Income",     "Income statement",  fin_income),
-         ("Balance",    "Balance statement", fin_balance),
-         ("Cash flow",  "Cash flow",         fin_cash),
+    {# Per-tab pane: chart panel on top + statement table below.
+       The active class is set by the JS toggle; CSS hides the rest. #}
+    {% set fin_panes = [
+         ("Income Statement", "income",   "Revenue & Profitability"),
+         ("Balance Sheet",    "balance",  "Asset Composition"),
+         ("Cash Flow",        "cashflow", "Cash Flow Analysis"),
+         ("Key Ratios",       "ratios",   "Margin & Return Trends"),
        ] %}
-    {% for kind, title, rows in statements %}
-      {% call panel(cls="pp-stock-fin-table-panel") %}
-        <table class="pp-stock-fin-table" data-stmt="{{ kind }}">
-          <thead>
-            <tr>
-              <th class="pp-stock-fin-th-label">{{ title }}</th>
-              {% for p in fin_periods %}
-                <th class="pp-stock-fin-th-num{% if loop.last %} is-ttm{% endif %}">{{ p }}</th>
-              {% endfor %}
-              <th class="pp-stock-fin-th-trend">Trend</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in rows %}
-              <tr class="{{ 'is-bold ' if r.bold else '' }}{{ 'is-hl' if r.hl else '' }}">
-                <td class="pp-stock-fin-cell-label">{{ r.label }}</td>
-                {% for v in r.vals %}
-                  {% set _last = loop.last %}
-                  <td class="pp-stock-fin-cell-num{% if _last %} is-ttm{% endif %}">
-                    <span class="pp-mono">
-                      {%- if r.unit == "$" -%}
-                        ${{ "%.2f"|format(v) }}
-                      {%- elif r.unit == "%" -%}
-                        {{ "%.1f"|format(v) }}%
-                      {%- elif r.unit == "ratio" -%}
-                        {{ "%.2f"|format(v) }}
-                      {%- else -%}
-                        {%- if v < 0 -%}({{ "%.1f"|format(v|abs) }}){%- else -%}{{ "%.1f"|format(v) }}{%- endif -%}
-                      {%- endif %}
-                    </span>
-                  </td>
-                {% endfor %}
-                {# Inline mini-bars showing last 5 values, highlighted last bar. #}
-                {% set _abs = r.vals|map('abs')|list %}
-                {% set _max = _abs|max %}
-                <td class="pp-stock-fin-cell-trend">
-                  <div class="pp-stock-fin-bars">
-                    {% for v in r.vals[-5:] %}
-                      {% set _h = (v|abs / (_max if _max > 0 else 1)) * 16 + 2 %}
-                      <span class="pp-stock-fin-bar{% if v < 0 %} is-neg{% endif %}{% if loop.last %} is-current{% endif %}{% if r.hl %} is-hl{% endif %}"
-                            style="height: {{ _h|round(1) }}px;"></span>
+    {% for label_text, key, chart_title in fin_panes %}
+      <div class="pp-stock-fin-pane{% if loop.first %} is-active{% endif %}"
+           data-fin-pane="{{ label_text }}"
+           data-fin-key="{{ key }}">
+
+        {# Chart — empty container; an ECharts builder hydrates it on
+           tab activation, reading the chart_data JSON blob below. #}
+        {% call panel(cls="pp-stock-fin-chart-panel") %}
+          {{ panel_head(chart_title, sub="") }}
+          <div class="pp-stock-fin-chart" data-chart-key="{{ key }}"></div>
+        {% endcall %}
+
+        {# Statement tables — one per frequency.  JS toggles which
+           one's visible based on the Annual/Quarterly segment. #}
+        {% for freq in ["annual", "quarterly"] %}
+          {% set freq_data = fin_annual if freq == "annual" else fin_quarterly %}
+          {% set stmt = (freq_data or {}).get(key) %}
+          <div class="pp-stock-fin-table-wrap"
+               data-fin-freq="{{ freq }}"
+               {% if freq == "quarterly" %}hidden{% endif %}>
+            {% if stmt and stmt.rows %}
+              <table class="pp-stock-fin-table">
+                <thead>
+                  <tr>
+                    <th class="pp-stock-fin-th-label"></th>
+                    {% for lbl in stmt.labels %}
+                      <th class="pp-stock-fin-th-num">{{ lbl }}</th>
                     {% endfor %}
-                  </div>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% endcall %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in stmt.rows %}
+                    <tr class="{{ 'is-bold' if r.is_subtotal else '' }}">
+                      <td class="pp-stock-fin-cell-label">{{ r.label }}</td>
+                      {% for p in stmt.periods %}
+                        {% set v = r['values'].get(p) %}
+                        <td class="pp-stock-fin-cell-num{% if v is not none and v < 0 %} pp-down{% endif %}">
+                          <span class="pp-mono">{{ fmt_fin_num(v,
+                              is_pct=r.get('is_pct', false),
+                              is_eps=r.get('is_eps', false),
+                              is_ratio=r.get('is_ratio', false),
+                              is_cash=r.get('is_cash', false)) }}</span>
+                        </td>
+                      {% endfor %}
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <p class="pp-stock-fin-empty">
+                No {{ freq }} {{ label_text|lower }} data available for this ticker.
+              </p>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
     {% endfor %}
 
-    {# Revenue split (segments) + Margin trend (line chart). #}
-    <div class="pp-stock-fin-row">
-      {% call panel() %}
-        {{ panel_head("Revenue by segment", sub="FY25") }}
-        <div class="pp-stock-rev-segments">
-          {% for s in rev_segments %}
-            {% set _pct = (s.value / rev_total) * 100 %}
-            <div class="pp-stock-rev-row">
-              <div class="pp-stock-rev-label">
-                <span>{{ s.name }}</span>
-                <span class="pp-mono pp-stock-rev-num">${{ "%.2f"|format(s.value) }}B
-                  <span class="pp-stock-rev-pct">{{ "%.1f"|format(_pct) }}%</span></span>
-              </div>
-              <div class="pp-stock-rev-bar">
-                <span class="pp-stock-rev-fill" style="width: {{ "%.1f"|format(_pct) }}%; background: {{ s.color }};"></span>
-              </div>
-            </div>
-          {% endfor %}
-        </div>
-      {% endcall %}
-
-      {% call panel() %}
-        {{ panel_head("Margin trend", sub="5-year") }}
-        <div class="pp-stock-margin-chart">
-          <svg viewBox="0 0 500 180" preserveAspectRatio="none" class="pp-stock-margin-svg" aria-label="Margin trend chart">
-            {% for i in range(4) %}
-              <line class="pp-home-chart-grid" x1="0" x2="500" y1="{{ i * 45 + 10 }}" y2="{{ i * 45 + 10 }}"/>
-            {% endfor %}
-            <path class="pp-stock-margin-line pp-stock-margin-gross" d="{{ margin_paths.gross }}"/>
-            <path class="pp-stock-margin-line pp-stock-margin-op"    d="{{ margin_paths.op }}"/>
-            <path class="pp-stock-margin-line pp-stock-margin-net"   d="{{ margin_paths.net }}"/>
-            {% for p in margin_paths.gross_pts %}
-              <circle class="pp-stock-margin-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"/>
-            {% endfor %}
-          </svg>
-          <div class="pp-stock-margin-axis">
-            {% for d in margin_trend.labels %}<span class="pp-mono">{{ d }}</span>{% endfor %}
-          </div>
-          <div class="pp-stock-margin-legend">
-            <span class="pp-stock-margin-leg pp-stock-margin-leg-gross"><span class="pp-stock-margin-swatch"></span>Gross</span>
-            <span class="pp-stock-margin-leg pp-stock-margin-leg-op"><span class="pp-stock-margin-swatch"></span>Operating</span>
-            <span class="pp-stock-margin-leg pp-stock-margin-leg-net"><span class="pp-stock-margin-swatch"></span>Net</span>
-          </div>
-        </div>
-      {% endcall %}
-    </div>
+    {# Chart-data payload — read by the ECharts builders below. #}
+    <script type="application/json" id="pp-stock-fin-chart-data">
+      {{ fin_chart_data | tojson }}
+    </script>
   </section>
 
   {# ━━━━━━━━━━ OWNERSHIP TAB ━━━━━━━━━━ #}
@@ -428,6 +413,24 @@
 
     {# ── Funds sub-tab ── #}
     <div class="pp-stock-own-pane is-active" data-own-pane="Funds">
+
+      {# Quarterly Activity Chart — adds vs reduces share-change bars per
+         quarter.  Empty chart container; ECharts hydrates it when the
+         Ownership tab is opened. #}
+      {% if own_funds_chart and own_funds_chart.labels %}
+        {% call panel(cls="pp-stock-own-chart-panel") %}
+          {% call panel_head("Quarterly activity", sub="Adds vs. Reduces by quarter") %}
+            <span class="pp-mono pp-stock-own-chart-foot">
+              Green = share additions · Red = share reductions
+            </span>
+          {% endcall %}
+          <div class="pp-stock-own-chart" id="pp-stock-own-funds-chart"></div>
+          <script type="application/json" id="pp-stock-own-funds-chart-data">
+            {{ own_funds_chart | tojson }}
+          </script>
+        {% endcall %}
+      {% endif %}
+
       {% call panel() %}
         {% call panel_head("Top institutional holders", sub="Q1 2026 13F") %}
           <div class="pp-stock-own-head-right">
@@ -471,12 +474,138 @@
           </tbody>
         </table>
       {% endcall %}
+
+      {# Quarterly Activity History — pill nav per quarter + table per pane.
+         JS toggles which quarter's table is visible. #}
+      {% if own_funds_quarters %}
+        {% call panel() %}
+          {{ panel_head("Quarterly activity history",
+                        sub=(own_funds_quarters|length|string) ~ " quarter" ~ ("s" if own_funds_quarters|length != 1 else "")) }}
+          <div class="pp-stock-own-qhist" id="pp-stock-own-qhist">
+            <div class="pp-stock-own-qhist-pills">
+              {% for q in own_funds_quarters %}
+                <button type="button"
+                        class="pp-stock-own-qhist-pill{% if loop.first %} is-active{% endif %}"
+                        data-qkey="{{ q.key }}">
+                  <span>{{ q.label }}</span>
+                  <span class="pp-mono pp-stock-own-qhist-pill-sub">
+                    {{ q.entries|length }} investor{{ "s" if q.entries|length != 1 else "" }}
+                  </span>
+                </button>
+              {% endfor %}
+            </div>
+            {% for q in own_funds_quarters %}
+              <div class="pp-stock-own-qhist-pane{% if loop.first %} is-active{% endif %}"
+                   data-qkey="{{ q.key }}">
+                <table class="pp-stock-own-table">
+                  <thead>
+                    <tr>
+                      <th class="pp-stock-own-th-l">Investor</th>
+                      <th class="pp-stock-own-th-l">Activity</th>
+                      <th class="pp-stock-own-th-r">Share change</th>
+                      <th class="pp-stock-own-th-r">% change</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for e in q.entries %}
+                      <tr>
+                        <td class="pp-stock-own-fund">{{ e.fund }}</td>
+                        <td>{{ tag(
+                          "new" if e.activity == "NEW BUY"
+                          else ("added" if e.activity == "ADD"
+                          else ("reduced" if e.activity == "REDUCE"
+                          else ("exited" if e.activity == "SOLD" else "")))
+                        ) }}</td>
+                        <td class="pp-stock-own-num pp-mono {{ 'pp-up' if e.share_change > 0 else 'pp-down' }}">
+                          {%- if e.share_change > 0 -%}+{%- endif -%}{{ "{:,}".format(e.share_change) }}
+                        </td>
+                        <td class="pp-stock-own-num pp-mono {{ 'pp-up' if e.pct_change > 0 else ('pp-down' if e.pct_change < 0 else 'pp-dim') }}">
+                          {%- if e.activity == "NEW BUY" -%}New
+                          {%- elif e.activity == "SOLD" -%}Exit
+                          {%- elif e.pct_change == 0 -%}—
+                          {%- else -%}{{ "%+.1f"|format(e.pct_change) }}%
+                          {%- endif -%}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endfor %}
+          </div>
+        {% endcall %}
+      {% endif %}
+
     </div>
 
     {# ── Congress sub-tab ── #}
     <div class="pp-stock-own-pane" data-own-pane="Congress">
+      {# Buy-volume by party — full-width 2-segment bar above the panel. #}
+      {% if own_congress_party and (own_congress_party.democrat_pct or own_congress_party.republican_pct) %}
+        {% call panel(cls="pp-stock-own-cong-party-panel") %}
+          {{ panel_head("Buy volume by party", sub="estimated from disclosure ranges") }}
+          <div class="pp-stock-own-cong-party-bar">
+            {% if own_congress_party.democrat_pct %}
+              <div class="pp-stock-own-cong-party-dem"
+                   style="width: {{ own_congress_party.democrat_pct }}%;">
+                {{ own_congress_party.democrat_pct }}% D
+              </div>
+            {% endif %}
+            {% if own_congress_party.republican_pct %}
+              <div class="pp-stock-own-cong-party-rep"
+                   style="width: {{ own_congress_party.republican_pct }}%;">
+                {{ own_congress_party.republican_pct }}% R
+              </div>
+            {% endif %}
+          </div>
+          <div class="pp-stock-own-cong-party-labels">
+            <span class="pp-mono pp-stock-own-cong-party-dem-label">
+              Democrat: {{ own_congress_party.democrat_value_fmt }}
+            </span>
+            <span class="pp-mono pp-stock-own-cong-party-rep-label">
+              Republican: {{ own_congress_party.republican_value_fmt }}
+            </span>
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      {# Members grid — top 12 politicians with party-tinted avatar. #}
+      {% if own_congress_pols %}
+        {% call panel() %}
+          {{ panel_head(own_congress_n_pols ~ " member" ~ ("s" if own_congress_n_pols != 1 else "") ~ " trading " ~ stock_ticker,
+                        sub=own_congress_n_trades ~ " trade" ~ ("s" if own_congress_n_trades != 1 else "") ~ " · all-time") }}
+          <div class="pp-stock-own-cong-grid">
+            {% for pol in own_congress_pols %}
+              {% set _pk = "dem" if pol.party == "Democrat" else ("rep" if pol.party == "Republican" else "ind") %}
+              <a class="pp-stock-own-cong-card" href="/politician/{{ pol.member_id }}">
+                <div class="pp-stock-own-cong-avatar pp-stock-own-cong-avatar--{{ _pk }}">
+                  {{ pol.party_short or "I" }}
+                </div>
+                <div class="pp-stock-own-cong-card-info">
+                  <div class="pp-stock-own-cong-card-name">{{ pol.name }}</div>
+                  <div class="pp-stock-own-cong-card-meta pp-mono">
+                    {{ pol.chamber }} · {{ pol.state }}
+                  </div>
+                </div>
+                <div class="pp-stock-own-cong-card-trades">
+                  <div class="pp-mono pp-stock-own-cong-card-count">
+                    {{ pol.total_trades }} trade{{ "s" if pol.total_trades != 1 else "" }}
+                  </div>
+                  {% if pol.last_action == "buy" %}
+                    {{ tag("buy", text="LAST: BUY") }}
+                  {% elif pol.last_action == "sell" %}
+                    {{ tag("sell", text="LAST: SELL") }}
+                  {% endif %}
+                </div>
+              </a>
+            {% endfor %}
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      {# Recent trades table (existing). #}
       {% call panel() %}
-        {{ panel_head("Congressional trading activity", sub="STOCK Act disclosures") }}
+        {{ panel_head("Recent trades", sub="newest first") }}
         <table class="pp-stock-own-table">
           <thead>
             <tr>
@@ -511,63 +640,256 @@
 
     {# ── Insiders sub-tab ── #}
     <div class="pp-stock-own-pane" data-own-pane="Insiders">
-      {% call panel() %}
-        {{ panel_head("Insider transactions", sub="Form 4 · last 6 months") }}
-        <table class="pp-stock-own-table">
-          <thead>
-            <tr>
-              <th class="pp-stock-own-th-l">Person</th>
-              <th class="pp-stock-own-th-l">Role</th>
-              <th class="pp-stock-own-th-l">Action</th>
-              <th class="pp-stock-own-th-r">Shares</th>
-              <th class="pp-stock-own-th-r">Value</th>
-              <th class="pp-stock-own-th-r">Date</th>
-              <th class="pp-stock-own-th-r">Remaining</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in own_insiders %}
-              <tr>
-                <td class="pp-stock-own-fund">{{ r.person }}</td>
-                <td class="pp-stock-own-mgr">{{ r.role }}</td>
-                <td>{{ tag(r.action) }}</td>
-                <td class="pp-stock-own-num pp-mono">{{ r.shares }}</td>
-                <td class="pp-stock-own-num pp-stock-own-val pp-mono">{{ r.value }}</td>
-                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date }}</td>
-                <td class="pp-stock-own-num pp-mono">{{ r.remaining }}</td>
-              </tr>
+
+      {# ── 4-card Insider Purchase Insights ── #}
+      {% if own_insiders_insights %}
+        {% set ins = own_insiders_insights %}
+        {% call panel() %}
+          {{ panel_head("Insider purchase insights",
+                        sub=("based on " ~ ins.total_purchases ~ " open market purchases · " ~ ins.date_range_start ~ " – " ~ ins.date_range_end)) }}
+          <div class="pp-stock-own-ins-cards">
+
+            <div class="pp-stock-own-ins-card">
+              {{ label("Buy activity") }}
+              <div class="pp-mono pp-stock-own-ins-card-val">
+                {{ ins.purchases_12m }}
+                <span class="pp-stock-own-ins-card-unit">in last 12mo</span>
+              </div>
+              <div class="pp-stock-own-ins-card-detail">
+                {% if ins.frequency_label == "Elevated" %}{{ tag("added", text="● Elevated") }}
+                {% elif ins.frequency_label == "Quiet" %}{{ tag("reduced", text="● Quiet") }}
+                {% else %}<span class="pp-mono pp-dim">● Normal</span>
+                {% endif %}
+                <span class="pp-mono pp-dim"> vs {{ ins.avg_annual_purchases }}/yr avg</span>
+              </div>
+            </div>
+
+            <div class="pp-stock-own-ins-card">
+              {{ label("Insider buying zone") }}
+              <div class="pp-mono pp-stock-own-ins-card-val">
+                ${{ "%.2f"|format(ins.avg_buy_price) }}
+                <span class="pp-stock-own-ins-card-unit">avg price</span>
+              </div>
+              <div class="pp-stock-own-ins-card-detail pp-mono pp-dim">
+                Range: ${{ "%.2f"|format(ins.min_buy_price) }} – ${{ "%.2f"|format(ins.max_buy_price) }}
+                {% if ins.current_price and ins.vs_avg_buy_pct is not none %}
+                <br/>Now: ${{ "%.2f"|format(ins.current_price) }}
+                <span class="{{ 'pp-up' if ins.vs_avg_buy_pct >= 0 else 'pp-down' }}">
+                  ({{ '+' if ins.vs_avg_buy_pct >= 0 else '' }}{{ ins.vs_avg_buy_pct }}%
+                  {{ 'above' if ins.vs_avg_buy_pct >= 0 else 'below' }} avg)
+                </span>
+                {% endif %}
+              </div>
+            </div>
+
+            <div class="pp-stock-own-ins-card">
+              {{ label("Purchase win rate") }}
+              {% if ins.win_rate_pct is not none %}
+                <div class="pp-mono pp-stock-own-ins-card-val">
+                  {{ ins.win_rate_pct }}%
+                  <span class="pp-stock-own-ins-card-unit">profitable</span>
+                </div>
+                <div class="pp-stock-own-ins-card-detail pp-mono">
+                  <span class="pp-up">{{ ins.wins }}W</span>
+                  <span class="pp-dim"> / </span>
+                  <span class="pp-down">{{ ins.losses }}L</span>
+                  {% if ins.pending > 0 %}<span class="pp-dim"> ({{ ins.pending }} pending)</span>{% endif %}
+                  <br/>
+                  <span class="pp-dim">Avg return:</span>
+                  <span class="{{ 'pp-up' if ins.avg_return_pct >= 0 else 'pp-down' }}">
+                    {{ '+' if ins.avg_return_pct >= 0 else '' }}{{ ins.avg_return_pct }}%
+                  </span>
+                </div>
+              {% else %}
+                <div class="pp-mono pp-stock-own-ins-card-val pp-dim">—</div>
+                <div class="pp-stock-own-ins-card-detail pp-mono pp-dim">Computing…</div>
+              {% endif %}
+            </div>
+
+            <div class="pp-stock-own-ins-card">
+              {{ label("After insider buys (90d)") }}
+              {% if ins.fwd_90d_median_return is not none %}
+                <div class="pp-mono pp-stock-own-ins-card-val {{ 'pp-up' if ins.fwd_90d_median_return >= 0 else 'pp-down' }}">
+                  {{ '+' if ins.fwd_90d_median_return >= 0 else '' }}{{ ins.fwd_90d_median_return }}%
+                  <span class="pp-stock-own-ins-card-unit">median</span>
+                </div>
+                <div class="pp-stock-own-ins-card-detail pp-mono pp-dim">
+                  {{ ins.fwd_90d_win_rate }}% positive (n={{ ins.fwd_90d_count }})
+                </div>
+              {% else %}
+                <div class="pp-mono pp-stock-own-ins-card-val pp-dim">—</div>
+                <div class="pp-stock-own-ins-card-detail pp-mono pp-dim">
+                  {% if ins.total_purchases >= 3 %}Computing forward returns…
+                  {% else %}Not enough data
+                  {% endif %}
+                </div>
+              {% endif %}
+            </div>
+
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      {# ── Insider summary cards (horizontal scroll) ── #}
+      {% if own_insiders %}
+        {% call panel() %}
+          {{ panel_head("Insider trading", sub=(own_insiders_count ~ " Form 4 filing" ~ ("s" if own_insiders_count != 1 else "") ~ " for " ~ stock_ticker)) }}
+          <div class="pp-stock-own-ins-people" id="pp-stock-own-ins-people">
+            {% for p in own_insiders %}
+              <div class="pp-stock-own-ins-person"
+                   data-insider-name="{{ p.name }}"
+                   data-quarterly-breakdown="{{ p.quarterly_breakdown | tojson | escape }}">
+                <div class="pp-stock-own-ins-person-name">{{ p.name }}</div>
+                <div class="pp-stock-own-ins-person-title pp-mono">{{ p.title }}</div>
+                <div class="pp-stock-own-ins-person-stats pp-mono">
+                  {% if p.buys > 0 %}
+                    <span class="pp-up">{{ p.buys }} buy{{ "s" if p.buys != 1 else "" }} · {{ p.buy_value_fmt }}</span>
+                  {% endif %}
+                  {% if p.sells > 0 %}
+                    <span class="pp-down">{{ p.sells }} sell{{ "s" if p.sells != 1 else "" }} · {{ p.sell_value_fmt }}</span>
+                  {% endif %}
+                  {% if p.buys == 0 and p.sells == 0 %}
+                    <span class="pp-dim">No buys/sells</span>
+                  {% endif %}
+                </div>
+                <div class="pp-stock-own-ins-person-date pp-mono pp-dim">
+                  Last: {{ p.last_trade_date|format_pretty_date }}
+                </div>
+              </div>
             {% endfor %}
-          </tbody>
-        </table>
-      {% endcall %}
+          </div>
+          {# Activity timeline chart — Chart.js (already loaded for v1).
+             Hydrated by the IIFE below; respects insider-name filter. #}
+          {% if own_insiders_chart and own_insiders_chart.labels %}
+            <div class="pp-stock-own-ins-chart-wrap">
+              <canvas id="pp-stock-own-ins-chart"></canvas>
+            </div>
+          {% endif %}
+
+          {# Filter row — Buy/Sell + per-insider dropdown. #}
+          <div class="pp-stock-own-ins-filters">
+            <button type="button" class="pp-stock-own-ins-filter is-active" data-fkind="all">All</button>
+            <button type="button" class="pp-stock-own-ins-filter" data-fkind="buy">Buys</button>
+            <button type="button" class="pp-stock-own-ins-filter" data-fkind="sell">Sells</button>
+            {% if own_insiders|length > 1 %}
+              <select class="pp-stock-own-ins-select" id="pp-stock-own-ins-person-filter">
+                <option value="__all__">All insiders</option>
+                {% for p in own_insiders %}
+                  <option value="{{ p.name }}">{{ p.name }}</option>
+                {% endfor %}
+              </select>
+            {% endif %}
+          </div>
+
+          {# Per-quarter expandable trade groups — first one open by default. #}
+          {% for q in own_insiders_quarters %}
+            <details class="pp-stock-own-ins-quarter" data-qkey="{{ q.key }}" {{ "open" if loop.first else "" }}>
+              <summary class="pp-stock-own-ins-quarter-head">
+                <strong class="pp-mono">{{ q.label }}</strong>
+                <span class="pp-mono pp-dim">
+                  <span class="pp-stock-own-ins-quarter-count">{{ q.trades|length }}</span> trade{{ "s" if q.trades|length != 1 else "" }} · {{ q.total_value_fmt }}
+                </span>
+                {% if q.buy_count > 0 %}{{ tag("added", text=q.buy_count ~ " buy" ~ ("s" if q.buy_count != 1 else "")) }}{% endif %}
+                {% if q.sell_count > 0 %}{{ tag("reduced", text=q.sell_count ~ " sell" ~ ("s" if q.sell_count != 1 else "")) }}{% endif %}
+              </summary>
+              <table class="pp-stock-own-table pp-stock-own-ins-table">
+                <thead>
+                  <tr>
+                    <th class="pp-stock-own-th-l">Insider</th>
+                    <th class="pp-stock-own-th-l">Title</th>
+                    <th class="pp-stock-own-th-l">Trade date</th>
+                    <th class="pp-stock-own-th-l">Type</th>
+                    <th class="pp-stock-own-th-r">Price</th>
+                    <th class="pp-stock-own-th-r">Qty</th>
+                    <th class="pp-stock-own-th-r">Value</th>
+                    <th class="pp-stock-own-th-r">Owned after</th>
+                    <th class="pp-stock-own-th-r">Filing</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for t in q.trades %}
+                    {% set _kind = "buy" if "Purchase" in t.trade_type else ("sell" if "Sale" in t.trade_type else "other") %}
+                    <tr data-insider-kind="{{ _kind }}" data-insider-name="{{ t.insider_name }}">
+                      <td class="pp-stock-own-fund">{{ t.insider_name }}</td>
+                      <td class="pp-stock-own-mgr">{{ t.title }}</td>
+                      <td class="pp-stock-own-mgr pp-mono pp-dim">{{ t.trade_date|format_pretty_date }}</td>
+                      <td>
+                        {% if "Purchase" in t.trade_type %}{{ tag("added", text=t.trade_type) }}
+                        {% elif "Sale" in t.trade_type %}{{ tag("reduced", text=t.trade_type) }}
+                        {% else %}<span class="pp-mono pp-dim">{{ t.trade_type }}</span>
+                        {% endif %}
+                      </td>
+                      <td class="pp-stock-own-num pp-mono">{{ t.price }}</td>
+                      <td class="pp-stock-own-num pp-mono">{{ t.qty }}</td>
+                      <td class="pp-stock-own-num pp-stock-own-val pp-mono">{{ t.value }}</td>
+                      <td class="pp-stock-own-num pp-mono pp-dim">
+                        {{ t.owned }}{% if t.delta_own %} <span class="pp-dim2">({{ t.delta_own }})</span>{% endif %}
+                      </td>
+                      <td class="pp-stock-own-num">
+                        {% if t.sec_url %}
+                          <a class="pp-stock-own-link" href="{{ t.sec_url }}" target="_blank" rel="noopener noreferrer" title="View SEC Form 4">↗</a>
+                        {% else %}
+                          <span class="pp-dim">—</span>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </details>
+          {% endfor %}
+
+          {# Chart payloads for the timeline + per-insider filter. #}
+          {% if own_insiders_chart %}
+            <script type="application/json" id="pp-stock-own-ins-chart-data">
+              {{ {"all": own_insiders_chart, "per": own_insiders_per_chart} | tojson }}
+            </script>
+          {% endif %}
+        {% endcall %}
+      {% endif %}
     </div>
 
     {# ── SEC Filings sub-tab ── #}
     <div class="pp-stock-own-pane" data-own-pane="SEC Filings">
       {% call panel() %}
-        {% call panel_head("EDGAR filings", sub="all forms · " ~ stock_ticker) %}
-          {{ segment(["All","10-K/Q","8-K","Form 4","13F","Proxy"], value="All", mono=True) }}
+        {% call panel_head("EDGAR filings", sub=(own_filings|length ~ " recent · " ~ stock_ticker)) %}
+          {# Form-type filter pills — JS hides table rows whose `data-form-type`
+             prefix doesn't match.  "10-K/Q" matches both 10-K and 10-Q via
+             prefix, "Form 4" matches "4" / "4/A". #}
+          <div class="pp-stock-own-fil-filters" id="pp-stock-own-fil-filters">
+            <button type="button" class="pp-stock-own-fil-pill is-active" data-fkey="all">All</button>
+            <button type="button" class="pp-stock-own-fil-pill" data-fkey="10-K">10-K</button>
+            <button type="button" class="pp-stock-own-fil-pill" data-fkey="10-Q">10-Q</button>
+            <button type="button" class="pp-stock-own-fil-pill" data-fkey="8-K">8-K</button>
+            <button type="button" class="pp-stock-own-fil-pill" data-fkey="4">Form 4</button>
+            <button type="button" class="pp-stock-own-fil-pill" data-fkey="13">13F/13G</button>
+            <button type="button" class="pp-stock-own-fil-pill" data-fkey="DEF">Proxy</button>
+          </div>
         {% endcall %}
-        <table class="pp-stock-own-table">
+        <table class="pp-stock-own-table" id="pp-stock-own-fil-table">
           <thead>
             <tr>
               <th class="pp-stock-own-th-l pp-stock-own-th-form">Form</th>
               <th class="pp-stock-own-th-l">Filed</th>
               <th class="pp-stock-own-th-l">Period</th>
               <th class="pp-stock-own-th-l">Description</th>
-              <th class="pp-stock-own-th-r">Size</th>
-              <th class="pp-stock-own-th-r"></th>
+              <th class="pp-stock-own-th-r">Link</th>
             </tr>
           </thead>
           <tbody>
             {% for r in own_filings %}
-              <tr>
+              <tr data-form-type="{{ r.type }}">
                 <td><span class="pp-stock-own-form-pill pp-mono">{{ r.type }}</span></td>
                 <td class="pp-stock-own-mgr pp-mono">{{ r.filed }}</td>
                 <td class="pp-stock-own-fund">{{ r.period }}</td>
                 <td class="pp-stock-own-mgr">{{ r.desc }}</td>
-                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.size }}</td>
-                <td class="pp-stock-own-num"><span class="pp-stock-own-link">↗</span></td>
+                <td class="pp-stock-own-num">
+                  {% if r.url %}
+                    <a class="pp-stock-own-link" href="{{ r.url }}" target="_blank" rel="noopener noreferrer" title="View on SEC EDGAR">↗</a>
+                  {% else %}
+                    <span class="pp-dim">—</span>
+                  {% endif %}
+                </td>
               </tr>
             {% endfor %}
           </tbody>
@@ -578,337 +900,752 @@
 
   {# ━━━━━━━━━━ FORECASTS TAB ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Forecasts">
-    {# Top: consensus + price-target distribution. #}
-    <div class="pp-stock-fct-top">
-      {% call panel() %}
-        {{ panel_head("Analyst consensus", sub=fct_ratings_total ~ " analysts") }}
-        <div class="pp-stock-fct-consensus">
-          {% set _verdict_class = "pp-up" if "BUY" in fct_consensus else ("pp-down" if "SELL" in fct_consensus else "pp-stock-fct-coral") %}
-          <span class="pp-mono pp-stock-fct-consensus-verdict {{ _verdict_class }}">{{ fct_consensus }}</span>
-          <div class="pp-stock-fct-consensus-sub">{{ fct_ratings_total }} firms covering · {{ fct_consensus|lower }} consensus</div>
-          <div class="pp-stock-fct-rating-bars">
-            {% for name, count, color in fct_ratings %}
-              <div class="pp-stock-fct-rating">
-                <div class="pp-stock-fct-rating-row">
-                  <span>{{ name }}</span>
-                  <span class="pp-mono pp-stock-fct-rating-count">{{ count }}</span>
-                </div>
-                <div class="pp-stock-fct-rating-bar">
-                  <span class="pp-stock-fct-rating-fill"
-                        style="width: {{ "%.1f"|format(count / fct_ratings_total * 100) }}%; background: {{ color }};"></span>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-        </div>
-      {% endcall %}
-
-      {% call panel() %}
-        {{ panel_head("Price target distribution", sub="12-month forward") }}
-        <div class="pp-stock-fct-targets">
-          <div class="pp-stock-fct-target-grid">
-            <div>{{ label("Low") }}<span class="pp-mono pp-stock-fct-target-num pp-down">${{ "%.0f"|format(fct_target_low) }}</span></div>
-            <div>{{ label("Avg") }}<span class="pp-mono pp-stock-fct-target-num pp-stock-fct-coral">${{ "%.0f"|format((fct_target_low + fct_target_high) / 2) }}</span></div>
-            <div>{{ label("High") }}<span class="pp-mono pp-stock-fct-target-num pp-up">${{ "%.0f"|format(fct_target_high) }}</span></div>
-          </div>
-          <div class="pp-stock-fct-numberline">
-            <div class="pp-stock-fct-axis"></div>
-            <div class="pp-stock-fct-now" style="left: {{ fct_now_pct }}%;">${{ stock_price|default('142') }} NOW</div>
-            <div class="pp-stock-fct-now-line" style="left: {{ fct_now_pct }}%;"></div>
-            {% for a in fct_analysts %}
-              {% set _col = "var(--pp-up)" if a.rating in ("BUY","OVERWEIGHT") else ("var(--pp-accent)" if a.rating == "HOLD" else "var(--pp-down)") %}
-              <span class="pp-stock-fct-tick" style="left: {{ a.pct }}%; background: {{ _col }};"></span>
-            {% endfor %}
-            <div class="pp-stock-fct-axis-labels">
-              <span class="pp-mono">$80</span><span class="pp-mono">$120</span>
-              <span class="pp-mono">$160</span><span class="pp-mono">$200</span>
-              <span class="pp-mono">$220</span>
-            </div>
-          </div>
-          <div class="pp-stock-fct-implied">
-            <span>Implied upside (avg)</span>
-            <span class="pp-mono pp-up">+21.0% to $172</span>
-          </div>
-        </div>
-      {% endcall %}
+    {# 3-sub-pill nav (Analysts / Earnings / Estimates) like Ownership. #}
+    <div class="pp-stock-own-controls">
+      {{ segment(["Analysts","Earnings","Estimates"],
+                 value="Analysts", accent=True, id="pp-stock-fct-sub") }}
     </div>
 
-    {# Recent analyst actions table. #}
-    {% call panel(cls="pp-stock-fct-table-panel") %}
-      {{ panel_head("Recent analyst actions", sub="last 30 days") }}
-      <table class="pp-stock-fct-analysts">
-        <thead>
-          <tr>
-            <th class="pp-stock-own-th-l">Firm</th>
-            <th class="pp-stock-own-th-l">Analyst</th>
-            <th class="pp-stock-own-th-l">Rating</th>
-            <th class="pp-stock-own-th-r">Target</th>
-            <th class="pp-stock-own-th-r">Prior</th>
-            <th class="pp-stock-own-th-r">Δ</th>
-            <th class="pp-stock-own-th-r">Date</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in fct_analysts %}
-            {% set _bull = r.rating in ("BUY","OVERWEIGHT") %}
-            {% set _bear = r.rating in ("SELL","UNDERWEIGHT") %}
-            <tr>
-              <td class="pp-stock-own-fund">{{ r.firm }}</td>
-              <td class="pp-stock-own-mgr">{{ r.analyst }}</td>
-              <td>
-                <span class="pp-mono pp-stock-fct-rating-pill {{ 'pp-up' if _bull else ('pp-down' if _bear else 'pp-stock-fct-coral') }}">
-                  {{ r.rating }}
-                </span>
-              </td>
-              <td class="pp-stock-own-num pp-mono pp-stock-fct-target-cell">${{ r.target }}</td>
-              <td class="pp-stock-own-num pp-mono pp-dim">${{ r.prev }}</td>
-              <td class="pp-stock-own-num pp-mono">
-                {% if r.delta == 0 %}
-                  <span class="pp-dim">—</span>
-                {% else %}
-                  <span class="{{ 'pp-up' if r.delta > 0 else 'pp-down' }}">
-                    {{- '▲' if r.delta > 0 else '▼' }} ${{ r.delta|abs }}
-                  </span>
-                {% endif %}
-              </td>
-              <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% endcall %}
-
-    {# Estimates: revenue table + EPS revisions chart. #}
-    <div class="pp-stock-fin-row">
-      {% call panel() %}
-        {{ panel_head("Revenue estimates", sub="next 4 quarters") }}
-        <table class="pp-stock-fct-rev">
-          <thead>
-            <tr>
-              <th class="pp-stock-own-th-l">Period</th>
-              <th class="pp-stock-own-th-r">Estimate</th>
-              <th class="pp-stock-own-th-r">Low</th>
-              <th class="pp-stock-own-th-r">High</th>
-              <th class="pp-stock-own-th-r">YoY</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in fct_rev_est %}
-              <tr class="{{ 'is-total' if r.is_total else '' }}">
-                <td class="pp-stock-own-fund">{{ r.period }}</td>
-                <td class="pp-stock-own-num pp-mono pp-stock-own-val">{{ r.est }}</td>
-                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.low }}</td>
-                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.high }}</td>
-                <td class="pp-stock-own-num pp-mono pp-up">{{ r.yoy }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% endcall %}
-
-      {% call panel() %}
-        {{ panel_head("Estimate revisions", sub="last 90 days") }}
-        <div class="pp-stock-eps-chart">
-          <svg viewBox="0 0 500 180" preserveAspectRatio="none" class="pp-stock-eps-svg" aria-label="EPS revisions chart">
-            {% for i in range(4) %}
-              <line class="pp-home-chart-grid" x1="0" x2="500" y1="{{ i * 45 + 10 }}" y2="{{ i * 45 + 10 }}"/>
-            {% endfor %}
-            <path class="pp-stock-eps-area" d="{{ fct_eps_path }} L 480 170 L 20 170 Z"/>
-            <path class="pp-stock-eps-line" d="{{ fct_eps_path }}"/>
-            {% for p in fct_eps_pts %}
-              <circle class="pp-stock-eps-dot" cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"/>
-            {% endfor %}
-          </svg>
-          <div class="pp-stock-eps-axis">
-            <span class="pp-mono">90d ago</span>
-            <span class="pp-mono">60d</span>
-            <span class="pp-mono">30d</span>
-            <span class="pp-mono">Now</span>
+    {# ── ANALYSTS SUB-PANE ── #}
+    <div class="pp-stock-fct-pane is-active" data-fct-pane="Analysts">
+      {# Top: consensus + price-target distribution. #}
+      <div class="pp-stock-fct-top">
+        {% call panel() %}
+          {{ panel_head("Analyst consensus", sub=fct_ratings_total ~ " analysts") }}
+          <div class="pp-stock-fct-consensus">
+            {% set _verdict_class = "pp-up" if "BUY" in fct_consensus else ("pp-down" if "SELL" in fct_consensus else "pp-stock-fct-coral") %}
+            <span class="pp-mono pp-stock-fct-consensus-verdict {{ _verdict_class }}">{{ fct_consensus }}</span>
+            <div class="pp-stock-fct-consensus-sub">{{ fct_ratings_total }} firms covering · {{ fct_consensus|lower }} consensus</div>
+            <div class="pp-stock-fct-rating-bars">
+              {% for name, count, color in fct_ratings %}
+                <div class="pp-stock-fct-rating">
+                  <div class="pp-stock-fct-rating-row">
+                    <span>{{ name }}</span>
+                    <span class="pp-mono pp-stock-fct-rating-count">{{ count }}</span>
+                  </div>
+                  <div class="pp-stock-fct-rating-bar">
+                    <span class="pp-stock-fct-rating-fill"
+                          style="width: {{ "%.1f"|format(count / fct_ratings_total * 100) }}%; background: {{ color }};"></span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
           </div>
-          <div class="pp-stock-eps-note">
-            FY26 EPS estimate revised <span class="pp-mono pp-up">+27.2%</span> over 90 days.
-            <span class="pp-dim">34 upgrades, 2 downgrades.</span>
+        {% endcall %}
+
+        {% call panel() %}
+          {{ panel_head("Price target distribution", sub="12-month forward") }}
+          <div class="pp-stock-fct-targets">
+            <div class="pp-stock-fct-target-grid">
+              <div>{{ label("Low") }}<span class="pp-mono pp-stock-fct-target-num pp-down">${{ "%.0f"|format(fct_target_low) }}</span></div>
+              <div>{{ label("Avg") }}<span class="pp-mono pp-stock-fct-target-num pp-stock-fct-coral">${{ "%.0f"|format((fct_target_low + fct_target_high) / 2) }}</span></div>
+              <div>{{ label("High") }}<span class="pp-mono pp-stock-fct-target-num pp-up">${{ "%.0f"|format(fct_target_high) }}</span></div>
+            </div>
+            <div class="pp-stock-fct-numberline">
+              <div class="pp-stock-fct-axis"></div>
+              <div class="pp-stock-fct-now" style="left: {{ fct_now_pct }}%;">${{ stock_price|default('142') }} NOW</div>
+              <div class="pp-stock-fct-now-line" style="left: {{ fct_now_pct }}%;"></div>
+              {% for a in fct_analysts %}
+                {% set _col = "var(--pp-up)" if a.rating in ("BUY","OVERWEIGHT") else ("var(--pp-accent)" if a.rating == "HOLD" else "var(--pp-down)") %}
+                <span class="pp-stock-fct-tick" style="left: {{ a.pct }}%; background: {{ _col }};"></span>
+              {% endfor %}
+              <div class="pp-stock-fct-axis-labels">
+                <span class="pp-mono">${{ "%.0f"|format(fct_target_low) }}</span>
+                <span class="pp-mono">${{ "%.0f"|format(fct_target_low + (fct_target_high - fct_target_low) * 0.25) }}</span>
+                <span class="pp-mono">${{ "%.0f"|format(fct_target_low + (fct_target_high - fct_target_low) * 0.5) }}</span>
+                <span class="pp-mono">${{ "%.0f"|format(fct_target_low + (fct_target_high - fct_target_low) * 0.75) }}</span>
+                <span class="pp-mono">${{ "%.0f"|format(fct_target_high) }}</span>
+              </div>
+            </div>
+          </div>
+        {% endcall %}
+      </div>
+
+      {# Per-firm analyst rating history — expandable card per firm,
+         mirroring the Insiders quarter-expandable pattern. #}
+      {% if fct_grouped %}
+        {% call panel() %}
+          {{ panel_head("Analyst ratings by firm",
+                        sub=(fct_grouped|length ~ " firm" ~ ("s" if fct_grouped|length != 1 else "") ~ " covering " ~ stock_ticker)) }}
+          {% for g in fct_grouped %}
+            <details class="pp-stock-fct-firm" {{ "open" if loop.first else "" }}>
+              <summary class="pp-stock-fct-firm-head">
+                <div class="pp-stock-fct-firm-avatar">{{ (g.firm or "?")[:1]|upper }}</div>
+                <div class="pp-stock-fct-firm-name">{{ g.firm }}</div>
+                <div class="pp-stock-fct-firm-actions">
+                  {% if g.latest_kind == "upgrade" %}{{ tag("added", text="Upgrade") }}
+                  {% elif g.latest_kind == "downgrade" %}{{ tag("reduced", text="Downgrade") }}
+                  {% elif g.latest_kind == "init" %}{{ tag("new", text="Initiated") }}
+                  {% elif g.latest_action %}<span class="pp-mono pp-stock-fct-firm-action">{{ g.latest_action }}</span>
+                  {% endif %}
+                  {% if g.latest_grade %}
+                    <span class="pp-stock-fct-firm-grade">
+                      {%- if g.latest_from and g.latest_from != g.latest_grade -%}
+                        <span class="pp-dim">{{ g.latest_from }}</span>
+                        <span class="pp-stock-fct-firm-arrow">→</span>
+                      {%- endif -%}
+                      <strong>{{ g.latest_grade }}</strong>
+                    </span>
+                  {% endif %}
+                  {% if g.latest_target %}
+                    <span class="pp-mono pp-stock-fct-firm-pt">
+                      {%- if g.latest_prev and g.latest_prev != g.latest_target -%}
+                        <span class="pp-dim">${{ "%.0f"|format(g.latest_prev) }}</span>
+                        <span class="pp-stock-fct-firm-arrow">→</span>
+                      {%- endif -%}
+                      <strong>${{ "%.0f"|format(g.latest_target) }}</strong>
+                    </span>
+                  {% endif %}
+                </div>
+                <div class="pp-stock-fct-firm-meta pp-mono">
+                  {{ g.ratings_count }} rating{{ "s" if g.ratings_count != 1 else "" }}
+                  · {{ g.latest_date }}
+                </div>
+              </summary>
+              <table class="pp-stock-own-table pp-stock-fct-firm-table">
+                <thead>
+                  <tr>
+                    <th class="pp-stock-own-th-l">Action</th>
+                    <th class="pp-stock-own-th-l">Rating</th>
+                    <th class="pp-stock-own-th-r">Price target</th>
+                    <th class="pp-stock-own-th-r">Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in g.history %}
+                    <tr>
+                      <td>
+                        {% if r.action_kind == "upgrade" %}{{ tag("added", text=r.action) }}
+                        {% elif r.action_kind == "downgrade" %}{{ tag("reduced", text=r.action) }}
+                        {% elif r.action_kind == "init" %}{{ tag("new", text=r.action) }}
+                        {% elif r.action %}<span class="pp-mono pp-stock-fct-firm-action">{{ r.action }}</span>
+                        {% endif %}
+                      </td>
+                      <td class="pp-stock-own-mgr">
+                        {%- if r.from_grade and r.from_grade != r.to_grade -%}
+                          <span class="pp-dim">{{ r.from_grade }}</span>
+                          <span class="pp-stock-fct-firm-arrow">→</span>
+                        {%- endif -%}
+                        <strong>{{ r.to_grade }}</strong>
+                      </td>
+                      <td class="pp-stock-own-num pp-mono">
+                        {%- if r.target -%}
+                          {%- if r.prev_target and r.prev_target != r.target -%}
+                            <span class="pp-dim">${{ "%.0f"|format(r.prev_target) }}</span>
+                            <span class="pp-stock-fct-firm-arrow">→</span>
+                          {%- endif -%}
+                          <strong>${{ "%.0f"|format(r.target) }}</strong>
+                        {%- else -%}
+                          <span class="pp-dim">—</span>
+                        {%- endif -%}
+                      </td>
+                      <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </details>
+          {% endfor %}
+        {% endcall %}
+      {% endif %}
+    </div>
+
+    {# ── EARNINGS SUB-PANE ── #}
+    <div class="pp-stock-fct-pane" data-fct-pane="Earnings">
+      {% if fct_earnings and fct_earnings.history %}
+        {% set _e = fct_earnings %}
+        {% set _s = _e.streak or {} %}
+
+        {# 5 KPI scorecards. #}
+        <div class="pp-stock-fct-earn-kpis">
+          {% if _s.eps_streak %}
+            <div class="pp-stock-fct-earn-kpi">
+              <div class="pp-mono pp-stock-fct-earn-kpi-val {{ 'pp-up' if _s.eps_streak > 0 else 'pp-down' }}">
+                {{ _s.eps_streak|abs }}
+              </div>
+              <div class="pp-stock-fct-earn-kpi-label">{{ _s.eps_streak_label }}</div>
+            </div>
+          {% endif %}
+          {% if _s.total_count %}
+            <div class="pp-stock-fct-earn-kpi">
+              <div class="pp-mono pp-stock-fct-earn-kpi-val {{ 'pp-up' if _s.beat_count > _s.total_count / 2 else 'pp-down' }}">
+                {{ _s.beat_count }} / {{ _s.total_count }}
+              </div>
+              <div class="pp-stock-fct-earn-kpi-label">quarters beat</div>
+            </div>
+          {% endif %}
+          {% if _s.avg_surprise_pct is not none %}
+            <div class="pp-stock-fct-earn-kpi">
+              <div class="pp-mono pp-stock-fct-earn-kpi-val {{ 'pp-up' if _s.avg_surprise_pct >= 0 else 'pp-down' }}">
+                {{ '+' if _s.avg_surprise_pct >= 0 else '' }}{{ "%.2f"|format(_s.avg_surprise_pct) }}%
+              </div>
+              <div class="pp-stock-fct-earn-kpi-label">avg. EPS surprise</div>
+            </div>
+          {% endif %}
+          {% if _s.biggest_beat_pct is not none %}
+            <div class="pp-stock-fct-earn-kpi">
+              <div class="pp-mono pp-stock-fct-earn-kpi-val pp-up">
+                +{{ "%.1f"|format(_s.biggest_beat_pct) }}%
+              </div>
+              <div class="pp-stock-fct-earn-kpi-label">biggest beat</div>
+              <div class="pp-stock-fct-earn-kpi-sub pp-dim pp-mono">{{ _s.biggest_beat_quarter }}</div>
+            </div>
+          {% endif %}
+          <div class="pp-stock-fct-earn-kpi">
+            {% if _s.largest_miss_pct is not none %}
+              <div class="pp-mono pp-stock-fct-earn-kpi-val pp-down">
+                {{ "%.1f"|format(_s.largest_miss_pct) }}%
+              </div>
+              <div class="pp-stock-fct-earn-kpi-label">largest miss</div>
+              <div class="pp-stock-fct-earn-kpi-sub pp-dim pp-mono">{{ _s.largest_miss_quarter }}</div>
+            {% else %}
+              <div class="pp-mono pp-stock-fct-earn-kpi-val pp-up">—</div>
+              <div class="pp-stock-fct-earn-kpi-label">no misses</div>
+            {% endif %}
           </div>
         </div>
-      {% endcall %}
+
+        {# EPS Trend chart — ECharts dot plot, hydrated lazily. #}
+        {% call panel(cls="pp-stock-fct-earn-chart-panel") %}
+          {{ panel_head("EPS trend", sub="last 8 quarters") }}
+          <div class="pp-stock-fct-earn-chart" id="pp-stock-fct-earn-chart"></div>
+          <script type="application/json" id="pp-stock-fct-earn-chart-data">
+            {{ _e.history | tojson }}
+          </script>
+        {% endcall %}
+
+        {# Quarterly results table. #}
+        {% call panel() %}
+          {{ panel_head("Quarterly results", sub=(_e.history|length ~ " quarter" ~ ("s" if _e.history|length != 1 else ""))) }}
+          <table class="pp-stock-own-table">
+            <thead>
+              <tr>
+                <th class="pp-stock-own-th-l">Report date</th>
+                <th class="pp-stock-own-th-l">Quarter</th>
+                <th class="pp-stock-own-th-r">EPS est.</th>
+                <th class="pp-stock-own-th-r">EPS actual</th>
+                <th class="pp-stock-own-th-r">Surprise</th>
+                <th class="pp-stock-own-th-l">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in _e.history[:12] %}
+                <tr>
+                  <td class="pp-stock-own-mgr pp-mono">{{ row.report_date }}</td>
+                  <td class="pp-stock-own-mgr">{{ row.fiscal_quarter or "—" }}</td>
+                  <td class="pp-stock-own-num pp-mono pp-dim">
+                    {%- if row.eps_estimate is not none -%}${{ "%.2f"|format(row.eps_estimate) }}{%- else -%}—{%- endif -%}
+                  </td>
+                  <td class="pp-stock-own-num pp-mono">
+                    {%- if row.eps_actual is not none -%}<strong>${{ "%.2f"|format(row.eps_actual) }}</strong>{%- else -%}—{%- endif -%}
+                  </td>
+                  <td class="pp-stock-own-num pp-mono">
+                    {% if row.eps_surprise_pct is not none %}
+                      <span class="{{ 'pp-up' if row.eps_surprise_pct >= 0 else 'pp-down' }}">
+                        {{- '+' if row.eps_surprise_pct >= 0 else '' -}}{{ "%.2f"|format(row.eps_surprise_pct) }}%
+                      </span>
+                    {% else %}—{% endif %}
+                  </td>
+                  <td>
+                    {% if row.beat_eps is true %}{{ tag("added", text="Beat") }}
+                    {% elif row.beat_eps is false %}{{ tag("reduced", text="Miss") }}
+                    {% else %}<span class="pp-mono pp-dim">—</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endcall %}
+      {% else %}
+        {% call panel() %}
+          <p class="pp-stock-fin-empty">No earnings history available for this ticker.</p>
+        {% endcall %}
+      {% endif %}
+    </div>
+
+    {# ── ESTIMATES SUB-PANE ── #}
+    <div class="pp-stock-fct-pane" data-fct-pane="Estimates">
+      {% if fct_est_eps or fct_est_revenue %}
+        {% if fct_est_eps %}
+          {% call panel() %}
+            {{ panel_head("Earnings estimate", sub="forward analyst consensus · USD") }}
+            <table class="pp-stock-own-table pp-stock-fct-est-table">
+              <thead>
+                <tr>
+                  <th class="pp-stock-own-th-l">Currency in USD</th>
+                  {% for e in fct_est_eps %}<th class="pp-stock-own-th-r">{{ e.period }}</th>{% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="pp-stock-own-fund">No. of analysts</td>
+                  {% for e in fct_est_eps %}<td class="pp-stock-own-num pp-mono">{{ e.analysts if e.analysts is not none else "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">Avg. estimate</td>
+                  {% for e in fct_est_eps %}<td class="pp-stock-own-num pp-mono pp-stock-own-val">{{ ("$%.2f"|format(e.avg)) if e.avg is not none else "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">Low estimate</td>
+                  {% for e in fct_est_eps %}<td class="pp-stock-own-num pp-mono pp-dim">{{ ("$%.2f"|format(e.low)) if e.low is not none else "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">High estimate</td>
+                  {% for e in fct_est_eps %}<td class="pp-stock-own-num pp-mono pp-dim">{{ ("$%.2f"|format(e.high)) if e.high is not none else "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">Year-ago EPS</td>
+                  {% for e in fct_est_eps %}<td class="pp-stock-own-num pp-mono pp-dim">{{ ("$%.2f"|format(e.year_ago)) if e.year_ago is not none else "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">EPS growth (yr/est)</td>
+                  {% for e in fct_est_eps %}
+                    <td class="pp-stock-own-num pp-mono">
+                      {% if e.growth is not none %}
+                        <span class="{{ 'pp-up' if e.growth > 0 else ('pp-down' if e.growth < 0 else 'pp-dim') }}">
+                          {{ "%.2f"|format(e.growth * 100) }}%
+                        </span>
+                      {% else %}—{% endif %}
+                    </td>
+                  {% endfor %}
+                </tr>
+              </tbody>
+            </table>
+          {% endcall %}
+        {% endif %}
+
+        {% if fct_est_revenue %}
+          {% call panel() %}
+            {{ panel_head("Revenue estimate", sub="forward analyst consensus · USD") }}
+            <table class="pp-stock-own-table pp-stock-fct-est-table">
+              <thead>
+                <tr>
+                  <th class="pp-stock-own-th-l">Currency in USD</th>
+                  {% for r in fct_est_revenue %}<th class="pp-stock-own-th-r">{{ r.period }}</th>{% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="pp-stock-own-fund">No. of analysts</td>
+                  {% for r in fct_est_revenue %}<td class="pp-stock-own-num pp-mono">{{ r.analysts if r.analysts is not none else "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">Avg. estimate</td>
+                  {% for r in fct_est_revenue %}<td class="pp-stock-own-num pp-mono pp-stock-own-val">{{ r.avg_fmt or "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">Low estimate</td>
+                  {% for r in fct_est_revenue %}<td class="pp-stock-own-num pp-mono pp-dim">{{ r.low_fmt or "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">High estimate</td>
+                  {% for r in fct_est_revenue %}<td class="pp-stock-own-num pp-mono pp-dim">{{ r.high_fmt or "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">Year-ago revenue</td>
+                  {% for r in fct_est_revenue %}<td class="pp-stock-own-num pp-mono pp-dim">{{ r.year_ago_fmt or "—" }}</td>{% endfor %}
+                </tr>
+                <tr>
+                  <td class="pp-stock-own-fund">Revenue growth (yr/est)</td>
+                  {% for r in fct_est_revenue %}
+                    <td class="pp-stock-own-num pp-mono">
+                      {% if r.growth is not none %}
+                        <span class="{{ 'pp-up' if r.growth > 0 else ('pp-down' if r.growth < 0 else 'pp-dim') }}">
+                          {{ "%.2f"|format(r.growth * 100) }}%
+                        </span>
+                      {% else %}—{% endif %}
+                    </td>
+                  {% endfor %}
+                </tr>
+              </tbody>
+            </table>
+          {% endcall %}
+        {% endif %}
+      {% else %}
+        {% call panel() %}
+          <p class="pp-stock-fin-empty">No forward analyst estimates available for this ticker.</p>
+        {% endcall %}
+      {% endif %}
     </div>
   </section>
 
   {# ━━━━━━━━━━ SIGNALS TAB ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Signals">
-    {# Composite header — sig_composite_score is precomputed (weighted). #}
-    {% set _composite = sig_composite_score %}
-    {% set _bullish = sig_signals|selectattr('score','>',0)|list|length %}
-    {% set _vclass = "pp-up" if "BULL" in sig_composite else ("pp-down" if "BEAR" in sig_composite else "pp-stock-fct-coral") %}
-    {% call panel(cls="pp-stock-sig-composite-panel") %}
-      <div class="pp-stock-sig-composite">
-        <div>
-          {{ kicker("Paperpanda composite signal") }}
-          <span class="pp-mono pp-stock-sig-composite-verdict {{ _vclass }}">{{ sig_composite }}</span>
-          <span class="pp-stock-sig-composite-sub">
-            Score <span class="pp-mono pp-stock-sig-composite-score">{{ '+' if _composite >= 0 }}{{ (_composite * 100)|round(0)|int }}</span>
-            of ±100 · {{ _bullish }} of {{ sig_signals|length }} signals positive
-          </span>
-        </div>
-        <div class="pp-stock-sig-balance">
-          {{ label("Signal balance") }}
-          <div class="pp-stock-sig-balance-track">
-            <span class="pp-stock-sig-balance-zero"></span>
-            <span class="pp-stock-sig-balance-fill {{ 'is-up' if _composite >= 0 else 'is-down' }}"
-                  style="width: {{ (_composite|abs * 50)|round(1) }}%;"></span>
-            <span class="pp-stock-sig-balance-needle"
-                  style="left: {{ (50 + _composite * 50)|round(1) }}%;"></span>
-          </div>
-          <div class="pp-stock-sig-balance-axis">
-            <span class="pp-mono">STRONG SELL</span>
-            <span class="pp-mono">NEUTRAL</span>
-            <span class="pp-mono">STRONG BUY</span>
-          </div>
-        </div>
-      </div>
-    {% endcall %}
-
-    {# Individual signals table. #}
-    {% call panel() %}
-      {{ panel_head("Individual signals", sub="weighted aggregate") }}
-      <table class="pp-stock-sig-table">
-        <thead>
-          <tr>
-            <th class="pp-stock-own-th-l">Signal</th>
-            <th class="pp-stock-own-th-l">Detail</th>
-            <th class="pp-stock-own-th-l">Weight</th>
-            <th class="pp-stock-own-th-l">Score</th>
-            <th class="pp-stock-own-th-r">Verdict</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for s in sig_signals %}
-            {% set _vc = "pp-up" if s.verdict == "BULLISH" else
-                          ("pp-down" if s.verdict == "BEARISH" else
-                          ("pp-stock-fct-coral" if s.verdict == "CAUTION" else "pp-dim")) %}
-            <tr>
-              <td class="pp-stock-own-fund">{{ s.name }}</td>
-              <td class="pp-stock-sig-detail">{{ s.detail }}</td>
-              <td><span class="pp-mono pp-stock-sig-weight">{{ s.weight }}</span></td>
-              <td>
-                <div class="pp-stock-sig-score">
-                  <span class="pp-stock-sig-score-zero"></span>
-                  <span class="pp-stock-sig-score-fill {{ 'is-up' if s.score >= 0 else 'is-down' }}"
-                        style="width: {{ (s.score|abs * 50)|round(1) }}%;"></span>
-                </div>
-              </td>
-              <td class="pp-stock-own-num">
-                <span class="pp-mono pp-stock-fct-rating-pill {{ _vc }}">{{ s.verdict }}</span>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% endcall %}
-  </section>
-
-  {# ━━━━━━━━━━ VITALS TAB ━━━━━━━━━━ #}
-  <section class="pp-page-pane" data-tab-pane="Vitals">
-    {# Dividends + upcoming events. #}
-    <div class="pp-stock-fin-row">
-      {% call panel() %}
-        {% call panel_head("Dividends", sub="quarterly") %}
-          <span class="pp-mono pp-dim pp-stock-vit-dividend-sub">Yield 0.03% · Payout 0.5%</span>
-        {% endcall %}
-        <table class="pp-stock-own-table">
-          <thead>
-            <tr>
-              <th class="pp-stock-own-th-l">Ex-date</th>
-              <th class="pp-stock-own-th-l">Pay date</th>
-              <th class="pp-stock-own-th-r">Amount</th>
-              <th class="pp-stock-own-th-r">Yield</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for d in vit_dividends %}
-              <tr>
-                <td class="pp-stock-own-fund pp-mono">{{ d.ex }}</td>
-                <td class="pp-stock-own-mgr pp-mono">{{ d.pay }}</td>
-                <td class="pp-stock-own-num pp-stock-own-val pp-mono">{{ d.amount }}</td>
-                <td class="pp-stock-own-num pp-mono">{{ d.yield }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% endcall %}
-
-      {% call panel() %}
-        {{ panel_head("Upcoming events", sub="calendar") }}
-        <div class="pp-stock-vit-events">
-          {% for e in vit_events %}
-            <div class="pp-stock-vit-event">
-              <span class="pp-mono pp-stock-vit-event-date">{{ e.date }}</span>
-              <div>
-                <div class="pp-stock-vit-event-name">{{ e.event }}</div>
-                <span class="pp-mono pp-stock-vit-event-when">{{ e.when }}</span>
-              </div>
-              <span class="pp-mono pp-stock-vit-event-est">{{ e.est }}</span>
-            </div>
-          {% endfor %}
-        </div>
-      {% endcall %}
+    {# 2-sub-pill nav (Sentiment / Short Interest). #}
+    <div class="pp-stock-own-controls">
+      {{ segment(["Sentiment","Short Interest"],
+                 value="Sentiment", accent=True, id="pp-stock-sig-sub") }}
     </div>
 
-    {# Peers + share statistics. #}
-    <div class="pp-stock-vit-bottom">
+    {# ── SENTIMENT SUB-PANE ── #}
+    <div class="pp-stock-sig-pane is-active" data-sig-pane="Sentiment">
+      {# Composite header (existing v2 component) — composite score is
+         the weighted aggregate of the 8 derived signals below. #}
+      {% set _composite = sig_composite_score %}
+      {% set _bullish = sig_signals|selectattr('score','>',0)|list|length %}
+      {% set _vclass = "pp-up" if "BULL" in sig_composite else ("pp-down" if "BEAR" in sig_composite else "pp-stock-fct-coral") %}
+      {% call panel(cls="pp-stock-sig-composite-panel") %}
+        <div class="pp-stock-sig-composite">
+          <div>
+            {{ kicker("Paperpanda composite signal") }}
+            <span class="pp-mono pp-stock-sig-composite-verdict {{ _vclass }}">{{ sig_composite }}</span>
+            <span class="pp-stock-sig-composite-sub">
+              Score <span class="pp-mono pp-stock-sig-composite-score">{{ '+' if _composite >= 0 }}{{ (_composite * 100)|round(0)|int }}</span>
+              of ±100 · {{ _bullish }} of {{ sig_signals|length }} signals positive
+            </span>
+          </div>
+          <div class="pp-stock-sig-balance">
+            {{ label("Signal balance") }}
+            <div class="pp-stock-sig-balance-track">
+              <span class="pp-stock-sig-balance-zero"></span>
+              <span class="pp-stock-sig-balance-fill {{ 'is-up' if _composite >= 0 else 'is-down' }}"
+                    style="width: {{ (_composite|abs * 50)|round(1) }}%;"></span>
+              <span class="pp-stock-sig-balance-needle"
+                    style="left: {{ (50 + _composite * 50)|round(1) }}%;"></span>
+            </div>
+            <div class="pp-stock-sig-balance-axis">
+              <span class="pp-mono">STRONG SELL</span>
+              <span class="pp-mono">NEUTRAL</span>
+              <span class="pp-mono">STRONG BUY</span>
+            </div>
+          </div>
+        </div>
+      {% endcall %}
+
+      {# Individual signals table (existing v2 component). #}
       {% call panel() %}
-        {{ panel_head("Peers", sub="Semiconductors") }}
-        <table class="pp-stock-own-table">
+        {{ panel_head("Individual signals", sub="weighted aggregate") }}
+        <table class="pp-stock-sig-table">
           <thead>
             <tr>
-              <th class="pp-stock-own-th-l">Ticker</th>
-              <th class="pp-stock-own-th-l">Name</th>
-              <th class="pp-stock-own-th-r">Price</th>
-              <th class="pp-stock-own-th-r">Day</th>
-              <th class="pp-stock-own-th-r">P/E</th>
-              <th class="pp-stock-own-th-r">Mkt cap</th>
+              <th class="pp-stock-own-th-l">Signal</th>
+              <th class="pp-stock-own-th-l">Detail</th>
+              <th class="pp-stock-own-th-l">Weight</th>
+              <th class="pp-stock-own-th-l">Score</th>
+              <th class="pp-stock-own-th-r">Verdict</th>
             </tr>
           </thead>
           <tbody>
-            <tr class="pp-stock-vit-peer-self">
-              <td><span class="pp-stock-vit-peer-tk pp-stock-fct-coral">{{ stock_ticker }}</span></td>
-              <td class="pp-stock-vit-peer-self-name">{{ stock_name }}</td>
-              <td class="pp-stock-own-num pp-mono pp-stock-own-val">{{ stock_price }}</td>
-              <td class="pp-stock-own-num pp-mono {{ 'pp-up' if stock_chg_up else 'pp-down' }}">
-                {{ '+' if stock_chg_up else '-' }}{{ "%.2f"|format((stock_chg_pct or 0) * 100|abs) }}%
-              </td>
-              <td class="pp-stock-own-num pp-mono">68.4</td>
-              <td class="pp-stock-own-num pp-mono pp-stock-own-val">{{ stock_mcap }}</td>
-            </tr>
-            {% for r in vit_peers %}
+            {% for s in sig_signals %}
+              {% set _vc = "pp-up" if s.verdict == "BULLISH" else
+                            ("pp-down" if s.verdict == "BEARISH" else
+                            ("pp-stock-fct-coral" if s.verdict == "CAUTION" else "pp-dim")) %}
               <tr>
-                <td><span class="pp-stock-vit-peer-tk">{{ r.ticker }}</span></td>
-                <td class="pp-stock-own-mgr">{{ r.name }}</td>
-                <td class="pp-stock-own-num pp-mono">{{ r.price }}</td>
-                <td class="pp-stock-own-num pp-mono {{ 'pp-up' if r.chg >= 0 else 'pp-down' }}">
-                  {{ '+' if r.chg >= 0 else '' }}{{ "%.2f"|format(r.chg * 100) }}%
+                <td class="pp-stock-own-fund">{{ s.name }}</td>
+                <td class="pp-stock-sig-detail">{{ s.detail }}</td>
+                <td><span class="pp-mono pp-stock-sig-weight">{{ s.weight }}</span></td>
+                <td>
+                  <div class="pp-stock-sig-score">
+                    <span class="pp-stock-sig-score-zero"></span>
+                    <span class="pp-stock-sig-score-fill {{ 'is-up' if s.score >= 0 else 'is-down' }}"
+                          style="width: {{ (s.score|abs * 50)|round(1) }}%;"></span>
+                  </div>
                 </td>
-                <td class="pp-stock-own-num pp-mono pp-text">{{ r.pe }}</td>
-                <td class="pp-stock-own-num pp-mono">{{ r.mc }}</td>
+                <td class="pp-stock-own-num">
+                  <span class="pp-mono pp-stock-fct-rating-pill {{ _vc }}">{{ s.verdict }}</span>
+                </td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       {% endcall %}
 
-      {% call panel() %}
-        {{ panel_head("Share statistics") }}
-        <div class="pp-stock-vit-stats">
-          {% for k, v in vit_share_stats %}
-            <div class="pp-stock-vit-stat">
-              <span class="pp-stock-vit-stat-key">{{ k }}</span>
-              <span class="pp-mono pp-stock-vit-stat-val">{{ v }}</span>
+      {# Sentiment overview row — CNN F&G + Finnhub bull/bear + ApeWisdom +
+         AlphaVantage news sentiment.  Renders only sources that returned data. #}
+      {% if sig_cnn or sig_finnhub or sig_apewisdom or sig_alphavantage %}
+        {% call panel() %}
+          {{ panel_head("Sentiment overview", sub="multiple sources") }}
+          <div class="pp-stock-sig-sent-grid">
+            {% if sig_cnn %}
+              <div class="pp-stock-sig-sent-card">
+                {{ label("CNN Fear & Greed") }}
+                <div class="pp-mono pp-stock-sig-sent-val">{{ sig_cnn.score|default('—') }}</div>
+                <div class="pp-stock-sig-sent-meta pp-dim pp-mono">
+                  {{ (sig_cnn.rating or "—")|upper }}
+                </div>
+              </div>
+            {% endif %}
+            {% if sig_finnhub %}
+              <div class="pp-stock-sig-sent-card">
+                {{ label("News sentiment · Finnhub") }}
+                <div class="pp-mono pp-stock-sig-sent-val pp-up">
+                  {{ ((sig_finnhub.bullish_pct or 0) * 100)|round|int }}%
+                  <span class="pp-stock-sig-sent-meta-inline pp-dim"> bull</span>
+                </div>
+                <div class="pp-stock-sig-sent-meta pp-mono">
+                  <span class="pp-down">{{ ((sig_finnhub.bearish_pct or 0) * 100)|round|int }}% bear</span>
+                  <span class="pp-dim"> · {{ sig_finnhub.buzz_articles_last_week or 0 }} articles · 7d</span>
+                </div>
+              </div>
+            {% endif %}
+            {% if sig_apewisdom and sig_apewisdom.mentions %}
+              <div class="pp-stock-sig-sent-card">
+                {{ label("Retail · r/WallStreetBets") }}
+                <div class="pp-mono pp-stock-sig-sent-val">{{ sig_apewisdom.mentions }}</div>
+                <div class="pp-stock-sig-sent-meta pp-dim pp-mono">
+                  mentions · #{{ sig_apewisdom.rank }} discussed
+                </div>
+              </div>
+            {% endif %}
+            {% if sig_alphavantage and sig_alphavantage.avg_sentiment_score is not none %}
+              {% set _av = sig_alphavantage %}
+              {% set _av_pos = _av.avg_sentiment_score >= 0 %}
+              <div class="pp-stock-sig-sent-card">
+                {{ label("News · Alpha Vantage") }}
+                <div class="pp-mono pp-stock-sig-sent-val {{ 'pp-up' if _av_pos else 'pp-down' }}">
+                  {{ '+' if _av_pos }}{{ "%.2f"|format(_av.avg_sentiment_score) }}
+                </div>
+                <div class="pp-stock-sig-sent-meta pp-dim pp-mono">
+                  {{ _av.article_count|default(0) }} articles · 7d
+                </div>
+              </div>
+            {% endif %}
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      {# Search Interest — Google Trends keyword categories + sparkline. #}
+      {% if sig_gt_keywords %}
+        {% set _gtk = sig_gt_keywords %}
+        {% call panel() %}
+          {{ panel_head("Search interest", sub=("Google Trends · " ~ stock_ticker)) }}
+          <div class="pp-stock-sig-gt">
+            <div class="pp-stock-sig-gt-keywords">
+              {% if _gtk.intent %}
+                <div class="pp-stock-sig-gt-row">
+                  <span class="pp-stock-sig-gt-row-label pp-stock-sig-gt-intent">Intent keywords</span>
+                  {% for k in _gtk.intent %}<span class="pp-stock-sig-gt-chip pp-stock-sig-gt-chip--intent">{{ k }}</span>{% endfor %}
+                </div>
+              {% endif %}
+              {% if _gtk.product %}
+                <div class="pp-stock-sig-gt-row">
+                  <span class="pp-stock-sig-gt-row-label pp-stock-sig-gt-product">Product keywords</span>
+                  {% for k in _gtk.product %}<span class="pp-stock-sig-gt-chip pp-stock-sig-gt-chip--product">{{ k }}</span>{% endfor %}
+                </div>
+              {% endif %}
+              {% if _gtk.comparison %}
+                <div class="pp-stock-sig-gt-row">
+                  <span class="pp-stock-sig-gt-row-label pp-stock-sig-gt-comparison">Comparison keywords</span>
+                  {% for k in _gtk.comparison %}<span class="pp-stock-sig-gt-chip pp-stock-sig-gt-chip--comparison">{{ k }}</span>{% endfor %}
+                </div>
+              {% endif %}
             </div>
-          {% endfor %}
+            {% if sig_gt_trend and sig_gt_trend.sparkline %}
+              {% set _spark = sig_gt_trend.sparkline %}
+              {% set _spark_max = _spark|map(attribute='value')|max %}
+              {% set _spark_min = _spark|map(attribute='value')|min %}
+              {% set _spark_range = [_spark_max - _spark_min, 1]|max %}
+              {% set _w = 360 %}{% set _h = 64 %}{% set _n = _spark|length %}
+              <div class="pp-stock-sig-gt-spark">
+                <svg viewBox="0 0 {{ _w }} {{ _h }}" preserveAspectRatio="none" class="pp-stock-sig-gt-svg">
+                  {% set pts = namespace(v="") %}
+                  {% for it in _spark %}
+                    {% set ix = (loop.index0 / (_n - 1) * _w) | round(1) %}
+                    {% set iy = (_h - (it.value - _spark_min) / _spark_range * (_h - 8) - 4) | round(1) %}
+                    {% set pts.v = pts.v ~ ix ~ "," ~ iy ~ " " %}
+                  {% endfor %}
+                  <polyline points="{{ pts.v }}" fill="none"
+                            class="pp-stock-sig-gt-line"/>
+                </svg>
+                <div class="pp-stock-sig-gt-spark-meta pp-mono pp-dim">
+                  Now <strong class="pp-stock-sig-gt-now">{{ sig_gt_trend.current }}</strong>
+                  · Peak {{ sig_gt_trend.peak }} · 12-mo
+                </div>
+              </div>
+            {% else %}
+              <div class="pp-stock-sig-gt-empty pp-dim">Search interest data temporarily unavailable. Keywords above are ready for tracking.</div>
+            {% endif %}
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      {# Web Traffic — Tranco rank card + Wikipedia event detector card. #}
+      {% if sig_wt_tranco or sig_wt_wikipedia %}
+        <div class="pp-stock-sig-wt-row">
+          {% if sig_wt_tranco %}
+            {% set _tr = sig_wt_tranco %}
+            {% call panel() %}
+              {{ panel_head("Domain popularity", sub="Tranco list") }}
+              <div class="pp-stock-sig-wt-card">
+                <div class="pp-stock-sig-wt-stats">
+                  <div>
+                    <span class="pp-mono pp-stock-sig-wt-num pp-stock-fct-coral">#{{ "{:,}".format(_tr.rank) }}</span>
+                    {{ label("Tranco rank") }}
+                  </div>
+                  {% if _tr.percentile is not none %}
+                    <div>
+                      <span class="pp-mono pp-stock-sig-wt-num pp-up">{{ "%.1f"|format(_tr.percentile) }}%</span>
+                      {{ label("Percentile") }}
+                    </div>
+                  {% endif %}
+                </div>
+                <p class="pp-stock-sig-wt-blurb pp-dim">
+                  Domain rank tracks actual visits.  For digital-first companies,
+                  rank changes are a leading indicator of revenue.
+                </p>
+              </div>
+            {% endcall %}
+          {% endif %}
+          {% if sig_wt_wikipedia and sig_wt_wikipedia.daily_views %}
+            {% set _wp = sig_wt_wikipedia %}
+            {% call panel() %}
+              {{ panel_head("Event detector", sub="Wikipedia page views") }}
+              <div class="pp-stock-sig-wt-card">
+                <div class="pp-stock-sig-wt-stats">
+                  <div>
+                    <span class="pp-mono pp-stock-sig-wt-num">{{ "{:,}".format(_wp.avg_daily_views) }}</span>
+                    {{ label("Avg. daily") }}
+                  </div>
+                  <div>
+                    <span class="pp-mono pp-stock-sig-wt-num">{{ "{:,}".format(_wp.total_views) }}</span>
+                    {{ label("Total · " ~ _wp.days ~ "d") }}
+                  </div>
+                  <div>
+                    <span class="pp-mono pp-stock-sig-wt-num pp-stock-fct-coral">{{ "{:,}".format(_wp.max_daily_views) }}</span>
+                    {{ label("Peak day") }}
+                  </div>
+                </div>
+                <div class="pp-stock-sig-wt-chart" id="pp-stock-sig-wt-chart"></div>
+                <script type="application/json" id="pp-stock-sig-wt-chart-data">
+                  {{ _wp.daily_views | tojson }}
+                </script>
+              </div>
+            {% endcall %}
+          {% endif %}
         </div>
-      {% endcall %}
+      {% endif %}
+    </div>
+
+    {# ── SHORT INTEREST SUB-PANE ── #}
+    <div class="pp-stock-sig-pane" data-sig-pane="Short Interest">
+      {% if sig_short_interest_history %}
+        {% set _hist = sig_short_interest_history %}
+        {% set _latest = _hist[0] %}
+        {% set _prior  = _hist[1] if _hist|length > 1 else None %}
+
+        {# 4 KPI cards — Shares Outstanding / Short % of Float / Change vs Prior / Last Report. #}
+        <div class="pp-stock-sig-si-kpis">
+          <div class="pp-stock-sig-si-kpi">
+            {{ label("Shares outstanding") }}
+            <div class="pp-mono pp-stock-sig-si-val">
+              {%- if _latest.shares_outstanding -%}
+                {%- if _latest.shares_outstanding >= 1e9 -%}{{ "%.2f"|format(_latest.shares_outstanding / 1e9) }}B
+                {%- elif _latest.shares_outstanding >= 1e6 -%}{{ "%.1f"|format(_latest.shares_outstanding / 1e6) }}M
+                {%- else -%}{{ "{:,.0f}".format(_latest.shares_outstanding) }}
+                {%- endif -%}
+              {%- else -%}—{%- endif -%}
+            </div>
+          </div>
+          <div class="pp-stock-sig-si-kpi">
+            {{ label("Short % of float") }}
+            {% set _spf = _latest.short_pct_float %}
+            <div class="pp-mono pp-stock-sig-si-val
+                  {% if _spf and _spf >= 0.20 %}pp-down
+                  {% elif _spf and _spf >= 0.10 %}pp-stock-fct-coral
+                  {% endif %}">
+              {%- if _spf is not none -%}{{ "%.1f"|format(_spf * 100) }}%{%- else -%}—{%- endif -%}
+            </div>
+            {% if _spf and _spf >= 0.20 %}{{ tag("reduced", text="Heavily shorted") }}
+            {% elif _spf and _spf >= 0.10 %}<span class="pp-mono pp-stock-fct-coral pp-stock-sig-si-pill">Elevated</span>
+            {% endif %}
+          </div>
+          <div class="pp-stock-sig-si-kpi">
+            {{ label("Change vs prior") }}
+            {% if _prior and _latest.shares_short and _prior.shares_short %}
+              {% set _diff = _latest.shares_short - _prior.shares_short %}
+              {% set _pct = _diff / _prior.shares_short * 100 %}
+              <div class="pp-mono pp-stock-sig-si-val {{ 'pp-down' if _diff > 0 else ('pp-up' if _diff < 0 else 'pp-dim') }}">
+                {%- if _diff > 0 -%}▲ +{{ "%.1f"|format(_pct) }}%
+                {%- elif _diff < 0 -%}▼ {{ "%.1f"|format(_pct) }}%
+                {%- else -%}— Flat{%- endif -%}
+              </div>
+              <div class="pp-stock-sig-si-sub pp-dim pp-mono">
+                {%- if _diff > 0 -%}Short interest increasing
+                {%- elif _diff < 0 -%}Short interest decreasing
+                {%- else -%}No change{%- endif -%}
+              </div>
+            {% else %}
+              <div class="pp-mono pp-stock-sig-si-val pp-dim">—</div>
+              <div class="pp-stock-sig-si-sub pp-dim">No prior data</div>
+            {% endif %}
+          </div>
+          <div class="pp-stock-sig-si-kpi">
+            {{ label("Last report") }}
+            <div class="pp-mono pp-stock-sig-si-val pp-stock-sig-si-val--date">{{ _latest.report_date }}</div>
+            {% if _latest.short_ratio %}
+              <div class="pp-stock-sig-si-sub pp-dim pp-mono">
+                Days to cover: {{ "%.1f"|format(_latest.short_ratio) }}
+              </div>
+            {% endif %}
+          </div>
+        </div>
+
+        {# Short interest trend line chart. #}
+        {% call panel(cls="pp-stock-sig-si-chart-panel") %}
+          {{ panel_head("Short interest trend", sub=(_hist|length ~ " reports")) }}
+          <div class="pp-stock-sig-si-chart" id="pp-stock-sig-si-chart"></div>
+          <script type="application/json" id="pp-stock-sig-si-chart-data">
+            {{ _hist | tojson }}
+          </script>
+        {% endcall %}
+
+        {# Report history table. #}
+        {% call panel() %}
+          {{ panel_head("Report history", sub="newest first") }}
+          <table class="pp-stock-own-table">
+            <thead>
+              <tr>
+                <th class="pp-stock-own-th-l">Report date</th>
+                <th class="pp-stock-own-th-r">Shares short</th>
+                <th class="pp-stock-own-th-r">% of float</th>
+                <th class="pp-stock-own-th-r">Days to cover</th>
+                <th class="pp-stock-own-th-r">vs prior</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in _hist[:14] %}
+                {% set _prev = _hist[loop.index] if loop.index < _hist|length else None %}
+                {% set _r_diff = (r.shares_short - _prev.shares_short) if (_prev and r.shares_short and _prev.shares_short) else 0 %}
+                {% set _r_pct = (_r_diff / _prev.shares_short * 100) if (_prev and _prev.shares_short) else 0 %}
+                <tr>
+                  <td class="pp-stock-own-mgr pp-mono">{{ r.report_date }}</td>
+                  <td class="pp-stock-own-num pp-mono">
+                    {%- if r.shares_short -%}
+                      {%- if r.shares_short >= 1e6 -%}{{ "%.1f"|format(r.shares_short / 1e6) }}M
+                      {%- else -%}{{ "{:,.0f}".format(r.shares_short) }}
+                      {%- endif -%}
+                    {%- else -%}—{%- endif -%}
+                  </td>
+                  <td class="pp-stock-own-num pp-mono
+                        {% if r.short_pct_float and r.short_pct_float >= 0.20 %}pp-down
+                        {% elif r.short_pct_float and r.short_pct_float >= 0.10 %}pp-stock-fct-coral
+                        {% endif %}">
+                    {%- if r.short_pct_float is not none -%}{{ "%.1f"|format(r.short_pct_float * 100) }}%{%- else -%}—{%- endif -%}
+                  </td>
+                  <td class="pp-stock-own-num pp-mono">
+                    {%- if r.short_ratio -%}{{ "%.1f"|format(r.short_ratio) }}{%- else -%}—{%- endif -%}
+                  </td>
+                  <td class="pp-stock-own-num pp-mono">
+                    {% if _prev and _r_diff != 0 %}
+                      <span class="{{ 'pp-down' if _r_diff > 0 else 'pp-up' }}">
+                        {{ '▲' if _r_diff > 0 else '▼' }} {{ '+' if _r_diff > 0 }}{{ "%.1f"|format(_r_pct) }}%
+                      </span>
+                    {% else %}<span class="pp-dim">—</span>{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% endcall %}
+      {% else %}
+        {% call panel() %}
+          <p class="pp-stock-fin-empty">No short interest data available for this ticker.</p>
+        {% endcall %}
+      {% endif %}
     </div>
   </section>
+
 
 </div>
 
@@ -939,24 +1676,349 @@
   });
 })();
 
-/* ── Financials statement toggle (Income / Balance / Cash flow) ── */
+/* ── Financials sub-pills (Income / Balance / Cash Flow / Key Ratios)
+   + Annual/Quarterly toggle + 4 ECharts panels.
+
+   Pattern mirrors the v1 stock-page financials partial: each sub-tab
+   has a chart panel and a table; switching tabs hides/shows panes and
+   resizes the active chart (hidden charts can't measure their size).
+   The Annual/Quarterly toggle swaps both the chart series AND the
+   active-pane's visible table.
+*/
 (function () {
-  var seg = document.getElementById('pp-stock-fin-stmt');
-  if (!seg) return;
-  var tables = document.querySelectorAll('.pp-stock-fin-table');
-  function applyStmt(name) {
-    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
-      o.classList.toggle('is-active', o.getAttribute('data-value') === name);
-    });
-    tables.forEach(function (t) {
-      t.style.display = t.getAttribute('data-stmt') === name ? '' : 'none';
+  var stmtSeg = document.getElementById('pp-stock-fin-stmt');
+  var freqSeg = document.getElementById('pp-stock-fin-freq');
+  if (!stmtSeg || !freqSeg) return;
+
+  var dataEl = document.getElementById('pp-stock-fin-chart-data');
+  var chartData = {};
+  try { chartData = JSON.parse(dataEl ? dataEl.textContent : '{}') || {}; }
+  catch (e) { chartData = {}; }
+
+  var panes = document.querySelectorAll('.pp-stock-fin-pane');
+  if (!panes.length) return;
+
+  /* One chart instance per stmt key (not per freq+key) — each pane has
+     a single DOM container, so swapping frequency must dispose the old
+     chart first or ECharts layers them in the same node. */
+  var charts = {};      // "income"|"balance"|"cashflow"|"ratios" → echarts instance
+  var chartFreq = {};   // tracks which freq each cached chart was built for
+  var activeStmt = 'Income Statement';
+  var activeFreq = 'annual';
+
+  /* ── Theme + formatters ───────────────────────────────────────── */
+  function isDark() {
+    return document.documentElement.getAttribute('data-theme') !== 'light';
+  }
+  function themeColors() {
+    var dark = isDark();
+    return {
+      text:    dark ? 'rgba(226,232,240,0.7)' : 'rgba(15,23,42,0.55)',
+      grid:    dark ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.07)',
+      tooltip: dark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+      ttText:  dark ? '#e2e8f0' : '#1e293b',
+      ttBorder: dark ? 'rgba(148,163,184,0.2)' : 'rgba(0,0,0,0.08)',
+    };
+  }
+  function fmtB(v) {
+    if (v == null) return '—';
+    var abs = Math.abs(v);
+    var s = v < 0 ? '-' : '';
+    if (abs >= 1e9) return s + '$' + (abs / 1e9).toFixed(2) + 'B';
+    if (abs >= 1e6) return s + '$' + (abs / 1e6).toFixed(1) + 'M';
+    if (abs >= 1e3) return s + '$' + (abs / 1e3).toFixed(1) + 'K';
+    return s + '$' + Math.round(abs).toLocaleString();
+  }
+
+  function chartContainer(stmtKey) {
+    var pane = document.querySelector('.pp-stock-fin-pane[data-fin-key="' + stmtKey + '"]');
+    return pane && pane.querySelector('.pp-stock-fin-chart');
+  }
+
+  /* ── Builders — port of v1 financials.html ───────────────────── */
+  function buildIncome(freq) {
+    var cd = chartData[freq];
+    var el = chartContainer('income');
+    if (!cd || !el) return;
+    var c = themeColors();
+    var hasMargin = (cd.income.operating_margin || []).some(function (v) { return v != null; });
+    var chart = window.echarts.init(el);
+    charts['income'] = chart;
+    chartFreq['income'] = freq;
+    chart.setOption({
+      animation: false,
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: c.tooltip, borderColor: c.ttBorder,
+        textStyle: { color: c.ttText, fontSize: 12 },
+        formatter: function (params) {
+          var html = '<strong>' + params[0].axisValue + '</strong>';
+          params.forEach(function (p) {
+            var v = p.seriesName.indexOf('Margin') >= 0
+              ? (p.value != null ? p.value.toFixed(1) + '%' : '—')
+              : fmtB(p.value);
+            html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>' + v + '</strong>';
+          });
+          return html;
+        },
+      },
+      legend: { bottom: 0, textStyle: { color: c.text, fontSize: 11 }, itemWidth: 14, itemHeight: 10 },
+      grid: { left: 55, right: hasMargin ? 55 : 20, top: 15, bottom: 40 },
+      xAxis: { type: 'category', data: cd.labels,
+        axisLine: { lineStyle: { color: c.grid } }, axisTick: { show: false },
+        axisLabel: { color: c.text, fontSize: 11 } },
+      yAxis: [
+        { type: 'value', axisLine: { show: false }, axisTick: { show: false },
+          splitLine: { lineStyle: { color: c.grid } },
+          axisLabel: { color: c.text, fontSize: 10, formatter: function (v) { return fmtB(v); } } },
+        hasMargin ? { type: 'value', axisLine: { show: false }, axisTick: { show: false },
+          splitLine: { show: false }, axisLabel: { color: c.text, fontSize: 10, formatter: '{value}%' } } : null,
+      ].filter(Boolean),
+      series: [
+        { name: 'Revenue', type: 'bar', data: cd.income.revenue, barMaxWidth: 32,
+          itemStyle: {
+            color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [{ offset: 0, color: '#2dd4bf' }, { offset: 1, color: '#0f766e' }] },
+            borderRadius: [3, 3, 0, 0] } },
+        { name: 'Net Income', type: 'bar', data: cd.income.net_income, barMaxWidth: 32,
+          itemStyle: {
+            color: function (p) { return p.value < 0 ? '#dc2626' : '#1976d2'; },
+            borderRadius: [3, 3, 0, 0] } },
+        hasMargin ? { name: 'Op. Margin', type: 'line', yAxisIndex: 1,
+          data: cd.income.operating_margin, smooth: true,
+          symbol: 'circle', symbolSize: 6,
+          lineStyle: { color: '#f59e0b', width: 2 }, itemStyle: { color: '#f59e0b' } } : null,
+      ].filter(Boolean),
     });
   }
-  applyStmt('Income');
-  seg.addEventListener('click', function (ev) {
+
+  function buildBalance(freq) {
+    var cd = chartData[freq];
+    var el = chartContainer('balance');
+    if (!cd || !el) return;
+    var c = themeColors();
+    var nonCurrentAssets = (cd.balance.total_assets || []).map(function (ta, i) {
+      var ca = (cd.balance.current_assets || [])[i];
+      return (ta != null && ca != null) ? ta - ca : null;
+    });
+    var chart = window.echarts.init(el);
+    charts['balance'] = chart;
+    chartFreq['balance'] = freq;
+    chart.setOption({
+      animation: false, backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis', backgroundColor: c.tooltip, borderColor: c.ttBorder,
+        textStyle: { color: c.ttText, fontSize: 12 },
+        formatter: function (params) {
+          var html = '<strong>' + params[0].axisValue + '</strong>';
+          params.forEach(function (p) {
+            html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>' + fmtB(p.value) + '</strong>';
+          });
+          return html;
+        } },
+      legend: { bottom: 0, textStyle: { color: c.text, fontSize: 11 }, itemWidth: 14, itemHeight: 10 },
+      grid: { left: 55, right: 20, top: 15, bottom: 40 },
+      xAxis: { type: 'category', data: cd.labels,
+        axisLine: { lineStyle: { color: c.grid } }, axisTick: { show: false },
+        axisLabel: { color: c.text, fontSize: 11 } },
+      yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false },
+        splitLine: { lineStyle: { color: c.grid } },
+        axisLabel: { color: c.text, fontSize: 10, formatter: function (v) { return fmtB(v); } } },
+      series: [
+        { name: 'Current Assets', type: 'bar', stack: 'assets', data: cd.balance.current_assets,
+          barMaxWidth: 28, itemStyle: { color: '#2dd4bf' } },
+        { name: 'Non-Current Assets', type: 'bar', stack: 'assets', data: nonCurrentAssets,
+          barMaxWidth: 28, itemStyle: { color: '#0f766e', borderRadius: [3, 3, 0, 0] } },
+        { name: 'Liabilities', type: 'bar', stack: 'funding', data: cd.balance.total_liabilities,
+          barMaxWidth: 28, itemStyle: { color: 'rgba(220,38,38,0.65)' } },
+        { name: 'Equity', type: 'bar', stack: 'funding', data: cd.balance.total_equity,
+          barMaxWidth: 28, itemStyle: { color: '#1976d2', borderRadius: [3, 3, 0, 0] } },
+      ],
+    });
+  }
+
+  function buildCashflow(freq) {
+    var cd = chartData[freq];
+    var el = chartContainer('cashflow');
+    if (!cd || !el) return;
+    var c = themeColors();
+    var hasFCF = (cd.cashflow.free_cf || []).some(function (v) { return v != null; });
+    var chart = window.echarts.init(el);
+    charts['cashflow'] = chart;
+    chartFreq['cashflow'] = freq;
+    chart.setOption({
+      animation: false, backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis', backgroundColor: c.tooltip, borderColor: c.ttBorder,
+        textStyle: { color: c.ttText, fontSize: 12 },
+        formatter: function (params) {
+          var html = '<strong>' + params[0].axisValue + '</strong>';
+          params.forEach(function (p) {
+            html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>' + fmtB(p.value) + '</strong>';
+          });
+          return html;
+        } },
+      legend: { bottom: 0, textStyle: { color: c.text, fontSize: 11 }, itemWidth: 14, itemHeight: 10 },
+      grid: { left: 55, right: 20, top: 15, bottom: 40 },
+      xAxis: { type: 'category', data: cd.labels,
+        axisLine: { lineStyle: { color: c.grid } }, axisTick: { show: false },
+        axisLabel: { color: c.text, fontSize: 11 } },
+      yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false },
+        splitLine: { lineStyle: { color: c.grid } },
+        axisLabel: { color: c.text, fontSize: 10, formatter: function (v) { return fmtB(v); } } },
+      series: [
+        { name: 'Operating', type: 'bar', data: cd.cashflow.operating_cf, barMaxWidth: 28,
+          itemStyle: { color: function (p) { return p.value < 0 ? '#dc2626' : '#16a34a'; },
+            borderRadius: [3, 3, 0, 0] } },
+        { name: 'Investing', type: 'bar', data: cd.cashflow.investing_cf, barMaxWidth: 28,
+          itemStyle: { color: function (p) { return p.value < 0 ? 'rgba(245,158,11,0.7)' : '#f59e0b'; },
+            borderRadius: [3, 3, 0, 0] } },
+        { name: 'Financing', type: 'bar', data: cd.cashflow.financing_cf, barMaxWidth: 28,
+          itemStyle: { color: function (p) { return p.value < 0 ? 'rgba(25,118,210,0.6)' : '#1976d2'; },
+            borderRadius: [3, 3, 0, 0] } },
+        hasFCF ? { name: 'Free Cash Flow', type: 'line', data: cd.cashflow.free_cf, smooth: true,
+          symbol: 'circle', symbolSize: 6,
+          lineStyle: { color: '#0d9488', width: 2, type: 'dashed' },
+          itemStyle: { color: '#0d9488' } } : null,
+      ].filter(Boolean),
+    });
+  }
+
+  function buildRatios(freq) {
+    var cd = chartData[freq];
+    var el = chartContainer('ratios');
+    if (!cd || !el) return;
+    var c = themeColors();
+    var lines = [
+      { key: 'gross_margin',     name: 'Gross Margin', color: '#0d9488', dash: false },
+      { key: 'operating_margin', name: 'Op. Margin',   color: '#1976d2', dash: false },
+      { key: 'net_margin',       name: 'Net Margin',   color: '#7c3aed', dash: false },
+      { key: 'roe',              name: 'ROE',          color: '#f59e0b', dash: false },
+      { key: 'fcf_margin',       name: 'FCF Margin',   color: '#16a34a', dash: true  },
+    ];
+    var series = [];
+    lines.forEach(function (ln) {
+      var vals = (cd.ratios || {})[ln.key];
+      if (!vals || !vals.some(function (v) { return v != null; })) return;
+      series.push({ name: ln.name, type: 'line', data: vals, smooth: true,
+        symbol: 'circle', symbolSize: 5,
+        lineStyle: { color: ln.color, width: 2, type: ln.dash ? 'dashed' : 'solid' },
+        itemStyle: { color: ln.color } });
+    });
+    var chart = window.echarts.init(el);
+    charts['ratios'] = chart;
+    chartFreq['ratios'] = freq;
+    chart.setOption({
+      animation: false, backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis', backgroundColor: c.tooltip, borderColor: c.ttBorder,
+        textStyle: { color: c.ttText, fontSize: 12 },
+        formatter: function (params) {
+          var html = '<strong>' + params[0].axisValue + '</strong>';
+          params.forEach(function (p) {
+            html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>'
+                  + (p.value != null ? p.value.toFixed(1) + '%' : '—') + '</strong>';
+          });
+          return html;
+        } },
+      legend: { bottom: 0, textStyle: { color: c.text, fontSize: 11 }, itemWidth: 14, itemHeight: 10 },
+      grid: { left: 55, right: 20, top: 15, bottom: 40 },
+      xAxis: { type: 'category', data: cd.labels,
+        axisLine: { lineStyle: { color: c.grid } }, axisTick: { show: false },
+        axisLabel: { color: c.text, fontSize: 11 } },
+      yAxis: { type: 'value', axisLine: { show: false }, axisTick: { show: false },
+        splitLine: { lineStyle: { color: c.grid } },
+        axisLabel: { color: c.text, fontSize: 10, formatter: '{value}%' } },
+      series: series,
+    });
+  }
+
+  var BUILDERS = { income: buildIncome, balance: buildBalance,
+                   cashflow: buildCashflow, ratios: buildRatios };
+
+  function ensureChart(freq, key) {
+    /* Reuse the cached instance only if it was built for the same freq;
+       otherwise dispose and rebuild so we don't layer ECharts canvases
+       on the same DOM container. */
+    if (charts[key] && chartFreq[key] === freq) return charts[key];
+    if (charts[key]) {
+      charts[key].dispose();
+      delete charts[key];
+      delete chartFreq[key];
+    }
+    if (!chartData[freq]) return null;
+    BUILDERS[key] && BUILDERS[key](freq);
+    return charts[key] || null;
+  }
+
+  /* ── Pane / freq toggles ──────────────────────────────────────── */
+  function showPane() {
+    panes.forEach(function (p) {
+      var on = p.getAttribute('data-fin-pane') === activeStmt;
+      p.classList.toggle('is-active', on);
+      // Show only the active freq's table inside each pane.
+      p.querySelectorAll('.pp-stock-fin-table-wrap').forEach(function (w) {
+        w.hidden = w.getAttribute('data-fin-freq') !== activeFreq;
+      });
+    });
+    // Hidden ECharts can't measure their box; build / resize on activate.
+    var pane = document.querySelector('.pp-stock-fin-pane.is-active');
+    if (!pane) return;
+    var key = pane.getAttribute('data-fin-key');
+    if (!window.echarts) {
+      window.requireECharts(function (err) { if (!err) showPane(); });
+      return;
+    }
+    var chart = ensureChart(activeFreq, key);
+    if (chart) chart.resize();
+  }
+
+  function syncSegment(seg, value) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o.getAttribute('data-value') === value);
+    });
+  }
+
+  stmtSeg.addEventListener('click', function (ev) {
     var opt = ev.target.closest('.pp-segment-opt');
-    if (opt) applyStmt(opt.getAttribute('data-value'));
+    if (!opt) return;
+    activeStmt = opt.getAttribute('data-value') || activeStmt;
+    syncSegment(stmtSeg, activeStmt);
+    showPane();
   });
+
+  freqSeg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    activeFreq = (opt.getAttribute('data-value') || 'Annual').toLowerCase();
+    syncSegment(freqSeg, activeFreq.charAt(0).toUpperCase() + activeFreq.slice(1));
+    showPane();
+  });
+
+  /* React to global theme toggle so charts re-skin without reload. */
+  document.addEventListener('pp-theme-changed', function () {
+    Object.keys(charts).forEach(function (k) {
+      charts[k].dispose();
+      delete charts[k];
+      delete chartFreq[k];
+    });
+    showPane();
+  });
+
+  /* Pane visibility runs on DOM ready so the freq tables hide correctly
+     even before the user clicks Financials.  ECharts loads lazily on the
+     first activation since hidden charts can't measure their box. */
+  showPane();
+
+  /* When the user clicks the top-level Financials tab, re-run showPane
+     so ECharts can measure now that the panel is visible. */
+  var topTabs = document.getElementById('pp-stock-tabs');
+  if (topTabs) {
+    topTabs.addEventListener('click', function (ev) {
+      var opt = ev.target.closest('.pp-segment-opt');
+      if (opt && opt.getAttribute('data-value') === 'Financials') {
+        requestAnimationFrame(showPane);
+      }
+    });
+  }
 })();
 
 /* ── Watch button → toggle watchlist via /api/watchlist. ── */
@@ -1220,10 +2282,713 @@
       p.classList.toggle('is-active', p.getAttribute('data-own-pane') === name);
     });
     if (counter && counterMap[name]) counter.textContent = counterMap[name];
+    /* Resize the funds activity chart when its pane becomes visible —
+       ECharts can't measure a hidden container so the bars look squished
+       until we trigger a resize. */
+    if (name === 'Funds' && window._ppFundsActivityChart) {
+      setTimeout(function () { window._ppFundsActivityChart.resize(); }, 0);
+    }
   }
   seg.addEventListener('click', function (ev) {
     var opt = ev.target.closest('.pp-segment-opt');
     if (opt) applySub(opt.getAttribute('data-value'));
+  });
+})();
+
+/* ── Funds Quarterly Activity Chart (ECharts bar chart with adds + reduces).
+   Lazy-loaded via requireECharts on first Ownership-tab activation. ── */
+(function () {
+  var el = document.getElementById('pp-stock-own-funds-chart');
+  var dataEl = document.getElementById('pp-stock-own-funds-chart-data');
+  if (!el || !dataEl) return;
+
+  var data;
+  try { data = JSON.parse(dataEl.textContent); }
+  catch (e) { return; }
+  if (!data || !data.labels || !data.labels.length) return;
+
+  function isDark() { return document.documentElement.getAttribute('data-theme') !== 'light'; }
+  function colors() {
+    var dark = isDark();
+    return {
+      text: dark ? 'rgba(226,232,240,0.7)' : 'rgba(15,23,42,0.55)',
+      grid: dark ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.07)',
+      tooltip: dark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+      ttText: dark ? '#e2e8f0' : '#1e293b',
+      ttBorder: dark ? 'rgba(148,163,184,0.2)' : 'rgba(0,0,0,0.08)',
+    };
+  }
+  function fmtShares(v) {
+    if (v == null) return '—';
+    var abs = Math.abs(v);
+    var s = v < 0 ? '-' : '';
+    if (abs >= 1e9) return s + (abs / 1e9).toFixed(1) + 'B';
+    if (abs >= 1e6) return s + (abs / 1e6).toFixed(1) + 'M';
+    if (abs >= 1e3) return s + (abs / 1e3).toFixed(0) + 'K';
+    return s + abs.toLocaleString();
+  }
+
+  var built = false;
+  function build() {
+    if (built) return;
+    if (!window.echarts) {
+      window.requireECharts(function (err) { if (!err) build(); });
+      return;
+    }
+    var c = colors();
+    var chart = window.echarts.init(el);
+    window._ppFundsActivityChart = chart;
+    chart.setOption({
+      animation: false,
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: c.tooltip, borderColor: c.ttBorder,
+        textStyle: { color: c.ttText, fontSize: 12 },
+        formatter: function (params) {
+          var html = '<strong>' + params[0].axisValue + '</strong>';
+          var net = 0;
+          params.forEach(function (p, i) {
+            if (p.value === 0 || p.value == null) return;
+            var idx = p.dataIndex;
+            var count = (p.seriesName === 'Adds')
+              ? (data.adds_count[idx] || 0)
+              : (data.reduces_count[idx] || 0);
+            html += '<br/>' + p.marker + ' ' + p.seriesName + ': <strong>'
+                  + fmtShares(p.value) + '</strong>'
+                  + ' <span style="opacity:0.7;">('
+                  + count + ' investor' + (count !== 1 ? 's' : '') + ')</span>';
+            net += p.value;
+          });
+          if (net !== 0) html += '<br/><span style="opacity:0.7;">Net: <strong>' + fmtShares(net) + '</strong></span>';
+          return html;
+        },
+      },
+      grid: { left: 60, right: 20, top: 15, bottom: 36 },
+      xAxis: {
+        type: 'category', data: data.labels,
+        axisLine: { lineStyle: { color: c.grid } }, axisTick: { show: false },
+        axisLabel: { color: c.text, fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false }, axisTick: { show: false },
+        splitLine: { lineStyle: { color: c.grid } },
+        axisLabel: { color: c.text, fontSize: 10, formatter: function (v) { return fmtShares(v); } },
+      },
+      series: [
+        { name: 'Adds', type: 'bar', stack: 'shares',
+          data: data.adds, barMaxWidth: 60,
+          itemStyle: {
+            color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [{ offset: 0, color: '#34d399' }, { offset: 1, color: '#047857' }] },
+            borderRadius: [3, 3, 0, 0] },
+        },
+        { name: 'Reduces', type: 'bar', stack: 'shares',
+          data: data.reduces, barMaxWidth: 60,
+          itemStyle: {
+            color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [{ offset: 0, color: '#b91c1c' }, { offset: 1, color: '#f87171' }] },
+            borderRadius: [0, 0, 3, 3] },
+        },
+      ],
+    });
+    built = true;
+  }
+
+  /* Build on Ownership-tab activation since the panel is hidden by
+     default and ECharts can't measure a hidden container.  setTimeout
+     instead of requestAnimationFrame because some preview / headless
+     browsers throttle RAF heavily. */
+  var topTabs = document.getElementById('pp-stock-tabs');
+  if (topTabs) {
+    topTabs.addEventListener('click', function (ev) {
+      var opt = ev.target.closest('.pp-segment-opt');
+      if (opt && opt.getAttribute('data-value') === 'Ownership') {
+        setTimeout(build, 0);
+      }
+    });
+  }
+  /* Also build on direct ownership sub-pill click in case Funds isn't
+     the default sub-pane on first paint. */
+  var ownSeg = document.getElementById('pp-stock-own-sub');
+  if (ownSeg) {
+    ownSeg.addEventListener('click', function (ev) {
+      var opt = ev.target.closest('.pp-segment-opt');
+      if (opt && opt.getAttribute('data-value') === 'Funds') {
+        setTimeout(function () {
+          if (window._ppFundsActivityChart) window._ppFundsActivityChart.resize();
+          else build();
+        }, 0);
+      }
+    });
+  }
+  /* Re-skin on theme toggle. */
+  document.addEventListener('pp-theme-changed', function () {
+    if (window._ppFundsActivityChart) {
+      window._ppFundsActivityChart.dispose();
+      window._ppFundsActivityChart = null;
+      built = false;
+      setTimeout(build, 0);
+    }
+  });
+})();
+
+/* ── Insiders panel — Chart.js timeline + dual filter (kind + insider).
+
+   Mirrors v1's filter behaviour: clicking Buys/Sells filters trade table
+   rows AND hides the matching chart series; the dropdown swaps the chart
+   data source from the global series to a per-insider one (filtered by
+   the dropdown value).  Both filters compose. ── */
+(function () {
+  var chartDataEl = document.getElementById('pp-stock-own-ins-chart-data');
+  var canvas = document.getElementById('pp-stock-own-ins-chart');
+  if (!chartDataEl) return;
+
+  var payload;
+  try { payload = JSON.parse(chartDataEl.textContent); }
+  catch (e) { return; }
+  if (!payload || !payload.all || !payload.all.labels) return;
+
+  var typeFilter   = 'all';
+  var personFilter = '__all__';
+  var chart = null;
+
+  function makeGradient(ctx, h, top, bottom) {
+    var g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, top); g.addColorStop(1, bottom);
+    return g;
+  }
+
+  function build() {
+    if (!canvas || typeof window.Chart === 'undefined') {
+      window.requireChartJS && window.requireChartJS(function (err) {
+        if (!err) build();
+      });
+      return;
+    }
+    var ctx = canvas.getContext('2d');
+    var h = canvas.parentElement.clientHeight || 220;
+    chart = new window.Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: payload.all.labels,
+        datasets: [
+          { label: 'Purchases', data: payload.all.buy_values.slice(),
+            backgroundColor: makeGradient(ctx, h, '#34d399', '#047857'),
+            borderColor: '#047857', borderWidth: 1, borderRadius: 4 },
+          { label: 'Sales', data: payload.all.sell_values.slice(),
+            backgroundColor: makeGradient(ctx, h, '#b91c1c', '#f87171'),
+            borderColor: '#b91c1c', borderWidth: 1, borderRadius: 4 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top', labels: { boxWidth: 12, padding: 12, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: function (c) {
+                var v = c.parsed.y || 0;
+                if (v >= 1e6) return c.dataset.label + ': $' + (v / 1e6).toFixed(1) + 'M';
+                if (v >= 1e3) return c.dataset.label + ': $' + (v / 1e3).toFixed(0) + 'K';
+                return c.dataset.label + ': $' + v.toFixed(0);
+              },
+            },
+          },
+        },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 } } },
+          y: {
+            stacked: true,
+            grid: { color: 'rgba(0,0,0,0.06)' },
+            ticks: {
+              font: { size: 10 },
+              callback: function (v) {
+                if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+                if (v >= 1e3) return '$' + (v / 1e3).toFixed(0) + 'K';
+                return '$' + v;
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  function applyFilters() {
+    /* Filter table rows (compose both filters). */
+    document.querySelectorAll('.pp-stock-own-ins-quarter').forEach(function (det) {
+      var visible = 0;
+      det.querySelectorAll('tbody tr').forEach(function (tr) {
+        var kindOk   = typeFilter === 'all' || tr.dataset.insiderKind === typeFilter;
+        var personOk = personFilter === '__all__' || tr.dataset.insiderName === personFilter;
+        var show = kindOk && personOk;
+        tr.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      var countEl = det.querySelector('.pp-stock-own-ins-quarter-count');
+      if (countEl) countEl.textContent = visible;
+      det.style.display = visible > 0 ? '' : 'none';
+    });
+
+    /* Update chart series — swap to per-insider data + hide one series
+       when typeFilter is set. */
+    if (chart) {
+      var src = (payload.per && payload.per[personFilter]) || payload.all;
+      chart.data.datasets[0].data = src.buy_values.slice();
+      chart.data.datasets[1].data = src.sell_values.slice();
+      chart.data.datasets[0].hidden = (typeFilter === 'sell');
+      chart.data.datasets[1].hidden = (typeFilter === 'buy');
+      chart.update();
+    }
+  }
+
+  /* Filter buttons. */
+  document.querySelectorAll('.pp-stock-own-ins-filter').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      typeFilter = btn.getAttribute('data-fkind') || 'all';
+      document.querySelectorAll('.pp-stock-own-ins-filter').forEach(function (b) {
+        b.classList.toggle('is-active', b === btn);
+      });
+      applyFilters();
+    });
+  });
+
+  /* Per-insider dropdown. */
+  var personSel = document.getElementById('pp-stock-own-ins-person-filter');
+  if (personSel) {
+    personSel.addEventListener('change', function () {
+      personFilter = personSel.value;
+      applyFilters();
+    });
+  }
+
+  /* Build on Insiders sub-pill activation only — Insiders pane is
+     `display: none` until then, and Chart.js can't measure a hidden
+     canvas (lands at 0x0 and won't recover even after a resize call
+     because the parent had no width when the chart parsed its options). */
+  var ownSeg = document.getElementById('pp-stock-own-sub');
+  if (ownSeg) {
+    ownSeg.addEventListener('click', function (ev) {
+      var opt = ev.target.closest('.pp-segment-opt');
+      if (opt && opt.getAttribute('data-value') === 'Insiders') {
+        /* 50ms gives the pane-toggle CSS one render frame to apply
+           `display: block` so the canvas can measure its parent. */
+        setTimeout(function () {
+          if (chart) chart.resize();
+          else build();
+        }, 50);
+      }
+    });
+  }
+})();
+
+/* ── Forecasts sub-pill toggle (Analysts / Earnings / Estimates) and
+   ECharts EPS-trend builder.  Lazy-builds the chart on first Earnings
+   activation; resizes on subsequent activations + theme toggle. ── */
+(function () {
+  var seg = document.getElementById('pp-stock-fct-sub');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-stock-fct-pane');
+
+  function applySub(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o.getAttribute('data-value') === name);
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-fct-pane') === name);
+    });
+    if (name === 'Earnings') {
+      setTimeout(function () {
+        if (window._ppEarnEPSChart) window._ppEarnEPSChart.resize();
+        else _ppBuildEarnChart();
+      }, 50);
+    }
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (opt) applySub(opt.getAttribute('data-value'));
+  });
+
+  /* EPS-trend chart — ECharts scatter, dot per quarter (estimate +
+     actual).  Mirrors v1's behaviour but uses redesign tokens. */
+  function _ppBuildEarnChart() {
+    var el = document.getElementById('pp-stock-fct-earn-chart');
+    var dataEl = document.getElementById('pp-stock-fct-earn-chart-data');
+    if (!el || !dataEl) return;
+    if (!window.echarts) {
+      window.requireECharts(function (err) { if (!err) _ppBuildEarnChart(); });
+      return;
+    }
+    var allHistory;
+    try { allHistory = JSON.parse(dataEl.textContent) || []; }
+    catch (e) { return; }
+    if (!allHistory.length) return;
+
+    /* Show last 8 quarters in chronological order (history is newest-first). */
+    var history = allHistory.slice(0, 8).reverse();
+    var dark = document.documentElement.getAttribute('data-theme') !== 'light';
+    var textColor = dark ? 'rgba(226,232,240,0.7)' : 'rgba(15,23,42,0.55)';
+    var gridColor = dark ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.07)';
+
+    var labels    = history.map(function (r) { return r.fiscal_quarter || r.report_date; });
+    var estimates = history.map(function (r) { return r.eps_estimate; });
+    var actuals   = history.map(function (r) { return r.eps_actual; });
+
+    var chart = window.echarts.init(el);
+    window._ppEarnEPSChart = chart;
+    chart.setOption({
+      animation: false,
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'none' },
+        backgroundColor: dark ? 'rgba(15,23,42,0.95)' : 'rgba(255,255,255,0.97)',
+        borderColor:    dark ? 'rgba(148,163,184,0.2)' : 'rgba(0,0,0,0.08)',
+        textStyle:      { color: dark ? '#e2e8f0' : '#1e293b', fontSize: 12 },
+        formatter: function (params) {
+          var i = params[0] ? params[0].dataIndex : 0;
+          var r = history[i];
+          var quarter = r.fiscal_quarter || r.report_date;
+          var html = '<strong>' + quarter + '</strong>';
+          if (r.eps_estimate != null) html += '<br/>Estimate: $' + r.eps_estimate.toFixed(2);
+          if (r.eps_actual != null) {
+            html += '<br/>Actual: $' + r.eps_actual.toFixed(2);
+            if (r.eps_estimate != null) {
+              var diff = r.eps_actual - r.eps_estimate;
+              var color = diff >= 0 ? '#16a34a' : '#dc2626';
+              var sign = diff >= 0 ? '+' : '';
+              html += ' <span style="color:' + color + '">(' + sign + '$' + Math.abs(diff).toFixed(2) + ')</span>';
+            }
+          }
+          return html;
+        },
+      },
+      legend: {
+        data: [
+          { name: 'Estimate', itemStyle: { color: 'transparent', borderColor: textColor, borderWidth: 2 } },
+          { name: 'Actual',   itemStyle: { color: '#16a34a' } },
+        ],
+        textStyle: { color: textColor, fontSize: 11 },
+        top: 0,
+      },
+      grid: { left: 55, right: 20, top: 36, bottom: 90 },
+      xAxis: {
+        type: 'category', data: labels,
+        axisLine: { lineStyle: { color: gridColor } },
+        axisTick: { show: false },
+        axisLabel: {
+          interval: 0, color: textColor, fontSize: 10, lineHeight: 16,
+          rich: {
+            q:    { color: textColor, fontSize: 11, align: 'center', padding: [0,0,2,0] },
+            beat: { color: '#16a34a', fontSize: 10, fontWeight: 'bold', align: 'center' },
+            miss: { color: '#dc2626', fontSize: 10, fontWeight: 'bold', align: 'center' },
+            neu:  { color: textColor, fontSize: 10, align: 'center' },
+            pos:  { color: '#16a34a', fontSize: 10, align: 'center' },
+            neg:  { color: '#dc2626', fontSize: 10, align: 'center' },
+          },
+          formatter: function (value, index) {
+            if (index >= history.length) return value;
+            var r = history[index];
+            var beatLine = '{neu|—}';
+            var amtLine = '';
+            if (r.beat_eps === true) {
+              beatLine = '{beat|Beat}';
+              var d = r.eps_actual - r.eps_estimate;
+              amtLine = '\n{pos|+$' + d.toFixed(2) + '}';
+            } else if (r.beat_eps === false) {
+              beatLine = '{miss|Miss}';
+              var d = r.eps_actual - r.eps_estimate;
+              amtLine = '\n{neg|$' + d.toFixed(2) + '}';
+            }
+            return '{q|' + value + '}\n' + beatLine + amtLine;
+          },
+        },
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { color: textColor, fontSize: 10, formatter: '${value}' },
+        splitLine: { lineStyle: { color: gridColor, type: 'dashed' } },
+      },
+      series: [
+        { name: 'Estimate', type: 'scatter', data: estimates, symbolSize: 22,
+          itemStyle: { color: 'transparent', borderColor: textColor, borderWidth: 3 }, z: 2 },
+        { name: 'Actual',   type: 'scatter', data: actuals,   symbolSize: 22,
+          itemStyle: {
+            color: function (p) {
+              var r = history[p.dataIndex];
+              if (r.beat_eps === true)  return '#16a34a';
+              if (r.beat_eps === false) return '#dc2626';
+              return textColor;
+            },
+            borderWidth: 0,
+          }, z: 3 },
+      ],
+    });
+  }
+
+  /* Re-skin on theme toggle. */
+  document.addEventListener('pp-theme-changed', function () {
+    if (window._ppEarnEPSChart) {
+      window._ppEarnEPSChart.dispose();
+      window._ppEarnEPSChart = null;
+      _ppBuildEarnChart();
+    }
+  });
+})();
+
+/* ── Signals sub-pill toggle (Sentiment / Short Interest) + lazy
+   ECharts builders for the Wikipedia event-detector mini chart and the
+   short-interest trend line. ── */
+(function () {
+  var seg = document.getElementById('pp-stock-sig-sub');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-stock-sig-pane');
+
+  function applySub(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      o.classList.toggle('is-active', o.getAttribute('data-value') === name);
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-sig-pane') === name);
+    });
+    /* Build / resize the relevant chart on activation since hidden panes
+       can't measure their canvas. */
+    if (name === 'Sentiment') {
+      setTimeout(function () {
+        if (window._ppSigWikiChart) window._ppSigWikiChart.resize();
+        else _buildWikiChart();
+      }, 50);
+    } else if (name === 'Short Interest') {
+      setTimeout(function () {
+        if (window._ppSigSIChart) window._ppSigSIChart.resize();
+        else _buildSIChart();
+      }, 50);
+    }
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (opt) applySub(opt.getAttribute('data-value'));
+  });
+
+  /* Wikipedia event-detector — small line chart of daily page views. */
+  function _buildWikiChart() {
+    var el = document.getElementById('pp-stock-sig-wt-chart');
+    var dataEl = document.getElementById('pp-stock-sig-wt-chart-data');
+    if (!el || !dataEl) return;
+    if (!window.echarts) {
+      window.requireECharts(function (err) { if (!err) _buildWikiChart(); });
+      return;
+    }
+    var daily;
+    try { daily = JSON.parse(dataEl.textContent) || []; }
+    catch (e) { return; }
+    if (!daily.length) return;
+    var dark = document.documentElement.getAttribute('data-theme') !== 'light';
+    var textColor = dark ? 'rgba(226,232,240,0.7)' : 'rgba(15,23,42,0.55)';
+    var gridColor = dark ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.07)';
+    /* daily can be either a list of {date, views} OR a list of numbers —
+       support both shapes. */
+    var labels = daily.map(function (d, i) {
+      return (typeof d === 'object' && d.date) ? d.date : '';
+    });
+    var values = daily.map(function (d) {
+      return (typeof d === 'object') ? (d.views != null ? d.views : 0) : d;
+    });
+    /* 7-day moving avg for the second series. */
+    var ma7 = values.map(function (_, i, arr) {
+      if (i < 6) return null;
+      var sum = 0;
+      for (var k = i - 6; k <= i; k++) sum += arr[k] || 0;
+      return Math.round(sum / 7);
+    });
+    var chart = window.echarts.init(el);
+    window._ppSigWikiChart = chart;
+    chart.setOption({
+      animation: false,
+      backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis', textStyle: { fontSize: 12 } },
+      legend: {
+        data: ['Daily views', '7-day avg'],
+        textStyle: { color: textColor, fontSize: 10 },
+        top: 0,
+      },
+      grid: { left: 50, right: 12, top: 30, bottom: 24 },
+      xAxis: {
+        type: 'category', data: labels, show: true,
+        axisLine: { lineStyle: { color: gridColor } },
+        axisTick: { show: false },
+        axisLabel: { color: textColor, fontSize: 9, interval: Math.floor(labels.length / 5) },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false }, axisTick: { show: false },
+        splitLine: { lineStyle: { color: gridColor } },
+        axisLabel: { color: textColor, fontSize: 9, formatter: function (v) {
+          return v >= 1000 ? (v / 1000).toFixed(0) + 'K' : v;
+        } },
+      },
+      series: [
+        { name: 'Daily views', type: 'line', data: values, smooth: true,
+          symbol: 'none',
+          lineStyle: { color: 'rgba(37,99,235,0.4)', width: 1.4 },
+          itemStyle: { color: '#2563eb' } },
+        { name: '7-day avg', type: 'line', data: ma7, smooth: true,
+          symbol: 'none',
+          lineStyle: { color: '#2563eb', width: 2 },
+          itemStyle: { color: '#2563eb' } },
+      ],
+    });
+  }
+
+  /* Short Interest trend — % of float over time. */
+  function _buildSIChart() {
+    var el = document.getElementById('pp-stock-sig-si-chart');
+    var dataEl = document.getElementById('pp-stock-sig-si-chart-data');
+    if (!el || !dataEl) return;
+    if (!window.echarts) {
+      window.requireECharts(function (err) { if (!err) _buildSIChart(); });
+      return;
+    }
+    var hist;
+    try { hist = JSON.parse(dataEl.textContent) || []; }
+    catch (e) { return; }
+    if (hist.length < 2) return;
+    /* Reverse so oldest renders left. */
+    var rows = hist.slice().reverse();
+    var labels = rows.map(function (r) { return r.report_date; });
+    var values = rows.map(function (r) {
+      return r.short_pct_float != null ? +(r.short_pct_float * 100).toFixed(2) : null;
+    });
+    var dark = document.documentElement.getAttribute('data-theme') !== 'light';
+    var textColor = dark ? 'rgba(226,232,240,0.7)' : 'rgba(15,23,42,0.55)';
+    var gridColor = dark ? 'rgba(148,163,184,0.12)' : 'rgba(0,0,0,0.07)';
+    var chart = window.echarts.init(el);
+    window._ppSigSIChart = chart;
+    chart.setOption({
+      animation: false,
+      backgroundColor: 'transparent',
+      tooltip: {
+        trigger: 'axis',
+        formatter: function (params) {
+          var p = params[0]; if (!p) return '';
+          var row = rows[p.dataIndex];
+          var html = '<strong>' + row.report_date + '</strong><br/>';
+          html += 'Short % of float: <strong>' + (p.value != null ? p.value.toFixed(1) + '%' : '—') + '</strong>';
+          if (row.shares_short) {
+            var s = row.shares_short;
+            var fmt = s >= 1e9 ? (s/1e9).toFixed(2) + 'B'
+                   : s >= 1e6 ? (s/1e6).toFixed(1) + 'M'
+                   : s.toLocaleString();
+            html += '<br/>Shares short: ' + fmt;
+          }
+          if (row.short_ratio) html += '<br/>Days to cover: ' + row.short_ratio.toFixed(1);
+          return html;
+        },
+      },
+      grid: { left: 50, right: 18, top: 18, bottom: 50 },
+      xAxis: { type: 'category', data: labels,
+        axisLine: { lineStyle: { color: gridColor } },
+        axisTick: { show: false },
+        axisLabel: { color: textColor, fontSize: 10, rotate: 45 } },
+      yAxis: { type: 'value',
+        axisLine: { show: false }, axisTick: { show: false },
+        splitLine: { lineStyle: { color: gridColor } },
+        axisLabel: { color: textColor, fontSize: 10, formatter: '{value}%' } },
+      series: [{
+        type: 'line', data: values, smooth: true,
+        symbol: 'circle', symbolSize: 6,
+        lineStyle: { color: '#dc2626', width: 2 },
+        itemStyle: { color: '#dc2626' },
+        areaStyle: {
+          color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(220,38,38,0.25)' },
+              { offset: 1, color: 'rgba(220,38,38,0.02)' },
+            ] },
+        },
+      }],
+    });
+  }
+
+  /* Re-skin on theme toggle. */
+  document.addEventListener('pp-theme-changed', function () {
+    if (window._ppSigWikiChart) {
+      window._ppSigWikiChart.dispose();
+      window._ppSigWikiChart = null;
+      _buildWikiChart();
+    }
+    if (window._ppSigSIChart) {
+      window._ppSigSIChart.dispose();
+      window._ppSigSIChart = null;
+      _buildSIChart();
+    }
+  });
+
+  /* Build sentiment-pane charts on first visit to Signals (default
+     sub-pane is Sentiment, so the Wikipedia chart needs to build on
+     Signals tab activation). */
+  var topTabs = document.getElementById('pp-stock-tabs');
+  if (topTabs) {
+    topTabs.addEventListener('click', function (ev) {
+      var opt = ev.target.closest('.pp-segment-opt');
+      if (opt && opt.getAttribute('data-value') === 'Signals') {
+        setTimeout(function () {
+          if (!window._ppSigWikiChart) _buildWikiChart();
+          else window._ppSigWikiChart.resize();
+        }, 50);
+      }
+    });
+  }
+})();
+
+/* ── SEC Filings — form-type filter pills.  Each pill carries a
+   data-fkey that the matcher maps to either an exact form string,
+   a prefix (10-K matches 10-K, 10-K/A), or a substring (13 matches
+   SCHEDULE 13G, 13F-HR, etc.).  Form 4 is exact + "/A" amendments. ── */
+(function () {
+  var pillBar = document.getElementById('pp-stock-own-fil-filters');
+  var table = document.getElementById('pp-stock-own-fil-table');
+  if (!pillBar || !table) return;
+  var pills = pillBar.querySelectorAll('.pp-stock-own-fil-pill');
+  var rows = table.querySelectorAll('tbody tr');
+
+  function matches(form, key) {
+    if (key === 'all') return true;
+    if (key === '4')   return form === '4' || form === '4/A';
+    if (key === '13')  return form.indexOf('13') !== -1; /* SCHEDULE 13G, 13F-HR */
+    if (key === 'DEF') return form.indexOf('DEF') === 0;  /* DEF 14A, DEFA14A */
+    /* 10-K / 10-Q / 8-K — match exact or "/A" amendment. */
+    return form === key || form === key + '/A';
+  }
+
+  pills.forEach(function (pill) {
+    pill.addEventListener('click', function () {
+      var key = pill.getAttribute('data-fkey');
+      pills.forEach(function (p) { p.classList.toggle('is-active', p === pill); });
+      rows.forEach(function (r) {
+        r.style.display = matches(r.getAttribute('data-form-type') || '', key) ? '' : 'none';
+      });
+    });
+  });
+})();
+
+/* ── Funds Quarterly Activity History — pill nav swaps the active table. ── */
+(function () {
+  var wrap = document.getElementById('pp-stock-own-qhist');
+  if (!wrap) return;
+  var pills = wrap.querySelectorAll('.pp-stock-own-qhist-pill');
+  var panes = wrap.querySelectorAll('.pp-stock-own-qhist-pane');
+  pills.forEach(function (pill) {
+    pill.addEventListener('click', function () {
+      var qkey = pill.getAttribute('data-qkey');
+      pills.forEach(function (p) { p.classList.toggle('is-active', p === pill); });
+      panes.forEach(function (p) {
+        p.classList.toggle('is-active', p.getAttribute('data-qkey') === qkey);
+      });
+    });
   });
 })();
 </script>

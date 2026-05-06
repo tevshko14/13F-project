@@ -42,8 +42,9 @@
 <div class="pp-screener-presets">
   <span class="pp-mono pp-screener-presets-label">Presets</span>
   {% for p in screener_presets %}
-    <button class="pp-screener-preset{% if p == screener_active_preset %} is-active{% endif %}"
-            data-preset="{{ p }}">{{ p }}</button>
+    {%- set _q = "?preset=" ~ p|urlencode ~ "&sort=" ~ screener_active_sort|urlencode -%}
+    <a class="pp-screener-preset{% if p == screener_active_preset %} is-active{% endif %}"
+       href="/_v2/screener{{ _q }}">{{ p }}</a>
   {% endfor %}
 </div>
 
@@ -71,73 +72,78 @@
   {# ── Results column (1fr, right) ── #}
   <div class="pp-screener-results">
     <div class="pp-screener-results-head">
-      <span class="pp-mono pp-screener-results-count">{{ screener_results|length }} results</span>
-      <span class="pp-mono pp-screener-results-universe">· of {{ screener_universe }} universe</span>
+      <span class="pp-mono pp-screener-results-count">{{ screener_match_count }} matches</span>
+      <span class="pp-mono pp-screener-results-universe">
+        · {{ screener_visible_count }} shown · of {{ screener_universe }} universe
+      </span>
       <div style="flex:1"></div>
-      {{ segment(["Sort: Smart money","Mkt cap","P/E","Day %","Insider buys"],
-                 value="Sort: Smart money", mono=True) }}
+      <div class="pp-screener-sort-group">
+        <span class="pp-mono pp-screener-sort-label">Sort</span>
+        <div class="pp-segment pp-segment-mono pp-screener-sort-seg" role="tablist">
+          {% for s in screener_sorts %}
+            {%- set _q = "?preset=" ~ screener_active_preset|urlencode ~ "&sort=" ~ s|urlencode -%}
+            <a class="pp-segment-opt{% if s == screener_active_sort %} is-active{% endif %}"
+               href="/_v2/screener{{ _q }}"
+               data-value="{{ s }}"
+               role="tab"
+               aria-selected="{{ 'true' if s == screener_active_sort else 'false' }}">{{ s }}</a>
+          {% endfor %}
+        </div>
+      </div>
     </div>
 
-    <table class="pp-table pp-screener-table">
-      <thead>
-        <tr>
-          <th>Ticker</th>
-          <th>Name</th>
-          <th>Sector</th>
-          <th class="pp-num">Mkt cap</th>
-          <th class="pp-num">P/E</th>
-          <th class="pp-num">Price</th>
-          <th class="pp-num">Day</th>
-          <th class="pp-num">13F flow</th>
-          <th class="pp-num">Insiders</th>
-          <th class="pp-num">Congress</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in screener_results %}
+    {% if screener_results %}
+      <table class="pp-table pp-screener-table">
+        <thead>
           <tr>
-            <td><span class="pp-mono pp-screener-tkr">{{ r.tk }}</span></td>
-            <td class="pp-text">{{ r.name }}</td>
-            <td class="pp-dim">{{ r.sec }}</td>
-            <td class="pp-num pp-mono pp-screener-mc">{{ r.mc }}</td>
-            <td class="pp-num pp-mono pp-text">{{ r.pe }}</td>
-            <td class="pp-num pp-mono pp-screener-price">{{ r.price }}</td>
-            <td class="pp-num">
-              <span class="pp-mono {{ 'pp-up' if r.chg >= 0 else 'pp-down' }}" style="font-weight:600;">
-                {%- if r.chg >= 0 %}+{% endif %}{{ "%.2f"|format(r.chg * 100) }}%
-              </span>
-            </td>
-            <td class="pp-num">
-              <span class="pp-mono pp-up" style="font-weight:600;">{{ r.smart }}</span>
-            </td>
-            <td class="pp-num">
-              <span class="pp-mono {% if 'BUY' in r.ins %}pp-up{% elif 'SELL' in r.ins %}pp-down{% else %}pp-dim2{% endif %}" style="font-weight:600;">{{ r.ins }}</span>
-            </td>
-            <td class="pp-num">
-              <span class="pp-mono {% if 'BUY' in r.cong %}pp-up{% elif 'SELL' in r.cong %}pp-down{% else %}pp-dim2{% endif %}" style="font-weight:600;">{{ r.cong }}</span>
-            </td>
+            <th>Ticker</th>
+            <th>Name</th>
+            <th>Sector</th>
+            <th class="pp-num">Price</th>
+            <th class="pp-num">Day</th>
+            <th class="pp-num">13F flow</th>
+            <th class="pp-num">Insiders</th>
+            <th class="pp-num">Congress</th>
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for r in screener_results %}
+            <tr>
+              <td>
+                <a class="pp-mono pp-screener-tkr" href="/_v2/stock/{{ r.tk }}">{{ r.tk }}</a>
+              </td>
+              <td class="pp-text">{{ r.name }}</td>
+              <td class="pp-dim">{{ r.sec }}</td>
+              <td class="pp-num pp-mono pp-screener-price">{{ r.price }}</td>
+              <td class="pp-num">
+                <span class="pp-mono {{ 'pp-up' if r.chg >= 0 else 'pp-down' }}" style="font-weight:600;">
+                  {%- if r.chg >= 0 %}+{% endif %}{{ "%.2f"|format(r.chg * 100) }}%
+                </span>
+              </td>
+              <td class="pp-num">
+                <span class="pp-mono {% if r.smart_score > 0 %}pp-up{% else %}pp-dim2{% endif %}" style="font-weight:600;">{{ r.smart }}</span>
+              </td>
+              <td class="pp-num">
+                <span class="pp-mono {% if 'BUY' in r.ins %}pp-up{% elif 'SELL' in r.ins %}pp-down{% else %}pp-dim2{% endif %}" style="font-weight:600;">{{ r.ins }}</span>
+              </td>
+              <td class="pp-num">
+                <span class="pp-mono {% if 'BUY' in r.cong %}pp-up{% elif 'SELL' in r.cong %}pp-down{% else %}pp-dim2{% endif %}" style="font-weight:600;">{{ r.cong }}</span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-icon">∅</div>
+        <div class="pp-page-placeholder-title">No matches</div>
+        <div class="pp-page-placeholder-sub">
+          Try a different preset, or pick the All preset to see the full universe.
+        </div>
+      </div>
+    {% endif %}
   </div>
 
 </div>
 
-{% endblock %}
-
-{% block extra_scripts %}
-{# Preset chips — visual-only toggle, swaps active class.  Real switch
-   would re-fetch results from /api/screener/run with the preset's filter set. #}
-<script>
-(function () {
-  document.querySelectorAll('.pp-screener-preset').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      document.querySelectorAll('.pp-screener-preset').forEach(function (b) {
-        b.classList.toggle('is-active', b === btn);
-      });
-    });
-  });
-})();
-</script>
 {% endblock %}

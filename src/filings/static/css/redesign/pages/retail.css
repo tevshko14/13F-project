@@ -1,152 +1,494 @@
-/* ============================================================================
- * PaperPanda Redesign — Retail page (Pulse · Trends · WSB)
- * Reuses .pp-page-* chrome from macro.css.
- * ==========================================================================*/
-
-/* KpiStrip default uses tabular-nums + 22px font — short labels like "AI /
-   Chips" or "$GME +81%" can clip the cell.  Allow value to wrap rather
-   than truncate, since stale `1.5rem` ascent absorbs a 2nd line cleanly. */
-.pp-page-section-kpi .pp-kpi-value {
-  font-size: 18px;
-  white-space: normal;
-  line-height: 1.2;
-}
-
 /* ─────────────────────────────────────────────────────────────────────────────
- * FEATURED CALLOUT — coral left-border + 3-col layout (id · stats · spark).
- * Matches the "notable_panel" pattern flagged in the gap audit.
+ * v2 RETAIL PAGE — Sentiment / Leaderboard / Calendar
+ *
+ * Design rules:
+ *   • Reuses panel(), panel_head(), kpi_strip from primitives — no custom
+ *     headers / borders / shadows.  Every section is a panel.
+ *   • Color tokens come from the existing palette — pp-up (green) for
+ *     positive momentum, pp-down (red) for negative, pp-accent (coral)
+ *     for neutral highlights.  Fear & Greed uses its own band palette
+ *     (red→amber→neutral→green) since the gauge needs distinct stops.
+ *   • Tickers always render in the monospaced .pp-insiders-tkr style for
+ *     visual continuity with the Insiders / Congress pages.
  * ───────────────────────────────────────────────────────────────────────────*/
 
-.pp-retail-featured {
-  padding: 22px 26px;
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 24px;
-  align-items: center;
-  border-left: 3px solid var(--pp-accent);
-}
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SENTIMENT TAB
+ * ───────────────────────────────────────────────────────────────────────────*/
 
-.pp-retail-featured-tkr {
-  display: block;
-  font-size: 48px;
+.pp-retail-mood-panel { padding: 22px 26px; margin-bottom: 16px; }
+.pp-retail-mood {
+  display: grid;
+  grid-template-columns: 180px 1fr 200px;
+  gap: 28px;
+  align-items: center;
+}
+.pp-retail-mood-score {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.pp-retail-mood-num {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.pp-retail-mood-val {
+  font-size: 56px;
   font-weight: 800;
-  letter-spacing: -2px;
-  color: var(--pp-ink);
-  margin-top: 6px;
   line-height: 1;
+  letter-spacing: -1.5px;
   font-variant-numeric: tabular-nums;
 }
-.pp-retail-featured-name {
-  font-size: 13px;
+.pp-retail-mood-denom {
+  font-size: 18px;
+  font-weight: 600;
   color: var(--pp-dim);
-  margin-top: 4px;
 }
 
-.pp-retail-featured-stats {
+/* Fear & Greed band tokens — only used by the score / pill / history rows. */
+.pp-retail-mood-band-extreme_fear { color: #dc2626; }
+.pp-retail-mood-band-fear         { color: #ef6e3c; }
+.pp-retail-mood-band-neutral      { color: var(--pp-text); }
+.pp-retail-mood-band-greed        { color: #1f9e54; }
+.pp-retail-mood-band-extreme_greed{ color: #16a34a; }
+
+.pp-retail-mood-pill {
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--pp-bg);
+  border: 1px solid currentColor;
+  font-weight: 700;
+}
+
+/* Gradient bar w/ marker. */
+.pp-retail-mood-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pp-retail-mood-bar-track {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    #dc2626 0%, #ef6e3c 25%, var(--pp-line2) 50%, #4ade80 75%, #16a34a 100%
+  );
+}
+.pp-retail-mood-bar-marker {
+  position: absolute;
+  top: -3px;
+  width: 4px;
+  height: 18px;
+  background: var(--pp-ink);
+  border: 2px solid var(--pp-bg);
+  border-radius: 2px;
+  transform: translateX(-50%);
+}
+.pp-retail-mood-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+
+.pp-retail-mood-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.pp-retail-mood-history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pp-retail-mood-history-val {
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 3 callout cards. */
+.pp-retail-callouts {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
-.pp-retail-stat-val {
-  display: block;
-  font-size: 22px;
+.pp-retail-callout-panel { padding: 18px 22px; }
+.pp-retail-callout-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 10px;
+}
+.pp-retail-callout-tkr {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+.pp-retail-callout-delta {
+  font-size: 16px;
   font-weight: 700;
-  color: var(--pp-ink);
-  margin-top: 2px;
-  letter-spacing: -0.5px;
   font-variant-numeric: tabular-nums;
 }
-.pp-retail-stat-delta {
-  font-size: 11px;
-  font-weight: 600;
+.pp-retail-callout-sub {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--pp-dim);
+  letter-spacing: 0.2px;
 }
-
-.pp-retail-featured-spark { display: block; }
+.pp-retail-callout-trending {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.pp-retail-callout-trending-tkr {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border: 1px solid var(--pp-line2);
+  border-radius: 4px;
+  background: var(--pp-bg);
+}
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * TRENDING TABLE — 9 cols, dense (10px header, 12px body).
+ * LEADERBOARD TAB
  * ───────────────────────────────────────────────────────────────────────────*/
 
-.pp-retail-trending-table { width: 100%; }
-.pp-retail-trending-table thead th {
-  font-family: var(--pp-font-mono);
-  font-size: 10px;
-  letter-spacing: 1.2px;
-  text-transform: uppercase;
-  font-weight: 600;
-  color: var(--pp-dim);
-  padding: 10px 14px;
-  text-align: left;
-  border-bottom: 1px solid var(--pp-line2);
+.pp-retail-lb-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
 }
-.pp-retail-trending-table thead th.pp-num { text-align: right; }
-.pp-retail-trending-table thead th.pp-retail-th-rank { width: 36px; }
-.pp-retail-trending-table tbody td {
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--pp-line);
-  font-size: 12px;
-  vertical-align: middle;
-}
-.pp-retail-trending-table tbody tr:last-child td { border-bottom: none; }
-.pp-retail-trending-table td.pp-num { text-align: right; }
+.pp-retail-heatmap-panel,
+.pp-retail-scatter-panel { padding: 18px 22px; }
 
-.pp-retail-tkr {
-  font-weight: 700;
-  color: var(--pp-ink);
+/* Squarified treemap — HTML divs in % units.  Aspect-ratio is fixed by
+   CSS rather than the box geometry (the algorithm packs into a 1×1 unit
+   square, then we display it at the panel's own aspect ratio).  Avoids
+   the `preserveAspectRatio="none"` stretch that warped the SVG version. */
+.pp-retail-heatmap {
+  position: relative;
+  width: 100%;
+  height: 460px;
+  background: var(--pp-line);
+  overflow: hidden;
+  border-radius: 4px;
 }
-.pp-retail-name {
-  color: var(--pp-text);
-  /* Truncate long names. */
-  max-width: 220px;
+.pp-retail-heatmap-box {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--pp-bg);
+  cursor: pointer;
+  transition: filter 0.08s ease, outline 0.08s ease;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.pp-retail-heatmap-box:hover {
+  filter: brightness(1.18);
+  outline: 1.5px solid var(--pp-accent);
+  outline-offset: -1px;
+  z-index: 1;
+}
+.pp-retail-heatmap-label {
+  font-size: 12px;
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: rgba(255, 255, 255, 0.95);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  padding: 0 4px;
+}
+
+.pp-retail-scatter { position: relative; }
+.pp-retail-scatter-svg {
+  display: block;
+  width: 100%;
+  height: 460px;
+}
+.pp-retail-scatter-axis {
+  stroke: var(--pp-line2);
+  stroke-width: 1;
+}
+.pp-retail-scatter-quad {
+  stroke: var(--pp-line);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+}
+.pp-retail-scatter-quad-label {
+  fill: var(--pp-dim);
+  font-size: 9px;
+  font-family: var(--pp-font-mono);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+.pp-retail-scatter-ax-label {
+  fill: var(--pp-dim);
+  font-size: 10px;
+  font-family: var(--pp-font-mono);
+  letter-spacing: 0.4px;
+  pointer-events: none;
+}
+.pp-retail-scatter-bubble {
+  fill: rgba(35, 162, 110, 0.4);
+  stroke: var(--pp-up);
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: opacity 0.08s ease, stroke-width 0.08s ease;
+}
+.pp-retail-scatter-bubble.is-guru {
+  fill: rgba(245, 197, 24, 0.35);
+  stroke: #f5c518;
+}
+.pp-retail-scatter-bubble:hover { stroke-width: 3; }
+
+.pp-retail-lb-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+/* Velocity Leaderboard table. */
+.pp-retail-vlt-panel { padding: 18px 22px; }
+.pp-retail-vlt-table tbody td { padding: 12px 14px; vertical-align: middle; }
+.pp-retail-vlt-tkr {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pp-retail-vlt-name {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: 220px;
 }
-.pp-retail-mentions {
-  color: var(--pp-ink);
-  font-weight: 700;
+.pp-retail-heat {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 18px;
+}
+.pp-retail-heat-bar {
+  display: inline-block;
+  width: 4px;
+  height: 100%;
+  background: var(--pp-line);
+  border-radius: 1px;
+}
+.pp-retail-heat-bar.is-on:nth-child(1) { background: #ef6e3c; height: 22%; }
+.pp-retail-heat-bar.is-on:nth-child(2) { background: #f59e0b; height: 40%; }
+.pp-retail-heat-bar.is-on:nth-child(3) { background: #eab308; height: 60%; }
+.pp-retail-heat-bar.is-on:nth-child(4) { background: #ef6e3c; height: 80%; }
+.pp-retail-heat-bar.is-on:nth-child(5) { background: #dc2626; height: 100%; }
+.pp-retail-rankchange {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.pp-retail-rankchange.is-up   { background: rgba(35, 162, 110, 0.18); color: var(--pp-up);   border: 1px solid rgba(35, 162, 110, 0.35); }
+.pp-retail-rankchange.is-down { background: rgba(220, 38, 38, 0.18); color: var(--pp-down); border: 1px solid rgba(220, 38, 38, 0.35); }
+.pp-retail-gurus {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(245, 197, 24, 0.18);
+  color: #f5c518;
+  border: 1px solid rgba(245, 197, 24, 0.35);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
- * SENTIMENT BAR — centered at 50%, fills outward in either direction.
- * Pattern flagged in gap audit; will extract to a primitive once reused.
+ * CALENDAR TAB
  * ───────────────────────────────────────────────────────────────────────────*/
 
-.pp-retail-sentiment-cell {
+.pp-retail-cal-recent-panel,
+.pp-retail-cal-channels-panel { padding: 18px 22px; margin-bottom: 14px; }
+
+.pp-retail-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+.pp-retail-cal-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--pp-line2);
+  border-radius: 6px;
+  background: var(--pp-bg);
+  text-decoration: none;
+  color: inherit;
+  overflow: hidden;
+  transition: border-color 0.08s ease, transform 0.08s ease;
+}
+.pp-retail-cal-card:hover {
+  border-color: var(--pp-accent);
+  transform: translateY(-1px);
+}
+.pp-retail-cal-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--pp-line);
+}
+.pp-retail-cal-thumb-empty {
+  background-image: linear-gradient(135deg, var(--pp-line) 0%, var(--pp-line2) 100%);
+}
+.pp-retail-cal-meta {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pp-retail-cal-channel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pp-retail-cal-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--pp-line);
+  color: var(--pp-accent);
+  font-size: 10px;
+}
+.pp-retail-cal-chan-name {
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: var(--pp-text);
+}
+.pp-retail-cal-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-ink);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pp-retail-cal-foot {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-size: 11px;
+  margin-top: 2px;
 }
-.pp-retail-sentiment-bar {
-  position: relative;
-  width: 80px;
-  height: 5px;
-  background: var(--pp-sub2);
+.pp-retail-cal-ticker {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  background: var(--pp-line);
+  border-radius: 3px;
+  color: var(--pp-accent);
+  letter-spacing: 0.4px;
+}
+
+.pp-retail-cal-empty-msg {
+  padding: 20px 0;
+  text-align: center;
+  font-size: 12px;
+}
+.pp-retail-cal-channels-table tbody td { padding: 12px 14px; vertical-align: middle; }
+.pp-retail-cal-chan-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.pp-retail-cal-chan-avatar {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background-size: cover;
+  background-position: center;
+  background-color: var(--pp-line);
   flex-shrink: 0;
 }
-.pp-retail-sentiment-tick {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: var(--pp-dim2);
-  z-index: 2;
+.pp-retail-cal-chan-avatar-empty {
+  background: linear-gradient(135deg, var(--pp-line) 0%, var(--pp-line2) 100%);
 }
-.pp-retail-sentiment-fill {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  /* width set inline; +/- determined by .is-up / .is-down modifier. */
-}
-.pp-retail-sentiment-fill.is-up   { background: var(--pp-up); }
-.pp-retail-sentiment-fill.is-down {
-  background: var(--pp-down);
-  /* Negative fills extend leftward from center. */
-  transform: translateX(-100%);
-}
-.pp-retail-sentiment-val {
-  font-size: 10px;
+.pp-retail-cal-chan-link {
+  color: var(--pp-accent);
+  font-size: 13px;
   font-weight: 600;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SHARED FLOATING TOOLTIP (heatmap + scatter)
+ * Same pattern as the Congress / Insiders tooltips so styling stays unified.
+ * ───────────────────────────────────────────────────────────────────────────*/
+.pp-retail-tooltip {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  padding: 10px 14px;
+  min-width: 200px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+}
+.pp-retail-tt-tk {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: 0.3px;
+  margin-bottom: 2px;
+}
+.pp-retail-tt-meta {
+  font-size: 11px;
+  color: var(--pp-dim);
+  margin-bottom: 8px;
+}
+.pp-retail-tt-rows { display: flex; flex-direction: column; gap: 3px; }
+.pp-retail-tt-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: 11px;
+}
+.pp-retail-tt-val {
+  color: var(--pp-ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * RESPONSIVE
+ * ───────────────────────────────────────────────────────────────────────────*/
+@media (max-width: 1100px) {
+  .pp-retail-mood {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .pp-retail-callouts { grid-template-columns: 1fr; }
+  .pp-retail-lb-row   { grid-template-columns: 1fr; }
+  .pp-retail-cal-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 720px) {
+  .pp-retail-cal-grid { grid-template-columns: 1fr; }
 }

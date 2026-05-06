@@ -194,14 +194,30 @@ def _load_finnhub() -> list[dict] | None:
             event_name = item.get("event", "")
             if not event_name:
                 continue
-            # Finnhub returns time as "HH:MM:SS" or ""
-            t = str(item.get("time", "") or "")
-            if len(t) > 5:
-                t = t[:5]  # "HH:MM"
+            # Finnhub's response format ships the date inside the `time`
+            # field as a full ISO datetime ("YYYY-MM-DD HH:MM:SS").  The
+            # legacy `date` key is gone, so derive both pieces from `time`.
+            time_raw = str(item.get("time", "") or "")
+            date_str = str(item.get("date", "") or "")
+            time_str = ""
+            if time_raw:
+                # "2026-04-28 00:00:00" → date "2026-04-28", time "00:00"
+                if len(time_raw) >= 10 and time_raw[4] == "-":
+                    if not date_str:
+                        date_str = time_raw[:10]
+                    if len(time_raw) >= 16:
+                        time_str = time_raw[11:16]
+                else:
+                    # Pre-existing "HH:MM:SS" or "HH:MM" form.
+                    time_str = time_raw[:5]
+            # 00:00 from Finnhub means "no time given" — drop it so the UI
+            # doesn't render a misleading midnight slot.
+            if time_str == "00:00":
+                time_str = ""
             events.append({
                 "event": event_name,
-                "date": str(item.get("date", "")),
-                "time": t,
+                "date": date_str,
+                "time": time_str,
                 "country": str(item.get("country", "")).upper(),
                 "impact": str(item.get("impact", "low")).lower(),
                 "actual": item.get("actual"),

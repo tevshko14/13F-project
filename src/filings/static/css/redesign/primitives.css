@@ -406,19 +406,33 @@
   color: var(--pp-ink);
 }
 
-/* Sortable header indicator — used by Screener */
+/* Sortable header indicator — auto-applied by sortable-table.js to every
+   `.pp-table` across the v2 experience.  An unobtrusive ↕ glyph hints at
+   the affordance, ↑/↓ make the active sort direction obvious. */
 .pp-table th.pp-sortable {
   cursor: pointer;
   user-select: none;
 }
+.pp-table th.pp-sortable::after {
+  content: " ↕";
+  opacity: 0.25;
+  font-size: 9px;
+  margin-left: 3px;
+  transition: opacity 0.08s ease;
+}
 .pp-table th.pp-sortable:hover { color: var(--pp-text); }
+.pp-table th.pp-sortable:hover::after { opacity: 0.55; }
 .pp-table th.pp-sortable[aria-sort="ascending"]::after {
   content: " ▲";
   color: var(--pp-accent);
+  opacity: 1;
+  font-size: inherit;
 }
 .pp-table th.pp-sortable[aria-sort="descending"]::after {
   content: " ▼";
   color: var(--pp-accent);
+  opacity: 1;
+  font-size: inherit;
 }
 
 /* Action chip on row right — coral arrow link */

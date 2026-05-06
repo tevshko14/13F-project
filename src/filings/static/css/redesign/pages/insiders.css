@@ -139,3 +139,520 @@
   color: var(--pp-accent);
   border-color: var(--pp-accent);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * CLUSTERS TAB — 2-col grid of cluster cards (header / strip / members).
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-clusters-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.pp-insiders-cluster-card { /* panel scoping */ }
+.pp-insiders-cluster-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-insiders-cluster-id { display: block; }
+.pp-insiders-cluster-tkr {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.5px;
+}
+.pp-insiders-cluster-name {
+  font-size: 11px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+.pp-insiders-cluster-stat {
+  text-align: right;
+}
+.pp-insiders-cluster-stat-val {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-insiders-cluster-stat-label {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.pp-insiders-cluster-members { /* parent panel handles outer border */ }
+.pp-insiders-cluster-member {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 20px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-insiders-cluster-member:last-child { border-bottom: none; }
+.pp-insiders-cluster-mn { display: block; min-width: 0; }
+.pp-insiders-cluster-mname {
+  color: var(--pp-ink);
+  font-weight: 500;
+}
+.pp-insiders-cluster-mrole {
+  font-size: 10px;
+  color: var(--pp-dim2);
+  margin-left: 8px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.pp-insiders-cluster-mvalue {
+  font-size: 11px;
+  color: var(--pp-ink);
+  font-weight: 600;
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pp-insiders-cluster-mdate {
+  font-size: 10px;
+  color: var(--pp-dim);
+  min-width: 60px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * PEOPLE TAB — 2-col grid of insider profile cards.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-people-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.pp-insiders-person-card { /* panel scoping */ }
+.pp-insiders-person-body { padding: 16px 18px; }
+.pp-insiders-person-head {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 14px;
+  align-items: flex-start;
+}
+.pp-insiders-person-avatar {
+  width: 44px;
+  height: 44px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.pp-insiders-person-id { min-width: 0; }
+.pp-insiders-person-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-insiders-person-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 10px;
+}
+.pp-insiders-person-role {
+  color: var(--pp-dim);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+.pp-insiders-person-tkr {
+  color: var(--pp-accent);
+  font-weight: 700;
+  font-size: 11px;
+}
+.pp-insiders-person-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 14px;
+  gap: 10px;
+}
+.pp-insiders-person-metric {
+  display: block;
+  font-size: 16px;
+  color: var(--pp-ink);
+  font-weight: 700;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-insiders-person-last { font-size: 12px; }
+.pp-insiders-person-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pp-line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pp-insiders-person-link {
+  font-size: 11px;
+  color: var(--pp-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * COMPANIES TAB — wide table with sentiment bar.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-companies-name {
+  color: var(--pp-dim);
+  margin-left: 6px;
+  font-size: 11px;
+}
+.pp-insiders-companies-sector {
+  font-size: 10px;
+  padding: 2px 7px;
+  color: var(--pp-dim);
+  border: 1px solid var(--pp-line2);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.pp-insiders-companies-net {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Centered sentiment bar — fills outward from the 50% midline. */
+.pp-insiders-sent-bar {
+  position: relative;
+  height: 6px;
+  width: 120px;
+  background: var(--pp-sub2);
+}
+.pp-insiders-sent-bar-tick {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  width: 1px;
+  height: 10px;
+  background: var(--pp-line2);
+}
+.pp-insiders-sent-bar-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+}
+.pp-insiders-sent-bar-fill.is-up   { left: 50%; background: var(--pp-up); }
+.pp-insiders-sent-bar-fill.is-down { right: 50%; background: var(--pp-down); }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * CALENDAR TAB — earnings + blackout window timeline.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-calendar { /* parent panel handles borders */ }
+.pp-insiders-cal-row {
+  display: grid;
+  grid-template-columns: 100px 8px 70px 1fr auto;
+  gap: 18px;
+  padding: 16px 22px;
+  align-items: center;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-insiders-cal-row:last-child { border-bottom: none; }
+.pp-insiders-cal-date { display: block; }
+.pp-insiders-cal-d {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.5px;
+}
+.pp-insiders-cal-when {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+}
+.pp-insiders-cal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--pp-dim);
+  align-self: flex-start;
+  margin-top: 8px;
+}
+.pp-insiders-cal-type-earnings { background: var(--pp-accent); }
+.pp-insiders-cal-type-blackout { background: var(--pp-down); }
+.pp-insiders-cal-type-meeting  { background: var(--pp-dim); }
+.pp-insiders-cal-ticker {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-insiders-cal-evt {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+}
+.pp-insiders-cal-meta {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.pp-insiders-cal-chip {
+  font-size: 10px;
+  padding: 3px 8px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  font-weight: 700;
+  border: 1px solid;
+}
+.pp-insiders-cal-chip.pp-insiders-cal-type-earnings {
+  color: var(--pp-accent);
+  border-color: var(--pp-accent);
+  background: transparent;
+}
+.pp-insiders-cal-chip.pp-insiders-cal-type-blackout {
+  color: var(--pp-down);
+  border-color: var(--pp-down);
+  background: transparent;
+}
+.pp-insiders-cal-chip.pp-insiders-cal-type-meeting {
+  color: var(--pp-dim);
+  border-color: var(--pp-line2);
+  background: transparent;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * FILINGS TAB — direction sub-pill + time chips + momentum chart + collapsible rows
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-toplevel {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.pp-insiders-direction .pp-segment-opt {
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 18px;
+  letter-spacing: -0.1px;
+}
+
+.pp-insiders-window-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.pp-insiders-window-chip {
+  font-size: 11px;
+  padding: 4px 11px;
+  background: var(--pp-bg);
+  color: var(--pp-text);
+  border: 1px solid var(--pp-line2);
+  text-decoration: none;
+  font-family: inherit;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+}
+.pp-insiders-window-chip:hover { border-color: var(--pp-ink); }
+.pp-insiders-window-chip.is-active {
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  border-color: var(--pp-ink);
+  font-weight: 700;
+}
+
+/* Filter rail (Role + Plan) — chips render as <a> tags now, same shape as
+   the existing visual segments but with real navigation. */
+.pp-insiders-filters .pp-segment-opt {
+  text-decoration: none;
+}
+
+/* Active filter chip styling already inherits from pp-segment-mono in
+   primitives.css; the link is just rendered as the segment option. */
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * INSIDER MOMENTUM CHART
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-momentum-panel { margin-bottom: 14px; }
+.pp-insiders-momentum-body { padding: 16px 18px 8px; }
+.pp-insiders-momentum-chart { position: relative; }
+.pp-insiders-momentum-svg {
+  display: block;
+  width: 100%;
+  height: 280px;
+  cursor: crosshair;
+}
+.pp-insiders-momentum-grid {
+  stroke: var(--pp-line);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+.pp-insiders-momentum-zero {
+  stroke: var(--pp-line2);
+  stroke-width: 1.2;
+}
+.pp-insiders-momentum-bar {
+  transition: opacity 0.08s ease;
+}
+.pp-insiders-momentum-bar.is-buy  { fill: var(--pp-up);   }
+.pp-insiders-momentum-bar.is-sell { fill: var(--pp-down); }
+.pp-insiders-momentum-chart:hover .pp-insiders-momentum-bar { opacity: 0.45; }
+.pp-insiders-momentum-bar.is-active { opacity: 1; }
+
+/* Tooltip — chip floating above the active bar.  Positioned outside the
+   SVG (in container px) so text isn't stretched by `preserveAspectRatio`. */
+.pp-insiders-momentum-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  transform: translate(-50%, calc(-100% - 10px));
+  white-space: nowrap;
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+.pp-insiders-momentum-tt-tk {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+}
+.pp-insiders-momentum-tt-v {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+}
+.pp-insiders-momentum-ylabel {
+  fill: var(--pp-dim);
+  font-size: 10px;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.pp-insiders-momentum-tklabel {
+  fill: var(--pp-text);
+  font-size: 10px;
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+.pp-insiders-momentum-legend {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  padding-left: 70px;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * COLLAPSIBLE GROUPED ROWS
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-insiders-grouped-table thead th {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pp-dim);
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line2);
+}
+.pp-insiders-grouped-table thead th.pp-num { text-align: right; }
+.pp-insiders-grouped-table thead th.pp-insiders-th-tkr { width: 100px; }
+.pp-insiders-grouped-table thead th.pp-insiders-th-toggle { width: 40px; }
+.pp-insiders-grouped-summary {
+  cursor: pointer;
+  border-bottom: 1px solid var(--pp-line);
+  transition: background 0.1s ease;
+}
+.pp-insiders-grouped-summary:hover { background: var(--pp-sub); }
+.pp-insiders-grouped-summary td {
+  padding: 11px 14px;
+  font-size: 12px;
+  vertical-align: middle;
+}
+.pp-insiders-grouped-summary td.pp-num { text-align: right; }
+.pp-insiders-grouped-name {
+  color: var(--pp-dim);
+  font-size: 11px;
+}
+.pp-insiders-grouped-net {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pp-insiders-grouped-chevron {
+  display: inline-block;
+  font-size: 14px;
+  color: var(--pp-dim);
+  transition: transform 0.15s ease;
+}
+.pp-insiders-grouped-summary.is-open .pp-insiders-grouped-chevron {
+  transform: rotate(180deg);
+}
+
+/* Detail row — full filings table revealed on expand. */
+.pp-insiders-grouped-detail td {
+  padding: 0;
+  background: var(--pp-sub);
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-insiders-grouped-subtable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.pp-insiders-grouped-subtable thead th {
+  font-family: var(--pp-font-mono);
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--pp-dim);
+  padding: 8px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-insiders-grouped-subtable thead th.pp-num { text-align: right; }
+.pp-insiders-grouped-subtable thead th.pp-insiders-th-sec { width: 40px; }
+.pp-insiders-grouped-subtable tbody td {
+  padding: 8px 14px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--pp-line);
+  vertical-align: middle;
+}
+.pp-insiders-grouped-subtable tbody tr:last-child td { border-bottom: none; }
+.pp-insiders-grouped-subtable td.pp-num { text-align: right; }

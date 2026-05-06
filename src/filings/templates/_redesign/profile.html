@@ -11,7 +11,7 @@
 -#}
 {% extends "_redesign/base.html" %}
 {% from "_redesign/macros/_primitives.html" import
-     mono, kicker, label, btn, panel, panel_head, segment %}
+     mono, kicker, label, btn, panel, panel_head, segment, tag %}
 
 {% block title %}Profile · PaperPanda{% endblock %}
 
@@ -52,7 +52,8 @@
 <div class="pp-page-body">
 
   {# ── WATCHLIST (default — LIVE) ── #}
-  <section class="pp-page-pane is-active" data-tab-pane="Watchlist">
+  <section class="pp-page-pane{% if profile_tab == 'Watchlist' %} is-active{% endif %}"
+           data-tab-pane="Watchlist">
 
     {# Top row: list selector + new-list / add-ticker actions.
        Lists are mock for now — schema is flat (no list_id).  We render the
@@ -127,44 +128,186 @@
 
   </section>
 
-  {# ── ALERTS (placeholder) ── #}
-  <section class="pp-page-pane" data-tab-pane="Alerts">
+  {# ━━━━━━━━━━ ALERTS ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if profile_tab == 'Alerts' %} is-active{% endif %}"
+           data-tab-pane="Alerts">
+    <div class="pp-profile-watch-controls">
+      <span class="pp-mono pp-profile-alerts-count">
+        <span class="pp-ink-strong">{{ profile_alerts_active }}</span> active alerts
+      </span>
+      <span class="pp-mono pp-dim">· of {{ profile_alerts_quota }} in plan</span>
+      <div style="flex:1"></div>
+      {{ btn("+ New alert", kind="accent") }}
+    </div>
+
     {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">🔔</div>
-        <div class="pp-page-placeholder-title">Alerts tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          7-column alert table (ticker / type / rule / channel / status / last triggered).
-          Wires to filings.notifications; backend endpoints already exist.
-        </div>
-      </div>
+      <table class="pp-table pp-profile-alerts-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Type</th>
+            <th>Rule</th>
+            <th>Channel</th>
+            <th>Status</th>
+            <th class="pp-num">Last</th>
+            <th class="pp-num pp-profile-alerts-th-act"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in profile_alerts %}
+            <tr class="{% if a.status == 'paused' %}pp-profile-alerts-paused{% endif %}">
+              <td><span class="pp-mono pp-profile-watch-tkr">{{ a.ticker }}</span></td>
+              <td>
+                <span class="pp-mono pp-profile-alerts-type">{{ a.type }}</span>
+              </td>
+              <td class="pp-text">{{ a.rule }}</td>
+              <td class="pp-dim">{{ a.channel }}</td>
+              <td>
+                <span class="pp-mono pp-profile-alerts-status {% if a.status == 'active' %}pp-up{% else %}pp-dim2{% endif %}">
+                  ● {{ a.status }}
+                </span>
+              </td>
+              <td class="pp-num pp-mono {% if a.triggered == 'now' %}pp-accent-color{% else %}pp-dim{% endif %}"
+                  style="font-weight:{% if a.triggered == 'now' %}700{% else %}400{% endif %};">{{ a.triggered }}</td>
+              <td class="pp-num">
+                <span class="pp-profile-alerts-act">Edit</span>
+                <span class="pp-profile-watch-x" role="button" aria-label="Remove">×</span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     {% endcall %}
   </section>
 
-  {# ── ACCOUNT (placeholder) ── #}
-  <section class="pp-page-pane" data-tab-pane="Account">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">⚙</div>
-        <div class="pp-page-placeholder-title">Account tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Profile fields, security (2FA, sessions), API keys, connected accounts.
+  {# ━━━━━━━━━━ ACCOUNT ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if profile_tab == 'Account' %} is-active{% endif %}"
+           data-tab-pane="Account">
+    <div class="pp-profile-account-grid">
+      {% call panel() %}
+        {{ panel_head("Profile") }}
+        <div class="pp-profile-kv">
+          {% for k, v in profile_account_profile %}
+            <div class="pp-profile-kv-row">
+              <span class="pp-profile-kv-key">{{ k }}</span>
+              <span class="pp-mono pp-profile-kv-val">{{ v }}</span>
+            </div>
+          {% endfor %}
+          <div class="pp-profile-kv-actions">{{ btn("Edit profile", kind="ghost") }}</div>
         </div>
-      </div>
-    {% endcall %}
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Preferences") }}
+        <div class="pp-profile-kv">
+          {% for k, v in profile_account_prefs %}
+            <div class="pp-profile-kv-row">
+              <span class="pp-profile-kv-key">{{ k }}</span>
+              <span class="pp-mono pp-profile-kv-val">{{ v }}</span>
+            </div>
+          {% endfor %}
+          <div class="pp-profile-kv-actions">{{ btn("Edit preferences", kind="ghost") }}</div>
+        </div>
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Security") }}
+        <div class="pp-profile-kv">
+          {% for k, v in profile_account_security %}
+            <div class="pp-profile-kv-row">
+              <span class="pp-profile-kv-key">{{ k }}</span>
+              <span class="pp-mono pp-profile-kv-val pp-text">{{ v }}</span>
+            </div>
+          {% endfor %}
+          <div class="pp-profile-kv-actions">
+            {{ btn("Change password", kind="ghost") }}
+            {{ btn("Manage 2FA", kind="ghost") }}
+          </div>
+        </div>
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Connected accounts") }}
+        <div class="pp-profile-kv">
+          {% for c in profile_account_connected %}
+            <div class="pp-profile-conn-row">
+              <div>
+                <div class="pp-profile-conn-name">{{ c.name }}</div>
+                <span class="pp-mono pp-profile-conn-val">{{ c.value }}</span>
+              </div>
+              <span class="pp-mono pp-profile-conn-status {% if c.status == 'connected' %}pp-up{% else %}pp-dim2{% endif %}">
+                ● {{ c.status }}
+              </span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endcall %}
+    </div>
   </section>
 
-  {# ── SUBSCRIPTION (placeholder) ── #}
-  <section class="pp-page-pane" data-tab-pane="Subscription">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">$</div>
-        <div class="pp-page-placeholder-title">Subscription tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Current plan, usage meters, billing history, plan-comparison cards.
+  {# ━━━━━━━━━━ SUBSCRIPTION ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if profile_tab == 'Subscription' %} is-active{% endif %}"
+           data-tab-pane="Subscription">
+    <div class="pp-profile-plans-grid">
+      {% for p in profile_plans %}
+        {% call panel(cls=("pp-profile-plan-card pp-profile-plan-current" if p.current else "pp-profile-plan-card")) %}
+          <div class="pp-profile-plan-body">
+            {% if p.current %}
+              <span class="pp-mono pp-profile-plan-kicker">★ Current plan</span>
+            {% endif %}
+            <span class="pp-mono pp-profile-plan-name">{{ p.name }}</span>
+            <div class="pp-profile-plan-price">
+              <span class="pp-mono pp-profile-plan-amount">{{ p.price }}</span>
+              <span class="pp-mono pp-profile-plan-period">{{ p.period }}</span>
+            </div>
+            <ul class="pp-profile-plan-features">
+              {% for f in p.features %}
+                <li><span class="pp-profile-plan-bullet">+</span>{{ f }}</li>
+              {% endfor %}
+            </ul>
+            <div class="pp-profile-plan-cta">
+              {{ btn(p.cta, kind=("ghost" if p.current else "accent"), block=True) }}
+            </div>
+          </div>
+        {% endcall %}
+      {% endfor %}
+    </div>
+
+    <div class="pp-profile-billing-grid">
+      {% call panel() %}
+        {{ panel_head("Billing") }}
+        <div class="pp-profile-kv">
+          {% for k, v in profile_billing %}
+            <div class="pp-profile-kv-row">
+              <span class="pp-profile-kv-key">{{ k }}</span>
+              <span class="pp-mono pp-profile-kv-val">{{ v }}</span>
+            </div>
+          {% endfor %}
+          <div class="pp-profile-kv-actions">
+            {{ btn("Update payment", kind="ghost") }}
+            {{ btn("Cancel plan", kind="ghost") }}
+          </div>
         </div>
-      </div>
-    {% endcall %}
+      {% endcall %}
+
+      {% call panel() %}
+        {{ panel_head("Invoices") }}
+        <table class="pp-table pp-profile-invoices-table">
+          <tbody>
+            {% for inv in profile_invoices %}
+              <tr>
+                <td><span class="pp-mono pp-dim">{{ inv.date }}</span></td>
+                <td class="pp-text">{{ inv.label }}</td>
+                <td class="pp-num pp-mono pp-ink-strong">{{ inv.amount }}</td>
+                <td class="pp-num">
+                  <span class="pp-mono pp-profile-invoices-status pp-up">● {{ inv.status }}</span>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    </div>
   </section>
 
 </div>

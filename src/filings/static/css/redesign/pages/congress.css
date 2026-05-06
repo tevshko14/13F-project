@@ -10,14 +10,19 @@
   gap: 9px;
 }
 .pp-congress-party-dot {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
   background: var(--pp-dim);
   flex-shrink: 0;
+  display: inline-block;
 }
-.pp-congress-party-d { background: #2274d6; }   /* blue, party D */
-.pp-congress-party-r { background: #d62b2b; }   /* red,  party R */
-.pp-congress-party-i { background: var(--pp-dim); } /* dim, independent */
+.pp-congress-party-d,
+.pp-congress-party-democrat    { background: #2563eb; }   /* blue,  party D */
+.pp-congress-party-r,
+.pp-congress-party-republican  { background: #dc2626; }   /* red,   party R */
+.pp-congress-party-i,
+.pp-congress-party-independent { background: #6b7280; }   /* gray,  Independent */
 .pp-congress-state {
   font-size: 10px;
   color: var(--pp-dim2);
@@ -26,4 +31,943 @@
 .pp-congress-lag {
   font-size: 11px;
   font-weight: 600;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * MEMBERS TAB — 2-column grid of profile cards.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-congress-members-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.pp-congress-member-card { /* panel scoping */ }
+.pp-congress-mc-body  { padding: 16px 18px; }
+.pp-congress-mc-head  {
+  display: grid;
+  grid-template-columns: 44px 1fr auto;
+  gap: 14px;
+  align-items: flex-start;
+}
+.pp-congress-mc-avatar {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: #fff;
+  background: var(--pp-dim);
+}
+.pp-congress-mc-avatar-d { background: #2274d6; }
+.pp-congress-mc-avatar-r { background: #d62b2b; }
+.pp-congress-mc-avatar-i { background: var(--pp-dim); }
+.pp-congress-mc-id   { min-width: 0; }
+.pp-congress-mc-name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-congress-mc-meta {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+.pp-congress-mc-pill {
+  font-size: 10px;
+  padding: 2px 7px;
+  border: 1px solid var(--pp-line2);
+  color: var(--pp-dim);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+.pp-congress-mc-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin-top: 14px;
+  gap: 10px;
+}
+.pp-congress-mc-metric {
+  display: block;
+  font-size: 16px;
+  color: var(--pp-ink);
+  font-weight: 700;
+  margin-top: 2px;
+}
+.pp-congress-mc-last { font-size: 12px; }
+.pp-congress-mc-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pp-line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pp-congress-mc-link {
+  font-size: 11px;
+  color: var(--pp-accent);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * LEADERBOARD TAB — top-3 podium + ranked table with buy-bias bar.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-congress-podium {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.pp-congress-podium-card { /* panel scoping */ }
+.pp-congress-podium-body {
+  position: relative;
+  padding: 22px 24px;
+}
+.pp-congress-podium-bigrank {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  font-size: 48px;
+  font-weight: 800;
+  color: var(--pp-line2);
+  letter-spacing: -3px;
+  line-height: 1;
+}
+.pp-congress-podium-rank {
+  font-size: 10px;
+  color: var(--pp-accent);
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.pp-congress-podium-name {
+  margin-top: 8px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+}
+.pp-congress-podium-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--pp-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.pp-congress-podium-vol {
+  display: block;
+  font-size: 36px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  margin-top: 14px;
+  letter-spacing: -1.2px;
+  line-height: 1;
+}
+.pp-congress-podium-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--pp-dim);
+  margin-top: 4px;
+}
+
+.pp-congress-leaderboard-table thead th.pp-congress-th-rank { width: 44px; }
+.pp-congress-buybar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pp-congress-buybar-track {
+  flex: 1;
+  max-width: 110px;
+  height: 4px;
+  background: var(--pp-sub2);
+}
+.pp-congress-buybar-fill { height: 100%; }
+.pp-congress-buybar-label {
+  font-size: 11px;
+  color: var(--pp-text);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * PERFORMANCE TAB — headline tiles + dual-line chart + party / sector cells.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-congress-perf-panel { margin-bottom: 18px; }
+.pp-congress-perf-body  { padding: 22px 26px; }
+.pp-congress-perf-tiles {
+  display: flex;
+  align-items: baseline;
+  gap: 32px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.pp-congress-perf-tile {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -1.0px;
+  margin-top: 4px;
+}
+
+.pp-congress-perf-chart { position: relative; }
+.pp-congress-perf-svg {
+  display: block;
+  width: 100%;
+  height: 220px;
+  cursor: crosshair;
+}
+
+/* Hover layer — crosshair + two emphasised dots (one per series), hidden
+   until JS toggles `.is-visible`.  Tooltip is HTML positioned in container
+   px so text isn't stretched by `preserveAspectRatio="none"`. */
+.pp-congress-perf-crosshair {
+  stroke: var(--pp-accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+  pointer-events: none;
+}
+.pp-congress-perf-crosshair.is-visible { opacity: 1; }
+.pp-congress-perf-dot {
+  stroke: var(--pp-bg);
+  stroke-width: 1.5;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+  pointer-events: none;
+}
+.pp-congress-perf-dot.is-cong { fill: var(--pp-accent); }
+.pp-congress-perf-dot.is-spy  { fill: var(--pp-dim);    }
+.pp-congress-perf-dot.is-visible { opacity: 1; }
+.pp-congress-perf-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  transform: translate(-50%, calc(-100% - 12px));
+  white-space: nowrap;
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+.pp-congress-perf-tt-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pp-congress-perf-tt-date {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--pp-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.pp-congress-perf-tt-cong,
+.pp-congress-perf-tt-spy {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-congress-perf-legend {
+  display: flex;
+  gap: 18px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--pp-text);
+}
+.pp-congress-perf-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.pp-congress-perf-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+.pp-congress-party-body  { padding: 18px; }
+.pp-congress-party-row   { margin-bottom: 16px; }
+.pp-congress-party-row:last-child { margin-bottom: 0; }
+.pp-congress-party-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.pp-congress-party-row-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.pp-congress-party-row-name {
+  font-size: 13px;
+  color: var(--pp-ink);
+  font-weight: 600;
+}
+.pp-congress-party-row-n   { font-size: 10px; }
+.pp-congress-party-row-pct {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+.pp-congress-party-bar {
+  height: 6px;
+  background: var(--pp-sub2);
+}
+.pp-congress-party-bar-fill { height: 100%; }
+.pp-congress-party-row-vol {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 4px;
+}
+
+.pp-congress-sectors-body { padding: 14px 18px; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * CALENDAR TAB — per-row dot + ticker tags.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-congress-calendar { /* relies on parent panel for borders */ }
+.pp-congress-cal-row {
+  display: grid;
+  grid-template-columns: 100px 8px 1fr auto;
+  gap: 18px;
+  padding: 16px 22px;
+  align-items: center;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-congress-cal-row:last-child { border-bottom: none; }
+.pp-congress-cal-date  { display: block; }
+.pp-congress-cal-d     {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.5px;
+}
+.pp-congress-cal-when  {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+}
+.pp-congress-cal-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--pp-dim);
+  align-self: flex-start;
+  margin-top: 8px;
+}
+.pp-congress-cal-impact-high   { background: var(--pp-down); }
+.pp-congress-cal-impact-medium { background: var(--pp-accent); }
+.pp-congress-cal-impact-low    { background: var(--pp-dim); }
+.pp-congress-cal-evt   {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+}
+.pp-congress-cal-impact-label {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.pp-congress-cal-tickers {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 240px;
+}
+.pp-congress-cal-tkr {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  padding: 3px 8px;
+  border: 1px solid var(--pp-line2);
+  background: var(--pp-bg);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * v2 CONGRESS PAGE — chamber dot grids + chart toggle
+ *
+ * Layout: stats banner → tab nav → Congress pane (Senate grid + House grid +
+ * Net Worth/Trade Freq toggle).  Mirrors the v1 page.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+/* Chamber panel — title + party legend, then a dot grid below. */
+.pp-congress-chamber-panel { margin-bottom: 18px; padding: 18px 22px; }
+.pp-congress-chamber-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.pp-congress-chamber-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-congress-chamber-icon { font-size: 16px; opacity: 0.9; }
+.pp-congress-chamber-legend {
+  display: inline-flex;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--pp-text);
+}
+.pp-congress-chamber-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Dot grid — CSS grid driven by `--pp-congress-cols` set inline.  Each
+   dot is a circular badge with the state abbreviation in the centre,
+   party-coloured background. */
+.pp-congress-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--pp-congress-cols, 20), 1fr);
+  gap: 8px;
+  padding: 4px 2px;
+}
+.pp-congress-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  font-family: var(--pp-font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+  user-select: none;
+}
+.pp-congress-dot:hover {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2px var(--pp-bg), 0 0 0 3px currentColor;
+  z-index: 2;
+}
+.pp-congress-dot-democrat    { background: #2563eb; }
+.pp-congress-dot-republican  { background: #dc2626; }
+.pp-congress-dot-independent { background: #6b7280; }
+
+/* Floating tooltip — same look as the chart tooltips elsewhere.  Hidden
+   by default; JS toggles `hidden` and positions absolutely. */
+.pp-congress-tooltip {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  padding: 10px 14px;
+  min-width: 220px;
+  font-size: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+}
+.pp-congress-tt-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  margin-bottom: 2px;
+}
+.pp-congress-tt-meta {
+  font-size: 11px;
+  margin-bottom: 8px;
+  color: var(--pp-dim);
+}
+.pp-congress-tt-meta.pp-congress-tt-party-democrat   { color: #2563eb; }
+.pp-congress-tt-meta.pp-congress-tt-party-republican { color: #dc2626; }
+.pp-congress-tt-row {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+.pp-congress-tt-row .pp-dim { min-width: 78px; }
+.pp-congress-tt-holdings-head {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+.pp-congress-tt-holdings {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pp-congress-tt-holdings li { font-size: 11px; color: var(--pp-text); }
+.pp-congress-tt-tkr { font-weight: 700; color: var(--pp-ink); }
+
+/* Chart toggle — Trade Frequency / Net Worth Leaderboard.  Two views
+   live in the same panel; only one has `.is-active` at a time. */
+.pp-congress-leader-panel { margin-top: 18px; padding: 18px 22px 22px; }
+.pp-congress-leader-head {
+  display: flex;
+  margin-bottom: 14px;
+}
+.pp-congress-leader-toggle .pp-segment-opt {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+.pp-congress-leader-view { display: none; }
+.pp-congress-leader-view.is-active { display: block; }
+
+/* Horizontal bar list — left label (member name + state, party-coloured),
+   right bar with the dollar value at the bar's end + a chamber tag. */
+.pp-congress-leader-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+.pp-congress-leader-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  min-height: 22px;
+  cursor: pointer;
+}
+.pp-congress-leader-label {
+  text-align: right;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-congress-leader-bar-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 16px;
+}
+.pp-congress-leader-bar {
+  height: 100%;
+  border-radius: 2px;
+  opacity: 0.85;
+  min-width: 1px;
+  transition: opacity 0.1s ease;
+}
+.pp-congress-leader-row:hover .pp-congress-leader-bar { opacity: 1; }
+.pp-congress-leader-val {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pp-congress-leader-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--pp-dim2);
+  background: var(--pp-line);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * v2 CONGRESS HOLDINGS TAB
+ * Trending bars + Consensus rows + Momentum bars + Holdings table.
+ *
+ * Reuses the existing v2 design tokens (pp-line/pp-bg/pp-up/pp-down/pp-accent),
+ * the panel macro, and the floating .pp-congress-tooltip from the Congress
+ * tab so hover behaviour is consistent across the page.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-congress-holdings-panel { margin-bottom: 18px; padding: 18px 22px; }
+
+/* Generic vertical-bar chart shell — used by Trending + Recent Momentum.
+   Matches the Insider Momentum chart pattern (ViewBox 1500 x H, fixed
+   left-pad rail for y-axis labels, dashed gridlines).  Bars carry their
+   per-ticker payload in data-* attributes for the hover handler. */
+.pp-congress-vbar-chart   { position: relative; }
+.pp-congress-vbar-svg {
+  display: block;
+  width: 100%;
+  cursor: pointer;
+}
+.pp-congress-trending-chart .pp-congress-vbar-svg { height: 260px; }
+.pp-congress-momentum-chart .pp-congress-vbar-svg { height: 280px; }
+
+.pp-congress-vbar-grid {
+  stroke: var(--pp-line);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+.pp-congress-vbar-zero {
+  stroke: var(--pp-line2);
+  stroke-width: 1.2;
+}
+.pp-congress-vbar-ylabel {
+  fill: var(--pp-dim);
+  font-size: 10px;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+/* Y-axis header ("Buyers" / "Trades") rendered in HTML so the
+   `preserveAspectRatio="none"` SVG can't horizontally stretch the text. */
+.pp-congress-vbar-axis-head {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  z-index: 1;
+  pointer-events: none;
+}
+.pp-congress-vbar-tlabel {
+  fill: var(--pp-text);
+  font-size: 9.5px;
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+}
+.pp-congress-vbar-count {
+  fill: var(--pp-ink);
+  font-size: 10px;
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+}
+.pp-congress-vbar {
+  cursor: pointer;
+  transition: opacity 0.08s ease, filter 0.08s ease;
+}
+/* Trending — single accent fill (teal). */
+.pp-congress-vbar-trending { fill: var(--pp-up); }
+/* Momentum — green up, red down. */
+.pp-congress-vbar-momentum.is-buy  { fill: var(--pp-up);   }
+.pp-congress-vbar-momentum.is-sell { fill: var(--pp-down); }
+.pp-congress-vbar-chart:hover .pp-congress-vbar { opacity: 0.55; }
+.pp-congress-vbar.is-active { opacity: 1; filter: brightness(1.15); }
+
+.pp-congress-momentum-legend {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  font-size: 11px;
+  color: var(--pp-text);
+  margin-bottom: 8px;
+}
+.pp-congress-momentum-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.pp-congress-momentum-swatch.is-buy  { background: var(--pp-up);   }
+.pp-congress-momentum-swatch.is-sell { background: var(--pp-down); }
+
+/* Consensus Leaders — horizontal-bar list.  Same pixel grid as the
+   Net Worth / Trade Frequency leaderboard so vertical rhythm matches. */
+.pp-congress-consensus-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+}
+.pp-congress-consensus-row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  min-height: 24px;
+  cursor: pointer;
+}
+.pp-congress-consensus-tkr {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  text-align: right;
+}
+.pp-congress-consensus-bar-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 18px;
+}
+.pp-congress-consensus-bar {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--pp-accent);
+  opacity: 0.85;
+  min-width: 1px;
+  transition: opacity 0.1s ease;
+}
+.pp-congress-consensus-row:hover .pp-congress-consensus-bar { opacity: 1; }
+.pp-congress-consensus-val {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* All Congressional Holdings — table.  Borrows the .pp-table /
+   .pp-insiders-table base classes and only adds column-specific tweaks. */
+.pp-congress-holdings-table tbody td { padding: 12px 16px; }
+.pp-congress-holdings-tkr {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pp-accent);
+  letter-spacing: 0.4px;
+}
+.pp-congress-holdings-members {
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--pp-ink);
+}
+.pp-congress-holdings-top {
+  color: var(--pp-text);
+  font-size: 12px;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * v2 CONGRESS ACTIVITY TAB
+ * Stats banner + filter pills + collapsible consensus moves.
+ *
+ * Reuses the existing v2 panel macro, monospaced ticker styling, and
+ * BUY/SELL tag pattern.  Pills (BULLISH/BEARISH/BIPARTISAN) are coloured
+ * via shared classes so they stay consistent with the rest of the app.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+/* Stats banner — six labelled cells in a row, uppercase mono labels above
+   tabular-num values.  Mirrors the v2 KPI strip rhythm but renders inside
+   a single panel so the labels can wrap to a second row on narrow widths. */
+.pp-congress-act-stats-panel { margin-bottom: 14px; padding: 18px 22px; }
+.pp-congress-act-stats {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px 24px;
+}
+.pp-congress-act-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.pp-congress-act-stat-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Filter row — three pill groups across one line.  Built on the existing
+   .pp-segment / .pp-segment-opt primitives so spacing/typography matches
+   the Filings filter row on the Insiders page. */
+.pp-congress-act-filters {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.pp-congress-act-segment-time { margin-left: auto; margin-right: auto; }
+
+/* Section heading above the cluster list. */
+.pp-congress-act-section-head {
+  margin: 18px 0 10px;
+  font-size: 11px;
+  letter-spacing: 1.2px;
+}
+
+/* ── Sentiment / bipartisan / buy-sell pills ──
+   The pp-tag base class already lives in v2's primitives stylesheet — we
+   only add the colour variants here. */
+.pp-congress-act-sentiment-bullish,
+.pp-congress-act-tag-buy {
+  background: rgba(35, 162, 110, 0.16);
+  color: var(--pp-up);
+  border: 1px solid rgba(35, 162, 110, 0.4);
+}
+.pp-congress-act-sentiment-bearish,
+.pp-congress-act-tag-sell {
+  background: rgba(220, 38, 38, 0.18);
+  color: var(--pp-down);
+  border: 1px solid rgba(220, 38, 38, 0.4);
+}
+.pp-congress-act-sentiment-neutral {
+  background: var(--pp-line);
+  color: var(--pp-dim);
+  border: 1px solid var(--pp-line2);
+}
+.pp-congress-act-tag-bipartisan {
+  background: rgba(139, 92, 246, 0.18);
+  color: #a78bfa;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+}
+.pp-congress-act-stats .pp-tag,
+.pp-congress-act-cluster-tags .pp-tag,
+.pp-congress-act-detail-action .pp-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+}
+
+/* ── Cluster card (collapsible) ──
+   Summary row is a button so the whole row is clickable + keyboard-focusable.
+   Detail row sits under it and toggles via [hidden] from JS. */
+.pp-congress-act-clusters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pp-congress-act-cluster {
+  border: 1px solid var(--pp-line2);
+  border-radius: 4px;
+  background: var(--pp-bg);
+  overflow: hidden;
+}
+.pp-congress-act-cluster-summary {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1.4fr) auto minmax(220px, 1.2fr) 110px 22px;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  transition: background 0.08s ease;
+}
+.pp-congress-act-cluster-summary:hover { background: var(--pp-line); }
+.pp-congress-act-cluster-tkr {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-accent);
+  letter-spacing: 0.4px;
+}
+.pp-congress-act-cluster-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-congress-act-cluster-tags {
+  display: inline-flex;
+  gap: 6px;
+}
+.pp-congress-act-cluster-meta {
+  font-size: 11px;
+  color: var(--pp-dim);
+  text-align: left;
+}
+.pp-congress-act-cluster-net {
+  text-align: right;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pp-congress-act-cluster-chev {
+  color: var(--pp-dim);
+  font-size: 11px;
+  transition: transform 0.1s ease;
+  text-align: center;
+}
+.pp-congress-act-cluster-summary[aria-expanded="true"] .pp-congress-act-cluster-chev {
+  transform: rotate(90deg);
+}
+
+/* Detail (expanded drawer) — table of individual politician trades.
+   Uses .pp-table base so column padding/typography matches other tables. */
+.pp-congress-act-cluster-detail {
+  border-top: 1px solid var(--pp-line);
+  background: var(--pp-bg);
+}
+.pp-congress-act-detail-table { width: 100%; }
+.pp-congress-act-detail-table tbody td {
+  padding: 10px 18px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-congress-act-detail-table tbody tr:last-child td { border-bottom: 0; }
+.pp-congress-act-detail-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-ink);
+}
+.pp-congress-act-detail-sub {
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pp-congress-act-detail-sub .pp-congress-party-democrat   { color: #2563eb; background: transparent; width: auto; height: auto; border-radius: 0; font-weight: 700; }
+.pp-congress-act-detail-sub .pp-congress-party-republican { color: #dc2626; background: transparent; width: auto; height: auto; border-radius: 0; font-weight: 700; }
+.pp-congress-act-detail-sub .pp-congress-party-independent{ color: #6b7280; background: transparent; width: auto; height: auto; border-radius: 0; font-weight: 700; }
+.pp-congress-act-detail-amt  { color: var(--pp-text); font-weight: 600; }
+.pp-congress-act-detail-date { color: var(--pp-dim); }
+
+@media (max-width: 1100px) {
+  .pp-congress-act-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pp-congress-act-cluster-summary {
+    grid-template-columns: 80px 1fr auto;
+  }
+  .pp-congress-act-cluster-meta,
+  .pp-congress-act-cluster-tags { grid-column: span 3; }
 }

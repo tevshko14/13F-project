@@ -1,23 +1,19 @@
 {#-
   PaperPanda Redesign — Retail page
-  Mirrors design_handoff_paperpanda/page-retail.jsx
-
-  Tabs: Pulse · Trends · WSB
-  Default = Pulse (live).  Trends + WSB are placeholders until their
-  data wiring lands (Google Trends multi-line; WSB sentiment + flair).
-
-  Real data: filings.sentiment._get_apewisdom_all() — 8 ticker trending
-  list with rank / mentions / mentions_24h_ago / upvotes.  Sentiment is
-  a crude upvotes-to-mentions proxy until proper NLP lands.
+  Three tabs (Sentiment / Leaderboard / Calendar) wired to:
+    - filings.sentiment._get_apewisdom_all + _get_cnn_fear_greed
+    - filings.sentiment.build_retail_leaderboard_data
+    - filings.youtube_cache.get_recent_youtube_uploads + get_youtube_channels
 -#}
 {% extends "_redesign/base.html" %}
 {% from "_redesign/macros/_primitives.html" import
-     mono, kicker, label, btn, panel, panel_head, segment,
-     kpi_strip, spark %}
+     mono, kicker, label, btn, panel, panel_head, segment, kpi_strip %}
 
 {% block title %}Retail · PaperPanda{% endblock %}
 
 {% block extra_css %}
+  {# macro.css carries the shared `.pp-page-pane` show/hide rules used by
+     every multi-tab v2 page — must be linked before retail.css. #}
   <link rel="stylesheet"
         href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
   <link rel="stylesheet"
@@ -30,16 +26,12 @@
 <header class="pp-page-hero">
   <div class="pp-page-hero-icon" aria-hidden="true">R</div>
   <div class="pp-page-hero-text">
-    <span class="pp-mono pp-page-hero-crumb">
-      Sentiment <span class="pp-page-hero-crumb-sep">/</span> Retail
-    </span>
-    <h1 class="pp-page-hero-title">Retail pulse</h1>
+    <span class="pp-mono pp-page-hero-crumb">PaperPanda Retail Lens</span>
+    <h1 class="pp-page-hero-title">Retail Sentiment &amp; Trending Stocks</h1>
     <div class="pp-page-hero-sub">
-      Google Trends · Reddit · X · 24-hour rolling window
-      {%- if retail_is_mock %} · <span class="pp-page-hero-flag">DEMO</span>{% endif %}
+      Reddit sentiment, trending tickers, market fear &amp; greed index, and finance YouTuber schedules.
     </div>
   </div>
-  {{ btn("Add ticker", kind="ghost") }}
 </header>
 
 {# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
@@ -49,137 +41,402 @@
 
 {# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
 <div class="pp-page-tabs">
-  {{ segment(["Pulse","Trends","WSB"],
-             value=retail_tab|default("Pulse"),
+  {{ segment(["Sentiment","Leaderboard","Calendar"],
+             value={"sentiment":"Sentiment","leaderboard":"Leaderboard","calendar":"Calendar"}.get(retail_view, "Sentiment"),
              id="pp-retail-tabs") }}
 </div>
 
 {# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
 <div class="pp-page-body">
 
-  {# ── PULSE (default — LIVE via ApeWisdom) ── #}
-  <section class="pp-page-pane is-active" data-tab-pane="Pulse">
+  {# ━━━━━━━━━━ SENTIMENT — Market Mood + 3 callout cards ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if retail_view == 'sentiment' %} is-active{% endif %}"
+           data-tab-pane="Sentiment">
 
-    {# Top callout — featured ticker hero with 3-stat grid + spark.
-       Coral left-border accent matches the design's `notable_panel` pattern. #}
-    {% if retail_featured %}
-      {% call panel(cls="pp-retail-featured-panel") %}
-        <div class="pp-retail-featured">
-          <div class="pp-retail-featured-id">
-            {{ kicker("Most discussed · 24h") }}
-            <div class="pp-mono pp-retail-featured-tkr">${{ retail_featured.ticker }}</div>
-            <div class="pp-retail-featured-name">{{ retail_featured.name }}</div>
+    {%- set _fg = sentiment.fear_greed -%}
+
+    {# ── Market Mood (CNN Fear & Greed Index) ── #}
+    {% call panel(cls="pp-retail-mood-panel") %}
+      {{ panel_head("Market Mood", sub="CNN Fear & Greed Index") }}
+      {% if _fg and _fg.score is not none %}
+        <div class="pp-retail-mood">
+          <div class="pp-retail-mood-score">
+            <div class="pp-retail-mood-num">
+              <span class="pp-mono pp-retail-mood-val pp-retail-mood-band-{{ _fg.rating_key }}">{{ _fg.score_str }}</span>
+              <span class="pp-mono pp-retail-mood-denom">/100</span>
+            </div>
+            <span class="pp-mono pp-tag pp-retail-mood-pill pp-retail-mood-band-{{ _fg.rating_key }}">{{ _fg.rating }}</span>
           </div>
-          <div class="pp-retail-featured-stats">
-            <div>
-              {{ label("Mentions") }}
-              <span class="pp-mono pp-retail-stat-val">{{ retail_featured.mentions_str }}</span>
-              <span class="pp-mono pp-retail-stat-delta {{ 'pp-up' if retail_featured.dod_up else 'pp-down' }}">{{ retail_featured.dod_str }}</span>
+          <div class="pp-retail-mood-bar">
+            <div class="pp-retail-mood-bar-track">
+              <div class="pp-retail-mood-bar-marker"
+                   style="left: {{ "{:.1f}".format(_fg.marker_pct) }}%;"
+                   aria-label="Score {{ _fg.score_str }}"></div>
             </div>
-            <div>
-              {{ label("Sentiment") }}
-              <span class="pp-mono pp-retail-stat-val">{{ retail_featured.sentiment_str }}</span>
-              <span class="pp-mono pp-retail-stat-delta {{ 'pp-up' if retail_featured.sentiment_up else 'pp-down' }}">{{ retail_featured.sentiment_label }}</span>
-            </div>
-            <div>
-              {{ label("Price") }}
-              <span class="pp-mono pp-retail-stat-val">{{ retail_featured.price }}</span>
-              <span class="pp-mono pp-retail-stat-delta pp-dim">{{ retail_featured.price_chg }}</span>
+            <div class="pp-retail-mood-bar-labels">
+              <span class="pp-mono pp-dim2">Extreme Fear</span>
+              <span class="pp-mono pp-dim2">Neutral</span>
+              <span class="pp-mono pp-dim2">Extreme Greed</span>
             </div>
           </div>
-          {# Inline 140×60 spark.  Mock series — would wire to a 24h
-             mentions-over-time series once we have hourly bucketing. #}
-          {{ spark(
-              [0.32,0.38,0.41,0.39,0.45,0.52,0.48,0.55,0.6,0.58,0.62,0.66,0.63,0.7,0.72,0.68,0.75,0.78,0.74,0.81,0.84,0.8,0.86,0.83,0.88,0.91,0.87,0.93],
-              color="var(--pp-accent)", w=140, h=60, stroke=1.6, cls="pp-retail-featured-spark"
-          ) }}
+          <div class="pp-retail-mood-history">
+            {% if _fg.previous_close is not none %}
+              <div class="pp-retail-mood-history-row">
+                <span class="pp-mono pp-dim">Previous close:</span>
+                <span class="pp-mono pp-retail-mood-history-val">{{ _fg.previous_close }}</span>
+              </div>
+            {% endif %}
+            {% if _fg.one_week_ago is not none %}
+              <div class="pp-retail-mood-history-row">
+                <span class="pp-mono pp-dim">1 week ago:</span>
+                <span class="pp-mono pp-retail-mood-history-val">{{ _fg.one_week_ago }}</span>
+              </div>
+            {% endif %}
+            {% if _fg.one_month_ago is not none %}
+              <div class="pp-retail-mood-history-row">
+                <span class="pp-mono pp-dim">1 month ago:</span>
+                <span class="pp-mono pp-retail-mood-history-val">{{ _fg.one_month_ago }}</span>
+              </div>
+            {% endif %}
+            {% if _fg.one_year_ago is not none %}
+              <div class="pp-retail-mood-history-row">
+                <span class="pp-mono pp-dim">1 year ago:</span>
+                <span class="pp-mono pp-retail-mood-history-val">{{ _fg.one_year_ago }}</span>
+              </div>
+            {% endif %}
+          </div>
         </div>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">CNN Fear &amp; Greed warming up.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+
+    {# ── 3 callout cards: most-mentioned · biggest mover · top-5 trending ── #}
+    <div class="pp-retail-callouts">
+      {% call panel(cls="pp-retail-callout-panel") %}
+        {{ kicker("Most mentioned") }}
+        {% if sentiment.most_mentioned %}
+          <div class="pp-retail-callout-headline">
+            <span class="pp-mono pp-insiders-tkr pp-retail-callout-tkr">{{ sentiment.most_mentioned.ticker }}</span>
+          </div>
+          <div class="pp-mono pp-retail-callout-sub">
+            {{ sentiment.most_mentioned.mentions_str }} mentions · {{ sentiment.most_mentioned.upvotes_str }} upvotes
+          </div>
+        {% else %}
+          <div class="pp-mono pp-dim pp-retail-callout-sub">—</div>
+        {% endif %}
       {% endcall %}
+
+      {% call panel(cls="pp-retail-callout-panel") %}
+        {{ kicker("Biggest rank mover") }}
+        {% if sentiment.biggest_mover %}
+          <div class="pp-retail-callout-headline">
+            <span class="pp-mono pp-insiders-tkr pp-retail-callout-tkr">{{ sentiment.biggest_mover.ticker }}</span>
+            <span class="pp-mono pp-retail-callout-delta {% if sentiment.biggest_mover.delta_up %}pp-up{% else %}pp-down{% endif %}">
+              {% if sentiment.biggest_mover.delta_up %}▲{% else %}▼{% endif %} {{ sentiment.biggest_mover.delta_str }}
+            </span>
+          </div>
+          <div class="pp-mono pp-retail-callout-sub">
+            Rank #{{ sentiment.biggest_mover.rank }} (was #{{ sentiment.biggest_mover.rank_24h }})
+          </div>
+        {% else %}
+          <div class="pp-mono pp-dim pp-retail-callout-sub">—</div>
+        {% endif %}
+      {% endcall %}
+
+      {% call panel(cls="pp-retail-callout-panel") %}
+        {{ kicker("Top 5 trending") }}
+        {% if sentiment.top_trending %}
+          <div class="pp-retail-callout-trending">
+            {% for t in sentiment.top_trending %}
+              <span class="pp-mono pp-insiders-tkr pp-retail-callout-trending-tkr">{{ t.ticker }}</span>
+            {% endfor %}
+          </div>
+          <div class="pp-mono pp-retail-callout-sub">by Reddit mention count (24h)</div>
+        {% else %}
+          <div class="pp-mono pp-dim pp-retail-callout-sub">—</div>
+        {% endif %}
+      {% endcall %}
+    </div>
+  </section>
+
+  {# ━━━━━━━━━━ LEADERBOARD — heatmap + scatter + table ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if retail_view == 'leaderboard' %} is-active{% endif %}"
+           data-tab-pane="Leaderboard">
+
+    {# ── Top: Sentiment Heatmap (treemap) + Hype vs Quality (scatter) ── #}
+    <div class="pp-retail-lb-row">
+      {% call panel(cls="pp-retail-heatmap-panel") %}
+        {{ panel_head("Sentiment Heatmap", sub="Size = mentions, Color = velocity") }}
+        {% if leaderboard.treemap_boxes %}
+          {# Squarified treemap rendered as HTML divs in % units so text
+             stays sharp at any aspect ratio (no SVG `preserveAspectRatio`
+             stretching).  Box visibility threshold (~3% area) suppresses
+             labels in the slivers down the right edge. #}
+          <div class="pp-retail-heatmap">
+            {% for b in leaderboard.treemap_boxes %}
+              <div class="pp-retail-heatmap-box"
+                   style="left: {{ b.x }}%; top: {{ b.y }}%; width: {{ b.w }}%; height: {{ b.h }}%; background: {{ b.color }};"
+                   data-ticker="{{ b.ticker }}"
+                   data-mentions="{{ b.mentions }}"
+                   data-velocity="{{ "{:+.1f}%".format(b.velocity_pct) }}"
+                   data-engagement="{{ "{:.1f}".format(b.engagement_ratio) }}"
+                   data-gurus="{{ b.guru_count }}">
+                {% if b.w * b.h >= 3 %}
+                  <span class="pp-retail-heatmap-label">{{ b.ticker }}</span>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">No mention data yet.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+
+      {% call panel(cls="pp-retail-scatter-panel") %}
+        {{ panel_head("Hype vs. Quality", sub="Quadrant = signal type") }}
+        {% if leaderboard.bubbles %}
+          <div class="pp-retail-scatter"
+               data-vb-w="{{ leaderboard.bubble_vb_w|int }}"
+               data-vb-h="{{ leaderboard.bubble_vb_h|int }}">
+            <svg class="pp-retail-scatter-svg"
+                 viewBox="0 0 {{ leaderboard.bubble_vb_w|int }} {{ leaderboard.bubble_vb_h|int }}"
+                 preserveAspectRatio="xMidYMid meet"
+                 aria-label="Hype vs Quality scatter">
+              {%- set _pad = leaderboard.bubble_pad -%}
+              {%- set _midX = _pad.left + (leaderboard.bubble_vb_w - _pad.left - _pad.right) / 2 -%}
+              {%- set _midY = _pad.top  + (leaderboard.bubble_vb_h - _pad.top  - _pad.bot) / 2 -%}
+              {# Axis lines + quadrant divider #}
+              <line class="pp-retail-scatter-axis"
+                    x1="{{ _pad.left }}" x2="{{ leaderboard.bubble_vb_w - _pad.right }}"
+                    y1="{{ leaderboard.bubble_vb_h - _pad.bot }}"
+                    y2="{{ leaderboard.bubble_vb_h - _pad.bot }}"/>
+              <line class="pp-retail-scatter-axis"
+                    x1="{{ _pad.left }}" x2="{{ _pad.left }}"
+                    y1="{{ _pad.top }}" y2="{{ leaderboard.bubble_vb_h - _pad.bot }}"/>
+              <line class="pp-retail-scatter-quad"
+                    x1="{{ _pad.left }}" x2="{{ leaderboard.bubble_vb_w - _pad.right }}"
+                    y1="{{ _midY }}" y2="{{ _midY }}"/>
+              <line class="pp-retail-scatter-quad"
+                    x1="{{ _midX }}" x2="{{ _midX }}"
+                    y1="{{ _pad.top }}" y2="{{ leaderboard.bubble_vb_h - _pad.bot }}"/>
+              {# Quadrant labels #}
+              <text class="pp-retail-scatter-quad-label" x="{{ _pad.left + 6 }}" y="{{ _pad.top + 12 }}">FUD ALERT</text>
+              <text class="pp-retail-scatter-quad-label" x="{{ leaderboard.bubble_vb_w - _pad.right - 6 }}" y="{{ _pad.top + 12 }}" text-anchor="end">MOONING</text>
+              <text class="pp-retail-scatter-quad-label" x="{{ _pad.left + 6 }}" y="{{ leaderboard.bubble_vb_h - _pad.bot - 4 }}">FADING</text>
+              <text class="pp-retail-scatter-quad-label" x="{{ leaderboard.bubble_vb_w - _pad.right - 6 }}" y="{{ leaderboard.bubble_vb_h - _pad.bot - 4 }}" text-anchor="end">STEADY</text>
+              {# Axis labels #}
+              <text class="pp-retail-scatter-ax-label"
+                    x="{{ _pad.left + (leaderboard.bubble_vb_w - _pad.left - _pad.right) / 2 }}"
+                    y="{{ leaderboard.bubble_vb_h - 4 }}"
+                    text-anchor="middle">Engagement (upvotes/mention)</text>
+              <text class="pp-retail-scatter-ax-label"
+                    transform="rotate(-90 14 {{ _pad.top + (leaderboard.bubble_vb_h - _pad.top - _pad.bot) / 2 }})"
+                    x="14"
+                    y="{{ _pad.top + (leaderboard.bubble_vb_h - _pad.top - _pad.bot) / 2 }}"
+                    text-anchor="middle">Mention Velocity (% 24h)</text>
+              {# Bubbles #}
+              {% for b in leaderboard.bubbles %}
+                <circle class="pp-retail-scatter-bubble{% if b.is_guru %} is-guru{% endif %}"
+                        cx="{{ b.cx }}" cy="{{ b.cy }}" r="{{ b.r }}"
+                        data-ticker="{{ b.ticker }}"
+                        data-name="{{ b.name }}"
+                        data-x="{{ "{:.1f}".format(b.x) }}"
+                        data-y="{{ "{:+.1f}%".format(b.y) }}"
+                        data-size="{{ b.size }}"
+                        data-gurus="{{ b.guru_count }}"/>
+              {% endfor %}
+            </svg>
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">No bubble data yet.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+    </div>
+
+    {# ── Footer chip — market mood + tickers tracked + timestamp ── #}
+    {% if leaderboard.market_mood or leaderboard.timestamp %}
+      <div class="pp-retail-lb-foot">
+        {% if leaderboard.market_score is not none and leaderboard.market_mood %}
+          <span class="pp-mono pp-tag pp-retail-mood-pill pp-retail-mood-band-{{ leaderboard.market_mood|lower|replace(' ', '_') }}">
+            Market Mood: {{ leaderboard.market_mood }} ({{ leaderboard.market_score|int }}/100)
+          </span>
+        {% endif %}
+        <span class="pp-mono pp-dim">
+          {{ leaderboard.total_count }} tickers tracked{% if leaderboard.timestamp %} · Updated {{ leaderboard.timestamp }}{% endif %}
+        </span>
+      </div>
     {% endif %}
 
-    {# Trending now — dense 9-col table.  Real ApeWisdom rows. #}
-    {% call panel() %}
-      {% call panel_head("Trending now", sub="ranked by 24h mention growth") %}
-        {{ segment(["All","Stocks","Crypto","Options"], value="All", mono=True) }}
-      {% endcall %}
-      <table class="pp-table pp-retail-trending-table">
-        <thead>
-          <tr>
-            <th class="pp-num pp-retail-th-rank">#</th>
-            <th>Ticker</th>
-            <th>Name</th>
-            <th class="pp-num">Mentions 24h</th>
-            <th class="pp-num">Δ DoD</th>
-            <th>Sentiment</th>
-            <th class="pp-num">Price</th>
-            <th class="pp-num">Day</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in retail_trending %}
+    {# ── Velocity Leaderboard table ── #}
+    {% call panel(cls="pp-retail-vlt-panel") %}
+      {{ panel_head("Retail Velocity Leaderboard",
+                    sub="Reddit mentions, velocity, and smart money overlap") }}
+      {% if leaderboard.table %}
+        <table class="pp-table pp-insiders-table pp-retail-vlt-table">
+          <thead>
             <tr>
-              <td class="pp-num">
-                <span class="pp-mono pp-dim2">{{ "%02d"|format(r.rank) }}</span>
-              </td>
-              <td>
-                <span class="pp-mono pp-retail-tkr">${{ r.ticker }}</span>
-              </td>
-              <td class="pp-retail-name">{{ r.name }}</td>
-              <td class="pp-num pp-mono pp-retail-mentions">{{ r.mentions_str }}</td>
-              <td class="pp-num">
-                <span class="pp-mono {{ 'pp-up' if r.dod >= 0 else 'pp-down' }}" style="font-weight:600;">{{ r.dod_str }}</span>
-              </td>
-              <td>
-                {# Sentiment bar — centered at 50%, fills outward. #}
-                <div class="pp-retail-sentiment-cell">
-                  <div class="pp-retail-sentiment-bar">
-                    <div class="pp-retail-sentiment-tick"></div>
-                    <div class="pp-retail-sentiment-fill {{ 'is-up' if r.sentiment_up else 'is-down' }}"
-                         style="width: {{ r.sentiment_bar_width }}%;"></div>
-                  </div>
-                  <span class="pp-mono pp-retail-sentiment-val {{ 'pp-up' if r.sentiment_up else 'pp-down' }}">{{ r.sentiment_str }}</span>
-                </div>
-              </td>
-              <td class="pp-num pp-mono pp-dim">{{ r.price if r.price else '—' }}</td>
-              <td class="pp-num pp-mono pp-dim">{{ r.price_chg if r.price_chg else '—' }}</td>
+              <th class="pp-num">Rank</th>
+              <th>Ticker</th>
+              <th>Heat</th>
+              <th class="pp-num">Mentions</th>
+              <th class="pp-num">Velocity</th>
+              <th>Rank change</th>
+              <th class="pp-num">Engagement</th>
+              <th>Smart money</th>
             </tr>
+          </thead>
+          <tbody>
+            {% for r in leaderboard.table %}
+              <tr>
+                <td class="pp-num pp-mono pp-dim">{{ r.rank }}</td>
+                <td>
+                  <div class="pp-retail-vlt-tkr">
+                    <span class="pp-mono pp-insiders-tkr">{{ r.ticker }}</span>
+                    {% if r.name %}
+                      <span class="pp-retail-vlt-name pp-dim">{{ r.name }}</span>
+                    {% endif %}
+                  </div>
+                </td>
+                <td>
+                  <div class="pp-retail-heat" data-heat="{{ r.heat }}" aria-label="Heat {{ r.heat }} of 5">
+                    {% for i in range(5) %}
+                      <span class="pp-retail-heat-bar{% if i < r.heat %} is-on{% endif %}"></span>
+                    {% endfor %}
+                  </div>
+                </td>
+                <td class="pp-num pp-mono">{{ r.mentions_str }}</td>
+                <td class="pp-num pp-mono {% if r.velocity_up %}pp-up{% else %}pp-down{% endif %}">{{ r.velocity_str }}</td>
+                <td>
+                  {% if r.rank_change == 0 %}
+                    <span class="pp-mono pp-dim2">—</span>
+                  {% else %}
+                    <span class="pp-mono pp-tag pp-retail-rankchange{% if r.rank_change_up %} is-up{% else %} is-down{% endif %}">
+                      {% if r.rank_change_up %}▲{% else %}▼{% endif %} {{ r.rank_change_str }}
+                    </span>
+                  {% endif %}
+                </td>
+                <td class="pp-num pp-mono">{{ r.engagement_str }}<span class="pp-dim2"> upv/m</span></td>
+                <td>
+                  {% if r.guru_count %}
+                    <span class="pp-mono pp-tag pp-retail-gurus">★ {{ r.guru_count }} {% if r.guru_count == 1 %}Guru{% else %}Gurus{% endif %}</span>
+                  {% else %}
+                    <span class="pp-mono pp-dim2">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">Velocity data warming up.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+  </section>
+
+  {# ━━━━━━━━━━ CALENDAR — YouTube uploads + channels ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if retail_view == 'calendar' %} is-active{% endif %}"
+           data-tab-pane="Calendar">
+
+    {# ── Recently Posted YouTube grid ── #}
+    {% call panel(cls="pp-retail-cal-recent-panel") %}
+      {{ panel_head("Recently Posted",
+                    sub="Latest " ~ (calendar.uploads|length) ~ " of " ~ calendar.uploads_total ~ " videos in the last 48 hours") }}
+      {% if calendar.uploads %}
+        <div class="pp-retail-cal-grid">
+          {% for u in calendar.uploads %}
+            <a class="pp-retail-cal-card"
+               href="{{ u.video_url }}" target="_blank" rel="noopener">
+              {% if u.thumbnail_url %}
+                <div class="pp-retail-cal-thumb"
+                     style="background-image: url('{{ u.thumbnail_url }}');" aria-hidden="true"></div>
+              {% else %}
+                <div class="pp-retail-cal-thumb pp-retail-cal-thumb-empty" aria-hidden="true"></div>
+              {% endif %}
+              <div class="pp-retail-cal-meta">
+                <div class="pp-retail-cal-channel">
+                  <span class="pp-retail-cal-avatar" aria-hidden="true">▶</span>
+                  <span class="pp-mono pp-retail-cal-chan-name">{{ u.channel_name }}</span>
+                </div>
+                <div class="pp-retail-cal-title">{{ u.title }}</div>
+                <div class="pp-retail-cal-foot">
+                  <span class="pp-mono pp-dim">{{ u.ago_str or "" }}</span>
+                  {% for tk in u.tickers %}
+                    <span class="pp-mono pp-retail-cal-ticker">${{ tk }}</span>
+                  {% endfor %}
+                </div>
+              </div>
+            </a>
           {% endfor %}
-        </tbody>
-      </table>
-    {% endcall %}
-
-  </section>
-
-  {# ── TRENDS (placeholder) ── #}
-  <section class="pp-page-pane" data-tab-pane="Trends">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">∿</div>
-        <div class="pp-page-placeholder-title">Trends tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Google Trends multi-line chart (90-day) for your watchlist.
-          Wires to filings.google_trends; needs an `area_chart` primitive
-          to render multiple series cleanly.
         </div>
-      </div>
-    {% endcall %}
-  </section>
-
-  {# ── WSB (placeholder) ── #}
-  <section class="pp-page-pane" data-tab-pane="WSB">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">⊘</div>
-        <div class="pp-page-placeholder-title">WSB tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          WSB sentiment index (+71 strongly bullish, distribution bar) plus
-          top tickers table with DD / YOLO / calls-puts breakdowns.
-          Wires to filings.wsb_sentiment; needs Reddit flair extension.
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No recent videos in the last 48 hours.</div>
         </div>
+      {% endif %}
+    {% endcall %}
+
+    {# ── Finance YouTuber channel directory ── #}
+    {% call panel(cls="pp-retail-cal-channels-panel") %}
+      {{ panel_head("Finance YouTuber Calendar",
+                    sub="Live event calendar · updated every 6 hours") }}
+      <div class="pp-retail-cal-empty-msg pp-mono pp-dim">
+        No upcoming live streams found. The calendar syncs with YouTube every 6 hours.
       </div>
+      {% if calendar.channels %}
+        <table class="pp-table pp-insiders-table pp-retail-cal-channels-table">
+          <thead>
+            <tr>
+              <th>Channel</th>
+              <th class="pp-num">Subscribers</th>
+              <th class="pp-num">Posts/week</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in calendar.channels %}
+              <tr>
+                <td>
+                  <div class="pp-retail-cal-chan-row">
+                    {% if c.thumbnail_url %}
+                      <span class="pp-retail-cal-chan-avatar"
+                            style="background-image: url('{{ c.thumbnail_url }}');"></span>
+                    {% else %}
+                      <span class="pp-retail-cal-chan-avatar pp-retail-cal-chan-avatar-empty"></span>
+                    {% endif %}
+                    <span class="pp-mono pp-retail-cal-chan-link">{{ c.channel_name }}</span>
+                  </div>
+                </td>
+                <td class="pp-num pp-mono">{{ c.subs_str }}</td>
+                <td class="pp-num pp-mono">{{ c.posts_str }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">Channel directory warming up.</div>
+        </div>
+      {% endif %}
     {% endcall %}
   </section>
 
+</div>
+
+{# Shared floating tooltip — used by the heatmap + scatter on the
+   Leaderboard tab.  Lives outside the panes so position:fixed works
+   regardless of the active tab. #}
+<div class="pp-retail-tooltip" hidden>
+  <div class="pp-retail-tt-tk"></div>
+  <div class="pp-mono pp-retail-tt-meta"></div>
+  <div class="pp-retail-tt-rows"></div>
 </div>
 
 {% endblock %}
@@ -187,6 +444,9 @@
 {% block extra_scripts %}
 <script>
 (function () {
+  /* Tab nav — hash-on-load support so server-rendered links can target a
+     specific tab via `#Leaderboard` etc., consistent with the Insiders +
+     Congress patterns. */
   var seg = document.getElementById('pp-retail-tabs');
   if (!seg) return;
   var panes = document.querySelectorAll('.pp-page-pane');
@@ -206,6 +466,73 @@
     if (!opt) return;
     var name = opt.getAttribute('data-value');
     if (name) activate(name);
+  });
+  var hashName = (location.hash || '').replace(/^#/, '');
+  if (hashName && [...seg.querySelectorAll('.pp-segment-opt')].some(o => o.getAttribute('data-value') === hashName)) {
+    activate(hashName);
+  }
+})();
+
+(function () {
+  /* Heatmap + scatter hover — single floating tooltip outside the panes. */
+  var tip = document.querySelector('.pp-retail-tooltip');
+  if (!tip) return;
+  var ttTk   = tip.querySelector('.pp-retail-tt-tk');
+  var ttMeta = tip.querySelector('.pp-retail-tt-meta');
+  var ttRows = tip.querySelector('.pp-retail-tt-rows');
+
+  function place(target) {
+    var r = target.getBoundingClientRect();
+    tip.hidden = false;
+    var tw = tip.offsetWidth;
+    var th = tip.offsetHeight;
+    var x = r.left + r.width / 2 - tw / 2;
+    var y = r.top - th - 10;
+    if (y < 8) y = r.bottom + 10;
+    if (x < 8) x = 8;
+    if (x + tw > window.innerWidth - 8) x = window.innerWidth - tw - 8;
+    tip.style.left = x + 'px';
+    tip.style.top  = y + 'px';
+  }
+  function hide() { tip.hidden = true; }
+
+  function rowsHTML(pairs) {
+    return pairs.map(function (p) {
+      return '<div class="pp-retail-tt-row">' +
+             '<span class="pp-mono pp-dim">' + p[0] + '</span>' +
+             '<span class="pp-mono pp-retail-tt-val">' + p[1] + '</span>' +
+             '</div>';
+    }).join('');
+  }
+
+  document.querySelectorAll('.pp-retail-heatmap-box').forEach(function (g) {
+    g.addEventListener('mouseenter', function () {
+      ttTk.textContent   = g.getAttribute('data-ticker') || '';
+      ttMeta.textContent = '';
+      ttRows.innerHTML   = rowsHTML([
+        ['Mentions:',   parseInt(g.getAttribute('data-mentions') || '0', 10).toLocaleString()],
+        ['Velocity:',   g.getAttribute('data-velocity') || '—'],
+        ['Engagement:', g.getAttribute('data-engagement') + ' upv/m'],
+        ['Gurus:',      g.getAttribute('data-gurus') || '0'],
+      ]);
+      place(g);
+    });
+    g.addEventListener('mouseleave', hide);
+  });
+
+  document.querySelectorAll('.pp-retail-scatter-bubble').forEach(function (c) {
+    c.addEventListener('mouseenter', function () {
+      ttTk.textContent   = c.getAttribute('data-ticker') || '';
+      ttMeta.textContent = c.getAttribute('data-name') || '';
+      ttRows.innerHTML   = rowsHTML([
+        ['Engagement:', parseFloat(c.getAttribute('data-x') || '0').toFixed(1) + ' upv/m'],
+        ['Velocity:',   c.getAttribute('data-y') || '—'],
+        ['Mentions:',   parseInt(c.getAttribute('data-size') || '0', 10).toLocaleString()],
+        ['Gurus:',      c.getAttribute('data-gurus') || '0'],
+      ]);
+      place(c);
+    });
+    c.addEventListener('mouseleave', hide);
   });
 })();
 </script>

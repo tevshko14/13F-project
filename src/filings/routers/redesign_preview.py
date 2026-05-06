@@ -16,13 +16,14 @@ pointed at these templates and mock data is replaced with live feeds.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import re
 import logging
 import math
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
@@ -93,22 +94,132 @@ SPARK_DOWN = [
 ]
 
 
-def _shell_context(active: str) -> dict:
-    """Common context every redesign page needs for the app shell."""
+_SHELL_NOTIF_WINDOW_HOURS   = 24                # fallback "fresh" window for first-time visitors
+_SHELL_NOTIF_BADGE_CAP      = 99                # avoid 4-digit badge overflow
+_SHELL_NOTIF_COOKIE         = "pp-notif-seen"   # per-browser "last viewed notifications" timestamp
+_SHELL_NOTIF_COOKIE_MAX_AGE = 60 * 60 * 24 * 90 # 90 days
+_SHELL_PANDA_GOAL_CENTS     = 20_000            # $200/month — same goal as v1 widget
+
+
+def _initials_from_name(name: str) -> str:
+    """Two-letter initials from a display name; empty when unavailable."""
+    if not name:
+        return ""
+    parts = [p for p in re.split(r"\s+", name.strip()) if p]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return (parts[0][:1] + parts[-1][:1]).upper()
+
+
+async def _shell_context(request: Request, active: str) -> dict:
+    """Common context every redesign page needs for the app shell.
+
+    Live values (replacing prior hardcodes):
+      - ``notif_unread`` — count of notifications in the last 24h.  ``0`` when
+        empty so the badge collapses (template already conditional on truthy).
+      - ``panda_raised/goal/pct/month`` — real Stripe donation totals via
+        ``supabase_cache.get_monthly_raised_cents``.  Goal stays a config
+        knob (`_SHELL_PANDA_GOAL_CENTS`).
+      - ``user_initials`` — derived from the signed-in user's profile
+        display name; empty for guests (template falls to the "PP" default).
+
+    Per-source try/excepts so a Supabase blip can't 500 every page render.
+    """
+    today = datetime.now()
+
+    # Notifications — count notifications created since the user last
+    # visited /_v2/notifications.  We persist that visit timestamp in the
+    # `pp-notif-seen` cookie so the badge accumulates across pages and
+    # collapses to 0 right after a visit.  First-time visitors (no cookie)
+    # fall back to a 24h "fresh" window so they see something on day one.
+    seen_iso = ""
+    try:
+        seen_iso = (request.cookies.get(_SHELL_NOTIF_COOKIE) or "").strip()
+        # Validate: parsing it must succeed.  A bad/expired value falls
+        # through to the 24h window so the badge never silently sticks.
+        if seen_iso:
+            datetime.fromisoformat(seen_iso.replace("Z", "+00:00"))
+    except Exception:
+        seen_iso = ""
+    if not seen_iso:
+        seen_iso = (datetime.now(timezone.utc)
+                    - timedelta(hours=_SHELL_NOTIF_WINDOW_HOURS)).isoformat()
+
+    notif_unread: int | str = 0
+    try:
+        from filings import supabase_cache
+        count, _latest = await to_light(supabase_cache.get_bell_state, seen_iso)
+        if count > _SHELL_NOTIF_BADGE_CAP:
+            notif_unread = f"{_SHELL_NOTIF_BADGE_CAP}+"
+        elif count > 0:
+            notif_unread = count
+    except Exception as exc:
+        logger.debug("shell: bell state failed: %s", exc)
+
+    # Panda Fund — Stripe-backed monthly donation total.  Falls back to 0/0
+    # cleanly when the row is missing so the widget shows "$0 / $200 · May".
+    panda_raised, panda_goal, panda_pct = 0, _SHELL_PANDA_GOAL_CENTS // 100, 0
+    try:
+        from filings import supabase_cache
+        cents = await to_light(supabase_cache.get_monthly_raised_cents,
+                               today.strftime("%Y-%m"))
+        if cents and cents > 0:
+            panda_raised = min(cents // 100, panda_goal)
+            panda_pct    = min(100, round(panda_raised / panda_goal * 100))
+    except Exception as exc:
+        logger.debug("shell: panda fund failed: %s", exc)
+
+    # Avatar initials — only when signed in.  Profile carries display_name;
+    # fall back to email's local-part initial; otherwise empty so the
+    # template's `default("PP")` kicks in.
+    user_initials = ""
+    profile = getattr(request.state, "profile", None) if hasattr(request, "state") else None
+    if isinstance(profile, dict):
+        user_initials = _initials_from_name(profile.get("display_name") or "")
+        if not user_initials and profile.get("email"):
+            user_initials = (profile["email"][:1] or "").upper()
+
     return {
-        "nav_active": active,
-        "today_label": _today_label(),
-        "market_status": _market_status(),
-        "panda_raised": 84,
-        "panda_goal": 200,
-        "panda_month": datetime.now().strftime("%b"),
-        "panda_pct": 42,
-        "user_initials": "JK",
-        "notif_unread": 2,
-        "insiders_count": 12,
-        "congress_count": 3,
-        "asset_version": _ASSET_VERSION,
+        "nav_active":     active,
+        "today_label":    _today_label(),
+        "market_status":  _market_status(),
+        "panda_raised":   panda_raised,
+        "panda_goal":     panda_goal,
+        "panda_month":    today.strftime("%b"),
+        "panda_pct":      panda_pct,
+        "user_initials":  user_initials,
+        "notif_unread":   notif_unread,
+        "asset_version":  _ASSET_VERSION,
     }
+
+
+async def _bounded(coro, *, timeout: float, fallback, name: str, page: str = "page"):
+    """Wrap an awaitable so a slow upstream can't stall the whole render.
+
+    `page` shows up in the warning log so the timing-out source is easy to
+    spot when several routes share the same upstream.
+    """
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("%s: %s timed out (>%ss)", page, name, timeout)
+        return fallback
+    except Exception as exc:
+        logger.warning("%s: %s failed: %s", page, name, exc)
+        return fallback
+
+
+def _short_date(iso: str) -> str:
+    """Repeated 'YYYY-MM-DD…' → 'Mon DD' formatter used by every calendar
+    parser and the activity feed."""
+    if not iso:
+        return ""
+    try:
+        return datetime.fromisoformat(iso[:10]).strftime("%b %d")
+    except Exception:
+        return iso[:10]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -134,7 +245,7 @@ async def preview_index(request: Request):
     ]
     return templates.TemplateResponse(
         "_redesign/_preview_index.html",
-        {"request": request, "pages": pages, **_shell_context("Home")},
+        {"request": request, "pages": pages, **(await _shell_context(request, "Home"))},
     )
 
 
@@ -244,8 +355,9 @@ async def _fetch_kpi_strip() -> list[dict]:
         return fallback
 
 
-# Hero chart viewBox — kept consistent with home.html's <svg viewBox="0 0 600 200"/>.
-_HERO_VB_W = 600
+# Hero chart viewBox — 800×200 (~4:1) matches the typical full-width hero
+# panel container ratio so `preserveAspectRatio="none"` doesn't squish lines.
+_HERO_VB_W = 800
 _HERO_VB_H = 200
 # Vertical inset — leaves a few px at top + bottom so the line never touches
 # the chart border on extreme highs/lows.
@@ -384,11 +496,13 @@ def _fallback_hero_payload() -> dict:
         110 + math.sin(i * 0.4) * 30 + math.cos(i * 0.9) * 10 - i * 0.55
         for i in range(60)
     ]
+    # Step matches the hero viewBox width: 60 evenly-spaced bars across `_HERO_VB_W`.
+    _step_x = _HERO_VB_W / 60
     line_d = " ".join(
-        f"{'M' if i == 0 else 'L'}{i * 10:.1f} {y:.1f}"
+        f"{'M' if i == 0 else 'L'}{i * _step_x:.1f} {y:.1f}"
         for i, y in enumerate(fallback_pts)
     )
-    area_d = f"{line_d} L 600 200 L 0 200 Z"
+    area_d = f"{line_d} L {_HERO_VB_W} {_HERO_VB_H} L 0 {_HERO_VB_H} Z"
     period = {
         "path":       line_d,
         "area":       area_d,
@@ -2206,10 +2320,10 @@ async def _fetch_home_activity(limit: int = 12) -> list[dict]:
             text = _strip_ticker_prefix(n.get("title") or "", ticker)
         # Click target — prefer the notification's explicit link; fall
         # back to the stock page when we have a ticker; else send users
-        # to the alerts page where they can dive into the full feed.
+        # to the notifications feed where they can dive into the stream.
         href = (n.get("link") or "").strip()
         if not href:
-            href = f"/_v2/stock/{ticker}" if ticker else "/profile?tab=Alerts"
+            href = f"/_v2/stock/{ticker}" if ticker else "/_v2/notifications"
         rows.append({
             "ago":    _activity_iso_time_ago(n.get("created_at") or ""),
             "src":    src_label,
@@ -2275,10 +2389,7 @@ async def _fetch_home_cal_earnings(limit: int = 6) -> list[dict]:
             return "—"
         if iso_str == today:
             return "Today"
-        try:
-            return datetime.fromisoformat(iso_str[:10]).strftime("%b %d")
-        except Exception:
-            return iso_str[:10]
+        return _short_date(iso_str) or iso_str[:10]
 
     # Filter to S&P 500 (when constituents loaded; otherwise show all to
     # avoid an empty panel) and only future-dated rows.
@@ -2332,12 +2443,7 @@ async def _fetch_home_cal_macro(limit: int = 6) -> list[dict]:
     today = datetime.now().strftime("%Y-%m-%d")
 
     def _format_date(iso_str: str) -> str:
-        if not iso_str:
-            return "—"
-        try:
-            return datetime.fromisoformat(iso_str[:10]).strftime("%b %d")
-        except Exception:
-            return iso_str[:10]
+        return _short_date(iso_str) or "—"
 
     flat: list[tuple[str, dict]] = []
     for day in by_date:
@@ -2445,7 +2551,7 @@ async def preview_home(request: Request):
     news_featured_ctx, news_stories_ctx, news_most_read_ctx, news_market_wire_ctx = news_payload
     ctx = {
         "request": request,
-        **_shell_context("Home"),
+        **(await _shell_context(request, "Home")),
 
         # Masthead copy — kicker rendered uppercase via CSS.
         "mast_kicker":  "PaperPanda · Intelligence",
@@ -2646,17 +2752,81 @@ async def _fetch_macro_indicators() -> dict:
 # Berkshire Hathaway is the demo fund the design ships with.
 _DEFAULT_FUND_CIK = "1067983"
 
-# Manager metadata for the page hero — keyed by CIK.  Just enough to fill
-# the breadcrumb / icon / location row.  Source of truth for the 85
-# superinvestors lives in cache.py; this is a tiny lookup for chrome.
-_FUND_META: dict[str, dict] = {
-    "1067983": {"manager": "Warren Buffett",   "city": "Omaha, NE",        "icon": "BRK"},
-    "1336528": {"manager": "Bill Ackman",      "city": "New York, NY",     "icon": "PSC"},
-    "1649339": {"manager": "Michael Burry",    "city": "Saratoga, CA",     "icon": "SCN"},
-    "1079114": {"manager": "David Einhorn",    "city": "New York, NY",     "icon": "GLC"},
-    "1040273": {"manager": "Daniel Loeb",      "city": "New York, NY",     "icon": "TPP"},
-    "1656456": {"manager": "Cathie Wood",      "city": "St. Petersburg, FL","icon": "ARK"},
+# Manager metadata for the page hero — keyed by CIK.  Auto-derived from
+# the canonical superinvestor list with a small per-CIK overlay for cities
+# (city/HQ data isn't carried in superinvestors.py yet — manual overrides
+# for the most-visited funds; everything else falls back to the fund_name).
+_FUND_CITY_OVERRIDES: dict[str, str] = {
+    "1067983": "Omaha, NE",            # Berkshire
+    "1336528": "New York, NY",         # Pershing Square
+    "1649339": "Saratoga, CA",         # Scion
+    "1079114": "New York, NY",         # Greenlight
+    "1040273": "New York, NY",         # Third Point
+    "1656456": "Miami Beach, FL",      # Appaloosa (David Tepper)
+    "1061768": "Boston, MA",           # Baupost
+    "1135730": "New York, NY",         # Coatue
+    "1423053": "Miami, FL",            # Citadel
+    "1167483": "New York, NY",         # Tiger Global
+    "1647251": "London, UK",           # TCI
+    "1166559": "Seattle, WA",          # Gates Foundation
+    "1418814": "San Francisco, CA",    # ValueAct
+    "1037389": "East Setauket, NY",    # Renaissance
+    "949509":  "Los Angeles, CA",      # Oaktree
+    "1350694": "Westport, CT",         # Bridgewater
+    "1061165": "Greenwich, CT",        # Lone Pine
+    "1103804": "Greenwich, CT",        # Viking
+    "934639":  "Dallas, TX",           # Maverick
+    "1345471": "New York, NY",         # Trian
+    "1358706": "Boston, MA",           # Abrams Capital
+    "921669":  "New York, NY",         # Icahn
+    "200217":  "San Francisco, CA",    # Dodge & Cox
+    "1536411": "New York, NY",         # Duquesne
 }
+
+
+def _icon_from_fund_name(fund_name: str) -> str:
+    """Derive a 3-letter chrome icon from a fund name.
+
+    "Berkshire Hathaway" → "BRK"
+    "Pershing Square"    → "PSC"
+    "Scion Asset Mgmt"   → "SCN"
+    Falls back to first 3 alphas if no decent split.
+    """
+    if not fund_name:
+        return "FND"
+    words = [w for w in re.split(r"[^A-Za-z]+", fund_name) if w]
+    if not words:
+        return "FND"
+    if len(words) == 1:
+        return words[0][:3].upper()
+    # Take first letter of first word + 2 from second-most-distinctive word
+    first = words[0]
+    second = words[1] if len(words) > 1 else ""
+    candidate = (first[:1] + second[:2]).upper() if second else first[:3].upper()
+    return candidate or "FND"
+
+
+def _build_fund_meta() -> dict[str, dict]:
+    """Auto-derive page-hero metadata for every superinvestor on file.
+
+    Reads from filings.superinvestors.SUPERINVESTORS_BY_CIK so the lookup
+    automatically grows with the master list.
+    """
+    try:
+        from filings.superinvestors import SUPERINVESTORS_BY_CIK
+    except Exception:
+        return {}
+    meta: dict[str, dict] = {}
+    for cik, info in SUPERINVESTORS_BY_CIK.items():
+        meta[cik] = {
+            "manager": info.display_name or info.fund_name or "",
+            "city":    _FUND_CITY_OVERRIDES.get(cik, ""),
+            "icon":    _icon_from_fund_name(info.fund_name or info.display_name),
+        }
+    return meta
+
+
+_FUND_META: dict[str, dict] = _build_fund_meta()
 
 
 def _format_dollars(v: float | int | None, *, full=False) -> str:
@@ -2713,75 +2883,409 @@ async def _fetch_fund_data(cik: str) -> dict | None:
         return None
 
 
-def _funds_kpi_strip(fund: dict) -> list[dict]:
-    """Build the 5-cell KPI strip — AUM, Positions, Top-10 conc, Turnover, YTD vs SPY.
-
-    AUM + Positions are real (from 13F).  Top-10 concentration is computed
-    from the holdings list.  Turnover and YTD-vs-SPY are not derivable from
-    a single quarter's filing — show "—" with no delta until we add a
-    multi-quarter aggregate job.
-    """
+def _funds_kpi_strip(fund: dict, history: list[dict] | None = None) -> list[dict]:
+    """Build the KPI strip from real data only — every cell is derived from
+    the 13F payload + AUM history.  No placeholder em-dash KPIs."""
     aum = fund.get("total_value")
     positions = fund.get("total_holdings")
     holdings = fund.get("all_holdings") or []
+    qchanges = fund.get("quarterly_changes") or []
+
     top10_value = sum(h.get("value") or 0 for h in holdings[:10])
     top10_pct = (top10_value / aum * 100) if aum else None
+
+    # New positions opened this quarter (from the most-recent quarter's diff).
+    new_positions_q = sum(
+        1 for c in (qchanges[0].get("changes") or []) if (c.get("status") or "").upper() in ("NEW", "NEWLY ADDED")
+    ) if qchanges else 0
+
+    # 4-quarter rolling turnover proxy: sum of |share_change| / sum(current_shares)
+    # across the last 4 quarters.  A real Turnover-TTM needs full position
+    # tracking, but this rolls-up the same trades the table already shows.
+    chg_4q  = sum(abs(c.get("share_change") or 0)
+                  for q in qchanges[:4] for c in (q.get("changes") or []))
+    held_4q = sum(int(h.get("shares") or 0) for h in holdings) or 1
+    turnover_pct = (chg_4q / held_4q * 100) if chg_4q else None
+
+    # AUM QoQ delta from the history series (last two points).
+    qoq_pct = None
+    qoq_up = None
+    if history and len(history) >= 2:
+        prev = history[-2].get("total_value") or 0
+        curr = history[-1].get("total_value") or 0
+        if prev > 0:
+            qoq_pct = (curr - prev) / prev * 100
+            qoq_up  = qoq_pct >= 0
+
     return [
-        {"label": "AUM",            "value": _format_dollars(aum),               "delta": None,        "up": None},
-        {"label": "Positions",      "value": str(positions) if positions else "—", "delta": None,      "up": None},
-        {"label": "Top 10 conc.",   "value": f"{top10_pct:.1f}%" if top10_pct else "—", "delta": None, "up": None},
-        {"label": "Turnover (TTM)", "value": "—",                                "delta": None,        "up": None},
-        {"label": "YTD vs SPY",     "value": "—",                                "delta": None,        "up": None},
+        {"label": "AUM",            "value": _format_dollars(aum),
+         "delta": (f"{qoq_pct:+.1f}% QoQ" if qoq_pct is not None else None),
+         "up":    qoq_up},
+        {"label": "Positions",      "value": str(positions) if positions else "—",
+         "delta": (f"+{new_positions_q} new" if new_positions_q else None),
+         "up":    (True if new_positions_q else None)},
+        {"label": "Top 10 conc.",   "value": (f"{top10_pct:.1f}%" if top10_pct else "—"),
+         "delta": None, "up": None},
+        {"label": "Turnover · 4q",  "value": (f"{turnover_pct:.1f}%" if turnover_pct is not None else "—"),
+         "delta": None, "up": None},
     ]
 
 
-def _funds_recent_activity(fund: dict) -> list[dict]:
-    """Convert quarterly_changes → 4 timeline rows.
-
-    Most recent quarter is `current=True`.  AUM Δ + change count summarized
-    into a single line; precise deltas would need linking shares-then to
-    shares-now × prices-then which we don't carry quarter-over-quarter.
-    """
-    qchanges = fund.get("quarterly_changes") or []
-    rows = []
-    for i, q in enumerate(qchanges[:4]):
-        changes = q.get("changes") or []
-        adds = sum(1 for c in changes if c.get("status") in ("ADDED", "NEW", "ADD"))
-        cuts = sum(1 for c in changes if c.get("status") in ("REDUCED", "EXITED", "CUT", "EXIT"))
-        rows.append({
-            "quarter":     _quarter_label(q.get("report_period", "")),
-            "filing_date": q.get("filing_date", ""),
-            "count_str":   f"+{adds} / -{cuts}",
-            "current":     i == 0,
-            # Precise AUM Δ requires multi-quarter price reconciliation; show
-            # neutral em-dash until that aggregate lands.
-            "aum_delta":   "—",
-            "aum_up":      None,
-        })
-    return rows
-
-
-def _funds_holdings_table(fund: dict, top_n: int = 10) -> list[dict]:
-    """Format top-N holdings for the dense table."""
+def _funds_concentration_donut(fund: dict) -> dict:
+    """v1's Portfolio Concentration donut — top 10 holdings as wedges + "Other"
+    bucket for the long tail.  Returns a payload the template walks to render
+    an SVG donut + legend."""
     aum = fund.get("total_value") or 0
     holdings = fund.get("all_holdings") or []
+    if not aum or not holdings:
+        return {"have_data": False, "wedges": [], "legend": []}
+
+    palette = [
+        "#3b82f6",  # blue (AAPL-style anchor)
+        "#22c55e",  # green
+        "#f97316",  # orange
+        "#a855f7",  # purple
+        "#ef4444",  # red
+        "#14b8a6",  # teal
+        "#eab308",  # yellow
+        "#8b5cf6",  # violet
+        "#94a3b8",  # slate
+        "#ec4899",  # pink
+    ]
+    top10 = holdings[:10]
+    rest_value = sum(h.get("value") or 0 for h in holdings[10:])
+
+    wedges: list[dict] = []
+    legend: list[dict] = []
+    cumulative = 0.0  # 0..1 fraction along the donut path.
+
+    cx, cy, r_outer, r_inner = 100.0, 100.0, 80.0, 50.0
+
+    def _arc(start_frac: float, end_frac: float, color: str) -> str:
+        """Return an SVG path for a donut wedge between two fractional angles."""
+        import math
+        a0 = -math.pi / 2 + start_frac * 2 * math.pi
+        a1 = -math.pi / 2 + end_frac   * 2 * math.pi
+        large = 1 if (end_frac - start_frac) > 0.5 else 0
+        x0o, y0o = cx + r_outer * math.cos(a0), cy + r_outer * math.sin(a0)
+        x1o, y1o = cx + r_outer * math.cos(a1), cy + r_outer * math.sin(a1)
+        x0i, y0i = cx + r_inner * math.cos(a0), cy + r_inner * math.sin(a0)
+        x1i, y1i = cx + r_inner * math.cos(a1), cy + r_inner * math.sin(a1)
+        return (
+            f"M {x0o:.2f} {y0o:.2f} "
+            f"A {r_outer} {r_outer} 0 {large} 1 {x1o:.2f} {y1o:.2f} "
+            f"L {x1i:.2f} {y1i:.2f} "
+            f"A {r_inner} {r_inner} 0 {large} 0 {x0i:.2f} {y0i:.2f} Z"
+        )
+
+    for i, h in enumerate(top10):
+        val = h.get("value") or 0
+        if not val:
+            continue
+        frac = val / aum
+        color = palette[i % len(palette)]
+        wedges.append({"d": _arc(cumulative, cumulative + frac, color), "color": color})
+        legend.append({
+            "ticker": (h.get("ticker") or "—").upper(),
+            "pct":    f"{frac * 100:.1f}%",
+            "color":  color,
+        })
+        cumulative += frac
+
+    if rest_value > 0:
+        frac = rest_value / aum
+        color = "var(--pp-line2)"
+        wedges.append({"d": _arc(cumulative, cumulative + frac, color), "color": color})
+        legend.append({"ticker": "Other", "pct": f"{frac * 100:.1f}%", "color": color})
+
+    return {"have_data": True, "wedges": wedges, "legend": legend, "viewbox": "0 0 200 200"}
+
+
+def _funds_position_changes_quarters(fund: dict) -> list[dict]:
+    """v1's Position Changes — emit one entry per quarter with its formatted
+    change rows ready to render.  Used by the Activity tab quarter selector."""
+    qchanges = fund.get("quarterly_changes") or []
+    out: list[dict] = []
+    for q in qchanges:
+        rows: list[dict] = []
+        for c in (q.get("changes") or []):
+            status = (c.get("status") or "").upper()
+            share_chg = c.get("share_change") or 0
+            cur_shares = c.get("current_shares") or 0
+            prev_shares = c.get("previous_shares") or 0
+            sign = "+" if share_chg > 0 else ("-" if share_chg < 0 else "")
+            magnitude = abs(share_chg)
+            if magnitude >= 1e6:
+                chg_str = f"{sign}{magnitude / 1e6:.1f}M"
+            elif magnitude >= 1e3:
+                chg_str = f"{sign}{magnitude / 1e3:.0f}K"
+            else:
+                chg_str = f"{sign}{magnitude:,}" if magnitude else "—"
+            pct_str = "—"
+            if prev_shares > 0:
+                pct = share_chg / prev_shares * 100
+                pct_str = f"{pct:+.1f}%"
+            elif status in ("NEW", "NEWLY ADDED"):
+                pct_str = "New"
+            rows.append({
+                "ticker":     c.get("ticker") or (c.get("issuer", "")[:6].upper() or "—"),
+                "name":       c.get("issuer") or "",
+                "action":     status,
+                "share_chg":  chg_str,
+                "share_chg_up": share_chg > 0,
+                "pct_str":    pct_str,
+                "pct_up":     (share_chg > 0) if share_chg else None,
+                "shares_now": _format_shares(cur_shares),
+                "value_now":  _format_dollars(c.get("current_value")),
+            })
+        rows.sort(key=lambda r: abs((r.get("share_chg_up") or False) and 1 or -1), reverse=False)
+        out.append({
+            "label":       _quarter_label(q.get("report_period", "")),
+            "report_date": q.get("report_period", ""),
+            "filing_date": q.get("filing_date", ""),
+            "trade_count": len(rows),
+            "rows":        rows,
+        })
+    return out
+
+
+# ── Capital Deployed (v1 module) — 13F equity + cash & equivalents ───────
+
+async def _funds_capital_deployed(cik: str) -> dict:
+    """Fetch the cached deployment metrics for one CIK.
+
+    Reads from the same Supabase rows the v1 page uses
+    (``aum_data.load_all_deployment_data`` / ``deployment:{cik}``).
+    """
+    cik_norm = (cik or "").lstrip("0") or cik
+    try:
+        from filings import supabase_cache
+        cached, _fresh = await to_light(supabase_cache.get_cached_with_stale, f"deployment:{cik_norm}")
+    except Exception as exc:
+        logger.warning("Capital deployed fetch failed for CIK=%s: %s", cik, exc)
+        return {}
+    return cached if isinstance(cached, dict) else {}
+
+
+def _funds_capital_panel(deployment: dict, fund: dict) -> dict:
+    """Format the deployment payload into a 4-cell capital panel.
+
+    Falls back to the in-fund 13F value when the deployment row is missing
+    so the page still surfaces the 13F equity number every CIK has.
+    """
+    raum = (deployment or {}).get("raum")
+    thirteenf = (deployment or {}).get("thirteenf_value") or fund.get("total_value")
+    exact_cash = (deployment or {}).get("exact_cash")
+    est_non_eq = (deployment or {}).get("estimated_non_equity")
+    deployment_ratio = (deployment or {}).get("deployment_ratio")
+    cash_period = (deployment or {}).get("exact_cash_period")
+    data_source = (deployment or {}).get("data_source")
+
+    cash_value = exact_cash if exact_cash is not None else est_non_eq
+    cash_label = "Cash · 10-K/Q" if exact_cash is not None else (
+        "Est. non-equity" if est_non_eq is not None else "Cash & Equiv"
+    )
+    cash_sub = (
+        f"as of {cash_period}" if exact_cash is not None and cash_period
+        else ("AUM gap (RAUM − 13F)" if est_non_eq is not None else None)
+    )
+
+    cells = [
+        {"label": "13F Equity", "value": _format_dollars(thirteenf),
+         "sub":   "from 13F-HR holdings"},
+        {"label": cash_label,   "value": _format_dollars(cash_value),
+         "sub":   cash_sub},
+    ]
+    if raum:
+        cells.append({"label": "RAUM",
+                      "value": _format_dollars(raum),
+                      "sub":   "Form ADV reported AUM"})
+    if deployment_ratio is not None:
+        cells.append({
+            "label": "Deployment ratio",
+            "value": f"{deployment_ratio * 100:.1f}%",
+            "sub":   "13F / RAUM",
+        })
+
+    return {
+        "have_data": bool(thirteenf),
+        "cells":     cells,
+        "data_source": data_source,
+    }
+
+
+# ── SEC Filings list (Filings tab, mirrors stock-page pattern) ──────────
+
+# Form-type → human-readable description.  Match by prefix so variants
+# (10-K/A, 13F-HR/A, etc.) inherit the same kind.
+_FILING_KIND_PREFIX: list[tuple[str, str]] = [
+    ("13F",   "Quarterly holdings"),
+    ("10-K",  "Annual report"),
+    ("10-Q",  "Quarterly report"),
+    ("8-K",   "Material event"),
+    ("DEF ",  "Proxy statement"),
+    ("SC 13",       "Beneficial ownership"),
+    ("SCHEDULE 13", "Beneficial ownership"),
+    ("S-1",   "Registration"),
+    ("S-3",   "Registration"),
+    ("S-4",   "Registration"),
+    ("4",     "Insider transaction"),
+    ("3",     "Insider transaction"),
+    ("5",     "Insider transaction"),
+    ("144",   "Notice of sale"),
+]
+
+
+def _filing_kind(form: str) -> str:
+    f = (form or "").upper()
+    for prefix, label in _FILING_KIND_PREFIX:
+        if f.startswith(prefix):
+            return label
+    return "Filing"
+
+
+def _filing_row_from_df(row, cik_norm: str) -> dict:
+    """Convert one row of `EntityFilings.to_pandas()` into the template shape."""
+    form = str(row.get("form", "") or "").strip()
+    filing_date = str(row.get("filing_date", "") or "")
+    accession = str(row.get("accession_number", "") or "").strip()
+    acc_clean = accession.replace("-", "")
+    url = (
+        f"https://www.sec.gov/Archives/edgar/data/{cik_norm}/{acc_clean}/" if acc_clean
+        else f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK={cik_norm}&type={form}"
+    )
+    return {
+        "form":         form,
+        "kind":         _filing_kind(form),
+        "filing_date":  filing_date,
+        "filing_label": _short_date(filing_date) or filing_date,
+        "accession":    accession,
+        "url":          url,
+    }
+
+
+async def _funds_filings_list(cik: str, *, limit: int = 25) -> list[dict]:
+    """List the most-recent SEC filings for *cik* via edgartools.
+
+    L2-cached (24h) — filings only land a few times per quarter.
+    """
+    cik_norm = (cik or "").lstrip("0") or cik
+
+    def _compute() -> list[dict]:
+        try:
+            # filings.client sets the SEC User-Agent identity at import-time
+            # via set_identity() — required before any edgartools call.
+            from filings import client as _client  # noqa: F401
+            from edgar import Company
+        except Exception:
+            return []
+        try:
+            company = Company(int(cik_norm))
+            # `.to_pandas()` sidesteps the per-attribute pyarrow access that
+            # raises 'ChunkedArray has no as_py' under newer pyarrow.
+            df = company.get_filings().to_pandas().head(limit)
+        except Exception as exc:
+            logger.warning("Funds filings: edgar load failed for CIK=%s: %s", cik, exc)
+            return []
+        return [_filing_row_from_df(row, cik_norm) for _, row in df.iterrows()]
+
+    return await _l2_cached(
+        key=f"funds:filings:{cik_norm}:v1",
+        ttl_seconds=24 * 3600,
+        compute=_compute,
+        category="funds_filings",
+    ) or []
+
+
+def _qoq_pct_for_holding(h: dict, changes_by_cusip: dict[str, dict]) -> float | None:
+    """Resolve the QoQ share-count change for a holding.
+
+    Looks up `changes` (most-recent quarter's diff vs prior) by cusip; the
+    `share_change` is signed.  Returns the percentage change relative to
+    the prior quarter's share count, or None if unchanged / unknown.
+    """
+    cusip = h.get("cusip")
+    if not cusip:
+        return None
+    rec = changes_by_cusip.get(cusip)
+    if not rec:
+        return None
+    share_chg = rec.get("share_change") or 0
+    prev = rec.get("previous_shares") or 0
+    if prev <= 0 or share_chg == 0:
+        # NEW positions report previous_shares=0; show as "NEW" via the tag below.
+        return None
+    return float(share_chg) / float(prev)
+
+
+def _funds_holdings_table(
+    fund: dict,
+    top_n: int = 10,
+    *,
+    prices_by_ticker: dict[str, dict] | None = None,
+    spark_by_ticker:  dict[str, list[float]] | None = None,
+) -> list[dict]:
+    """Format top-N holdings for the dense table.
+
+    `prices_by_ticker` shape: {"AAPL": {"price": 232.71, "pct_change": -0.83}, ...}
+    `spark_by_ticker`  shape: {"AAPL": [0.32, 0.38, ...], ...}
+    Both are optional — pass None to render placeholders.
+    """
+    aum = fund.get("total_value") or 0
+    holdings = fund.get("all_holdings") or []
+    prices_by_ticker = prices_by_ticker or {}
+    spark_by_ticker = spark_by_ticker or {}
+
+    # cusip → {share_change, previous_shares, status}.  Pulled from the
+    # most-recent quarter's `changes` list.  Used for the QoQ Δ column.
+    changes_by_cusip: dict[str, dict] = {}
+    qchanges = fund.get("quarterly_changes") or []
+    if qchanges:
+        for c in (qchanges[0].get("changes") or []):
+            cusip = c.get("cusip")
+            if cusip:
+                changes_by_cusip[cusip] = c
+
     rows = []
     for i, h in enumerate(holdings[:top_n], start=1):
         val = h.get("value") or 0
         port_pct = (val / aum) if aum else 0
+        ticker = (h.get("ticker") or "").upper() or "—"
+
+        # QoQ — preferred resolution: actual share_change pct vs prior shares.
+        qoq_pct = _qoq_pct_for_holding(h, changes_by_cusip)
+        rec = changes_by_cusip.get(h.get("cusip") or "")
+        is_new = bool(rec and rec.get("status") in ("NEW", "NEWLY ADDED"))
+        if is_new:
+            qoq_str = "NEW"
+            qoq_kind = "new"          # gets the coral "NEW" chip
+        elif qoq_pct is None:
+            qoq_str = "—"
+            qoq_kind = "neutral"
+        else:
+            qoq_str = f"{'+' if qoq_pct > 0 else ''}{qoq_pct * 100:.1f}%"
+            qoq_kind = "added" if qoq_pct > 0 else "reduced"
+
+        price_rec = prices_by_ticker.get(ticker) or {}
+        last_v = price_rec.get("price")
+        day_v  = price_rec.get("pct_change")  # already in % (e.g. -0.83)
+        spark_series = spark_by_ticker.get(ticker)
+
         rows.append({
             "rank":   i,
-            "ticker": h.get("ticker") or "—",
+            "ticker": ticker,
             "name":   h.get("issuer") or "",
             "shares": _format_shares(h.get("shares")),
             "value":  _format_dollars(val),
             "port":   port_pct,         # 0..1 for bar width
             "port_pct_str": f"{port_pct * 100:.1f}%",
-            # Day / 1Y price data isn't carried in fund_summary — leave a
-            # placeholder; populate via market_data quote join in a follow-up.
-            "last":   None,
-            "day":    None,
-            "qoq":    "—",
+            "qoq":         qoq_str,
+            "qoq_kind":    qoq_kind,    # "added" | "reduced" | "new" | "neutral"
+            "last":        f"{last_v:.2f}" if isinstance(last_v, (int, float)) else None,
+            "day":         f"{day_v:+.2f}%" if isinstance(day_v, (int, float)) else None,
+            "day_up":      (day_v >= 0) if isinstance(day_v, (int, float)) else None,
+            "spark":       spark_series,
+            "spark_up":    bool(spark_series and len(spark_series) > 1 and spark_series[-1] >= spark_series[0]),
         })
     return rows
 
@@ -2816,63 +3320,496 @@ def _funds_changes_split(fund: dict) -> tuple[list[dict], list[dict]]:
     return adds[:4], cuts[:4]
 
 
-# Mock sector allocation — Q1 2026 Berkshire-shaped split.  Once we ship a
-# ticker → sector lookup in fund_summary we can compute this from holdings.
-_FUNDS_SECTORS_MOCK = [
-    {"name": "Technology",        "pct": 0.412, "color": "var(--pp-accent)"},
-    {"name": "Financials",        "pct": 0.221, "color": "var(--pp-ink)"},
-    {"name": "Consumer Staples",  "pct": 0.108, "color": "var(--pp-up)"},
-    {"name": "Energy",            "pct": 0.094, "color": "var(--pp-down)"},
-    {"name": "Healthcare",        "pct": 0.062, "color": "var(--pp-dim)"},
-    {"name": "Other",             "pct": 0.103, "color": "var(--pp-line2)"},
-]
+# GICS sector → palette mapping for the allocation panel.  Values are CSS
+# variable references so light/dark mode swap automatically.  "Other" /
+# anything missing collapses to a neutral border colour.
+_FUNDS_SECTOR_COLORS: dict[str, str] = {
+    "Information Technology": "var(--pp-accent)",
+    "Communication Services": "var(--pp-ink)",
+    "Financials":             "var(--pp-up)",
+    "Health Care":            "var(--pp-down)",
+    "Consumer Discretionary": "var(--pp-dim)",
+    "Consumer Staples":       "var(--pp-up)",
+    "Energy":                 "var(--pp-down)",
+    "Industrials":            "var(--pp-ink)",
+    "Materials":              "var(--pp-dim2)",
+    "Utilities":              "var(--pp-line2)",
+    "Real Estate":            "var(--pp-line2)",
+    "Other":                  "var(--pp-line2)",
+}
+
+
+def _build_ticker_sector_map() -> dict[str, str]:
+    """Build a ticker → GICS-sector lookup from S&P 500 + NASDAQ 100 data.
+
+    Cached implicitly by `market_data.get_sp500_constituents` (24h memory).
+    Returns roughly 500 tickers mapped — enough to cover ~80% of any
+    superinvestor's top holdings; the rest fall under "Other".
+    """
+    try:
+        from filings import market_data
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    for source in (
+        market_data.get_sp500_constituents() or [],
+        market_data.get_nasdaq100_constituents() or [],
+    ):
+        for c in source:
+            t = (c.get("ticker") or "").upper()
+            sec = c.get("sector") or ""
+            if t and sec and t not in out:
+                out[t] = sec
+    return out
+
+
+def _funds_sectors_breakdown(fund: dict) -> list[dict]:
+    """Aggregate holdings by GICS sector for the allocation panel.
+
+    Tickers we can't resolve roll into "Other" so the bars still sum to ~100%.
+    Returns at most 6 rows ordered by allocation (largest first).
+    """
+    holdings = fund.get("all_holdings") or []
+    aum = fund.get("total_value") or 0
+    if not holdings or not aum:
+        return []
+    ticker_to_sector = _build_ticker_sector_map()
+    by_sector: dict[str, float] = {}
+    for h in holdings:
+        ticker = (h.get("ticker") or "").upper()
+        val = h.get("value") or 0
+        if not val:
+            continue
+        sector = ticker_to_sector.get(ticker, "Other")
+        by_sector[sector] = by_sector.get(sector, 0.0) + float(val)
+    # Pull "Other" out of the named buckets so the long-tail rollup doesn't
+    # create a duplicate row when the cap (>5) trips.
+    other_pct = (by_sector.pop("Other", 0.0) / aum) if aum else 0.0
+    rows = [
+        {
+            "name":  name,
+            "pct":   total / aum,
+            "color": _FUNDS_SECTOR_COLORS.get(name, "var(--pp-line2)"),
+        }
+        for name, total in by_sector.items()
+    ]
+    rows.sort(key=lambda r: r["pct"], reverse=True)
+    # Cap at 5 named rows + 1 "Other" — long tail beyond 5 rolls into Other.
+    if len(rows) > 5:
+        other_pct += sum(r["pct"] for r in rows[5:])
+        rows = rows[:5]
+    if other_pct > 0:
+        rows.append({"name": "Other", "pct": other_pct, "color": _FUNDS_SECTOR_COLORS["Other"]})
+    return rows
+
+
+def _funds_holdings_market_join(holdings: list[dict]) -> tuple[dict[str, dict], dict[str, list[float]]]:
+    """Fetch current prices + sparkline series for the given holdings.
+
+    Synchronous (uses market_data's in-memory caches).  Wrap calls in
+    `to_heavy` from the route for cold paths where these may pull from
+    yfinance.  Always returns dicts (possibly empty) so callers can safely
+    pass the results into `_funds_holdings_table`.
+    """
+    tickers = sorted({(h.get("ticker") or "").upper() for h in holdings if h.get("ticker")})
+    if not tickers:
+        return {}, {}
+    try:
+        from filings import market_data
+    except Exception:
+        return {}, {}
+
+    # 1. Day-percent + price for each S&P 500 holding (covers ~80% of typical
+    #    13F top-10s; the rest fall back to current_prices_batch).
+    sp500 = market_data.get_sp500_market_data("1D") or {}
+    prices_by_ticker: dict[str, dict] = {
+        t: {"price": v.get("price"), "pct_change": v.get("pct_change")}
+        for t, v in sp500.items()
+        if isinstance(v, dict) and t in tickers
+    }
+
+    # 2. Fill in missing prices via current-prices batch (no day-pct, just last).
+    missing = [t for t in tickers if t not in prices_by_ticker]
+    if missing:
+        try:
+            extra = market_data.get_current_prices_batch(missing) or {}
+            for t, p in extra.items():
+                prices_by_ticker[t] = {"price": p, "pct_change": None}
+        except Exception:
+            pass
+
+    # 3. Normalized sparkline points (~1 month of close data; column header
+    #    relabelled "1M" since that's all we cache for free today).
+    spark_by_ticker: dict[str, list[float]] = {}
+    try:
+        spark_by_ticker = market_data.get_sparkline_points(tickers, num_points=24) or {}
+    except Exception:
+        pass
+
+    return prices_by_ticker, spark_by_ticker
+
+
+# ── AUM history (multi-quarter) ────────────────────────────────────────────
+# Reconstructs total_value per historical 13F-HR by walking edgartools
+# directly.  Cached in L2 with 24h TTL — the underlying filings are
+# immutable once filed, so a long TTL is safe.
+
+_FUNDS_AUM_HISTORY_TTL_SECONDS = 24 * 3600
+_FUNDS_AUM_HISTORY_QUARTERS = 12   # ~3 years of quarterly cadence
+
+
+def _fund_aum_history_compute(cik: str) -> list[dict]:
+    """Synchronous: pull last N 13F-HRs via edgartools and total each one.
+
+    Returns list of {report_period, filing_date, total_value} ordered
+    oldest → newest.  Empty list if edgar can't reach the filer.
+
+    `tf.total_value` triggers a pyarrow incompatibility in some edgartools
+    versions ("ChunkedArray has no attribute as_py"); we compute the total
+    directly from the holdings frame's Value column instead, which is the
+    same number ``ThirteenF.total_value`` would yield.
+    """
+    try:
+        from edgar import Company, ThirteenF
+        from filings.client import _detect_multiplier
+    except Exception:
+        return []
+
+    try:
+        company = Company(int(cik))
+        filings = company.get_filings(form="13F-HR", amendments=False)
+    except Exception as exc:
+        logger.warning("AUM history: edgar load failed for CIK=%s: %s", cik, exc)
+        return []
+
+    if not filings:
+        return []
+
+    n = min(len(filings), _FUNDS_AUM_HISTORY_QUARTERS)
+    out: list[dict] = []
+    for i in range(n):
+        try:
+            tf = ThirteenF(filings[i])
+            holdings_df = tf.holdings
+            if holdings_df is None or len(holdings_df) == 0:
+                continue
+            mult = _detect_multiplier(holdings_df)
+            total = int(holdings_df["Value"].sum()) * mult
+            if not total:
+                continue
+            out.append({
+                "report_period": str(tf.report_period),
+                "filing_date":   str(tf.filing_date),
+                "total_value":   total,
+            })
+        except Exception as exc:
+            logger.debug("AUM history: skipping filing %d for CIK=%s: %s", i, cik, exc)
+            continue
+    out.sort(key=lambda r: r["report_period"])
+    return out
+
+
+async def _fund_aum_history(cik: str) -> list[dict]:
+    """L2-cached AUM history series for the funds page.
+
+    Cache key: ``funds:aum_history:{cik_norm}:v1``.  Stale data is fine —
+    historical 13Fs don't change once filed.
+    """
+    cik_norm = (cik or "").lstrip("0") or cik
+    return await _l2_cached(
+        key=f"funds:aum_history:{cik_norm}:v1",
+        ttl_seconds=_FUNDS_AUM_HISTORY_TTL_SECONDS,
+        compute=lambda: _fund_aum_history_compute(cik),
+        category="funds_aum_history",
+    )
+
+
+def _nice_axis_step(rng: float, target_steps: int = 4) -> float:
+    """Pick a 'nice' step size (1/2/5 × 10^k) that splits *rng* into ~target_steps."""
+    if rng <= 0:
+        return 1.0
+    import math
+    raw = rng / max(target_steps, 1)
+    mag = 10 ** math.floor(math.log10(raw))
+    n = raw / mag
+    if   n < 1.5: nice = 1.0
+    elif n < 3.5: nice = 2.0
+    elif n < 7.5: nice = 5.0
+    else:         nice = 10.0
+    return nice * mag
+
+
+def _format_dollars_compact(v: float) -> str:
+    """Tight $XB / $XM string used by chart axis labels (no trailing zeros)."""
+    av = abs(v)
+    if av >= 1e12: out, suf = v / 1e12, "T"
+    elif av >= 1e9:  out, suf = v / 1e9,  "B"
+    elif av >= 1e6:  out, suf = v / 1e6,  "M"
+    elif av >= 1e3:  out, suf = v / 1e3,  "K"
+    else:            return f"${v:,.0f}"
+    txt = f"{out:.1f}".rstrip("0").rstrip(".")
+    return f"${txt}{suf}"
+
+
+def _funds_aum_chart_payload(history: list[dict]) -> dict:
+    """Convert AUM history into the data the SVG template needs.
+
+    Produces SVG point pairs + nice-rounded y-axis labels in a 600×220
+    viewBox.  The y-axis is anchored to round dollar values (e.g. $250B /
+    $300B / $350B for Berkshire) so the absolute scale is visible — the
+    earlier auto-normalized version made every fund's curve look the
+    same shape regardless of magnitude.  The latest point's QoQ delta is
+    precomputed so the panel header can colourize it.
+    """
+    if not history:
+        return {
+            "have_data": False,
+            "points":     [],
+            "ticks":      [],
+            "y_labels":   [],
+            "grid_ys":    [],
+            "qoq_str":    "",
+            "qoq_up":     None,
+            "fill_d":     "",
+            "line_d":     "",
+        }
+
+    # ViewBox sized 1500×240 to match the typical full-width container's
+    # natural ratio (~6:1).  With `preserveAspectRatio="none"` the SVG
+    # stretches to fill the container; if the viewBox aspect ratio matches,
+    # that stretch is near-identity and circles stay round / slopes accurate.
+    width, height = 1500.0, 240.0
+    pad_top, pad_bot = 16.0, 12.0
+    plot_h = height - pad_top - pad_bot
+    n = len(history)
+
+    vals = [r["total_value"] for r in history]
+    lo_raw, hi_raw = min(vals), max(vals)
+    rng = hi_raw - lo_raw if hi_raw > lo_raw else 1.0
+
+    # Round y-axis bounds to a "nice" step so labels read $250B / $300B /
+    # $350B instead of $258.5B / $303.4B / $348.2B.
+    step = _nice_axis_step(rng, target_steps=4)
+    import math
+    lo = math.floor(lo_raw / step) * step
+    hi = math.ceil (hi_raw / step) * step
+    if hi == lo:
+        hi = lo + step
+    plot_rng = hi - lo
+
+    def _y_for(v: float) -> float:
+        return pad_top + (1.0 - (v - lo) / plot_rng) * plot_h
+
+    points: list[tuple[float, float]] = []
+    for i, v in enumerate(vals):
+        x = (i / max(n - 1, 1)) * width
+        points.append((round(x, 1), round(_y_for(v), 1)))
+
+    line_d = " ".join(("M" if i == 0 else "L") + f"{x} {y}" for i, (x, y) in enumerate(points))
+    fill_d = f"{line_d} L {width:.1f} {height:.1f} L 0 {height:.1f} Z"
+
+    # Y-axis labels at every nice step between lo and hi.  Cap at 5 rows
+    # so we don't crowd a small panel.
+    y_labels: list[dict] = []
+    grid_ys:  list[float] = []
+    v = lo
+    while v <= hi + step / 2:
+        y_labels.append({
+            "label": _format_dollars_compact(v),
+            "y":     round(_y_for(v), 1),
+        })
+        grid_ys.append(round(_y_for(v), 1))
+        v += step
+    if len(y_labels) > 5:
+        # Keep first / mid / last when too many.
+        y_labels = [y_labels[0], y_labels[len(y_labels) // 2], y_labels[-1]]
+        grid_ys  = [g["y"] for g in y_labels]
+
+    # X-axis tick labels — ~6 evenly-spaced (incl. first + last).
+    target_ticks = 6
+    step_x = max(1, (n - 1) // (target_ticks - 1)) if n > 1 else 1
+    tick_idxs = sorted(set([0] + list(range(0, n, step_x)) + [n - 1]))
+    ticks = [{
+        "label": _quarter_label(history[i]["report_period"]).replace(" 20", " '"),
+        "x":     points[i][0],
+    } for i in tick_idxs]
+
+    # QoQ delta from the last two points.
+    qoq_str = ""
+    qoq_up: bool | None = None
+    if n >= 2:
+        delta = vals[-1] - vals[-2]
+        sign = "+" if delta >= 0 else "-"
+        if abs(delta) >= 1e9:
+            qoq_str = f"{sign}${abs(delta) / 1e9:.1f}B QoQ"
+        elif abs(delta) >= 1e6:
+            qoq_str = f"{sign}${abs(delta) / 1e6:.0f}M QoQ"
+        else:
+            qoq_str = f"{sign}${abs(delta):,.0f} QoQ"
+        qoq_up = delta >= 0
+
+    # Per-point hover payload — quarter label + value + QoQ delta vs prior
+    # point (None for the first row).  Serialized to JSON in the template
+    # so the mousemove handler can look up the nearest point in O(1).
+    chart_history: list[dict] = []
+    for i, (h, p) in enumerate(zip(history, points)):
+        prev_v = vals[i - 1] if i > 0 else None
+        delta_pct = None
+        if prev_v and prev_v > 0:
+            delta_pct = (vals[i] - prev_v) / prev_v * 100
+        chart_history.append({
+            "x":          p[0],
+            "y":          p[1],
+            "value":      vals[i],
+            "value_str":  _format_dollars_compact(vals[i]),
+            "quarter":    _quarter_label(h["report_period"]),
+            "filed":      h.get("filing_date", ""),
+            "delta_pct":  delta_pct,
+        })
+
+    return {
+        "have_data":     True,
+        "points":        [{"x": x, "y": y} for x, y in points],
+        "ticks":         ticks,
+        "y_labels":      y_labels,
+        "grid_ys":       grid_ys,
+        "qoq_str":       qoq_str,
+        "qoq_up":        qoq_up,
+        "fill_d":        fill_d,
+        "line_d":        line_d,
+        "vb_width":      width,
+        "vb_height":     height,
+        "chart_history": chart_history,
+    }
+
+
+def _funds_recent_activity_with_aum(fund: dict, history: list[dict]) -> list[dict]:
+    """Activity timeline with real AUM Δ when we have multi-quarter history.
+
+    Pairs each `quarterly_changes` entry with the corresponding AUM-then
+    record (matched by report_period).  When two consecutive AUM points
+    are available, fills the Δ; otherwise leaves it as an em-dash.
+    """
+    qchanges = fund.get("quarterly_changes") or []
+    history = history or []
+    by_period = {h["report_period"]: h["total_value"] for h in history}
+    history_periods = [h["report_period"] for h in history]
+
+    rows = []
+    for i, q in enumerate(qchanges[:4]):
+        changes = q.get("changes") or []
+        adds = sum(1 for c in changes if c.get("status") in ("ADDED", "NEW", "ADD"))
+        cuts = sum(1 for c in changes if c.get("status") in ("REDUCED", "EXITED", "CUT", "EXIT"))
+
+        period = q.get("report_period", "")
+        aum_str, aum_up = "—", None
+        if period in by_period:
+            aum_now = by_period[period]
+            try:
+                idx = history_periods.index(period)
+                if idx > 0:
+                    prev = history[idx - 1]["total_value"]
+                    if prev > 0:
+                        delta_pct = (aum_now - prev) / prev * 100
+                        sign = "+" if delta_pct >= 0 else ""
+                        aum_str = f"{sign}{delta_pct:.1f}%"
+                        aum_up = delta_pct >= 0
+            except ValueError:
+                pass
+
+        rows.append({
+            "quarter":     _quarter_label(period),
+            "filing_date": q.get("filing_date", ""),
+            "count_str":   f"+{adds} / -{cuts}",
+            "current":     i == 0,
+            "aum_delta":   aum_str,
+            "aum_up":      aum_up,
+        })
+    return rows
+
+
+_FUND_TABS = ("Portfolio", "Activity", "Performance", "Sectors", "Filings")
 
 
 @router.get("/funds", response_class=HTMLResponse)
-async def preview_funds(request: Request, cik: str = _DEFAULT_FUND_CIK):
-    """Funds detail — Berkshire by default; ?cik=1067983 to load others."""
+async def preview_funds(
+    request: Request,
+    cik: str = _DEFAULT_FUND_CIK,
+    tab: str = "Portfolio",
+):
+    """Funds detail — 5 tabs (Portfolio / Activity / Performance / Sectors /
+    Filings).  Default CIK = Berkshire (1067983); ?cik= to load any of the
+    85 superinvestors; ?tab= deep-links the active pane."""
+    if tab not in _FUND_TABS:
+        tab = "Portfolio"
+    bounded = functools.partial(_bounded, page="Funds page")
+
     fund = await _fetch_fund_data(cik)
     if not fund:
-        # If the L2 cache hasn't seen this CIK, render an empty-state shell
-        # rather than 404.  Keeps the page navigable while data warms.
         fund = {
-            "name": "—",
-            "cik":  cik,
-            "report_period": "",
-            "filing_date":   "",
-            "total_value":   0,
-            "total_holdings": 0,
-            "top_holdings":  [],
-            "all_holdings":  [],
-            "changes":       [],
-            "quarterly_changes": [],
+            "name": "—", "cik": cik, "report_period": "", "filing_date": "",
+            "total_value": 0, "total_holdings": 0,
+            "top_holdings": [], "all_holdings": [],
+            "changes": [], "quarterly_changes": [],
         }
+
     meta = _FUND_META.get(cik.lstrip("0") or cik) or _FUND_META.get(cik) or {}
     adds, cuts = _funds_changes_split(fund)
+    top10 = (fund.get("all_holdings") or [])[:10]
+
+    history, market_join, deployment, filings = await asyncio.gather(
+        bounded(_fund_aum_history(cik),                        timeout=8.0,
+                 fallback=[],          name="aum_history"),
+        bounded(to_heavy(_funds_holdings_market_join, top10),  timeout=4.0,
+                 fallback=({}, {}),    name="holdings_market_join"),
+        bounded(_funds_capital_deployed(cik),                  timeout=3.0,
+                 fallback={},          name="capital_deployed"),
+        bounded(_funds_filings_list(cik, limit=25),            timeout=8.0,
+                 fallback=[],          name="filings"),
+    )
+    # _l2_cached returns None on hard compute failure; normalise.
+    history = history or []
+    prices_by_ticker, spark_by_ticker = market_join or ({}, {})
+
+    aum_chart = _funds_aum_chart_payload(history)
+    activity  = _funds_recent_activity_with_aum(fund, history)
 
     ctx = {
         "request": request,
-        **_shell_context("Funds"),
+        **(await _shell_context(request, "Funds")),
         # Hero
-        "fund_icon":   meta.get("icon") or (fund.get("name", "")[:3].upper() or "FND"),
-        "fund_cik":    fund.get("cik") or cik,
-        "fund_name":   fund.get("name") or "—",
-        "fund_manager":     meta.get("manager") or "",
-        "fund_city":        meta.get("city") or "",
-        "fund_filing_date": fund.get("filing_date", ""),
+        "fund_icon":          meta.get("icon") or _icon_from_fund_name(fund.get("name", "")),
+        "fund_cik":           fund.get("cik") or cik,
+        "fund_name":          fund.get("name") or "—",
+        "fund_manager":       meta.get("manager") or "",
+        "fund_city":          meta.get("city") or "",
+        "fund_filing_date":   fund.get("filing_date", ""),
         "fund_report_period": fund.get("report_period", ""),
-        # Body
-        "funds_kpi":      _funds_kpi_strip(fund),
-        "funds_activity": _funds_recent_activity(fund),
-        "funds_holdings": _funds_holdings_table(fund, top_n=10),
-        "funds_pos_total": fund.get("total_holdings") or 0,
-        "funds_sectors":  _FUNDS_SECTORS_MOCK,
-        "funds_adds":     adds,
-        "funds_cuts":     cuts,
-        # Active sub-tab — segment is decorative for now; only "Holdings"
-        # state is wired.  When we add Activity/Performance/Sectors/Filings
-        # subroutes, swap default via ?tab=Activity etc.
-        "funds_tab":      "Holdings",
+        "fund_quarter_label": _quarter_label(fund.get("report_period", "")),
+        # Tabs
+        "fund_tabs":     list(_FUND_TABS),
+        "funds_tab":     tab,
+        # Portfolio tab payloads
+        "funds_kpi":           _funds_kpi_strip(fund, history),
+        "funds_concentration": _funds_concentration_donut(fund),
+        "funds_holdings":      _funds_holdings_table(
+            fund, top_n=10,
+            prices_by_ticker=prices_by_ticker,
+            spark_by_ticker=spark_by_ticker,
+        ),
+        "funds_pos_total":     fund.get("total_holdings") or 0,
+        # Activity tab payloads
+        "funds_activity":      activity,
+        "funds_quarter_diffs": _funds_position_changes_quarters(fund),
+        "funds_adds":          adds,
+        "funds_cuts":          cuts,
+        # Performance tab payloads
+        "funds_aum_chart":     aum_chart,
+        "funds_capital":       _funds_capital_panel(deployment, fund),
+        # Sectors tab payload
+        "funds_sectors":       _funds_sectors_breakdown(fund),
+        # Filings tab payload
+        "funds_filings":       filings,
     }
     return templates.TemplateResponse("_redesign/funds.html", ctx)
 
@@ -2911,7 +3848,7 @@ async def preview_options(request: Request):
     ]
     ctx = {
         "request":      request,
-        **_shell_context("Options"),
+        **(await _shell_context(request, "Options")),
         "options_kpi":  kpi,
         "options_flow": _OPTIONS_FLOW_MOCK,
         "options_tab":  "Unusual flow",
@@ -2921,7 +3858,10 @@ async def preview_options(request: Request):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STOCK — Overview (default tab) is wired to real OHLCV + quote data.
-# Financials / Ownership / Forecasts / Signals / Vitals are placeholders.
+# Financials / Ownership / Forecasts / Signals are wired alongside.
+# (The Vitals tab and its `_stock_build_vitals` helper are kept in the file
+# but unreferenced from the route — restore by re-adding the segment entry
+# and the gather-call when ready.)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -3076,57 +4016,6 @@ _STOCK_MOCK_FIN_KPIS = [
     {"label": "FCF (TTM)",        "value": "$76.0B",  "delta": "+24% QoQ",  "up": True},
     {"label": "Gross Margin",     "value": "75.7%",   "delta": "+0.7pp",    "up": True},
 ]
-
-_STOCK_FIN_PERIODS = ["FY21", "FY22", "FY23", "FY24", "FY25", "TTM"]
-
-_STOCK_FIN_INCOME = [
-    {"label": "Revenue",          "vals": [16.7, 26.9, 26.97, 60.92, 130.50, 158.20], "bold": True},
-    {"label": "Cost of revenue",  "vals": [6.3, 9.4, 11.6, 16.6, 32.6, 38.4]},
-    {"label": "Gross profit",     "vals": [10.4, 17.5, 15.4, 44.3, 97.9, 119.8], "bold": True},
-    {"label": "R&D",              "vals": [3.9, 5.3, 7.3, 8.7, 12.9, 14.4]},
-    {"label": "SG&A",             "vals": [2.2, 2.4, 2.4, 2.7, 3.5, 3.8]},
-    {"label": "Operating income", "vals": [4.5, 10.0, 5.6, 33.0, 81.5, 101.6], "bold": True},
-    {"label": "Net income",       "vals": [4.3, 9.8, 4.4, 29.8, 72.9, 88.4], "bold": True, "hl": True},
-    {"label": "EPS (diluted)",    "vals": [1.73, 3.85, 1.74, 11.93, 29.16, 35.23], "unit": "$"},
-    {"label": "Gross margin",     "vals": [62.3, 65.0, 56.9, 72.7, 75.0, 75.7], "unit": "%"},
-    {"label": "Operating margin", "vals": [26.9, 37.2, 20.7, 54.2, 62.4, 64.2], "unit": "%"},
-    {"label": "Net margin",       "vals": [25.7, 36.4, 16.3, 48.9, 55.9, 55.9], "unit": "%"},
-]
-
-_STOCK_FIN_BALANCE = [
-    {"label": "Cash & equivalents",   "vals": [11.6, 17.0, 13.3, 25.9, 38.5, 42.1], "bold": True},
-    {"label": "Total assets",         "vals": [28.8, 44.2, 41.2, 65.7, 96.4, 103.2], "bold": True},
-    {"label": "Total debt",           "vals": [7.2, 11.7, 10.95, 8.5, 8.4, 8.4]},
-    {"label": "Stockholders' equity", "vals": [16.9, 26.6, 22.1, 42.9, 65.9, 73.8], "bold": True, "hl": True},
-    {"label": "Working capital",      "vals": [12.4, 19.8, 17.5, 33.4, 51.0, 56.4]},
-    {"label": "Debt / Equity",        "vals": [0.43, 0.44, 0.50, 0.20, 0.13, 0.11], "unit": "ratio"},
-    {"label": "Current ratio",        "vals": [4.1, 6.6, 3.5, 4.2, 4.4, 4.5], "unit": "ratio"},
-]
-
-_STOCK_FIN_CASH = [
-    {"label": "Operating cash flow", "vals": [5.8, 9.1, 5.6, 28.1, 64.1, 79.4], "bold": True},
-    {"label": "Capex",               "vals": [-1.0, -1.8, -1.1, -1.1, -2.7, -3.4]},
-    {"label": "Free cash flow",      "vals": [4.8, 7.3, 4.5, 27.0, 61.4, 76.0], "bold": True, "hl": True},
-    {"label": "Stock buybacks",      "vals": [-0.0, -9.5, -10.0, -9.7, -33.7, -41.2]},
-    {"label": "Dividends paid",      "vals": [-0.4, -0.4, -0.4, -0.4, -0.5, -0.6]},
-    {"label": "Share count (B)",     "vals": [2.50, 2.51, 2.50, 2.49, 2.46, 2.43], "unit": "ratio"},
-]
-
-_STOCK_REVENUE_SEGMENTS = [
-    {"name": "Data Center",       "value": 115.20, "color": "var(--pp-accent)"},
-    {"name": "Gaming",            "value":  11.40, "color": "var(--pp-ink)"},
-    {"name": "Pro Visualization", "value":   1.92, "color": "var(--pp-up)"},
-    {"name": "Automotive",        "value":   1.74, "color": "var(--pp-dim)"},
-    {"name": "OEM & Other",       "value":   0.24, "color": "var(--pp-dim2)"},
-]
-_STOCK_REVENUE_TOTAL = 130.50
-
-_STOCK_MARGIN_TREND = {
-    "gross": [62.3, 65.0, 56.9, 72.7, 75.0, 75.7],
-    "op":    [26.9, 37.2, 20.7, 54.2, 62.4, 64.2],
-    "net":   [25.7, 36.4, 16.3, 48.9, 55.9, 55.9],
-    "labels": ["FY21", "FY22", "FY23", "FY24", "FY25", "TTM"],
-}
 
 _STOCK_OWN_FUNDS = [
     {"rank": "01", "fund": "Vanguard Group",      "manager": "—",                  "shares": "212.4M", "value": "$30.2B",  "port": "4.1%",  "chg":  0.012},
@@ -3310,22 +4199,41 @@ _RATING_BUCKETS = [
 
 
 def _stock_build_forecasts(ticker: str, current_price: float | None) -> dict:
-    """Real analyst consensus + ratings + price targets via ``analysts``.
+    """Real analyst consensus + ratings + price targets + earnings + estimates.
 
-    Fans out across the three sources (yfinance + Finnhub merged into a
-    single view inside ``get_analyst_ratings`` and consensus computed by
-    ``get_consensus_summary_from_raw``).  Falls back to the mock fixtures
-    when the analyst pipeline returns nothing — common when both data
-    sources hit a rate limit or the ticker isn't covered.
+    Fans out across:
+      - ``analysts.get_analyst_ratings`` — bucketed counts, consensus,
+        per-firm full rating history (for the Analysts pane expandables)
+      - ``earnings.get_earnings_data`` — quarterly EPS history + streak
+        scorecard for the Earnings pane
+      - ``earnings.get_forward_estimates`` — EPS + Revenue forward
+        analyst estimates for the Estimates pane
+
+    All wrapped in best-effort try/except so a single source failure
+    can't blank out the whole tab.  The Analysts pane retains the v2's
+    bucket/consensus/target-distribution shape for backwards compat —
+    new fields (``grouped``, ``earnings``, ``est``) are additive.
     """
     from datetime import datetime
-    from filings import analysts
+    from filings import analysts, earnings as earn
 
     try:
         ratings_objs = analysts.get_analyst_ratings(ticker) or []
     except Exception as exc:
         logger.warning("get_analyst_ratings(%s) failed: %s", ticker, exc)
         ratings_objs = []
+
+    # Earnings + estimates are independent — pull both even if ratings empty.
+    try:
+        earn_data = earn.get_earnings_data(ticker)
+    except Exception as exc:
+        logger.warning("get_earnings_data(%s) failed: %s", ticker, exc)
+        earn_data = {}
+    try:
+        est_data = earn.get_forward_estimates(ticker)
+    except Exception as exc:
+        logger.warning("get_forward_estimates(%s) failed: %s", ticker, exc)
+        est_data = {}
 
     if not ratings_objs:
         return {"has_data": False,
@@ -3336,7 +4244,79 @@ def _stock_build_forecasts(ticker: str, current_price: float | None) -> dict:
                 "eps":          _STOCK_FCT_EPS_REVISIONS,
                 "target_band":  _STOCK_FCT_TARGET_BAND,
                 "now_pct":      _STOCK_FCT_PRICE_PCT,
-                "consensus":    "BUY"}
+                "consensus":    "BUY",
+                "grouped":      [],
+                "current_price": current_price,
+                "earnings":     earn_data or {},
+                "est_eps":      (est_data or {}).get("eps") or [],
+                "est_revenue":  (est_data or {}).get("revenue") or []}
+
+    # ── Firm-grouped FULL rating history (for the Analysts pane expandables).
+    # Built from the un-deduped ratings_objs so each firm's group carries
+    # its complete rating history.  ratings_objs arrives date-desc, so the
+    # first encounter per firm is the most-recent rating.
+    firm_groups: dict[str, dict] = {}
+    firm_order: list[str] = []
+    for r in ratings_objs:
+        firm_key = (r.firm or "").strip().lower() or "unknown"
+        if firm_key not in firm_groups:
+            firm_groups[firm_key] = {
+                "firm":    r.firm or "Unknown",
+                "latest":  r,
+                "ratings": [],
+            }
+            firm_order.append(firm_key)
+        firm_groups[firm_key]["ratings"].append(r)
+
+    grouped: list[dict] = []
+    for k in firm_order:
+        g = firm_groups[k]
+        latest = g["latest"]
+        # Action label: latest.action is "upgrade"/"downgrade"/"maintain"/"init".
+        action_label = (latest.action or "").lower()
+        action_disp = {
+            "upgrade":   "Upgrade",
+            "downgrade": "Downgrade",
+            "maintain":  "Maintain",
+            "init":      "Initiated",
+            "reiterate": "Reiterate",
+        }.get(action_label, latest.action.title() if latest.action else "")
+
+        history: list[dict] = []
+        for r in g["ratings"]:
+            try:
+                d_str = datetime.strptime((r.date or "")[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+            except (TypeError, ValueError):
+                d_str = (r.date or "")[:10]
+            r_action = (r.action or "").lower()
+            history.append({
+                "action":  {
+                    "upgrade":   "Upgrade",
+                    "downgrade": "Downgrade",
+                    "maintain":  "Maintain",
+                    "init":      "Initiated",
+                    "reiterate": "Reiterate",
+                }.get(r_action, r.action.title() if r.action else ""),
+                "action_kind": r_action,
+                "from_grade":  r.from_grade or "",
+                "to_grade":    r.to_grade or "",
+                "target":      r.current_price_target,
+                "prev_target": r.prior_price_target,
+                "date":        d_str,
+            })
+
+        grouped.append({
+            "firm":          g["firm"],
+            "latest_action": action_disp,
+            "latest_kind":   action_label,
+            "latest_grade":  latest.to_grade or "",
+            "latest_from":   latest.from_grade or "",
+            "latest_target": latest.current_price_target,
+            "latest_prev":   latest.prior_price_target,
+            "latest_date":   (latest.date or "")[:10],
+            "ratings_count": len(g["ratings"]),
+            "history":       history,
+        })
 
     # Dedupe by firm — keep the most-recent rating per firm (ratings_objs
     # already arrives sorted date-desc from get_analyst_ratings).
@@ -3415,14 +4395,22 @@ def _stock_build_forecasts(ticker: str, current_price: float | None) -> dict:
         "ratings":        ratings_dist,
         "ratings_total":  ratings_total,
         "analysts":       analyst_rows,
-        # Revenue estimates + EPS revisions: no reliable free source for
-        # forward-looking estimates without yfinance, so keep the design
-        # fixture as scaffolding until a source lands.
+        # The bottom-of-pane mock panels were removed in favour of the
+        # Estimates sub-pane (real EPS + revenue analyst tables).  These
+        # fields stay for the Forecasts header / chart math — kept on
+        # mock fixtures so consumers (e.g. ``_stock_compute_signals``)
+        # don't break, but they're no longer rendered as panels.
         "rev_est":        _STOCK_FCT_REV_EST,
         "eps":            _STOCK_FCT_EPS_REVISIONS,
         "target_band":    target_band,
         "now_pct":        now_pct,
         "consensus":      consensus_label,
+        # ── New for the 3-pane redesign ──
+        "grouped":        grouped,
+        "current_price":  current_price,
+        "earnings":       earn_data or {},
+        "est_eps":        (est_data or {}).get("eps") or [],
+        "est_revenue":    (est_data or {}).get("revenue") or [],
     }
 
 
@@ -3435,7 +4423,7 @@ def _stock_compute_signals(
     forecasts: dict,
     payload: dict,
     meta: dict,
-    vitals: dict,
+    short_interest: dict | None = None,
 ) -> dict:
     """Synthesize the 8-row Signals table from already-fetched context.
 
@@ -3454,14 +4442,14 @@ def _stock_compute_signals(
 
     rows: list[dict] = []
 
-    # 1) Insider activity — Form 4 BUYs vs SELLs.
-    ins = ownership_insiders.get("rows") or []
-    buys  = sum(1 for r in ins if r.get("action") == "BUY")
-    sells = sum(1 for r in ins if r.get("action") == "SELL")
+    # 1) Insider activity — aggregate Form 4 buys vs sells across insiders.
+    ins = ownership_insiders.get("insiders") or []
+    buys  = sum(int(p.get("buys")  or 0) for p in ins)
+    sells = sum(int(p.get("sells") or 0) for p in ins)
     total = buys + sells
     if total:
         score = (buys - sells) / total
-        detail = f"{sells} SELL Form 4s · {buys} BUYs · last {min(total, 10)}"
+        detail = f"{sells} sells · {buys} buys · {len(ins)} insiders"
     else:
         score, detail = None, "No recent Form 4 activity"
     rows.append({"name": "Insider activity", "score": score, "weight": "high",
@@ -3562,19 +4550,15 @@ def _stock_compute_signals(
     # 8) Short interest — high short = bearish; low = bullish.
     si_str = ""
     si_score = None
-    for label, val in (vitals.get("share_stats") or []):
-        if label == "Short interest" and val and val != "—":
-            si_str = val
-            try:
-                pct = float(val.rstrip("% "))
-                # >5% = bearish, <2% = bullish
-                if pct < 2:    si_score = +0.3
-                elif pct < 5:  si_score = +0.1
-                elif pct < 10: si_score = -0.2
-                else:          si_score = -0.5
-            except (TypeError, ValueError):
-                pass
-            break
+    pct_float = (short_interest or {}).get("short_pct_float")
+    if isinstance(pct_float, (int, float)) and pct_float >= 0:
+        pct = pct_float * 100
+        si_str = f"{pct:.1f}%"
+        # >5% = bearish, <2% = bullish
+        if pct < 2:    si_score = +0.3
+        elif pct < 5:  si_score = +0.1
+        elif pct < 10: si_score = -0.2
+        else:          si_score = -0.5
     si_detail = f"{si_str} of float" if si_str else "Short interest unavailable"
     rows.append({"name": "Short interest", "score": si_score, "weight": "low",
                  "detail": si_detail,
@@ -3603,6 +4587,66 @@ def _stock_compute_signals(
 
     return {"signals": rows, "composite": composite_label,
             "composite_score": round(composite, 2)}
+
+
+async def _stock_build_signals_data(ticker: str) -> dict:
+    """Fan out the auxiliary Signals-tab data sources in parallel.
+
+    Powers the Sentiment + Short Interest sub-panes (the composite
+    8-row table is computed separately in ``_stock_compute_signals``):
+
+      - ``sentiment.get_sentiment_data`` — CNN F&G / Finnhub bullish-pct /
+        ApeWisdom mention velocity / AlphaVantage news sentiment / short
+        interest (latest snapshot + history)
+      - ``google_trends.get_trends_summary`` — categorised keywords +
+        12-month trend sparkline
+      - ``web_traffic.get_web_traffic_data`` — Tranco rank + Wikipedia
+        page-view event detector
+    """
+    t_up = ticker.upper()
+
+    async def _sentiment() -> dict:
+        try:
+            from filings import sentiment
+            return await to_heavy(sentiment.get_sentiment_data, t_up) or {}
+        except Exception as exc:
+            logger.debug("sentiment.get_sentiment_data(%s) failed: %s", ticker, exc)
+            return {}
+
+    async def _gtrends() -> dict:
+        try:
+            from filings import google_trends
+            return await to_heavy(google_trends.get_trends_summary, t_up) or {}
+        except Exception as exc:
+            logger.debug("google_trends.get_trends_summary(%s) failed: %s", ticker, exc)
+            return {}
+
+    async def _webtraffic() -> dict:
+        try:
+            from filings import web_traffic
+            return await to_heavy(web_traffic.get_web_traffic_data, t_up) or {}
+        except Exception as exc:
+            logger.debug("web_traffic.get_web_traffic_data(%s) failed: %s", ticker, exc)
+            return {}
+
+    sent, gt, wt = await asyncio.gather(_sentiment(), _gtrends(), _webtraffic())
+
+    return {
+        # Sentiment overview cards
+        "cnn":            sent.get("cnn_fear_greed"),
+        "finnhub":        sent.get("finnhub"),
+        "apewisdom":      sent.get("apewisdom"),
+        "alphavantage":   sent.get("alphavantage"),
+        # Search interest
+        "gt_keywords":    (gt or {}).get("keywords"),
+        "gt_trend":       (gt or {}).get("trend"),
+        # Web traffic
+        "wt_tranco":      (wt or {}).get("tranco"),
+        "wt_wikipedia":   (wt or {}).get("wikipedia"),
+        # Short interest (passes through to the Short Interest sub-pane)
+        "short_interest":         sent.get("short_interest"),
+        "short_interest_history": sent.get("short_interest_history") or [],
+    }
 
 
 async def _stock_build_vitals(request: Request, ticker: str) -> dict:
@@ -3743,13 +4787,22 @@ async def _stock_build_vitals(request: Request, ticker: str) -> dict:
 def _stock_build_financials(ticker: str) -> dict:
     """Real financial statements for *ticker* via SEC XBRL.
 
-    Pulls 10-K annual data from ``fundamentals.get_fundamentals`` and
-    transforms it into the shape the redesign template expects (FYxx
-    columns, rows with ``vals`` lists, ``bold``/``hl``/``unit`` flags),
-    plus the 4-cell KPI strip and the gross/op/net margin trend used by
-    the SVG line chart.  Returns ``has_data=False`` when XBRL is empty.
+    Returns the four-tab structure the v2 Financials pane renders
+    (Income / Balance / Cash Flow / Key Ratios), at both annual and
+    quarterly cadence, plus a flat ``chart_data`` blob the ECharts
+    builders consume for the chart-on-top-of-table layout.  Mirrors
+    the v1 ``/api/financials/{ticker}`` shape so the existing chart
+    builder logic ports cleanly.
+
+    Each statement is ``{periods, labels, rows}`` where rows preserve
+    the raw fundamentals shape — ``{label, is_subtotal, is_eps, is_pct,
+    is_ratio, is_cash, values: {period: val}}`` — so the template's
+    ``fmt_num`` macro can format per-row without a Python pre-pass.
+
+    Returns ``has_data=False`` and the design fixture when XBRL is empty
+    so the page never blanks out.
     """
-    from datetime import datetime
+    from datetime import datetime as _dt
 
     try:
         from filings import fundamentals
@@ -3758,114 +4811,99 @@ def _stock_build_financials(ticker: str) -> dict:
         logger.warning("get_fundamentals(%s) failed: %s", ticker, exc)
         data = None
 
-    annual = (data or {}).get("annual")
-    if not annual:
-        return {"has_data": False, "kpis": _STOCK_MOCK_FIN_KPIS,
-                "periods": _STOCK_FIN_PERIODS, "income": _STOCK_FIN_INCOME,
-                "balance": _STOCK_FIN_BALANCE, "cash": _STOCK_FIN_CASH,
-                "margin_trend": _STOCK_MARGIN_TREND}
+    if not data or (not data.get("annual") and not data.get("quarterly")):
+        return _stock_financials_fallback()
 
-    # Sort periods chronologically (oldest → newest) and keep last 5.
-    raw_periods = sorted(annual["income"]["periods"])[-5:]
-
-    def _label_for(period_end: str) -> str:
+    def _period_label(p: str, freq: str) -> str:
+        # Annual → "FY 2024".  Quarterly → "03/2024" (MM/YYYY).
         try:
-            yy = datetime.strptime(period_end, "%Y-%m-%d").year % 100
-            return f"FY{yy:02d}"
+            d = _dt.strptime(p, "%Y-%m-%d")
         except (TypeError, ValueError):
-            return period_end[-2:] if period_end else "?"
+            return p
+        return f"FY {d.year}" if freq == "annual" else f"{d.month:02d}/{d.year}"
 
-    period_labels = [_label_for(p) for p in raw_periods]
+    def _shape_statement(stmt: dict | None, freq: str) -> dict | None:
+        # Most-recent first to match v1's L→R period order in the table.
+        if not stmt:
+            return None
+        periods = sorted(stmt.get("periods") or [], reverse=True)
+        if not periods:
+            return None
+        labels = [_period_label(p, freq) for p in periods]
+        return {"periods": periods, "labels": labels, "rows": stmt.get("rows") or []}
 
-    # Highlight rows the design singles out as "key" (bold + accent fill).
-    HL = {"Net Income", "Total Equity", "Free Cash Flow"}
+    def _row_values(stmt: dict | None, label: str) -> list:
+        # Chart-friendly oldest-first array (chart x-axis reads L→R old→new).
+        if not stmt:
+            return []
+        periods = sorted(stmt.get("periods") or [])
+        for row in stmt.get("rows") or []:
+            if row.get("label") == label:
+                return [(row.get("values") or {}).get(p) for p in periods]
+        return [None] * len(periods)
 
-    # Statement labels from fundamentals → display label mapping (drop
-    # XBRL-ese; preserve order from the source list).
-    INCOME_LABELS = {
-        "Revenue":               "Revenue",
-        "Cost of Revenue":       "Cost of revenue",
-        "Gross Profit":          "Gross profit",
-        "R&D Expenses":          "R&D",
-        "SG&A Expenses":         "SG&A",
-        "Operating Income":      "Operating income",
-        "Net Income":            "Net income",
-        "EPS Basic":             "EPS (basic)",
-        "EPS Diluted":           "EPS (diluted)",
-    }
-    BALANCE_LABELS = {
-        "Cash and Equivalents":     "Cash & equivalents",
-        "Total Current Assets":     "Total current assets",
-        "Total Assets":             "Total assets",
-        "Total Current Liabilities": "Total current liabilities",
-        "Total Debt":               "Total debt",
-        "Total Equity":             "Stockholders' equity",
-    }
-    CASH_LABELS = {
-        "Operating Cash Flow":      "Operating cash flow",
-        "Capital Expenditures":     "Capex",
-        "Free Cash Flow":           "Free cash flow",
-        "Cash from Financing":      "Cash from financing",
-        "Stock Buybacks":           "Stock buybacks",
-        "Dividends Paid":           "Dividends paid",
-    }
+    out: dict = {"has_data": True}
+    chart_data: dict = {}
+    for freq in ("annual", "quarterly"):
+        fd = data.get(freq)
+        if not fd:
+            out[freq] = None
+            continue
+        out[freq] = {
+            "income":   _shape_statement(fd.get("income"),   freq),
+            "balance":  _shape_statement(fd.get("balance"),  freq),
+            "cashflow": _shape_statement(fd.get("cashflow"), freq),
+            "ratios":   _shape_statement(fd.get("ratios"),   freq),
+        }
+        # Chart axis labels are oldest-first.  Use whatever periods the
+        # income statement reports — every chart shares this axis.
+        periods_asc = sorted(
+            (fd.get("income") or {}).get("periods") or [], reverse=False
+        )
+        chart_data[freq] = {
+            "labels": [_period_label(p, freq) for p in periods_asc],
+            "income": {
+                "revenue":          _row_values(fd.get("income"), "Revenue"),
+                "net_income":       _row_values(fd.get("income"), "Net Income"),
+                "operating_margin": _row_values(fd.get("ratios"), "Operating Margin"),
+            },
+            "balance": {
+                "current_assets":      _row_values(fd.get("balance"), "Total Current Assets"),
+                "total_assets":        _row_values(fd.get("balance"), "Total Assets"),
+                "current_liabilities": _row_values(fd.get("balance"), "Total Current Liabilities"),
+                "total_liabilities":   _row_values(fd.get("balance"), "Total Liabilities"),
+                "total_equity":        _row_values(fd.get("balance"), "Total Equity"),
+            },
+            "cashflow": {
+                "operating_cf": _row_values(fd.get("cashflow"), "Operating Cash Flow"),
+                "investing_cf": _row_values(fd.get("cashflow"), "Investing Cash Flow"),
+                "financing_cf": _row_values(fd.get("cashflow"), "Financing Cash Flow"),
+                "free_cf":      _row_values(fd.get("ratios"),   "Free Cash Flow"),
+            },
+            "ratios": {
+                "gross_margin":     _row_values(fd.get("ratios"), "Gross Margin"),
+                "operating_margin": _row_values(fd.get("ratios"), "Operating Margin"),
+                "net_margin":       _row_values(fd.get("ratios"), "Net Margin"),
+                "roe":              _row_values(fd.get("ratios"), "ROE"),
+                "fcf_margin":       _row_values(fd.get("ratios"), "FCF Margin"),
+            },
+        }
+    out["chart_data"] = chart_data
 
-    def _vals_for(row: dict, scale: float = 1e9, decimals: int = 2) -> list[float]:
-        out: list[float] = []
-        for p in raw_periods:
-            v = (row.get("values") or {}).get(p)
-            if v is None:
-                out.append(0.0)
-            else:
-                out.append(round(float(v) / scale, decimals))
-        return out
+    # KPI strip — annual values, latest period vs prior.
+    annual = data.get("annual") or {}
+    annual_periods_asc = sorted(
+        (annual.get("income") or {}).get("periods") or []
+    )[-2:]
 
-    def _build_rows(src_rows: list[dict], label_map: dict[str, str], *,
-                    is_eps_check: bool = True) -> list[dict]:
-        rows: list[dict] = []
-        for src in src_rows:
-            label = src.get("label")
-            if label not in label_map:
-                continue
-            display = label_map[label]
-            is_eps = bool(src.get("is_eps")) if is_eps_check else False
-            scale = 1.0 if is_eps else 1e9
-            rows.append({
-                "label": display,
-                "vals":  _vals_for(src, scale=scale, decimals=2),
-                "bold":  bool(src.get("is_subtotal")),
-                "hl":    label in HL,
-                "unit":  "$" if is_eps else "",
-            })
-        return rows
-
-    income_rows  = _build_rows(annual["income"]["rows"],   INCOME_LABELS)
-    balance_rows = _build_rows(annual["balance"]["rows"],  BALANCE_LABELS,  is_eps_check=False)
-    cash_rows    = _build_rows(annual["cashflow"]["rows"], CASH_LABELS,     is_eps_check=False)
-
-    # Append margin rows (from ratios) onto income for the Income tab.
-    ratios_by_label = {r["label"]: r for r in annual.get("ratios", {}).get("rows") or []}
-    for r_label, display in [
-        ("Gross Margin",     "Gross margin"),
-        ("Operating Margin", "Operating margin"),
-        ("Net Margin",       "Net margin"),
-    ]:
-        if r_label in ratios_by_label:
-            r = ratios_by_label[r_label]
-            income_rows.append({
-                "label": display,
-                "vals":  [round((r.get("values") or {}).get(p) or 0, 1) for p in raw_periods],
-                "bold":  False, "hl": False, "unit": "%",
-            })
-
-    # KPI strip (top-of-tab) — pull latest annual values + simple YoY deltas.
-    def _latest_two(label: str, src_rows: list[dict]) -> tuple[float | None, float | None]:
-        for src in src_rows:
-            if src.get("label") == label:
-                values = src.get("values") or {}
-                last     = values.get(raw_periods[-1])
-                prev     = values.get(raw_periods[-2]) if len(raw_periods) > 1 else None
-                return last, prev
+    def _annual_two(stmt_key: str, label: str) -> tuple[float | None, float | None]:
+        stmt = annual.get(stmt_key) or {}
+        for row in stmt.get("rows") or []:
+            if row.get("label") == label:
+                vals = row.get("values") or {}
+                curr = vals.get(annual_periods_asc[-1]) if annual_periods_asc else None
+                prev = vals.get(annual_periods_asc[0]) if len(annual_periods_asc) > 1 else None
+                return curr, prev
         return None, None
 
     def _yoy_pct(curr: float | None, prev: float | None) -> str:
@@ -3875,30 +4913,30 @@ def _stock_build_financials(ticker: str) -> dict:
         sign = "+" if pct >= 0 else ""
         return f"{sign}{pct:.0f}% YoY"
 
-    rev_curr, rev_prev = _latest_two("Revenue",    annual["income"]["rows"])
-    ni_curr,  ni_prev  = _latest_two("Net Income", annual["income"]["rows"])
-    fcf_row = ratios_by_label.get("Free Cash Flow") or {}
-    fcf_values = fcf_row.get("values") or {}
-    fcf_curr   = fcf_values.get(raw_periods[-1])
-    fcf_prev   = fcf_values.get(raw_periods[-2]) if len(raw_periods) > 1 else None
-    gm_row = ratios_by_label.get("Gross Margin") or {}
-    gm_values = gm_row.get("values") or {}
-    gm_curr   = gm_values.get(raw_periods[-1])
-    gm_prev   = gm_values.get(raw_periods[-2]) if len(raw_periods) > 1 else None
-    gm_delta  = ""
-    if gm_curr is not None and gm_prev is not None:
-        gm_delta = f"{'+' if gm_curr >= gm_prev else ''}{gm_curr - gm_prev:.1f}pp"
+    rev_curr, rev_prev = _annual_two("income", "Revenue")
+    ni_curr,  ni_prev  = _annual_two("income", "Net Income")
+    fcf_curr, fcf_prev = _annual_two("ratios", "Free Cash Flow")
+    gm_curr,  gm_prev  = _annual_two("ratios", "Gross Margin")
 
-    kpis = [
-        {"label": f"Revenue ({period_labels[-1]})",
+    latest_label = (
+        _period_label(annual_periods_asc[-1], "annual")
+        if annual_periods_asc else "FY"
+    )
+    gm_delta = (
+        f"{'+' if gm_curr >= gm_prev else ''}{gm_curr - gm_prev:.1f}pp"
+        if gm_curr is not None and gm_prev is not None else ""
+    )
+
+    out["kpis"] = [
+        {"label": f"Revenue ({latest_label})",
          "value": _stock_format_mcap(rev_curr) if rev_curr else "—",
          "delta": _yoy_pct(rev_curr, rev_prev),
          "up":    (rev_curr or 0) >= (rev_prev or 0)},
-        {"label": f"Net Income ({period_labels[-1]})",
+        {"label": f"Net Income ({latest_label})",
          "value": _stock_format_mcap(ni_curr) if ni_curr else "—",
          "delta": _yoy_pct(ni_curr, ni_prev),
          "up":    (ni_curr or 0) >= (ni_prev or 0)},
-        {"label": f"FCF ({period_labels[-1]})",
+        {"label": f"FCF ({latest_label})",
          "value": _stock_format_mcap(fcf_curr) if fcf_curr else "—",
          "delta": _yoy_pct(fcf_curr, fcf_prev),
          "up":    (fcf_curr or 0) >= (fcf_prev or 0)},
@@ -3907,45 +4945,43 @@ def _stock_build_financials(ticker: str) -> dict:
          "delta": gm_delta,
          "up":    (gm_curr or 0) >= (gm_prev or 0)},
     ]
+    return out
 
-    # Margin-trend chart: pull margin series across the 5 periods.
-    def _series(label: str) -> list[float]:
-        r = ratios_by_label.get(label) or {}
-        values = r.get("values") or {}
-        return [round(values.get(p) or 0, 1) for p in raw_periods]
 
-    margin_trend = {
-        "gross":  _series("Gross Margin"),
-        "op":     _series("Operating Margin"),
-        "net":    _series("Net Margin"),
-        "labels": period_labels,
-    }
-
+def _stock_financials_fallback() -> dict:
+    """Empty-state placeholder used when XBRL has nothing for the ticker."""
     return {
-        "has_data":      True,
-        "kpis":          kpis,
-        "periods":       period_labels,
-        "income":        income_rows,
-        "balance":       balance_rows,
-        "cash":          cash_rows,
-        "margin_trend":  margin_trend,
+        "has_data":   False,
+        "kpis":       _STOCK_MOCK_FIN_KPIS,
+        "annual":     None,
+        "quarterly":  None,
+        "chart_data": {},
     }
 
 
 def _stock_build_ownership_funds(request: Request, ticker: str) -> dict:
-    """Real top-10 13F holders for *ticker* from ``app.state.fund_cache``.
+    """Real 13F ownership data for *ticker* from ``app.state.fund_cache``.
 
-    Walks every cached fund's ``all_holdings`` (zero API calls), sorts by
-    position value descending, formats numbers, and computes QoQ share
-    change as a fraction (NEW = 1.0, exits = -1.0).  Returns a dict with
-    ``rows`` (top-10), ``total_count`` (all funds holding this ticker),
-    and ``total_value`` (combined position value, formatted).
+    Returns:
+      - ``rows`` — top-10 holders with fund/manager/shares/value/port%/QoQΔ
+      - ``total_count`` / ``total_value`` — all funds holding this ticker
+      - ``activity_chart`` — per-quarter aggregate {labels, adds, reduces,
+        adds_count, reduces_count} for the Quarterly Activity bar chart
+      - ``quarters`` — per-quarter activity history (newest first), each
+        with ``label`` / ``key`` / ``entries`` (fund / activity / share
+        change / pct change), used by the Quarterly Activity History pills.
+
+    Both new fields come from a single walk of ``client.build_stock_history``
+    so we don't double-iterate the cache.
     """
     from filings.superinvestors import SUPERINVESTORS_BY_CIK
 
     fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
     if not fund_cache:
-        return {"rows": [], "total_count": 0, "total_value": "—"}
+        return {"rows": [], "total_count": 0, "total_value": "—",
+                "activity_chart": {"labels": [], "adds": [], "reduces": [],
+                                   "adds_count": [], "reduces_count": []},
+                "quarters": []}
 
     t_up = ticker.upper()
     rows_raw: list[dict] = []
@@ -4004,78 +5040,174 @@ def _stock_build_ownership_funds(request: Request, ticker: str) -> dict:
         "chg":     r["chg"],
     } for i, r in enumerate(rows_raw[:10])]
 
+    # ── Quarterly activity (chart + per-quarter expandable history) ──
+    # Use the existing ``client.build_stock_history`` builder which walks
+    # every fund's quarterly_changes once.
+    try:
+        from filings import client
+        history = client.build_stock_history(ticker, fund_cache, SUPERINVESTORS_BY_CIK)
+    except Exception as exc:
+        logger.warning("build_stock_history(%s) failed: %s", ticker, exc)
+        history = []
+
+    # Activity chart series — chronological (oldest left to match v1).
+    chart_labels: list[str] = []
+    chart_adds: list[int] = []
+    chart_reduces: list[int] = []
+    chart_adds_count: list[int] = []
+    chart_reduces_count: list[int] = []
+
+    quarters_history: list[dict] = []
+    for q in history:
+        adds_shares = 0
+        reduces_shares = 0
+        adds_n = 0
+        reduces_n = 0
+        entries: list[dict] = []
+        for e in q.entries:
+            if e.share_change > 0:
+                adds_shares  += e.share_change
+                adds_n       += 1
+            elif e.share_change < 0:
+                reduces_shares += e.share_change  # negative
+                reduces_n     += 1
+            entries.append({
+                "fund":         e.fund_display_name,
+                "fund_cik":     e.fund_cik,
+                "activity":     e.activity,
+                "share_change": e.share_change,
+                "pct_change":   e.pct_change,
+            })
+        quarters_history.append({
+            "label":   q.period,
+            "key":     q.period.replace(" ", "-").lower(),
+            "entries": entries,
+        })
+        chart_labels.append(q.period)
+        chart_adds.append(adds_shares)
+        chart_reduces.append(reduces_shares)
+        chart_adds_count.append(adds_n)
+        chart_reduces_count.append(reduces_n)
+
+    # build_stock_history returns newest-first; flip the chart axis to
+    # oldest-left so it reads naturally L→R.  Keep quarters_history
+    # newest-first for the pill nav (most recent quarter pre-selected).
+    chart_labels.reverse()
+    chart_adds.reverse()
+    chart_reduces.reverse()
+    chart_adds_count.reverse()
+    chart_reduces_count.reverse()
+
     return {
         "rows":        rows,
         "total_count": len(rows_raw),
         "total_value": _stock_format_mcap(combined_value),
+        "activity_chart": {
+            "labels":        chart_labels,
+            "adds":          chart_adds,
+            "reduces":       chart_reduces,
+            "adds_count":    chart_adds_count,
+            "reduces_count": chart_reduces_count,
+        },
+        "quarters": quarters_history,
     }
 
 
 def _stock_build_ownership_insiders(ticker: str) -> dict:
     """Real Form 4 insider trades for *ticker* via ``insider_trading``.
 
-    Returns top-10 most-recent trades formatted for the Ownership > Insiders
-    sub-tab.  Falls back to ``{rows: [], total_count: 0}`` on any error.
+    Reuses the v1 ``insider_trading.prepare_ticker_display`` to produce
+    the four data slices the redesign panel needs:
+
+      - ``insiders`` — per-insider summary (name, title, buy/sell counts +
+        values, last trade date, quarterly_breakdown for the hover tooltip)
+      - ``quarters`` — newest-first per-quarter trade groups (each with
+        label, key, trades list, buy/sell counts, total value)
+      - ``chart`` — Chart.js series data (labels, buy_values, sell_values)
+      - ``per_insider_chart`` — same shape keyed by insider name (+__all__)
+        for the dropdown filter
+
+    Plus the 4-card insights panel from ``insider_insights``.  Falls back
+    to empty structures on error so the template never blows up.
     """
-    from filings import insider_trading
-    from datetime import datetime
+    from filings import insider_trading, supabase_cache, insider_insights as ii
 
     try:
         trades = insider_trading.get_ticker_insider_trades(ticker) or []
     except Exception as exc:
         logger.warning("get_ticker_insider_trades(%s) failed: %s", ticker, exc)
-        return {"rows": [], "total_count": 0}
+        trades = []
 
-    rows: list[dict] = []
-    for t in trades[:10]:
-        # Trade type: "Sale", "Sale+OE", "Purchase" → "SELL" / "BUY"
-        ttype = (t.trade_type or "").lower()
-        if "sale" in ttype:    action = "SELL"
-        elif "purchas" in ttype: action = "BUY"
-        else:                   action = (t.trade_type or "").upper()
+    if not trades:
+        return {"insiders": [], "quarters": [], "chart": None,
+                "per_insider_chart": {}, "insights": None,
+                "total_count": 0}
 
-        # Format date from ISO → "Apr 28, 2026"
-        date_str = t.trade_date or t.filing_date or ""
-        try:
-            dt = datetime.strptime(date_str, "%Y-%m-%d")
-            date_str = dt.strftime("%b %-d, %Y")
-        except (TypeError, ValueError):
-            pass
+    try:
+        display = insider_trading.prepare_ticker_display(trades)
+    except Exception as exc:
+        logger.warning("prepare_ticker_display(%s) failed: %s", ticker, exc)
+        display = {"insiders": [], "quarters": [], "chart": None,
+                   "per_insider_chart": {}}
 
-        # Strip leading "+/-" from qty and value — action tag conveys direction.
-        qty   = (t.qty   or "—").lstrip("+-")
-        value = (t.value or "—").replace("-$", "$").lstrip("+")
+    # 4-card insights panel — Buy Activity / Buying Zone / Win Rate /
+    # Forward 90d.  Pulls from a separate ``insider_purchases_history``
+    # table (cold storage of historical buys), so guard if missing.
+    insights = None
+    try:
+        purchases = supabase_cache.get_insider_purchases(ticker) or []
+        if purchases and len(purchases) >= 2:
+            insights = ii.compute_insider_insights(ticker, purchases, None)
+    except Exception as exc:
+        logger.debug("insider_insights for %s failed: %s", ticker, exc)
 
-        rows.append({
-            "person":    t.insider_name or "—",
-            "role":      t.title or "—",
-            "action":    action,
-            "shares":    qty,
-            "value":     value,
-            "date":      date_str,
-            "remaining": t.owned or "—",
-        })
-
-    return {"rows": rows, "total_count": len(trades)}
+    return {
+        "insiders":          display.get("insiders") or [],
+        "quarters":          display.get("quarters") or [],
+        "chart":             display.get("chart"),
+        "per_insider_chart": display.get("per_insider_chart") or {},
+        "insights":          insights,
+        "total_count":       len(trades),
+    }
 
 
 def _stock_build_ownership_congress(ticker: str) -> dict:
     """Real STOCK Act congressional trades for *ticker* from Supabase.
 
-    Returns top-10 most-recent trades, with disclosure delay (days between
-    trade_date and filing_date) and a compact dollar range.
+    Reuses ``congress_trading.prepare_stock_congress_display`` for the
+    party-volume breakdown + per-member aggregation, then formats the top
+    10 most-recent trades for the table.  Returns:
+      - ``rows`` — top-10 trades with date / party / action / size / delay
+      - ``politicians`` — top-12 members trading this ticker for the grid
+      - ``party_breakdown`` — Dem vs Rep buy-volume percentages
+      - ``total_trades`` / ``total_politicians`` for the panel headers
     """
-    from filings import supabase_cache
+    from filings import supabase_cache, congress_trading
     from datetime import datetime
 
     try:
-        rows_db = supabase_cache.get_congress_trades_by_ticker(ticker, limit=200) or []
+        rows_db = supabase_cache.get_congress_trades_by_ticker(ticker, limit=500) or []
     except Exception as exc:
         logger.warning("get_congress_trades_by_ticker(%s) failed: %s", ticker, exc)
         rows_db = []
 
+    if not rows_db:
+        return {"rows": [], "total_count": 0,
+                "politicians": [], "party_breakdown": None,
+                "total_politicians": 0, "total_trades": 0}
+
+    # Aggregate via the existing v1 helper — gives us politicians +
+    # party_breakdown + recent_trades in one pass.
+    try:
+        agg = congress_trading.prepare_stock_congress_display(ticker, rows_db)
+    except Exception as exc:
+        logger.warning("prepare_stock_congress_display(%s) failed: %s", ticker, exc)
+        agg = {"politicians": [], "party_breakdown": None,
+               "recent_trades": [], "total_politicians": 0, "total_trades": 0}
+
+    # Format top-10 trades for the redesign table (same shape as before).
     rows: list[dict] = []
-    for r in rows_db[:10]:
+    for r in (agg.get("recent_trades") or rows_db)[:10]:
         party_full = (r.get("party") or "").lower()
         if "democrat" in party_full:   party = "D"
         elif "republican" in party_full: party = "R"
@@ -4093,17 +5225,28 @@ def _stock_build_ownership_congress(ticker: str) -> dict:
         except (TypeError, ValueError):
             days, date_str = 0, fd or td
 
+        size = (r.get("amount_compact")
+                or _compact_range_str(r.get("amount_display"))
+                or "—")
+
         rows.append({
             "person":  r.get("politician_name") or "—",
             "party":   party,
             "chamber": (r.get("chamber") or "").title() or "—",
             "action":  action,
-            "size":    _compact_range_str(r.get("amount_display")) or "—",
+            "size":    size,
             "date":    date_str,
             "days":    max(0, days),
         })
 
-    return {"rows": rows, "total_count": len(rows_db)}
+    return {
+        "rows":              rows,
+        "total_count":       len(rows_db),
+        "politicians":       (agg.get("politicians") or [])[:12],
+        "party_breakdown":   agg.get("party_breakdown"),
+        "total_politicians": agg.get("total_politicians", 0),
+        "total_trades":      agg.get("total_trades", len(rows_db)),
+    }
 
 
 async def _stock_build_ownership_filings(ticker: str) -> dict:
@@ -4146,17 +5289,34 @@ async def _stock_build_ownership_filings(ticker: str) -> dict:
         descriptions = recent.get("primaryDocDescription") or []
         accessions   = recent.get("accessionNumber") or []
         periods      = recent.get("reportDate") or []
+        primary_docs = recent.get("primaryDocument") or []
 
         rows: list[dict] = []
-        skip_forms = {"3", "3/A", "5", "5/A"}  # routine; surfaced in Insiders tab
+        # Up the cap to ~50 — the redesign panel scrolls anyway, and
+        # exposing more filings makes the form-type filter useful.
         for i in range(min(len(forms), 50)):
             form = forms[i]
-            if form in skip_forms or len(rows) >= 12:
-                continue
+            if len(rows) >= 50:
+                break
             try:
                 d = datetime.strptime(dates[i], "%Y-%m-%d").strftime("%b %-d, %Y")
             except (TypeError, ValueError, IndexError):
                 d = dates[i] if i < len(dates) else ""
+
+            # Build the EDGAR filing-detail URL from accession + primary doc.
+            # Accession number is "0001193125-24-001234"; folder format
+            # strips the dashes.  Filing index page is at:
+            #   /Archives/edgar/data/{cik_no_pad}/{acc_no_clean}/{primary_doc}
+            sec_url = ""
+            if i < len(accessions) and accessions[i]:
+                acc_clean = accessions[i].replace("-", "")
+                doc = primary_docs[i] if i < len(primary_docs) else ""
+                sec_url = (
+                    f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
+                    f"{acc_clean}/{doc}" if doc
+                    else f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany"
+                         f"&CIK={int(cik):010d}&type={form}"
+                )
 
             rows.append({
                 "type":   form,
@@ -4164,12 +5324,15 @@ async def _stock_build_ownership_filings(ticker: str) -> dict:
                 "period": periods[i] if i < len(periods) and periods[i] else "—",
                 "desc":   descriptions[i] if i < len(descriptions) else "—",
                 "size":   "—",
+                "url":    sec_url,
             })
         return {"rows": rows}
 
     try:
+        # ``v2`` cache key suffix: previous shape didn't include ``url``
+        # or expand to 50 rows; bump to invalidate stale rows in Supabase.
         return await _l2_cached(
-            f"redesign:stock:filings:{ticker.upper()}", ttl_seconds=86400,
+            f"redesign:stock:filings:v2:{ticker.upper()}", ttl_seconds=86400,
             compute=_compute, category="redesign_stock",
         ) or {"rows": []}
     except Exception as exc:
@@ -4652,7 +5815,7 @@ async def _fetch_stock_overview(ticker: str) -> dict:
     """
     try:
         from filings import market_data
-        ohlcv = await to_heavy(market_data.get_stock_ohlcv, ticker.upper(), "1Y")
+        ohlcv = await to_heavy(market_data.get_stock_ohlcv, ticker.upper(), "1M")
     except Exception as exc:
         logger.warning("Stock OHLCV fetch failed for %s: %s", ticker, exc)
         ohlcv = None
@@ -4755,8 +5918,12 @@ def _stock_kpi_strip(ctx: dict) -> list[dict]:
     ]
 
 
-def _stock_candlestick_paths(candles: list, vb_w: int = 600, vb_h: int = 200) -> dict:
-    """Build SVG geometry for a 1Y candlestick + volume strip.
+def _stock_candlestick_paths(candles: list, vb_w: int = 800, vb_h: int = 280) -> dict:
+    """Build SVG geometry for a candlestick + volume strip.
+
+    Default viewBox is 800×280 (~2.86:1) — matches the stock-page hero's
+    2-column container ratio (chart sits next to the news panel) so
+    `preserveAspectRatio="none"` doesn't squish or stretch the candles.
 
     Returns dict with `bars` (list of per-candle drawing data) and meta.
     Each bar entry: {x, wick_y1, wick_y2, body_y, body_h, up, vol_h}.
@@ -4822,7 +5989,7 @@ def _stock_candlestick_paths(candles: list, vb_w: int = 600, vb_h: int = 200) ->
             "body_y":  round(bar_top, 1),
             "body_h":  round(body_h, 1),
             "up":      up,
-            "vol_x":   round(x - 3, 1),
+            "vol_x":   round(x - body_w / 2, 1),
             "vol_y":   round(v_strip_top + v_strip_h - vol_h, 1),
             "vol_h":   round(vol_h, 1),
             # Raw OHLCV for the hover tooltip — kept separate from the SVG
@@ -4854,7 +6021,7 @@ async def preview_stock(request: Request, ticker: str):
             logger.warning("Stock %s: %s failed: %s", ticker, name, exc)
         return fallback
 
-    payload, meta, sentiment_data, ownership_funds, ownership_insiders, ownership_congress, ownership_filings, financials, forecasts, vitals = await asyncio.gather(
+    payload, meta, sentiment_data, ownership_funds, ownership_insiders, ownership_congress, ownership_filings, financials, forecasts, signals_aux = await asyncio.gather(
         _bounded(_fetch_stock_overview(ticker),                      timeout=8.0,
                  fallback={"ticker": ticker.upper(), "name": ticker.upper(),
                            "exchange": "—", "cusip": "—", "price": None,
@@ -4878,24 +6045,29 @@ async def preview_stock(request: Request, ticker: str):
                            "cohort": [], "note": "", "fill_pct": 0, "fill_left": 50},
                  name="sentiment"),
         _bounded(to_light(_stock_build_ownership_funds, request, ticker), timeout=2.0,
-                 fallback={"rows": [], "total_count": 0, "total_value": "—"},
+                 fallback={"rows": [], "total_count": 0, "total_value": "—",
+                           "activity_chart": {"labels": [], "adds": [], "reduces": [],
+                                              "adds_count": [], "reduces_count": []},
+                           "quarters": []},
                  name="ownership_funds"),
-        _bounded(to_heavy(_stock_build_ownership_insiders, ticker),  timeout=2.0,
-                 fallback={"rows": [], "total_count": 0},
+        _bounded(to_heavy(_stock_build_ownership_insiders, ticker),  timeout=4.0,
+                 fallback={"insiders": [], "quarters": [], "chart": None,
+                           "per_insider_chart": {}, "insights": None,
+                           "total_count": 0},
                  name="ownership_insiders"),
         _bounded(to_light(_stock_build_ownership_congress, ticker),  timeout=3.0,
-                 fallback={"rows": [], "total_count": 0},
+                 fallback={"rows": [], "total_count": 0,
+                           "politicians": [], "party_breakdown": None,
+                           "total_politicians": 0, "total_trades": 0},
                  name="ownership_congress"),
         _bounded(_stock_build_ownership_filings(ticker),             timeout=4.0,
                  fallback={"rows": []},
                  name="ownership_filings"),
         _bounded(to_heavy(_stock_build_financials, ticker),          timeout=6.0,
                  fallback={"has_data": False, "kpis": _STOCK_MOCK_FIN_KPIS,
-                           "periods": _STOCK_FIN_PERIODS,
-                           "income": _STOCK_FIN_INCOME, "balance": _STOCK_FIN_BALANCE,
-                           "cash": _STOCK_FIN_CASH, "margin_trend": _STOCK_MARGIN_TREND},
+                           "annual": None, "quarterly": None, "chart_data": {}},
                  name="financials"),
-        _bounded(to_heavy(_stock_build_forecasts, ticker, None),     timeout=5.0,
+        _bounded(to_heavy(_stock_build_forecasts, ticker, None),     timeout=6.0,
                  fallback={"has_data": False, "ratings": _STOCK_FCT_RATINGS,
                            "ratings_total": sum(r[1] for r in _STOCK_FCT_RATINGS),
                            "analysts": _STOCK_FCT_ANALYSTS,
@@ -4903,18 +6075,23 @@ async def preview_stock(request: Request, ticker: str):
                            "eps": _STOCK_FCT_EPS_REVISIONS,
                            "target_band": _STOCK_FCT_TARGET_BAND,
                            "now_pct": _STOCK_FCT_PRICE_PCT,
-                           "consensus": "BUY"},
+                           "consensus": "BUY",
+                           "grouped": [], "current_price": None,
+                           "earnings": {}, "est_eps": [], "est_revenue": []},
                  name="forecasts"),
-        _bounded(_stock_build_vitals(request, ticker),               timeout=7.0,
-                 fallback={"share_stats": list(_STOCK_VITALS_SHARE_STATS),
-                           "peers": list(_STOCK_VITALS_PEERS),
-                           "dividends": _STOCK_VITALS_DIVS,
-                           "events": _STOCK_VITALS_EVENTS},
-                 name="vitals"),
+        _bounded(_stock_build_signals_data(ticker),                  timeout=6.0,
+                 fallback={"cnn": None, "finnhub": None, "apewisdom": None,
+                           "alphavantage": None, "gt_keywords": None,
+                           "gt_trend": None, "wt_tranco": None,
+                           "wt_wikipedia": None, "short_interest": None,
+                           "short_interest_history": []},
+                 name="signals_aux"),
     )
     # Re-anchor the price tick on the analyst target distribution once the
     # live quote has landed (forecasts ran in parallel without it).
     cur_price = payload.get("price")
+    if cur_price:
+        forecasts["current_price"] = cur_price
     if forecasts.get("has_data") and cur_price:
         band = forecasts["target_band"]
         span = band["high"] - band["low"] or 1
@@ -4945,7 +6122,8 @@ async def preview_stock(request: Request, ticker: str):
     signals_data = _stock_compute_signals(
         sentiment=sentiment_data, ownership_funds=ownership_funds,
         ownership_insiders=ownership_insiders, ownership_congress=ownership_congress,
-        forecasts=forecasts, payload=payload, meta=meta, vitals=vitals,
+        forecasts=forecasts, payload=payload, meta=meta,
+        short_interest=signals_aux.get("short_interest"),
     )
     # Overlay real metadata (mcap, P/E, exchange, CUSIP) onto the payload so
     # the KPI strip + hero pills render live values instead of em-dashes.
@@ -4970,16 +6148,7 @@ async def preview_stock(request: Request, ticker: str):
             "url":   n.get("url") or "",
         })
 
-    # Precompute chart path geometry server-side — keeps the template
-    # arithmetic-free and lets us reuse the same _stock_line_path helper
-    # across the margin-trend + EPS-revisions charts.
-    mt = financials["margin_trend"]
-    margin_paths = {
-        "gross": _stock_line_path(mt["gross"], 0, 100),
-        "op":    _stock_line_path(mt["op"],    0, 100),
-        "net":   _stock_line_path(mt["net"],   0, 100),
-        "gross_pts": _stock_chart_points(mt["gross"], 0, 100),
-    }
+    # Forecasts EPS chart still uses server-rendered SVG (one-off line).
     eps_series = forecasts["eps"]
     eps_min = min(eps_series) - 1
     eps_max = max(eps_series) + 1
@@ -4997,7 +6166,7 @@ async def preview_stock(request: Request, ticker: str):
 
     ctx = {
         "request":      request,
-        **_shell_context(""),  # Stock page doesn't highlight a sidebar item
+        **(await _shell_context(request, "")),  # Stock page doesn't highlight a sidebar item
         # Header — design adds sector / industry / "held by N superinvestors"
         # below the title; mock until fundamentals + holders join lands.
         "stock_ticker":   payload["ticker"],
@@ -5029,23 +6198,31 @@ async def preview_stock(request: Request, ticker: str):
         "stock_news":     news_items[:6],
         "stock_is_mock":  payload.get("is_mock", False),
         "stock_tab":      "Overview",
-        # Financials tab
-        "fin_kpis":       financials["kpis"],
-        "fin_periods":    financials["periods"],
-        "fin_income":     financials["income"],
-        "fin_balance":    financials["balance"],
-        "fin_cash":       financials["cash"],
-        "rev_segments":   _STOCK_REVENUE_SEGMENTS,
-        "rev_total":      _STOCK_REVENUE_TOTAL,
-        "margin_trend":   _STOCK_MARGIN_TREND,
+        # Financials tab — full v1-shaped data (annual + quarterly statements
+        # + a flat chart_data blob the ECharts builders consume on-demand).
+        "fin_kpis":        financials["kpis"],
+        "fin_annual":      financials.get("annual"),
+        "fin_quarterly":   financials.get("quarterly"),
+        "fin_chart_data":  financials.get("chart_data") or {},
+        "fin_has_data":    financials.get("has_data", False),
         # Ownership tab
-        "own_funds":          ownership_funds["rows"],
-        "own_funds_count":    ownership_funds["total_count"],
-        "own_funds_value":    ownership_funds["total_value"],
-        "own_insiders":       ownership_insiders["rows"],
-        "own_insiders_count": ownership_insiders["total_count"],
-        "own_congress":       ownership_congress["rows"],
-        "own_congress_count": ownership_congress["total_count"],
+        "own_funds":             ownership_funds["rows"],
+        "own_funds_count":       ownership_funds["total_count"],
+        "own_funds_value":       ownership_funds["total_value"],
+        "own_funds_chart":       ownership_funds.get("activity_chart") or {},
+        "own_funds_quarters":    ownership_funds.get("quarters") or [],
+        "own_insiders":             ownership_insiders.get("insiders") or [],
+        "own_insiders_count":       ownership_insiders["total_count"],
+        "own_insiders_quarters":    ownership_insiders.get("quarters") or [],
+        "own_insiders_chart":       ownership_insiders.get("chart"),
+        "own_insiders_per_chart":   ownership_insiders.get("per_insider_chart") or {},
+        "own_insiders_insights":    ownership_insiders.get("insights"),
+        "own_congress":          ownership_congress["rows"],
+        "own_congress_count":    ownership_congress["total_count"],
+        "own_congress_pols":     ownership_congress.get("politicians") or [],
+        "own_congress_party":    ownership_congress.get("party_breakdown"),
+        "own_congress_n_pols":   ownership_congress.get("total_politicians", 0),
+        "own_congress_n_trades": ownership_congress.get("total_trades", 0),
         "own_filings":        ownership_filings["rows"],
         # Forecasts tab
         "fct_ratings":      forecasts["ratings"],
@@ -5058,17 +6235,27 @@ async def preview_stock(request: Request, ticker: str):
         "fct_target_high":  band["high"],
         "fct_now_pct":      forecasts["now_pct"],
         "fct_consensus":    forecasts["consensus"],
-        # Financials tab — extras: margin trend SVG paths
-        "margin_paths":   margin_paths,
+        # 3-pane redesign — Analysts firm groups, Earnings history, Estimates.
+        "fct_grouped":       forecasts.get("grouped") or [],
+        "fct_current_price": forecasts.get("current_price"),
+        "fct_earnings":      forecasts.get("earnings") or {},
+        "fct_est_eps":       forecasts.get("est_eps") or [],
+        "fct_est_revenue":   forecasts.get("est_revenue") or [],
         # Signals tab
         "sig_signals":    signals_data["signals"],
         "sig_composite":  signals_data["composite"],
         "sig_composite_score": signals_data["composite_score"],
-        # Vitals tab
-        "vit_dividends":  vitals["dividends"],
-        "vit_events":     vitals["events"],
-        "vit_peers":      vitals["peers"],
-        "vit_share_stats": vitals["share_stats"],
+        # New for the 2-pill Signals tab.
+        "sig_cnn":        signals_aux.get("cnn"),
+        "sig_finnhub":    signals_aux.get("finnhub"),
+        "sig_apewisdom":  signals_aux.get("apewisdom"),
+        "sig_alphavantage": signals_aux.get("alphavantage"),
+        "sig_gt_keywords": signals_aux.get("gt_keywords"),
+        "sig_gt_trend":   signals_aux.get("gt_trend"),
+        "sig_wt_tranco":  signals_aux.get("wt_tranco"),
+        "sig_wt_wikipedia": signals_aux.get("wt_wikipedia"),
+        "sig_short_interest":         signals_aux.get("short_interest"),
+        "sig_short_interest_history": signals_aux.get("short_interest_history") or [],
         # Watchlist state
         "stock_watching": stock_watching,
         "stock_user_signed_in": bool(user_id),
@@ -5086,7 +6273,7 @@ async def preview_stock_chart(request: Request, ticker: str, period: str):
     Powers the range-chip click handler — JS swaps the inner HTML of
     ``.pp-stock-chart-body`` instead of refetching the whole page.
     """
-    period_norm = period.upper() if period.upper() in _CHART_PERIODS else "1Y"
+    period_norm = period.upper() if period.upper() in _CHART_PERIODS else "1M"
 
     try:
         from filings import market_data
@@ -5113,14 +6300,321 @@ async def preview_stock_chart(request: Request, ticker: str, period: str):
 
 
 _SCREENER_PRESETS = [
-    "My filters", "Smart-money buys", "13F new positions",
-    "Insider clusters", "Congress momentum", "Magnificent 7",
-    "Dividend aristocrats", "Quality compounders", "Cheap & growing",
+    "All",                      # No filter — full universe
+    "Smart-money buys",         # ≥ 5 superinvestors holding
+    "13F new positions",        # any fund newly opened a position last quarter
+    "Insider clusters",         # ≥ 3 insiders BUYing in 30d
+    "Congress momentum",        # ≥ 1 Congress BUY in 90d
+    "Magnificent 7",            # specific 7 mega-caps
+    "Dividend aristocrats",     # placeholder — needs dividend metadata
+    "Quality compounders",      # placeholder — needs fundamentals
+    "Cheap & growing",          # placeholder — needs P/E + growth
 ]
 
-# Mock filter rail — until /api/screener/run exists.  Each group is a
-# (title, [(label, value), ...]) tuple.  Values render as outlined chips.
-_SCREENER_FILTER_GROUPS = [
+# Magnificent 7 universe — used by the preset of the same name.
+_MAG7 = {"AAPL", "MSFT", "GOOGL", "AMZN", "META", "NVDA", "TSLA"}
+
+_SCREENER_SORTS = ["Smart money", "Day %", "Insider buys", "Congress buys", "Ticker"]
+
+
+def _format_compact_count(n: int, singular: str, plural: str | None = None) -> str:
+    """e.g. _format_compact_count(5, "fund") → '5 funds'."""
+    plural = plural or (singular + "s")
+    return f"{n} {singular if n == 1 else plural}"
+
+
+async def _fetch_screener_signals(months: int = 3) -> dict:
+    """Fetch the three signal feeds the screener layers on top of the
+    S&P 500 universe — 13F holdings (per-ticker fund counts), insider
+    trades (last ~30d, by ticker), and Congress trades (last 3 months,
+    by ticker)."""
+    try:
+        from filings import insider_trading, supabase_cache
+    except Exception:
+        return {"insiders": [], "congress": []}
+
+    insiders, congress = await asyncio.gather(
+        to_heavy(insider_trading.get_latest_insider_trades, "", 200, ""),
+        to_heavy(supabase_cache.get_congress_trades_recent_months, months, 5000),
+        return_exceptions=True,
+    )
+    if isinstance(insiders, Exception):
+        logger.warning("Screener insiders fetch failed: %s", insiders)
+        insiders = []
+    if isinstance(congress, Exception):
+        logger.warning("Screener congress fetch failed: %s", congress)
+        congress = []
+    return {"insiders": insiders or [], "congress": congress or []}
+
+
+def _screener_count_funds_holding(request: Request) -> dict[str, int]:
+    """Walk app.state.fund_cache once and count distinct funds holding each
+    ticker.  Cached on app.state so repeated screener loads are free."""
+    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    if not fund_cache:
+        return {}
+    cached = getattr(request.app.state, "_pp_screener_funds_by_ticker", None)
+    if isinstance(cached, dict):
+        return cached
+
+    by_ticker: dict[str, int] = {}
+    for fund_data in fund_cache.values():
+        seen: set[str] = set()
+        for h in fund_data.get("all_holdings") or []:
+            t = (h.get("ticker") or "").upper()
+            if t and t not in seen:
+                seen.add(t)
+        for t in seen:
+            by_ticker[t] = by_ticker.get(t, 0) + 1
+    try:
+        request.app.state._pp_screener_funds_by_ticker = by_ticker
+    except Exception:
+        pass
+    return by_ticker
+
+
+def _screener_count_funds_new_positions(request: Request) -> dict[str, int]:
+    """Count funds that opened a brand-new position in each ticker last
+    quarter.  Reads `changes` per fund, rolls up by ticker."""
+    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    if not fund_cache:
+        return {}
+    cached = getattr(request.app.state, "_pp_screener_new_by_ticker", None)
+    if isinstance(cached, dict):
+        return cached
+
+    cusip_to_ticker = _build_cusip_ticker_map(fund_cache)
+    by_ticker: dict[str, int] = {}
+    for fund_data in fund_cache.values():
+        for c in fund_data.get("changes") or []:
+            status = (c.get("status") or "").upper()
+            if status not in ("NEW", "NEWLY ADDED"):
+                continue
+            cusip = c.get("cusip", "")
+            ticker = (cusip_to_ticker.get(cusip) or "").upper()
+            if not ticker:
+                continue
+            by_ticker[ticker] = by_ticker.get(ticker, 0) + 1
+    try:
+        request.app.state._pp_screener_new_by_ticker = by_ticker
+    except Exception:
+        pass
+    return by_ticker
+
+
+def _screener_count_insiders(insider_trades: list) -> dict[str, dict[str, int]]:
+    """Roll insider trades into {ticker: {buys, sells}}."""
+    out: dict[str, dict[str, int]] = {}
+    for tr in insider_trades:
+        ticker = (getattr(tr, "ticker", None) or "").upper()
+        if not ticker:
+            continue
+        bucket = out.setdefault(ticker, {"buys": 0, "sells": 0})
+        if "Purchase" in (getattr(tr, "trade_type", "") or ""):
+            bucket["buys"] += 1
+        else:
+            bucket["sells"] += 1
+    return out
+
+
+def _screener_count_congress(congress_rows: list) -> dict[str, dict[str, int]]:
+    """Roll Congress trades into {ticker: {buys, sells}}."""
+    out: dict[str, dict[str, int]] = {}
+    for r in congress_rows:
+        ticker = (r.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        bucket = out.setdefault(ticker, {"buys": 0, "sells": 0})
+        ttype = (r.get("trade_type") or "").lower()
+        if ttype in ("buy", "purchase"):
+            bucket["buys"] += 1
+        elif ttype in ("sell", "sale"):
+            bucket["sells"] += 1
+    return out
+
+
+# Shared GICS-sector → short label map.  Used by the screener results table,
+# the macro heatmap, and the insiders-companies sector chip.
+_SECTOR_SHORT_LABELS: dict[str, str] = {
+    "Information Technology": "Tech",
+    "Communication Services": "Comm.",
+    "Consumer Discretionary": "Cons Disc",
+    "Consumer Staples":       "Cons Staples",
+    "Financials":             "Financial",
+    "Health Care":            "Health",
+    "Industrials":            "Industrial",
+    "Energy":                 "Energy",
+    "Materials":              "Materials",
+    "Utilities":              "Utilities",
+    "Real Estate":            "Real Estate",
+}
+
+
+def _screener_build_dataset(
+    request: Request,
+    *,
+    insiders: list,
+    congress: list,
+) -> list[dict]:
+    """Join the S&P 500 universe with smart-money / insider / Congress
+    aggregates.  One row per ticker — already sorted by smart-money flow."""
+    try:
+        from filings import market_data
+    except Exception:
+        return []
+
+    constituents = market_data.get_sp500_constituents() or []
+    market_1d   = market_data.get_sp500_market_data("1D") or {}
+    funds_by_t  = _screener_count_funds_holding(request)
+    new_by_t    = _screener_count_funds_new_positions(request)
+    ins_by_t    = _screener_count_insiders(insiders)
+    cong_by_t   = _screener_count_congress(congress)
+
+    rows: list[dict] = []
+    for c in constituents:
+        ticker = (c.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        market_rec = market_1d.get(ticker)
+        price = (market_rec or {}).get("price") if isinstance(market_rec, dict) else None
+        pct   = (market_rec or {}).get("pct_change") if isinstance(market_rec, dict) else None
+
+        funds_held = funds_by_t.get(ticker, 0)
+        funds_new  = new_by_t.get(ticker, 0)
+        ins        = ins_by_t.get(ticker, {"buys": 0, "sells": 0})
+        cong       = cong_by_t.get(ticker, {"buys": 0, "sells": 0})
+
+        # Smart-money column: prefer "+N new" when there were new positions
+        # this quarter, otherwise show the held-by count.
+        smart_str = "—"
+        smart_score = 0
+        if funds_new > 0:
+            smart_str = f"+{funds_new} new"
+            smart_score = funds_new * 2 + funds_held
+        elif funds_held > 0:
+            smart_str = _format_compact_count(funds_held, "fund")
+            smart_score = funds_held
+
+        # Insiders column: prefer the dominant direction.
+        ins_buys, ins_sells = ins["buys"], ins["sells"]
+        if ins_buys > ins_sells:
+            ins_str = _format_compact_count(ins_buys, "BUY", "BUYs")
+        elif ins_sells > 0:
+            ins_str = _format_compact_count(ins_sells, "SELL", "SELLs")
+        else:
+            ins_str = "—"
+
+        # Congress column: same dominant-direction treatment.
+        cong_buys, cong_sells = cong["buys"], cong["sells"]
+        if cong_buys > cong_sells:
+            cong_str = _format_compact_count(cong_buys, "BUY", "BUYs")
+        elif cong_sells > 0:
+            cong_str = _format_compact_count(cong_sells, "SELL", "SELLs")
+        else:
+            cong_str = "—"
+
+        rows.append({
+            "tk":           ticker,
+            "name":         c.get("name") or "",
+            "sec":          _SECTOR_SHORT_LABELS.get(c.get("sector") or "", c.get("sector") or "—"),
+            "mc":           "—",
+            "pe":           "—",
+            "price":        f"{price:,.2f}" if isinstance(price, (int, float)) else "—",
+            "chg":          (pct / 100.0) if isinstance(pct, (int, float)) else 0.0,
+            "smart":        smart_str,
+            "smart_score":  smart_score,
+            "funds_held":   funds_held,
+            "funds_new":    funds_new,
+            "ins":          ins_str,
+            "ins_buys":     ins_buys,
+            "ins_sells":    ins_sells,
+            "cong":         cong_str,
+            "cong_buys":    cong_buys,
+            "cong_sells":   cong_sells,
+            "is_mag7":      ticker in _MAG7,
+        })
+
+    rows.sort(key=lambda r: r["smart_score"], reverse=True)
+    return rows
+
+
+# Each preset maps to a (row → bool) predicate.  "All", "My filters", and
+# the not-yet-derivable presets are absent → fall through to the no-op.
+_SCREENER_PRESET_PREDICATES: dict[str, Callable[[dict], bool]] = {
+    "Smart-money buys":   lambda r: r["funds_held"] >= 5,
+    "13F new positions":  lambda r: r["funds_new"]  >= 1,
+    "Insider clusters":   lambda r: r["ins_buys"]   >= 3,
+    "Congress momentum":  lambda r: r["cong_buys"]  >= 1,
+    "Magnificent 7":      lambda r: r["is_mag7"],
+}
+
+
+def _screener_apply_preset(rows: list[dict], preset: str) -> list[dict]:
+    """Filter dataset based on the active preset."""
+    pred = _SCREENER_PRESET_PREDICATES.get(preset)
+    return [r for r in rows if pred(r)] if pred else rows
+
+
+def _screener_apply_sort(rows: list[dict], sort_key: str) -> list[dict]:
+    """Sort dataset by the active column."""
+    sort_map = {
+        "Smart money":   ("smart_score",  True),
+        "Day %":         ("chg",          True),
+        "Insider buys":  ("ins_buys",     True),
+        "Congress buys": ("cong_buys",    True),
+        "Ticker":        ("tk",           False),
+    }
+    field, desc = sort_map.get(sort_key, ("smart_score", True))
+    if field == "tk":
+        return sorted(rows, key=lambda r: r[field])
+    return sorted(rows, key=lambda r: r.get(field) or 0, reverse=desc)
+
+
+def _screener_filter_groups(dataset: list[dict]) -> list[tuple[str, list[tuple[str, str]]]]:
+    """Filter rail values — derived from the live dataset where possible
+    so the chips reflect the actual signal landscape, not hardcoded labels."""
+    if not dataset:
+        return _SCREENER_FILTER_GROUPS_FALLBACK
+
+    # Single pass over the universe instead of four scans, one per chip.
+    holding_at_least_5 = new_positions = insider_clusters = cong_momentum = 0
+    for r in dataset:
+        if r["funds_held"] >= 5: holding_at_least_5 += 1
+        if r["funds_new"]  >= 1: new_positions      += 1
+        if r["ins_buys"]   >= 3: insider_clusters   += 1
+        if r["cong_buys"]  >= 1: cong_momentum      += 1
+
+    return [
+        ("Smart money", [
+            ("13F adds (Q1)",   f"≥ 5 funds · {holding_at_least_5} match"),
+            ("13F new",         f"Yes · {new_positions} match"),
+            ("13F position %",  "≥ 1% of fund"),
+            ("Top investor",    "Buffett, Ackman, +3"),
+        ]),
+        ("Insiders", [
+            ("Open-market BUY", "Last 30d"),
+            ("Cluster",         f"≥ 3 insiders · {insider_clusters} match"),
+            ("10b5-1 only",     "Off"),
+        ]),
+        ("Congress", [
+            ("Trades · 90d",    f"≥ 1 BUY · {cong_momentum} match"),
+            ("Disclosure lag",  "Any"),
+        ]),
+        ("Fundamentals", [
+            ("Mkt cap",         "$10B – $5T"),
+            ("P/E",             "5 – 80"),
+            ("Revenue growth",  "≥ 10% YoY"),
+            ("FCF margin",      "≥ 15%"),
+        ]),
+        ("Price", [
+            ("Day change",      "Any"),
+            ("52w from high",   "≤ 25%"),
+            ("RSI",             "30 – 80"),
+        ]),
+    ]
+
+
+_SCREENER_FILTER_GROUPS_FALLBACK = [
     ("Smart money", [
         ("13F adds (Q1)",  "≥ 5 funds"),
         ("13F new",        "Yes"),
@@ -5149,32 +6643,67 @@ _SCREENER_FILTER_GROUPS = [
     ]),
 ]
 
-# Mock screener results — 9 well-known tickers.  Real impl would assemble
-# from market_data + 13F / insider / congress aggregators per filter.
-_SCREENER_RESULTS = [
-    {"tk": "NVDA",  "name": "NVIDIA Corp.",         "sec": "Tech",       "mc": "$3.51T", "pe": "68.4", "price": "142.18", "chg":  0.0421, "smart": "+12 funds", "ins": "5 SELLs", "cong": "3 BUYs"},
-    {"tk": "BRK.B", "name": "Berkshire Hathaway",   "sec": "Financial",  "mc": "$932B",  "pe": "22.1", "price": "428.42", "chg":  0.0084, "smart": "+4 funds",  "ins": "—",       "cong": "1 BUY"},
-    {"tk": "COIN",  "name": "Coinbase Global",      "sec": "Financial",  "mc":  "$54B",  "pe": "42.4", "price": "218.42", "chg":  0.0214, "smart": "+8 funds",  "ins": "3 BUYs",  "cong": "—"},
-    {"tk": "OXY",   "name": "Occidental Petroleum", "sec": "Energy",     "mc":  "$61B",  "pe": "14.2", "price":  "64.21", "chg": -0.0124, "smart": "+6 funds",  "ins": "4 BUYs",  "cong": "—"},
-    {"tk": "GOOGL", "name": "Alphabet",             "sec": "Comm.",      "mc": "$2.18T", "pe": "24.8", "price": "172.42", "chg":  0.0184, "smart": "+9 funds",  "ins": "2 SELLs", "cong": "2 BUYs"},
-    {"tk": "PLTR",  "name": "Palantir Tech",        "sec": "Tech",       "mc":  "$84B",  "pe": "94.2", "price":  "34.21", "chg":  0.0642, "smart": "+18 funds", "ins": "7 SELLs", "cong": "4 BUYs"},
-    {"tk": "AVGO",  "name": "Broadcom Inc.",        "sec": "Tech",       "mc": "$1.02T", "pe": "38.4", "price": "218.92", "chg":  0.0184, "smart": "+5 funds",  "ins": "1 SELL",  "cong": "1 BUY"},
-    {"tk": "AMZN",  "name": "Amazon.com",           "sec": "Cons Disc",  "mc": "$1.94T", "pe": "42.1", "price": "184.20", "chg":  0.0124, "smart": "+7 funds",  "ins": "—",       "cong": "1 BUY"},
-    {"tk": "META",  "name": "Meta Platforms",       "sec": "Comm.",      "mc": "$1.41T", "pe": "28.4", "price": "548.20", "chg":  0.0214, "smart": "+11 funds", "ins": "3 SELLs", "cong": "1 BUY"},
-]
-
 
 @router.get("/screener", response_class=HTMLResponse)
-async def preview_screener(request: Request):
-    """Screener — mock results (no real engine yet).  Filter rail is visual."""
+async def preview_screener(
+    request: Request,
+    preset: str = "All",
+    sort:   str = "Smart money",
+    limit:  int = 30,
+):
+    """Screener — joins the S&P 500 universe with smart-money / insider /
+    Congress aggregates, applies the requested preset filter and sort, and
+    paginates the top *limit* rows.  No real engine yet; filter rail values
+    are read-only chips reflecting the live dataset."""
+    if preset not in _SCREENER_PRESETS:
+        preset = "All"
+    if sort not in _SCREENER_SORTS:
+        sort = "Smart money"
+    limit = max(min(int(limit or 30), 200), 5)
+
+    bounded = functools.partial(_bounded, page="Screener page")
+
+    # The dataset is preset/sort-independent and the join across 500 SP500
+    # tickers + signal feeds is hot-path bloat when re-run every request.
+    # Memoize on app-state with a 5-minute TTL — short enough that fresh
+    # insider / congress trades surface without lingering staleness.
+    cache_slot = getattr(request.app.state, "_pp_screener_dataset", None)
+    now = time.time()
+    if cache_slot and (now - cache_slot[0]) < 300:
+        dataset = cache_slot[1]
+    else:
+        signals = await bounded(
+            _fetch_screener_signals(months=3),
+            timeout=8.0, fallback={"insiders": [], "congress": []}, name="signals",
+        )
+        def _build():
+            return _screener_build_dataset(
+                request,
+                insiders=signals.get("insiders") or [],
+                congress=signals.get("congress") or [],
+            )
+        dataset = await to_light(_build)
+        try:
+            request.app.state._pp_screener_dataset = (now, dataset)
+        except Exception:
+            pass
+
+    filtered = _screener_apply_preset(dataset, preset)
+    sorted_rows = _screener_apply_sort(filtered, sort)
+    visible = sorted_rows[:limit]
+
     ctx = {
         "request":         request,
-        **_shell_context("Screener"),
-        "screener_presets": _SCREENER_PRESETS,
-        "screener_active_preset": "Smart-money buys",
-        "screener_filters": _SCREENER_FILTER_GROUPS,
-        "screener_results": _SCREENER_RESULTS,
-        "screener_universe": "8,420",
+        **(await _shell_context(request, "Screener")),
+        "screener_presets":       _SCREENER_PRESETS,
+        "screener_active_preset": preset,
+        "screener_sorts":         _SCREENER_SORTS,
+        "screener_active_sort":   sort,
+        "screener_filters":       _screener_filter_groups(dataset),
+        "screener_results":       visible,
+        "screener_universe":      f"{len(dataset):,}" if dataset else "—",
+        "screener_match_count":   len(filtered),
+        "screener_visible_count": len(visible),
     }
     return templates.TemplateResponse("_redesign/screener.html", ctx)
 
@@ -5225,7 +6754,7 @@ async def _fetch_congress_data() -> dict:
     """Read recent congressional trades from Supabase cache."""
     try:
         from filings import supabase_cache
-        rows = await to_heavy(supabase_cache.get_congress_recent_trades, 30)
+        rows = await to_heavy(supabase_cache.get_congress_recent_trades, 60)
     except Exception as exc:
         logger.warning("Congress trades fetch failed: %s", exc)
         rows = None
@@ -5270,27 +6799,126 @@ async def _fetch_congress_data() -> dict:
     return {"rows": out, "is_mock": False}
 
 
-def _congress_kpi_strip(rows: list[dict]) -> list[dict]:
-    """KPI strip — totals, top buy/sell, avg disclosure lag."""
-    buys = [r for r in rows if r["action"] == "BUY"]
-    sells = [r for r in rows if r["action"] == "SELL"]
-    lags = [r["lag"] for r in rows if r["lag"] is not None]
-    avg_lag = sum(lags) / len(lags) if lags else None
+def _amount_midpoint(low, high) -> float:
+    """Midpoint of an OGE amount-range disclosure (low/high are both in $)."""
+    try:
+        if low is None and high is None:
+            return 0.0
+        if low is None:
+            return float(high)
+        if high is None:
+            return float(low)
+        return (float(low) + float(high)) / 2.0
+    except (TypeError, ValueError):
+        return 0.0
 
-    # Most-bought / most-sold ticker by frequency.
-    from collections import Counter
-    buy_counts = Counter(r["ticker"] for r in buys)
-    sell_counts = Counter(r["ticker"] for r in sells)
-    most_bought = buy_counts.most_common(1)[0][0] if buy_counts else "—"
-    most_sold   = sell_counts.most_common(1)[0][0] if sell_counts else "—"
 
+def _format_compact_dollars(v: float | int | None) -> str:
+    """Compact dollar formatter for KPI / leaderboard cells."""
+    if not v or v <= 0:
+        return "—"
+    v = float(v)
+    if v >= 1e9:
+        return f"${v / 1e9:.1f}B"
+    if v >= 1e6:
+        return f"${v / 1e6:.1f}M"
+    if v >= 1e3:
+        return f"${v / 1e3:.0f}K"
+    return f"${v:,.0f}"
+
+
+def _format_signed_compact_dollars(v: float | int | None) -> str:
+    """Compact dollar formatter that preserves sign — used for cumulative
+    flow series where negative values are meaningful (cum sells > buys)."""
+    if v is None:
+        return "—"
+    sign = "+" if v >= 0 else "−"
+    a = abs(float(v))
+    if a >= 1e9: return f"{sign}${a / 1e9:.1f}B"
+    if a >= 1e6: return f"{sign}${a / 1e6:.1f}M"
+    if a >= 1e3: return f"{sign}${a / 1e3:.0f}K"
+    return f"{sign}${a:,.0f}"
+
+
+def _trade_in_window(trade_date: str, days: int) -> bool:
+    """True if a trade's ISO date lies within the last `days` days."""
+    if not trade_date:
+        return False
+    try:
+        d = datetime.fromisoformat(trade_date[:10])
+        return (datetime.now() - d).days <= days
+    except Exception:
+        return False
+
+
+async def _fetch_congress_wider_window(months: int = 6, limit: int = 5000) -> list[dict]:
+    """Slim trade list from the last N months — used for KPI aggregates,
+    Members, Leaderboard, Performance, sectors."""
+    try:
+        from filings import supabase_cache
+        rows = await to_heavy(
+            supabase_cache.get_congress_trades_recent_months, months, limit,
+        )
+    except Exception as exc:
+        logger.warning("Congress wider-window fetch failed: %s", exc)
+        return []
+    return rows or []
+
+
+async def _fetch_congress_members() -> list[dict]:
+    """Member profile rows — name/party/chamber/state/net_worth."""
+    try:
+        from filings import supabase_cache
+        rows = await to_heavy(supabase_cache.get_all_congress_members)
+    except Exception as exc:
+        logger.warning("Congress members fetch failed: %s", exc)
+        return []
+    return rows or []
+
+
+def _index_member_meta(members: list[dict]) -> dict[str, dict]:
+    """member_id → {party, chamber, state_abbr, full_name, net_worth_estimate}."""
+    out: dict[str, dict] = {}
+    for m in members:
+        mid = m.get("member_id")
+        if not mid:
+            continue
+        out[mid] = {
+            "name":      m.get("full_name") or "",
+            "party":     m.get("party") or "Independent",
+            "chamber":   m.get("chamber") or "",
+            "state":     m.get("state_abbr") or "",
+            "district":  m.get("district") or "",
+            "net_worth": m.get("net_worth_estimate") or 0,
+        }
+    return out
+
+
+def _party_letter(party: str) -> str:
+    """Normalise to 'D' / 'R' / 'I' for the dot."""
+    p = (party or "").lower()
+    if p.startswith("d"):
+        return "D"
+    if p.startswith("r"):
+        return "R"
+    return "I"
+
+
+def _congress_kpi_strip(stats: dict) -> list[dict]:
+    """KPI strip — six headline stats consumed by the standard `kpi_strip`
+    macro (matches v1's stats banner).  Source: ``stats`` produced by
+    :func:`congress_trading.prepare_congress_page_data`.
+    """
+    start = (stats.get("date_range_start") or "")[:4]
+    end   = (stats.get("date_range_end") or "")[:4]
+    date_range = f"{start}–{end}" if start and end else "—"
     return [
-        {"label": "Trades · 30d",        "value": f"{len(rows) * 34:,}",   "delta": "18%", "up": True},
-        {"label": "Volume · 30d",        "value": "$48.2M",                "delta": None,  "up": None},
-        {"label": "Most-bought",         "value": most_bought,             "delta": None,  "up": None},
-        {"label": "Most-sold",           "value": most_sold,               "delta": None,  "up": None},
-        {"label": "Avg disclosure lag",  "value": f"{int(avg_lag)} days" if avg_lag is not None else "—", "delta": None, "up": None},
-        {"label": "Top performer YTD",   "value": "+34.2%",                "delta": None,  "up": None},
+        {"label": "Politicians", "value": f"{stats.get('total_members', 0):,}",  "delta": None, "up": None},
+        {"label": "Trades",      "value": f"{stats.get('total_trades', 0):,}",   "delta": None, "up": None},
+        {"label": "Stocks",      "value": f"{stats.get('unique_tickers', 0):,}", "delta": None, "up": None},
+        {"label": "House",       "value": str(stats.get("house_count", 0)),      "delta": None, "up": None},
+        {"label": "Senate",      "value": str(stats.get("senate_count", 0)),     "delta": None, "up": None},
+        {"label": "Date range",  "value": date_range,                            "delta": None, "up": None},
     ]
 
 
@@ -5312,29 +6940,740 @@ def _congress_notable(rows: list[dict]) -> dict | None:
     }
 
 
+# ── Members tab — per-member aggregate cards ───────────────────────────────
+
+def _build_member_aggregates(
+    wider_rows: list[dict],
+    member_index: dict[str, dict],
+    *,
+    window_days: int = 30,
+) -> list[dict]:
+    """Aggregate member-level activity from the wider trade window.
+
+    The "window" is anchored to the latest filing_date in the data (not
+    wall-clock now) so the cards stay populated even when the scrape
+    pipeline lags by weeks.
+
+    Returns one row per active member with:
+        trades_window, volume_window, top_ticker, last_trade_date,
+        spark_series (12 weekly buckets of trade frequency), party, chamber.
+    """
+    from collections import Counter, defaultdict
+
+    # Anchor to the most recent filing_date.
+    filing_dates = sorted(
+        (t.get("filing_date") for t in wider_rows if t.get("filing_date")),
+        reverse=True,
+    )
+    if filing_dates:
+        try:
+            ref = datetime.fromisoformat(filing_dates[0][:10])
+        except Exception:
+            ref = datetime.now()
+    else:
+        ref = datetime.now()
+
+    def _days_before_ref(iso: str) -> int | None:
+        if not iso:
+            return None
+        try:
+            return (ref - datetime.fromisoformat(iso[:10])).days
+        except Exception:
+            return None
+
+    by_member: dict[str, dict] = {}
+    for t in wider_rows:
+        mid = t.get("member_id") or t.get("politician_name") or "—"
+        if mid not in by_member:
+            by_member[mid] = {
+                "member_id":   mid,
+                "name":        t.get("politician_name") or "—",
+                "party":       _party_letter(t.get("party") or ""),
+                "chamber":     t.get("chamber") or "",
+                "state":       t.get("state") or "",
+                "tickers":     Counter(),
+                "trades_total": 0,
+                "trades_window": 0,
+                "volume_window": 0.0,
+                "last_trade_date": "",
+                "weekly_counts": defaultdict(int),
+            }
+        agg = by_member[mid]
+        agg["trades_total"] += 1
+        ticker = (t.get("ticker") or "").upper()
+        if ticker:
+            agg["tickers"][ticker] += 1
+
+        td = t.get("trade_date", "")
+        if td and td > agg["last_trade_date"]:
+            agg["last_trade_date"] = td
+
+        # Window check uses filing_date (when public) anchored to ref.
+        days_in = _days_before_ref(t.get("filing_date") or td)
+        if days_in is not None and 0 <= days_in <= window_days:
+            agg["trades_window"] += 1
+            agg["volume_window"] += _amount_midpoint(t.get("amount_low"), t.get("amount_high"))
+
+        # Weekly bucket (last 12 weeks) for the sparkline — also ref-anchored.
+        if days_in is not None and 0 <= days_in < 84:
+            weeks_ago = days_in // 7
+            agg["weekly_counts"][11 - weeks_ago] += 1
+
+    rows = []
+    for mid, agg in by_member.items():
+        if agg["trades_total"] == 0:
+            continue
+        # Backfill from member_index when present (party/chamber/state may be
+        # missing/abbreviated on raw trade rows).
+        meta = member_index.get(mid, {})
+        party = _party_letter(meta.get("party") or agg["party"])
+        chamber = meta.get("chamber") or agg["chamber"]
+        state = meta.get("state") or agg["state"]
+
+        spark = [agg["weekly_counts"].get(i, 0) for i in range(12)]
+        top = agg["tickers"].most_common(1)
+        rows.append({
+            "member_id":      mid,
+            "name":           agg["name"],
+            "party":          party,
+            "chamber":        chamber,
+            "state":          state,
+            "trades_window":  agg["trades_window"],
+            "volume_window":  agg["volume_window"],
+            "volume_str":     _format_compact_dollars(agg["volume_window"]),
+            "top_ticker":     top[0][0] if top else "—",
+            "last_trade":     _congress_format_date(agg["last_trade_date"]),
+            "spark":          spark,
+            "spark_up":       sum(spark[6:]) >= sum(spark[:6]),
+            "trades_total":   agg["trades_total"],
+            "net_worth":      meta.get("net_worth", 0),
+        })
+
+    return rows
+
+
+def _members_panel_data(
+    wider_rows: list[dict],
+    member_index: dict[str, dict],
+    *,
+    top_n: int = 12,
+) -> dict:
+    """Build the Members tab payload — sort by 30d trade count then volume."""
+    members = _build_member_aggregates(wider_rows, member_index, window_days=30)
+    members.sort(key=lambda m: (m["trades_window"], m["volume_window"]), reverse=True)
+    return {
+        "rows":      members[:top_n],
+        "total":     len([m for m in members if m["trades_window"] > 0]),
+    }
+
+
+# ── Leaderboard — ranked by activity (volume) with win-rate bar ────────────
+
+def _leaderboard_panel_data(
+    wider_rows: list[dict],
+    member_index: dict[str, dict],
+    *,
+    top_n: int = 10,
+) -> dict:
+    """Rank members by 6-month trade volume (proxy for activity).
+
+    win_rate is computed naively from BUY/SELL split (a SELL is "negative
+    conviction") without forward-return data, which lives in
+    congress_trades_prices and isn't yet read on the hot path.  The bar
+    still gives a meaningful "buyer vs seller" signal.
+    """
+    members = _build_member_aggregates(wider_rows, member_index, window_days=180)
+    # We need BUY / SELL split per member — re-walk wider_rows for that.
+    from collections import defaultdict
+    splits: dict[str, dict] = defaultdict(lambda: {"buys": 0, "sells": 0})
+    for t in wider_rows:
+        mid = t.get("member_id") or t.get("politician_name") or "—"
+        ttype = (t.get("trade_type") or "").lower()
+        if ttype in ("buy", "purchase"):
+            splits[mid]["buys"] += 1
+        elif ttype in ("sell", "sale"):
+            splits[mid]["sells"] += 1
+
+    out = []
+    for m in members:
+        s = splits.get(m["member_id"], {"buys": 0, "sells": 0})
+        total = s["buys"] + s["sells"]
+        # Buy-bias as a proxy "win-rate" stand-in until forward returns wire up.
+        buy_pct = (s["buys"] / total) if total else 0.0
+        out.append({
+            **m,
+            "buys": s["buys"],
+            "sells": s["sells"],
+            "total": total,
+            "buy_pct": buy_pct,
+        })
+
+    out.sort(key=lambda r: r["volume_window"], reverse=True)
+    for i, r in enumerate(out[:top_n], start=1):
+        r["rank"] = i
+    return {
+        "podium": out[:3],
+        "rows":   out[:top_n],
+        "total":  len(out),
+    }
+
+
+# ── Performance tab — Congress vs SPY + by-party + sectors ────────────────
+
+def _performance_party_breakdown(wider_rows: list[dict]) -> list[dict]:
+    """Aggregate trade volume + count + buy-bias by party."""
+    from collections import defaultdict
+    by_party: dict[str, dict] = defaultdict(lambda: {
+        "members": set(), "buys": 0, "sells": 0, "volume": 0.0,
+    })
+    for t in wider_rows:
+        p = _party_letter(t.get("party") or "")
+        bucket = by_party[p]
+        if t.get("member_id"):
+            bucket["members"].add(t["member_id"])
+        ttype = (t.get("trade_type") or "").lower()
+        if ttype in ("buy", "purchase"):
+            bucket["buys"] += 1
+        elif ttype in ("sell", "sale"):
+            bucket["sells"] += 1
+        bucket["volume"] += _amount_midpoint(t.get("amount_low"), t.get("amount_high"))
+
+    name_for = {"D": "Democrats", "R": "Republicans", "I": "Independent"}
+    rows = []
+    for code, agg in by_party.items():
+        total = agg["buys"] + agg["sells"]
+        if total == 0:
+            continue
+        buy_pct = agg["buys"] / total if total else 0.0
+        rows.append({
+            "code":    code,
+            "name":    name_for.get(code, code),
+            "members": len(agg["members"]),
+            "trades":  total,
+            "volume":  _format_compact_dollars(agg["volume"]),
+            "buy_pct": buy_pct,
+            "buy_pct_str": f"{buy_pct * 100:.0f}%",
+        })
+    # Order: D, R, I
+    order = {"D": 0, "R": 1, "I": 2}
+    rows.sort(key=lambda r: order.get(r["code"], 99))
+    return rows
+
+
+def _performance_sectors(wider_rows: list[dict]) -> list[dict]:
+    """Volume-weighted sector allocation for last-6mo trades."""
+    try:
+        from filings import market_data
+    except Exception:
+        return []
+    sp = market_data.get_sp500_constituents() or []
+    nq = market_data.get_nasdaq100_constituents() or []
+    ticker_to_sector: dict[str, str] = {}
+    for source in (sp, nq):
+        for c in source:
+            t = (c.get("ticker") or "").upper()
+            sec = c.get("sector") or ""
+            if t and sec and t not in ticker_to_sector:
+                ticker_to_sector[t] = sec
+
+    from collections import defaultdict
+    by_sector: dict[str, float] = defaultdict(float)
+    total_vol = 0.0
+    for t in wider_rows:
+        ticker = (t.get("ticker") or "").upper()
+        if not ticker:
+            continue
+        sector = ticker_to_sector.get(ticker, "Other")
+        v = _amount_midpoint(t.get("amount_low"), t.get("amount_high"))
+        if v > 0:
+            by_sector[sector] += v
+            total_vol += v
+
+    if total_vol <= 0:
+        return []
+
+    palette = {
+        "Information Technology": "var(--pp-accent)",
+        "Communication Services": "var(--pp-ink)",
+        "Financials":             "var(--pp-up)",
+        "Health Care":            "var(--pp-down)",
+        "Consumer Discretionary": "var(--pp-dim)",
+        "Consumer Staples":       "var(--pp-up)",
+        "Energy":                 "var(--pp-down)",
+        "Industrials":            "var(--pp-ink)",
+        "Materials":              "var(--pp-dim2)",
+        "Utilities":              "var(--pp-line2)",
+        "Real Estate":            "var(--pp-line2)",
+        "Other":                  "var(--pp-line2)",
+    }
+    other_share = by_sector.pop("Other", 0.0)
+    rows = sorted(
+        ({"name": n, "pct": v / total_vol, "color": palette.get(n, "var(--pp-line2)")}
+         for n, v in by_sector.items()),
+        key=lambda r: r["pct"], reverse=True,
+    )
+    if len(rows) > 5:
+        other_share += sum(r["pct"] * total_vol for r in rows[5:])
+        rows = rows[:5]
+    if other_share > 0:
+        rows.append({"name": "Other", "pct": other_share / total_vol, "color": palette["Other"]})
+    return rows
+
+
+async def _performance_index_chart(wider_rows: list[dict]) -> dict:
+    """Build a Congress index vs SPY chart payload from the last 6 months.
+
+    Congress series = cumulative net buy/sell weighted by amount midpoint
+    (a directional volume curve, not a return); the design spec calls for
+    a relative line shape, which this approximates without a price-join.
+    SPY series uses the real ^GSPC daily close pulled from market_data.
+    """
+    try:
+        from filings import market_data
+        idx = await to_heavy(market_data.get_index_market_data)
+    except Exception as exc:
+        logger.warning("Performance: SPY fetch failed: %s", exc)
+        idx = {}
+
+    spy = idx.get("^GSPC") if isinstance(idx, dict) else None
+    spy_history = (spy or {}).get("history") or []   # [[epoch_ms, close], ...]
+    spy_pts: list[tuple[float, float]] = []          # (epoch_ms, close)
+    if spy_history:
+        spy_pts = [(p[0], p[1]) for p in spy_history if isinstance(p, (list, tuple)) and len(p) >= 2]
+
+    # Congress directional flow: walk trades sorted oldest→newest, accumulate
+    # signed net volume (BUY = +, SELL = −) so the series traces sentiment.
+    sorted_trades = sorted(
+        [t for t in wider_rows if t.get("trade_date")],
+        key=lambda t: t.get("trade_date", "")[:10],
+    )
+    cong_pts: list[tuple[float, float]] = []
+    cum = 0.0
+    for t in sorted_trades:
+        ttype = (t.get("trade_type") or "").lower()
+        sign = 1 if ttype in ("buy", "purchase") else (-1 if ttype in ("sell", "sale") else 0)
+        if sign == 0:
+            continue
+        v = _amount_midpoint(t.get("amount_low"), t.get("amount_high"))
+        cum += sign * v
+        try:
+            d = datetime.fromisoformat(t["trade_date"][:10])
+            epoch_ms = d.timestamp() * 1000
+            cong_pts.append((epoch_ms, cum))
+        except Exception:
+            continue
+
+    # Trim SPY history to roughly the same window as the trade data.
+    if cong_pts and spy_pts:
+        start = cong_pts[0][0]
+        spy_pts = [p for p in spy_pts if p[0] >= start]
+
+    def _series_to_path(pts: list[tuple[float, float]], width: float, height: float, pad_top: float = 12.0):
+        """Returns (line_d, fill_d, screen_pts) where screen_pts is the same
+        list re-projected into viewBox coordinates so the JS hover layer can
+        snap to it."""
+        if not pts or len(pts) < 2:
+            return "", "", []
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        x_min, x_max = min(xs), max(xs)
+        y_min, y_max = min(ys), max(ys)
+        xr = x_max - x_min if x_max > x_min else 1
+        yr = y_max - y_min if y_max > y_min else 1
+        plot_h = height - pad_top - 4
+        out: list[str] = []
+        screen: list[tuple[float, float, float, float]] = []
+        for i, (x, y) in enumerate(pts):
+            sx = (x - x_min) / xr * width
+            sy = pad_top + (1 - (y - y_min) / yr) * plot_h
+            out.append(("M" if i == 0 else "L") + f"{sx:.1f} {sy:.1f}")
+            screen.append((round(sx, 1), round(sy, 1), x, y))
+        line = " ".join(out)
+        fill = f"{line} L {width:.1f} {height:.1f} L 0 {height:.1f} Z"
+        return line, fill, screen
+
+    # ViewBox 1500×220 — matches the typical full-width container ratio
+    # so `preserveAspectRatio="none"` doesn't horizontally stretch slopes.
+    width, height = 1500.0, 220.0
+    cong_line, cong_fill, cong_screen = _series_to_path(cong_pts, width, height)
+    spy_line, _spy_fill, spy_screen   = _series_to_path(spy_pts, width, height)
+
+    # Build hover history aligned to the cong series (the user-relevant one);
+    # for each cong point, look up the SPY value at the nearest timestamp.
+    chart_history: list[dict] = []
+    if cong_screen and spy_screen:
+        # Index spy by timestamp for nearest-lookup.
+        spy_by_ts = sorted(spy_screen, key=lambda p: p[2])
+        spy_ts    = [p[2] for p in spy_by_ts]
+
+        def _nearest_spy(ts: float):
+            import bisect
+            i = bisect.bisect_left(spy_ts, ts)
+            if i <= 0:                 return spy_by_ts[0]
+            if i >= len(spy_by_ts):    return spy_by_ts[-1]
+            a, b = spy_by_ts[i - 1], spy_by_ts[i]
+            return a if abs(a[2] - ts) <= abs(b[2] - ts) else b
+
+        # SPY uses % return (real prices); Congress uses raw cumulative
+        # dollar flow (cum starts at 0 so a % change off the first move is
+        # nonsensical).
+        spy_base  = spy_screen[0][3]  if spy_screen[0][3]  else 0.0
+
+        for sx, sy, ts, cong_v in cong_screen:
+            spy_pt = _nearest_spy(ts)
+            spy_pct = ((spy_pt[3] - spy_base) / spy_base * 100) if spy_base else 0.0
+            try:
+                date_str = datetime.fromtimestamp(ts / 1000).strftime("%b %d %Y")
+            except Exception:
+                date_str = ""
+            chart_history.append({
+                "x":        sx,
+                "cong_y":   sy,
+                "spy_y":    spy_pt[1],
+                "date":     date_str,
+                "cong_str": _format_signed_compact_dollars(cong_v),
+                "spy_str":  f"{spy_pct:+.1f}%",
+            })
+
+    # SPY YTD baseline percent.
+    spy_ytd_pct: float | None = None
+    if spy_history:
+        # Find first close on/after Jan 1 of the current year.
+        try:
+            year = datetime.now().year
+            ytd_target = datetime(year, 1, 1).timestamp() * 1000
+            ytd_pt = next((p for p in spy_history if p[0] >= ytd_target), None)
+            last_pt = spy_history[-1]
+            if ytd_pt and last_pt and ytd_pt[1] > 0:
+                spy_ytd_pct = (last_pt[1] - ytd_pt[1]) / ytd_pt[1] * 100
+        except Exception:
+            pass
+
+    # Congress YTD net flow (sign of cumulative buy bias, ytd window).
+    ytd_str = f"{datetime.now().year}-01-01"
+    ytd_buys = sum(
+        _amount_midpoint(t.get("amount_low"), t.get("amount_high"))
+        for t in wider_rows
+        if (t.get("trade_type") or "").lower() in ("buy", "purchase")
+        and (t.get("trade_date") or "") >= ytd_str
+    )
+    ytd_sells = sum(
+        _amount_midpoint(t.get("amount_low"), t.get("amount_high"))
+        for t in wider_rows
+        if (t.get("trade_type") or "").lower() in ("sell", "sale")
+        and (t.get("trade_date") or "") >= ytd_str
+    )
+    cong_buy_bias_pct: float | None = None
+    if (ytd_buys + ytd_sells) > 0:
+        cong_buy_bias_pct = (ytd_buys - ytd_sells) / (ytd_buys + ytd_sells) * 100
+
+    return {
+        "have_data": bool(cong_line and spy_line),
+        "cong_line": cong_line,
+        "cong_fill": cong_fill,
+        "spy_line":  spy_line,
+        "vb_width":  width,
+        "vb_height": height,
+        "chart_history": chart_history,
+        "ytd_buys": _format_compact_dollars(ytd_buys),
+        "ytd_sells": _format_compact_dollars(ytd_sells),
+        "cong_buy_bias_str": f"{cong_buy_bias_pct:+.0f}%" if cong_buy_bias_pct is not None else "—",
+        "cong_buy_bias_up":  (cong_buy_bias_pct >= 0) if cong_buy_bias_pct is not None else None,
+        "spy_ytd_str":  f"{spy_ytd_pct:+.1f}%" if spy_ytd_pct is not None else "—",
+        "spy_ytd_up":   (spy_ytd_pct >= 0) if spy_ytd_pct is not None else None,
+    }
+
+
+# ── Calendar tab — economic events as proxy for "session days" ────────────
+
+# Big macro events that move sectors — for the ticker-tag column.
+_CALENDAR_TICKER_HINTS: dict[str, list[str]] = {
+    "cpi":              ["TIPS", "TLT", "SPY"],
+    "ppi":              ["TIPS", "TLT"],
+    "non-farm":         ["SPY", "QQQ"],
+    "nonfarm":          ["SPY", "QQQ"],
+    "unemployment":     ["SPY", "TLT"],
+    "fomc":             ["SPY", "TLT", "GLD"],
+    "fed":              ["SPY", "TLT"],
+    "rate decision":    ["SPY", "TLT"],
+    "gdp":              ["SPY", "QQQ"],
+    "pce":              ["TIPS", "TLT"],
+    "retail sales":     ["XRT", "SPY"],
+    "housing":          ["XHB", "ITB"],
+    "oil":              ["XLE", "USO"],
+    "consumer confidence": ["SPY", "XLY"],
+}
+
+
+def _ticker_hints_for_event(event_name: str) -> list[str]:
+    name = (event_name or "").lower()
+    for key, tickers in _CALENDAR_TICKER_HINTS.items():
+        if key in name:
+            return tickers
+    return []
+
+
+async def _calendar_panel_data(*, top_n: int = 12) -> dict:
+    """Wire the Calendar tab to the existing economic_calendar feed.
+
+    `events_by_date` is a list of {date, date_label, entries: [events]}
+    grouped by ISO date — not a dict — so we walk the list and flatten.
+    """
+    try:
+        from filings import economic_calendar
+        bundle = await to_heavy(economic_calendar.fetch_economic_events, "all", "us", "all")
+    except Exception as exc:
+        logger.warning("Congress calendar: economic_calendar fetch failed: %s", exc)
+        bundle = None
+
+    if not bundle:
+        return {"rows": [], "total": 0, "is_mock": True}
+
+    days = bundle.get("events_by_date") or []
+    is_mock = bool(bundle.get("is_mock"))
+
+    flat: list[dict] = []
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        date_iso = day.get("date") or ""
+        for ev in (day.get("entries") or []):
+            evt_name = ev.get("event") or "—"
+            flat.append({
+                "d":        _short_date(date_iso) or date_iso[:10],
+                "when":     ev.get("time") or "—",
+                "evt":      evt_name,
+                "impact":   (ev.get("impact") or "low").lower(),
+                "tickers":  _ticker_hints_for_event(evt_name),
+                "raw_date": date_iso[:10],
+            })
+
+    flat.sort(key=lambda r: r.get("raw_date", ""))
+    return {"rows": flat[:top_n], "total": len(flat), "is_mock": is_mock}
+
+
+# ── Congress Holdings tab — chart geometry helpers ───────────────────────────
+
+
+def _congress_vbar_geometry(
+    items: list[dict],
+    value_key: str,
+    *,
+    vb_w: float = 1500.0,
+    vb_h: float = 260.0,
+    pad_top: float = 18.0,
+    pad_bot: float = 30.0,
+    pad_left: float = 64.0,
+    bar_gap: float = 12.0,
+    signed: bool = False,
+) -> dict:
+    """Vertical bar-chart geometry for Trending / Recent Momentum.
+
+    `signed=False` (Trending): all bars grow up from the x-axis; y-range is
+    [0, max].  `signed=True` (Momentum): bars grow up for positive values
+    and down for negative ones; y-range is [-max_abs, +max_abs] with a
+    zero line at the midpoint.
+
+    Each item must have `value_key` populated.  Returns SVG-ready bar
+    payload + grid lines + y-axis labels.
+    """
+    if not items:
+        return {"have_data": False, "bars": [], "grid_ys": [], "y_labels": []}
+
+    plot_w = vb_w - pad_left
+    plot_h = vb_h - pad_top - pad_bot
+    n = len(items)
+    bar_w = max(8.0, (plot_w - bar_gap * (n + 1)) / n)
+
+    values = [it.get(value_key, 0) or 0 for it in items]
+    if signed:
+        max_abs = max((abs(v) for v in values), default=1) or 1
+        step = _nice_axis_step(max_abs * 2, target_steps=4)
+        import math
+        rng_top = math.ceil(max_abs / step) * step
+        rng_bot = -rng_top
+    else:
+        max_v = max(values, default=1) or 1
+        step = _nice_axis_step(max_v, target_steps=4)
+        import math
+        rng_top = math.ceil(max_v / step) * step
+        rng_bot = 0
+
+    def _y_for(v: float) -> float:
+        return pad_top + (1.0 - (v - rng_bot) / (rng_top - rng_bot)) * plot_h
+
+    zero_y = _y_for(0)
+
+    bars: list[dict] = []
+    for i, it in enumerate(items):
+        v = it.get(value_key, 0) or 0
+        x = pad_left + bar_gap + i * (bar_w + bar_gap)
+        if v >= 0:
+            y_top, y_bot = _y_for(v), zero_y
+        else:
+            y_top, y_bot = zero_y, _y_for(v)
+        bars.append({
+            **it,
+            "x":      round(x, 1),
+            "y":      round(y_top, 1),
+            "w":      round(bar_w, 1),
+            "h":      round(max(y_bot - y_top, 1.0), 1),
+            "label_x": round(x + bar_w / 2, 1),
+            "is_pos": v >= 0,
+        })
+
+    y_labels: list[dict] = []
+    grid_ys: list[float] = []
+    v = rng_bot
+    while v <= rng_top + step / 2:
+        y_pos = round(_y_for(v), 1)
+        y_labels.append({"label": f"{int(v):,}" if v == int(v) else f"{v:.1f}", "y": y_pos})
+        grid_ys.append(y_pos)
+        v += step
+
+    return {
+        "have_data": True,
+        "bars":      bars,
+        "y_labels":  y_labels,
+        "grid_ys":   grid_ys,
+        "vb_width":  vb_w,
+        "vb_height": vb_h,
+        "zero_y":    round(zero_y, 1),
+        "left_pad":  pad_left,
+        "signed":    signed,
+    }
+
+
+def _congress_trending_chart(trending: list[dict], top_n: int = 15) -> dict:
+    """Bar chart of top-N stocks by unique buyer count (last 6 months).
+
+    Wraps :func:`_congress_vbar_geometry` and forwards every item field
+    (ticker, name, add_count, democrat, republican, top_traders) through
+    to the bar so the JS hover handler can pull rich data straight from
+    the rendered DOM.
+    """
+    return _congress_vbar_geometry(trending[:top_n], "add_count", vb_h=260.0)
+
+
+def _congress_momentum_chart(momentum: list[dict], top_n: int = 15) -> dict:
+    """Bar chart of recent-momentum tickers (top-N by net = buys - sells).
+
+    Mirrors the v1 chart: positive bars grow up (green), negative bars
+    grow down (red), anchored to a zero line.  Hover surfaces buys / sells /
+    net / active traders.
+    """
+    return _congress_vbar_geometry(momentum[:top_n], "net", vb_h=280.0, signed=True)
+
+
+_CONGRESS_ACT_TIMEFRAMES = ("1W", "1M", "3M", "ALL")
+_CONGRESS_ACT_CHAMBERS   = ("all", "house", "senate")
+_CONGRESS_ACT_PARTIES    = ("all", "democrat", "republican")
+
+
 @router.get("/congress", response_class=HTMLResponse)
-async def preview_congress(request: Request):
-    """Congress page — Trades tab is live; others are placeholders."""
-    payload = await _fetch_congress_data()
+async def preview_congress(
+    request: Request,
+    view:      str = "congress",
+    timeframe: str = "ALL",
+    chamber:   str = "all",
+    party:     str = "all",
+):
+    """Congress page — three tabs (Congress / Holdings / Activity), wired
+    through the v1 ``congress_trading`` module so we get the same chamber
+    visualisations, trade-frequency leaderboard, and net-worth leaderboard
+    that v1 already proved out.
+
+    Activity tab honours `?timeframe=&chamber=&party=` query params.  Filter
+    state is server-rendered (links carry the active values) — no client JS
+    state to keep in sync.
+    """
+    if view not in ("congress", "holdings", "activity"):
+        view = "congress"
+    if timeframe not in _CONGRESS_ACT_TIMEFRAMES: timeframe = "ALL"
+    if chamber.lower() not in _CONGRESS_ACT_CHAMBERS: chamber = "all"
+    if party.lower() not in _CONGRESS_ACT_PARTIES:     party   = "all"
+
+    bounded = functools.partial(_bounded, page="Congress page")
+
+    payload, wider_rows, members = await asyncio.gather(
+        bounded(_fetch_congress_data(),                timeout=4.0, fallback={"rows": [], "is_mock": False}, name="recent_trades"),
+        bounded(_fetch_congress_wider_window(6, 5000), timeout=6.0, fallback=[],                              name="wider_trades"),
+        bounded(_fetch_congress_members(),             timeout=4.0, fallback=[],                              name="members"),
+    )
     rows = payload.get("rows") or []
+
+    # v1 page-data orchestrator gives us chamber_viz / trade_frequency /
+    # net_worth_leaderboard / stats / trending / consensus / momentum /
+    # activity in one call.  We re-run consensus with a deeper top_n for
+    # the "All Congressional Holdings" table (page_data caps it at 10) and
+    # re-run activity with the user-selected filter set.
+    from filings import congress_trading as _ct
+    page_data, holdings_table, activity = await asyncio.gather(
+        to_light(_ct.prepare_congress_page_data,
+                 members or [], wider_rows or [], wider_rows or []),
+        to_light(_ct.prepare_congress_consensus,
+                 wider_rows or [], members or [], 20),
+        to_light(_ct.prepare_congress_activity,
+                 wider_rows or [], timeframe, chamber, party, 200),
+    )
+
+    # Pre-format dollar amounts for the Activity tab — Jinja templates don't
+    # have access to our Python helpers as filters, so we hand them strings
+    # ready to render.  Keeps the template free of formatting math.
+    _astats = activity.get("stats") or {}
+    activity["stats_fmt"] = {
+        "net_dollar_flow": _format_signed_compact_dollars(_astats.get("net_dollar_flow", 0)),
+        "buy_value":       _format_compact_dollars(_astats.get("total_buy_value", 0)),
+        "sell_value":      _format_compact_dollars(_astats.get("total_sell_value", 0)),
+    }
+    for c in activity.get("clusters") or []:
+        c["net_flow_fmt"] = _format_signed_compact_dollars(c.get("net_flow", 0))
+
+    perf_chart = await bounded(
+        _performance_index_chart(wider_rows or []),
+        timeout=5.0,
+        fallback={"have_data": False},
+        name="perf_chart",
+    )
 
     ctx = {
         "request":         request,
-        **_shell_context("Congress"),
-        "congress_kpi":    _congress_kpi_strip(rows),
+        **(await _shell_context(request, "Congress")),
+        "congress_view":   view,
+        "congress_kpi":    _congress_kpi_strip(page_data.get("stats", {})),
         "congress_rows":   rows,
         "congress_notable": _congress_notable(rows),
-        "congress_total":  "412",
+        "congress_total":  f"{len(wider_rows):,}" if wider_rows else "—",
         "congress_is_mock": payload.get("is_mock", False),
-        "congress_tab":    "Trades",
+        # v1-derived payloads — chamber_viz drives the House/Senate dot
+        # grids; trade_frequency + net_worth_leaderboard back the chart
+        # toggle on the Congress tab.
+        "chamber_viz":     page_data.get("chamber_viz", {}),
+        "trade_frequency": page_data.get("trade_frequency", []),
+        "net_worth_leaderboard": page_data.get("net_worth_leaderboard", []),
+        "congress_stats":  page_data.get("stats", {}),
+        # Holdings tab payloads — raw lists + chart geometry derived from them.
+        "trending":         page_data.get("trending", []),
+        "consensus":        page_data.get("consensus", []),
+        "momentum":         page_data.get("momentum", []),
+        "trending_chart":   _congress_trending_chart(page_data.get("trending", [])),
+        "momentum_chart":   _congress_momentum_chart(page_data.get("momentum", [])),
+        "holdings_table":   holdings_table,
+        # Activity tab — filtered server-side, with active filter state echoed
+        # back so the pill links can render their is-active class.
+        "activity":          activity,
+        "activity_timeframe": timeframe,
+        "activity_chamber":   chamber,
+        "activity_party":     party,
+        # Performance chart (kept — used elsewhere)
+        "perf_chart":      perf_chart,
     }
     return templates.TemplateResponse("_redesign/congress.html", ctx)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# INSIDERS — Filings (default tab) is live; Clusters / People / Companies /
-# Calendar are placeholders.  Filings is wired to insider_trading via
-# get_latest_insider_trades().
+# INSIDERS — two tabs: Filings (filtered recent trades) and Clusters
+# (per-ticker rollups).  Both are wired to OpenInsider via insider_trading.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -5367,6 +7706,29 @@ def _insiders_format_title(title: str) -> str:
     # OpenInsider gives strings like "CEO, Director" — keep just first segment
     # for the role column to match the design's compact display.
     return t.split(",")[0].strip()
+
+
+# Coarse role bucket used by the Filings tab role filter.  Maps every
+# OpenInsider title segment to one of the chip values.  Anything that
+# doesn't match a named bucket falls into "Other" so the filter still
+# accounts for it without dropping rows from "All".
+def _insiders_role_key(title: str) -> str:
+    """Map a raw OpenInsider title to one of the role-filter buckets:
+    'CEO', 'CFO', 'Director', '10pct', or 'Other'."""
+    t = (title or "").lower()
+    if not t:
+        return "Other"
+    # Title strings can list multiple roles, e.g. "Pres & CEO, Director" —
+    # match the most senior-looking bucket first.
+    if "ceo" in t or "chief executive" in t:
+        return "CEO"
+    if "cfo" in t or "chief financial" in t:
+        return "CFO"
+    if "10%" in t or "10 percent" in t or "ten percent" in t or "10 pct" in t:
+        return "10pct"
+    if "director" in t:
+        return "Director"
+    return "Other"
 
 
 async def _fetch_insiders_data() -> dict:
@@ -5423,24 +7785,15 @@ async def _fetch_insiders_data() -> dict:
     return {"rows": rows, "is_mock": False}
 
 
-def _insiders_kpi_strip(rows: list[dict]) -> list[dict]:
-    """Build the 6-cell KPI strip — counts, top buyer/seller from current view.
-
-    Pure-from-window stats (filings count, top buyer/seller).  Net-flow + B/S
-    ratio + active clusters need server-side aggregation we don't have yet —
-    show fixed placeholders with no delta.
-    """
-    buys  = [r for r in rows if r["action"] == "BUY"]
-    sells = [r for r in rows if r["action"] == "SELL"]
-    top_buyer  = buys[0]["ticker"]  if buys  else "—"
-    top_seller = sells[0]["ticker"] if sells else "—"
+def _insiders_kpi_strip_empty() -> list[dict]:
+    """KPI strip when no upstream trade data is available — every cell em-dashed."""
     return [
-        {"label": "Filings · 30d",    "value": "1,847",                 "delta": "4.2%", "up": False},
-        {"label": "Net flow · 30d",   "value": "-$2.84B",               "delta": None,   "up": None},
-        {"label": "Buy / Sell ratio", "value": f"{len(buys)/max(len(sells),1):.2f}", "delta": None, "up": None},
-        {"label": "Active clusters",  "value": "12",                    "delta": "3",    "up": True},
-        {"label": "Top buyer",        "value": top_buyer,               "delta": None,   "up": None},
-        {"label": "Top seller",       "value": top_seller,              "delta": None,   "up": None},
+        {"label": "Filings",          "value": "—", "delta": None, "up": None},
+        {"label": "Net flow",         "value": "—", "delta": None, "up": None},
+        {"label": "Buy / Sell ratio", "value": "—", "delta": None, "up": None},
+        {"label": "Active clusters",  "value": "—", "delta": None, "up": None},
+        {"label": "Top buyer",        "value": "—", "delta": None, "up": None},
+        {"label": "Top seller",       "value": "—", "delta": None, "up": None},
     ]
 
 
@@ -5462,21 +7815,524 @@ def _insiders_notable(rows: list[dict]) -> dict | None:
     }
 
 
+# ── Insider tab builders — Clusters ──────────────────────────────────────
+
+
+async def _fetch_insider_trades_wide(count: int = 200) -> list:
+    """Pull a wider window of insider trades for the new aggregation tabs.
+
+    Reuses the same scraper/Supabase layer as the Filings tab fetcher, just
+    with a larger count budget.  Returns the raw ``InsiderTrade`` list so
+    each builder can roll up by ticker / insider / sector independently.
+    """
+    try:
+        from filings import insider_trading
+        return await to_heavy(
+            insider_trading.get_latest_insider_trades, "", count, "",
+        ) or []
+    except Exception as exc:
+        logger.warning("Insider wide-window fetch failed: %s", exc)
+        return []
+
+
+def _insider_value_dollars(trade) -> float:
+    """Parse the OpenInsider ``value`` string into an absolute dollar float."""
+    try:
+        from filings.insider_trading import parse_dollar_value
+    except Exception:
+        return 0.0
+    try:
+        return abs(parse_dollar_value(trade.value))
+    except Exception:
+        return 0.0
+
+
+def _insider_is_buy(trade) -> bool:
+    """OpenInsider trade_type → bool BUY / SELL."""
+    return "Purchase" in (trade.trade_type or "")
+
+
+def _insiders_clusters_panel(trades: list, top_n: int = 4) -> list[dict]:
+    """Group trades by ticker; surface tickers with 3+ insiders all trading
+    the same direction inside the window.  Returns the densest 4 cards by
+    aggregate dollar volume — matches the design's 2x2 grid."""
+    from collections import defaultdict
+
+    by_ticker: dict[str, dict] = {}
+    for tr in trades:
+        if not tr.ticker:
+            continue
+        key = tr.ticker.upper()
+        if key not in by_ticker:
+            by_ticker[key] = {
+                "ticker":   key,
+                "name":     tr.company_name or "",
+                "buys":     [],
+                "sells":    [],
+                "buy_value":  0.0,
+                "sell_value": 0.0,
+            }
+        bucket = by_ticker[key]
+        v = _insider_value_dollars(tr)
+        if _insider_is_buy(tr):
+            bucket["buys"].append(tr)
+            bucket["buy_value"] += v
+        else:
+            bucket["sells"].append(tr)
+            bucket["sell_value"] += v
+
+    clusters: list[dict] = []
+    for key, b in by_ticker.items():
+        # Cluster = ≥3 distinct insiders trading the same direction.
+        if len(b["buys"]) >= 3:
+            members = b["buys"]
+            direction = "BUY"
+            volume = b["buy_value"]
+        elif len(b["sells"]) >= 3:
+            members = b["sells"]
+            direction = "SELL"
+            volume = b["sell_value"]
+        else:
+            continue
+
+        # Dedupe by insider name; keep the largest individual trade per person.
+        per_person: dict[str, dict] = {}
+        for m in members:
+            person = m.insider_name or "—"
+            mv = _insider_value_dollars(m)
+            existing = per_person.get(person)
+            if existing is None or mv > existing["v"]:
+                per_person[person] = {
+                    "p":  person,
+                    "r":  _shorten_role((m.title or "").split(",")[0].strip()),
+                    "v":  _format_compact_dollars(mv),
+                    "v_raw": mv,
+                    "d":  (m.trade_date or m.filing_date or "")[:10],
+                }
+        members_list = sorted(per_person.values(), key=lambda x: x["v_raw"], reverse=True)[:6]
+
+        clusters.append({
+            "ticker":     key,
+            "name":       b["name"],
+            "direction":  direction,
+            "count":      len(per_person),
+            "value":      _format_compact_dollars(volume),
+            "_volume":    volume,        # sort key — not consumed by the template
+            "members":    members_list,
+        })
+
+    clusters.sort(key=lambda c: (c["count"], c["_volume"]), reverse=True)
+    return clusters[:top_n]
+
+
+def _shorten_role(title: str) -> str:
+    """Compact role label — preserves CEO/CFO/Director, abbreviates the rest."""
+    if not title:
+        return "—"
+    t = title.strip()
+    aliases = {
+        "Chief Executive Officer":  "CEO",
+        "Chief Financial Officer":  "CFO",
+        "Chief Operating Officer":  "COO",
+        "Chief Technology Officer": "CTO",
+        "Chief Legal Officer":      "CLO",
+        "Chief Marketing Officer":  "CMO",
+        "President":                "President",
+        "Director":                 "Director",
+    }
+    for long_, short_ in aliases.items():
+        if long_.lower() in t.lower():
+            return short_
+    if "10%" in t or "Owner" in t:
+        return "10% own."
+    return t[:14]
+
+
+def _net_format(net: float) -> str:
+    if not net:
+        return "—"
+    sign = "+" if net > 0 else "-"
+    return f"{sign}{_format_compact_dollars(abs(net))}"
+
+
+def _insiders_kpi_strip_real(trades: list) -> list[dict]:
+    """Real KPI strip from the active trade window. Empty data → every cell
+    em-dashed; we never emit fake fallback numbers."""
+    from collections import Counter
+    if not trades:
+        return _insiders_kpi_strip_empty()
+
+    buys = [t for t in trades if _insider_is_buy(t)]
+    sells = [t for t in trades if not _insider_is_buy(t)]
+    buy_v = sum(_insider_value_dollars(t) for t in buys)
+    sell_v = sum(_insider_value_dollars(t) for t in sells)
+    net = buy_v - sell_v
+    bs_ratio = (buy_v / sell_v) if sell_v else 0
+
+    buy_counts = Counter((t.ticker or "").upper() for t in buys if t.ticker)
+    sell_counts = Counter((t.ticker or "").upper() for t in sells if t.ticker)
+    top_buyer  = buy_counts.most_common(1)[0][0] if buy_counts else "—"
+    top_seller = sell_counts.most_common(1)[0][0] if sell_counts else "—"
+
+    # Active clusters — tickers w/ 3+ same-direction insiders.
+    from collections import defaultdict
+    cluster_count = 0
+    by_ticker_dirs: dict[str, dict[str, set]] = defaultdict(lambda: {"buys": set(), "sells": set()})
+    for t in trades:
+        if not t.ticker:
+            continue
+        key = t.ticker.upper()
+        if _insider_is_buy(t):
+            by_ticker_dirs[key]["buys"].add(t.insider_name)
+        else:
+            by_ticker_dirs[key]["sells"].add(t.insider_name)
+    for sets in by_ticker_dirs.values():
+        if len(sets["buys"]) >= 3 or len(sets["sells"]) >= 3:
+            cluster_count += 1
+
+    return [
+        {"label": "Filings",                     "value": f"{len(trades):,}",       "delta": None,  "up": None},
+        {"label": "Net flow",                    "value": _net_format(net),         "delta": None,  "up": (net >= 0)},
+        {"label": "Buy / Sell ratio",            "value": f"{bs_ratio:.2f}",        "delta": None,  "up": (bs_ratio >= 1)},
+        {"label": "Active clusters",             "value": str(cluster_count),       "delta": None,  "up": None},
+        {"label": "Top buyer",                   "value": top_buyer,                "delta": None,  "up": None},
+        {"label": "Top seller",                  "value": top_seller,               "delta": None,  "up": None},
+    ]
+
+
+# ── Filings tab — direction / window / role / plan filtering ────────────
+
+_INSIDERS_DIRECTIONS = {
+    "latest":    {"label": "Latest",    "trade_type": ""},
+    "purchases": {"label": "Purchases", "trade_type": "p"},
+    "sales":     {"label": "Sales",     "trade_type": "s"},
+}
+_INSIDERS_WINDOWS = {
+    "today":   {"label": "Today",         "days": 1,   "kpi": "today"},
+    "7d":      {"label": "Last 7 days",   "days": 7,   "kpi": "7d"},
+    "30d":     {"label": "Last 30 days",  "days": 30,  "kpi": "30d"},
+    "quarter": {"label": "This quarter",  "days": None,"kpi": "QTD"},  # special: from quarter start
+}
+_INSIDERS_ROLE_KEYS = ("All", "CEO", "CFO", "Director", "10pct", "Other")
+_INSIDERS_PLAN_KEYS = ("All", "open", "10b5-1")
+
+
+def _insiders_window_since(window_key: str) -> str:
+    """Resolve a window key to a 'YYYY-MM-DD' since-date for the OpenInsider
+    fetcher.  'quarter' anchors to the start of the current calendar quarter."""
+    today = datetime.now()
+    if window_key == "quarter":
+        q_start_month = ((today.month - 1) // 3) * 3 + 1
+        return today.replace(month=q_start_month, day=1).strftime("%Y-%m-%d")
+    days = _INSIDERS_WINDOWS.get(window_key, _INSIDERS_WINDOWS["30d"])["days"]
+    if days is None or days <= 0:
+        return ""
+    return (today - timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+async def _fetch_insiders_filtered(*, direction: str, window: str, count: int = 200) -> list:
+    """Pull insider trades filtered server-side by trade_type + since_date.
+
+    Role + Plan are parsed from the OpenInsider title / trade_type strings
+    after the fetch — the upstream API doesn't expose those as filters.
+    """
+    trade_type = _INSIDERS_DIRECTIONS.get(direction, _INSIDERS_DIRECTIONS["latest"])["trade_type"]
+    since      = _insiders_window_since(window)
+    try:
+        from filings import insider_trading
+        return await to_heavy(
+            insider_trading.get_latest_insider_trades, trade_type, count, since,
+        ) or []
+    except Exception as exc:
+        logger.warning("Insiders filtered fetch failed: %s", exc)
+        return []
+
+
+def _insiders_apply_role_plan(trades: list, role: str, plan: str) -> list:
+    """Post-filter the returned list by role + plan (no upstream support)."""
+    if role == "All" and plan == "All":
+        return trades
+    out = []
+    for t in trades:
+        if role != "All" and _insiders_role_key(t.title) != role:
+            continue
+        if plan != "All" and _insiders_plan(t.trade_type) != plan:
+            continue
+        out.append(t)
+    return out
+
+
+def _insiders_format_filtered_rows(trades: list, *, max_filings: int = 200) -> list[dict]:
+    """Same shape as the existing rows — re-formatted from the filtered set.
+    Used when we apply server-side filters; mirrors the row dict
+    `_fetch_insiders_data` produces for cold paths."""
+    rows = []
+    for tr in trades[:max_filings]:
+        action = _insiders_action(tr.trade_type)
+        plan   = _insiders_plan(tr.trade_type)
+        rows.append({
+            "person":       tr.insider_name,
+            "role":         _insiders_format_title(tr.title),
+            "ticker":       (tr.ticker or "").upper(),
+            "company_name": getattr(tr, "company_name", "") or "",
+            "action":       action,
+            "shares":       tr.qty or "—",
+            "price":        tr.price or "—",
+            "value":        tr.value or "—",
+            "plan":         plan,
+            "date":         (tr.trade_date or tr.filing_date or "")[:10],
+            "sec_url":      getattr(tr, "sec_url", "") or "",
+            "title":        tr.title or "",
+            "flag":         action == "BUY" and plan == "open",
+        })
+    return rows
+
+
+def _insiders_group_by_ticker(rows: list[dict]) -> list[dict]:
+    """Collapse individual filings into one row per ticker for the dense
+    summary view — each group carries the count + total $ + the
+    constituent filings (revealed when the row is expanded)."""
+    from collections import OrderedDict
+    groups: "OrderedDict[str, dict]" = OrderedDict()
+    for r in rows:
+        tk = r.get("ticker") or "—"
+        bucket = groups.setdefault(tk, {
+            "ticker":     tk,
+            "name":       "",
+            "filings":    [],
+            "buy_count":  0,
+            "sell_count": 0,
+            "buy_value":  0.0,
+            "sell_value": 0.0,
+        })
+        bucket["filings"].append(r)
+        # Best-available company name from the first row that carries one.
+        if not bucket["name"]:
+            bucket["name"] = (r.get("company_name") or r.get("name") or "")
+        try:
+            from filings.insider_trading import parse_dollar_value
+            v = abs(parse_dollar_value(r.get("value") or ""))
+        except Exception:
+            v = 0.0
+        if r.get("action") == "BUY":
+            bucket["buy_count"]  += 1
+            bucket["buy_value"]  += v
+        else:
+            bucket["sell_count"] += 1
+            bucket["sell_value"] += v
+
+    out = []
+    for tk, b in groups.items():
+        net = b["buy_value"] - b["sell_value"]
+        # Summary tag: dominant direction + count.
+        if b["buy_count"] and not b["sell_count"]:
+            tag_kind  = "BUY"
+            tag_label = f"{b['buy_count']} Buy" + ("s" if b["buy_count"] > 1 else "")
+        elif b["sell_count"] and not b["buy_count"]:
+            tag_kind  = "SELL"
+            tag_label = f"{b['sell_count']} Sale" + ("s" if b["sell_count"] > 1 else "")
+        else:
+            tag_kind  = "MIXED"
+            tag_label = f"{b['buy_count']} Buy / {b['sell_count']} Sale"
+        out.append({
+            "ticker":     tk,
+            "name":       b["name"],
+            "tag_kind":   tag_kind,
+            "tag_label":  tag_label,
+            "net":        net,
+            "net_str":    _net_format(net) if (b["buy_value"] or b["sell_value"]) else "—",
+            "filings":    b["filings"],
+            "filing_n":   len(b["filings"]),
+        })
+    return out
+
+
+def _insiders_momentum_chart(trades: list, *, top_buys: int = 5, top_sells: int = 5) -> dict:
+    """Bar-chart payload for the Insider Momentum panel.
+
+    Buckets trades by ticker, picks the top-N buys (positive net dollar) +
+    top-N sells (negative net dollar), then computes SVG-ready bar geometry.
+    Mirrors the v1 'Insider Momentum' module.
+    """
+    if not trades:
+        return {"have_data": False, "bars": [], "y_labels": [], "grid_ys": []}
+
+    from collections import defaultdict
+    by_t: dict[str, dict] = defaultdict(lambda: {"buy": 0.0, "sell": 0.0})
+    for tr in trades:
+        tk = (tr.ticker or "").upper()
+        if not tk:
+            continue
+        v = _insider_value_dollars(tr)
+        if _insider_is_buy(tr):
+            by_t[tk]["buy"]  += v
+        else:
+            by_t[tk]["sell"] += v
+    if not by_t:
+        return {"have_data": False, "bars": [], "y_labels": [], "grid_ys": []}
+
+    nets = [(tk, b["buy"] - b["sell"]) for tk, b in by_t.items()]
+    nets.sort(key=lambda x: x[1], reverse=True)
+    buys  = [(tk, n) for tk, n in nets if n > 0][:top_buys]
+    sells = [(tk, n) for tk, n in nets if n < 0][-top_sells:]
+    sells.reverse()  # most-negative first → matches v1 ordering
+    # `bars` order: buys (descending), then sells (most-negative first → least).
+    ordered = buys + sells
+    if not ordered:
+        return {"have_data": False, "bars": [], "y_labels": [], "grid_ys": []}
+
+    # Y-axis: anchor zero at the chart midline so positive bars grow up and
+    # negative bars grow down.  ViewBox 1500×280 matches a typical full-width
+    # container (~5.4:1) so `preserveAspectRatio="none"` is near-identity.
+    width, height = 1500.0, 280.0
+    pad_top, pad_bot, pad_left = 18.0, 28.0, 78.0
+    plot_w = width - pad_left
+    plot_h = height - pad_top - pad_bot
+
+    max_val = max(abs(n) for _, n in ordered) or 1.0
+    # Round up to a "nice" step so y labels read cleanly.
+    step = _nice_axis_step(max_val * 2, target_steps=4)
+    import math
+    rng_top = math.ceil(max_val / step) * step
+    rng_bot = -rng_top
+
+    def _y_for(v: float) -> float:
+        return pad_top + (1.0 - (v - rng_bot) / (rng_top - rng_bot)) * plot_h
+
+    zero_y = _y_for(0)
+
+    n_bars = len(ordered)
+    bar_gap = 14.0
+    bar_w = max(8.0, (plot_w - bar_gap * (n_bars + 1)) / n_bars)
+
+    bars: list[dict] = []
+    for i, (tk, n) in enumerate(ordered):
+        x = pad_left + bar_gap + i * (bar_w + bar_gap)
+        y_top = _y_for(n) if n >= 0 else zero_y
+        y_bot = zero_y if n >= 0 else _y_for(n)
+        bars.append({
+            "ticker":  tk,
+            "value":   n,
+            "is_buy":  n >= 0,
+            "value_str": _net_format(n),
+            "x":       round(x, 1),
+            "y":       round(y_top, 1),
+            "w":       round(bar_w, 1),
+            "h":       round(max(y_bot - y_top, 1.0), 1),
+            "label_x": round(x + bar_w / 2, 1),
+        })
+
+    # Y-axis: 5 lines from -rng to +rng inclusive.
+    y_labels: list[dict] = []
+    grid_ys:  list[float] = []
+    v = rng_bot
+    while v <= rng_top + step / 2:
+        y_pos = round(_y_for(v), 1)
+        y_labels.append({"label": _format_dollars_compact(v), "y": y_pos})
+        grid_ys.append(y_pos)
+        v += step
+
+    return {
+        "have_data": True,
+        "bars":      bars,
+        "y_labels":  y_labels,
+        "grid_ys":   grid_ys,
+        "vb_width":  width,
+        "vb_height": height,
+        "zero_y":    round(zero_y, 1),
+        "left_pad":  pad_left,
+    }
+
+
+_VALID_INSIDER_DIRECTIONS = tuple(_INSIDERS_DIRECTIONS.keys())
+_VALID_INSIDER_WINDOWS    = tuple(_INSIDERS_WINDOWS.keys())
+# Clusters tab sub-pill — filter the per-ticker cluster list by direction.
+_INSIDERS_CLUSTER_KEYS = ("All", "BUY", "SELL")
+
+
 @router.get("/insiders", response_class=HTMLResponse)
-async def preview_insiders(request: Request):
-    """Insiders page — Filings tab is live; others are placeholders."""
-    payload = await _fetch_insiders_data()
-    rows = payload.get("rows") or []
+async def preview_insiders(
+    request: Request,
+    direction: str = "latest",
+    role:      str = "All",
+    plan:      str = "All",
+    cluster:   str = "All",
+):
+    """Insiders page — Filings tab honours `?direction=&role=&plan=` query
+    params; Clusters tab honours `?cluster=All|BUY|SELL`.  Every filter is
+    server-rendered (no client-side decoration).
+
+    The Filings tab + momentum chart use a fixed 30-day lookback; the wider
+    6-month set still drives Clusters / People / Companies tabs.
+    """
+    window = "30d"  # fixed window for Filings + momentum (no UI control)
+    if direction not in _VALID_INSIDER_DIRECTIONS: direction = "latest"
+    if role      not in _INSIDERS_ROLE_KEYS:       role      = "All"
+    if plan      not in _INSIDERS_PLAN_KEYS:       plan      = "All"
+    if cluster   not in _INSIDERS_CLUSTER_KEYS:    cluster   = "All"
+
+    bounded = functools.partial(_bounded, page="Insiders page")
+
+    # Filings tab uses the user-selected filters on the recent 200-trade
+    # pull; Clusters tab uses a wider always-on pull so the aggregation is
+    # stable regardless of what's in the filter bar.
+    filings_trades, wide_trades = await asyncio.gather(
+        bounded(_fetch_insiders_filtered(direction=direction, window=window, count=200),
+                timeout=8.0, fallback=[], name="filings"),
+        bounded(_fetch_insider_trades_wide(200),
+                timeout=8.0, fallback=[], name="wide"),
+    )
+
+    # Apply role + plan filters server-side (OpenInsider doesn't expose them).
+    filings_trades = _insiders_apply_role_plan(filings_trades, role, plan)
+
+    rows = _insiders_format_filtered_rows(filings_trades)
+    grouped = _insiders_group_by_ticker(rows)
+
+    # Momentum chart + KPI strip reflect the active Filings filter set.
+    momentum_chart = _insiders_momentum_chart(filings_trades)
+
+    # Pull the full cluster list (not just the top 4) so we can server-side
+    # filter by direction before slicing to the 2x2 grid.
+    clusters_all = (
+        await to_light(_insiders_clusters_panel, wide_trades, 99)
+        if wide_trades else []
+    )
+
+    # Cluster sub-pill: filter by direction (BUY/SELL/All), then take top 4.
+    if cluster == "All":
+        clusters_panel = clusters_all[:4]
+    else:
+        clusters_panel = [c for c in clusters_all if c["direction"] == cluster][:4]
+    clusters_buy_total  = sum(1 for c in clusters_all if c["direction"] == "BUY")
+    clusters_sell_total = sum(1 for c in clusters_all if c["direction"] == "SELL")
 
     ctx = {
-        "request":         request,
-        **_shell_context("Insiders"),
-        "insiders_kpi":    _insiders_kpi_strip(rows),
-        "insiders_rows":   rows,
-        "insiders_notable": _insiders_notable(rows),
-        "insiders_total":  "1,847",  # 30d count placeholder
-        "insiders_is_mock": payload.get("is_mock", False),
-        "insiders_tab":    "Filings",
+        "request":          request,
+        **(await _shell_context(request, "Insiders")),
+        # KPI strip + filtered Filings tab payload
+        "insiders_kpi":         _insiders_kpi_strip_real(filings_trades),
+        "insiders_rows":        rows,
+        "insiders_grouped":     grouped,
+        "insiders_total":       len(filings_trades),
+        "insiders_total_str":   f"{len(filings_trades):,}",
+        "insiders_notable":     _insiders_notable(rows),
+        "insiders_momentum":    momentum_chart,
+        # Active filter state
+        "insiders_direction":   direction,
+        "insiders_directions":  [(k, v["label"]) for k, v in _INSIDERS_DIRECTIONS.items()],
+        "insiders_role":        role,
+        "insiders_role_keys":   _INSIDERS_ROLE_KEYS,
+        "insiders_plan":        plan,
+        "insiders_plan_keys":   _INSIDERS_PLAN_KEYS,
+        # Clusters tab (independent of Filings filter)
+        "insiders_clusters":    clusters_panel,
+        "insiders_cluster":     cluster,
+        "insiders_cluster_keys": _INSIDERS_CLUSTER_KEYS,
+        "insiders_clusters_buy_count":  clusters_buy_total,
+        "insiders_clusters_sell_count": clusters_sell_total,
+        "insiders_clusters_all_count":  len(clusters_all),
+        "insiders_tab":         "Filings",
     }
     return templates.TemplateResponse("_redesign/insiders.html", ctx)
 
@@ -5547,14 +8403,100 @@ async def _fetch_profile_watchlist() -> list[dict]:
     return rows
 
 
-@router.get("/profile", response_class=HTMLResponse)
-async def preview_profile(request: Request):
-    """Profile page — Watchlist tab is live; others are placeholders."""
-    rows = await _fetch_profile_watchlist()
+# Mock illustrative data for the still-unwired tabs.  These tabs need a
+# user-prefs / billing schema we don't have yet — the design-faithful
+# tables render real-shape rows so the page feels complete to a viewer
+# without lying about what's actually wired.
+_PROFILE_ALERTS_MOCK: list[dict] = [
+    {"ticker": "NVDA",  "type": "Insider buy",      "rule": "Open-market BUY ≥ $1M",    "channel": "Email + Push",  "status": "active", "triggered": "3 days ago"},
+    {"ticker": "PLTR",  "type": "Congress trade",   "rule": "Any new BUY",              "channel": "Email",         "status": "active", "triggered": "yesterday"},
+    {"ticker": "GME",   "type": "Sentiment spike",  "rule": "WSB mentions ≥ 5,000 / 4h","channel": "Push",          "status": "active", "triggered": "now"},
+    {"ticker": "BRK.B", "type": "13F filing",       "rule": "New filing posted",        "channel": "Email",         "status": "active", "triggered": "22 days ago"},
+    {"ticker": "COIN",  "type": "Price",            "rule": "Cross above $250",         "channel": "Email + Push",  "status": "active", "triggered": "never"},
+    {"ticker": "AAPL",  "type": "Earnings",         "rule": "24h before earnings",      "channel": "Email",         "status": "active", "triggered": "in 8 days"},
+    {"ticker": "OXY",   "type": "Insider cluster",  "rule": "≥ 3 insiders BUY in 30d",  "channel": "Email",         "status": "paused", "triggered": "42 days ago"},
+]
 
+_PROFILE_ACCOUNT_PROFILE = [
+    ("Display name",  "Tev McNeill"),
+    ("Email",         "tev@paperpanda.io"),
+    ("Username",      "@tev"),
+    ("Time zone",     "America / New York"),
+    ("Default range", "6 months"),
+]
+_PROFILE_ACCOUNT_PREFS = [
+    ("Theme",                "System (auto)"),
+    ("Number format",        "Compact ($1.2B)"),
+    ("Default home view",    "Markets"),
+    ("Email digest",         "Weekly · Mondays"),
+    ("Notification sounds",  "On"),
+]
+_PROFILE_ACCOUNT_SECURITY = [
+    ("Password",          "Last changed 4 months ago"),
+    ("Two-factor",        "Enabled · Authenticator"),
+    ("Active sessions",   "2 devices"),
+    ("API keys",          "1 key · last used yesterday"),
+]
+_PROFILE_ACCOUNT_CONNECTED = [
+    {"name": "Google",      "value": "tev@gmail.com",  "status": "connected"},
+    {"name": "X / Twitter", "value": "@tev",           "status": "connected"},
+    {"name": "Discord",     "value": "—",              "status": "not connected"},
+    {"name": "Slack",       "value": "—",              "status": "not connected"},
+]
+
+_PROFILE_PLANS = [
+    {"name": "Free",     "price": "$0",   "period": "/mo",
+     "features": ["3 watchlists", "5 alerts", "15-min delayed quotes", "Basic 13F access"],
+     "cta":      "Downgrade", "current": False},
+    {"name": "Pro",      "price": "$24",  "period": "/mo",
+     "features": ["25 watchlists", "Unlimited alerts", "Real-time quotes",
+                  "Full 13F + insider + Congress", "API access", "Custom screeners"],
+     "cta":      "Current plan", "current": True,  "accent": True},
+    {"name": "Premium",  "price": "$72",  "period": "/mo",
+     "features": ["Everything in Pro", "Options flow + dark pools",
+                  "AI-generated reports", "Priority support",
+                  "Slack / Discord webhooks", "Multi-user (3 seats)"],
+     "cta":      "Upgrade", "current": False},
+]
+
+_PROFILE_BILLING = [
+    ("Plan",          "Pro · $24 / month"),
+    ("Next charge",   "May 14, 2026 · $24.00"),
+    ("Payment",       "Visa •••• 4280"),
+    ("Billing email", "tev@paperpanda.io"),
+]
+
+_PROFILE_INVOICES = [
+    {"date": "Apr 14, 2026", "label": "Pro · monthly", "amount": "$24.00", "status": "Paid"},
+    {"date": "Mar 14, 2026", "label": "Pro · monthly", "amount": "$24.00", "status": "Paid"},
+    {"date": "Feb 14, 2026", "label": "Pro · monthly", "amount": "$24.00", "status": "Paid"},
+    {"date": "Jan 14, 2026", "label": "Pro · monthly", "amount": "$24.00", "status": "Paid"},
+    {"date": "Dec 14, 2025", "label": "Pro · monthly", "amount": "$24.00", "status": "Paid"},
+]
+
+
+_PROFILE_TABS = ("Watchlist", "Alerts", "Account", "Subscription")
+
+
+@router.get("/profile", response_class=HTMLResponse)
+async def preview_profile(request: Request, tab: str = "Watchlist"):
+    """Profile page — all 4 tabs render content on the initial load.
+
+    Watchlist is live; Alerts / Account / Subscription render design-faithful
+    illustrative data until the user-prefs / billing schemas are in place.
+
+    ``?tab=`` deep-links the active tab so other pages (sidebar Watchlist,
+    topbar +Alert) can land on the right pane on load.
+    """
+    rows = await _fetch_profile_watchlist()
+    if tab not in _PROFILE_TABS:
+        tab = "Watchlist"
+
+    # No "Profile" sidebar item — Watchlist is the closest entry-point so
+    # highlight it whenever any Profile tab is in view.
     ctx = {
         "request":    request,
-        **_shell_context("Profile"),
+        **(await _shell_context(request, "Watchlist")),
         "user":       _PROFILE_USER,
         "watch_lists": [
             (label, len(rows) if i == 0 else 0)
@@ -5563,9 +8505,160 @@ async def preview_profile(request: Request):
         "watch_active": _PROFILE_LISTS_MOCK[0],
         "watch_rows": rows,
         "watch_empty": len(rows) == 0,
-        "profile_tab": "Watchlist",
+        "profile_tab": tab,
+        # New tab payloads — illustrative content for now.
+        "profile_alerts":           _PROFILE_ALERTS_MOCK,
+        "profile_alerts_active":    sum(1 for a in _PROFILE_ALERTS_MOCK if a["status"] == "active"),
+        "profile_alerts_quota":     25,
+        "profile_account_profile":  _PROFILE_ACCOUNT_PROFILE,
+        "profile_account_prefs":    _PROFILE_ACCOUNT_PREFS,
+        "profile_account_security": _PROFILE_ACCOUNT_SECURITY,
+        "profile_account_connected":_PROFILE_ACCOUNT_CONNECTED,
+        "profile_plans":            _PROFILE_PLANS,
+        "profile_billing":          _PROFILE_BILLING,
+        "profile_invoices":         _PROFILE_INVOICES,
     }
     return templates.TemplateResponse("_redesign/profile.html", ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NOTIFICATIONS — chronological feed of recent platform notifications.
+# Mirrors the v1 /notifications page but in the v2 design language: filter
+# chips at the top + inbox-style row list.  Reads from supabase_cache.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_NOTIF_PAGE_TYPE_META: dict[str, dict[str, str]] = {
+    "13f_change":      {"label": "13F",        "color": "#2563eb"},
+    "youtube":         {"label": "YouTube",    "color": "#dc2626"},
+    "reddit_velocity": {"label": "Reddit",     "color": "#f97316"},
+    "congress_trade":  {"label": "Congress",   "color": "#059669"},
+    "insider_trade":   {"label": "Insider",    "color": "#7c3aed"},
+    "feature_release": {"label": "New feature","color": "#0ea5e9"},
+}
+
+
+def _time_ago_v2(iso_str: str) -> str:
+    """Same shape as web._time_ago — duplicated so the redesign router stays
+    importable without pulling all of web.py."""
+    if not iso_str:
+        return ""
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        dt = _dt.fromisoformat(iso_str.replace("Z", "+00:00"))
+        diff = _dt.now(_tz.utc) - dt
+        seconds = int(diff.total_seconds())
+        if seconds < 60:
+            return "just now"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes}m ago"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours}h ago"
+        days = hours // 24
+        if days < 7:
+            return f"{days}d ago"
+        return f"{days // 7}w ago"
+    except Exception:
+        return ""
+
+
+@router.get("/notifications", response_class=HTMLResponse)
+async def preview_notifications(request: Request, types: str = "", page: int = 1):
+    """Notifications activity feed — chronological list with type filters."""
+    valid_types = list(_NOTIF_PAGE_TYPE_META.keys())
+    active_types: list[str] = []
+    if types.strip():
+        active_types = [t.strip() for t in types.split(",") if t.strip() in valid_types]
+
+    page = max(int(page or 1), 1)
+    per_page = 30
+    offset = (page - 1) * per_page
+
+    try:
+        from filings import supabase_cache
+        notifs = await to_heavy(
+            supabase_cache.get_recent_notifications,
+            per_page + 1,
+            active_types or None,
+            offset,
+        )
+    except Exception as exc:
+        logger.warning("Notifications fetch failed: %s", exc)
+        notifs = []
+
+    has_next = len(notifs) > per_page
+    notifs = notifs[:per_page]
+
+    rows: list[dict] = []
+    for n in notifs:
+        ntype = n.get("type", "")
+        meta = _NOTIF_PAGE_TYPE_META.get(ntype, {"label": ntype.title(), "color": "var(--pp-dim)"})
+        ticker = ((n.get("metadata") or {}).get("ticker") or "").upper()
+        rows.append({
+            "id":        n.get("id"),
+            "type":      ntype,
+            "type_label": meta["label"],
+            "type_color": meta["color"],
+            "title":     n.get("title", ""),
+            "message":   n.get("message", ""),
+            "icon":      n.get("icon", "•"),
+            "link":      n.get("link", ""),
+            "ticker":    ticker,
+            "time_ago":  _time_ago_v2(n.get("created_at", "")),
+            "created_at": n.get("created_at", ""),
+        })
+
+    # Group by day for the timeline rail.
+    from collections import OrderedDict
+    by_day: "OrderedDict[str, list[dict]]" = OrderedDict()
+    for r in rows:
+        d_label = "Earlier"
+        try:
+            d = datetime.fromisoformat((r["created_at"] or "").replace("Z", "+00:00"))
+            now = datetime.now(d.tzinfo) if d.tzinfo else datetime.now()
+            delta_days = (now.date() - d.date()).days
+            if delta_days == 0:
+                d_label = "Today"
+            elif delta_days == 1:
+                d_label = "Yesterday"
+            else:
+                d_label = d.strftime("%a, %b %-d")
+        except Exception:
+            pass
+        by_day.setdefault(d_label, []).append(r)
+
+    shell = await _shell_context(request, "Notifications")
+    # Visiting this page IS the "I've seen these" event — clear the badge
+    # for the current render so the user doesn't see a stale count next
+    # to the page they're already on.
+    shell["notif_unread"] = 0
+
+    ctx = {
+        "request":         request,
+        **shell,
+        "notif_types":     [
+            {"key": k, "label": _NOTIF_PAGE_TYPE_META[k]["label"], "color": _NOTIF_PAGE_TYPE_META[k]["color"]}
+            for k in valid_types
+        ],
+        "notif_active_types": active_types,
+        "notif_groups":    list(by_day.items()),
+        "notif_total":     len(rows),
+        "notif_page":      page,
+        "notif_has_next":  has_next,
+        "notif_has_prev":  page > 1,
+    }
+    response = templates.TemplateResponse("_redesign/notifications.html", ctx)
+    # Persist the visit so subsequent page renders count only notifications
+    # that arrive AFTER this moment.  Cookie is per-browser, no auth needed.
+    response.set_cookie(
+        _SHELL_NOTIF_COOKIE,
+        datetime.now(timezone.utc).isoformat(),
+        max_age=_SHELL_NOTIF_COOKIE_MAX_AGE,
+        path="/",
+        samesite="lax",
+    )
+    return response
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5720,74 +8813,1072 @@ def _retail_trending_rows(items: list[dict]) -> list[dict]:
     return rows
 
 
-@router.get("/retail", response_class=HTMLResponse)
-async def preview_retail(request: Request):
-    """Retail page — Pulse tab is live (ApeWisdom).  Trends + WSB are placeholders."""
-    payload = await _fetch_retail_data()
-    featured = payload.get("featured")
-    trending = payload.get("trending") or []
+# ── Retail Trends tab — Google Trends multi-line ──────────────────────────
 
-    # Featured callout — top ticker with formatted stats.
-    feat_dod = _retail_dod_delta(featured) if featured else 0
-    feat_sentiment = _retail_sentiment_proxy(featured) if featured else 0
-    featured_ctx = None
-    if featured:
-        m = int(featured.get("mentions") or 0)
-        featured_ctx = {
-            "ticker":         (featured.get("ticker") or "").upper(),
-            "name":           _retail_name(featured),
-            "mentions":       m,
-            "mentions_str":   f"{m:,}",
-            "dod_str":        f"+{int(feat_dod * 100)}% DoD" if feat_dod >= 0 else f"{int(feat_dod * 100)}% DoD",
-            "dod_up":         feat_dod >= 0,
-            "sentiment":      int(feat_sentiment * 100),
-            "sentiment_str":  f"+{int(feat_sentiment * 100)}" if feat_sentiment >= 0 else f"{int(feat_sentiment * 100)}",
-            "sentiment_label": "Bullish" if feat_sentiment >= 0.3 else ("Bearish" if feat_sentiment < -0.1 else "Neutral"),
-            "sentiment_up":   feat_sentiment >= 0,
-            # Price / day chg need market_data join — placeholder for MVP.
-            "price":          "—",
-            "price_chg":      "—",
-            "price_up":       None,
+# Colour cycle for the Trends multi-line chart (matches the design's accent /
+# up / ink / dim sequence so series stay distinguishable on dark + light).
+_TRENDS_LINE_COLORS = ["var(--pp-accent)", "var(--pp-up)", "var(--pp-ink)", "var(--pp-dim)"]
+_TRENDS_DEFAULT_TICKERS = ["NVDA", "GME", "TSLA", "AAPL"]
+
+
+def _retail_trends_chart_compute() -> dict | None:
+    """Synchronous: pull 90-day Google Trends interest for the default basket
+    and produce SVG-ready multi-series chart data.
+
+    Returns ``None`` on upstream failure so the L2 cache doesn't poison
+    itself with an empty payload — the bounded route fallback handles the
+    rendering path. ``{"have_data": False, ...}`` is reserved for a
+    successful fetch that yielded no usable points.
+
+    Wrapped by `_retail_trends_chart` (L2-cached) — pytrends has tight
+    rate limits and the 4 keyword set takes ~6-15s on a cold path.
+    """
+    try:
+        from filings import google_trends
+    except Exception:
+        return None
+
+    try:
+        bundle = google_trends.fetch_interest_over_time(
+            _TRENDS_DEFAULT_TICKERS,
+            timeframe="today 3-m",
+            geo="US",
+        )
+    except Exception as exc:
+        logger.warning("Retail trends compute failed: %s", exc)
+        return None
+
+    if not bundle or not bundle.get("data"):
+        return None
+
+    keywords = bundle.get("keywords") or []
+    points = bundle.get("data") or []          # [{date, values: {kw: int}}, ...]
+    if not points:
+        return {"have_data": False, "series": []}
+
+    # ViewBox 1500×260 (~5.8:1) — matches the typical full-width container
+    # ratio so `preserveAspectRatio="none"` is near-identity.
+    width, height = 1500.0, 260.0
+    pad_top, pad_bot = 15.0, 25.0
+    plot_h = height - pad_top - pad_bot
+    n = len(points)
+
+    # Build per-keyword score arrays in the order keywords were returned.
+    by_kw: dict[str, list[int]] = {kw: [] for kw in keywords}
+    for p in points:
+        vals = p.get("values") or {}
+        for kw in keywords:
+            by_kw[kw].append(int(vals.get(kw) or 0))
+
+    # Trends scores are 0-100 globally — fix the y-range so the lines stay
+    # comparable across keywords.
+    series: list[dict] = []
+    # Per-keyword screen-y arrays (parallel to `points`) so the JS hover
+    # layer can plot a dot on every line at the active x.
+    series_screen_ys: list[list[float]] = []
+    for i, kw in enumerate(keywords):
+        ys = by_kw[kw]
+        if not ys:
+            continue
+        avg = sum(ys) / max(len(ys), 1)
+        last = ys[-1]
+        first_nonzero = next((y for y in ys if y > 0), ys[0])
+        delta = ((last - first_nonzero) / first_nonzero * 100) if first_nonzero else 0.0
+        d_path = []
+        screen_ys: list[float] = []
+        for j, y in enumerate(ys):
+            sx = (j / max(n - 1, 1)) * width
+            sy = pad_top + (1 - y / 100.0) * plot_h
+            d_path.append(("M" if j == 0 else "L") + f"{sx:.1f} {sy:.1f}")
+            screen_ys.append(round(sy, 1))
+        series.append({
+            "name":  kw,
+            "color": _TRENDS_LINE_COLORS[i % len(_TRENDS_LINE_COLORS)],
+            "line":  " ".join(d_path),
+            "avg":   round(avg, 1),
+            "last":  last,
+            "delta_pct_str": f"{delta:+.0f}%" if delta else "—",
+            "delta_up": delta >= 0,
+        })
+        series_screen_ys.append(screen_ys)
+
+    # Per-x hover history: every point gets the date + value for every
+    # keyword.  JS uses nearest-x to find the active index and renders a
+    # dot per series + a multi-line tooltip.
+    chart_history: list[dict] = []
+    for j, p in enumerate(points):
+        sx = round((j / max(n - 1, 1)) * width, 1)
+        date_str = p.get("date") or ""
+        try:
+            from datetime import datetime as _dt
+            date_str = _dt.strptime(date_str, "%b %d, %Y").strftime("%b %d, %Y")
+        except Exception:
+            pass
+        kw_values = []
+        for s_idx, s in enumerate(series):
+            kw = s["name"]
+            v = (p.get("values") or {}).get(kw) or 0
+            kw_values.append({
+                "name":  kw,
+                "color": s["color"],
+                "value": int(v),
+                "y":     series_screen_ys[s_idx][j] if j < len(series_screen_ys[s_idx]) else 0,
+            })
+        chart_history.append({"x": sx, "date": date_str, "kws": kw_values})
+
+    # First / mid / last x-axis date labels (MMM d).
+    def _label(idx: int) -> str:
+        d = points[idx].get("date") or ""
+        try:
+            from datetime import datetime as _dt
+            return _dt.strptime(d, "%b %d, %Y").strftime("%b %d")
+        except Exception:
+            return (d.split(",")[0]).strip() or ""
+
+    if n >= 3:
+        ticks = [_label(0), _label(n // 2), _label(n - 1)]
+    else:
+        ticks = [_label(0)] if n else []
+
+    return {
+        "have_data": True,
+        "series":    series,
+        "ticks":     ticks,
+        "n":         n,
+        "as_of":     bundle.get("fetched_at", ""),
+        "vb_width":  width,
+        "vb_height": height,
+        "chart_history": chart_history,
+    }
+
+
+async def _retail_trends_chart() -> dict:
+    """L2-cached wrapper — Google Trends payload is stable for hours."""
+    return await _l2_cached(
+        key="redesign:retail:trends_chart:v1",
+        ttl_seconds=2 * 3600,
+        compute=_retail_trends_chart_compute,
+        category="redesign_retail",
+    ) or {"have_data": False, "series": []}
+
+
+# ── Retail WSB tab — index, distribution, top-ticker table ────────────────
+
+def _retail_wsb_panel(top_rows: list[dict] | None) -> dict:
+    """Build the WSB hero index + top-tickers table from get_wsb_top() rows."""
+    rows = top_rows or []
+    if not rows:
+        return {"have_data": False, "rows": [], "index": 0, "dist": {}, "total_posts": 0}
+
+    # Sentiment categorical → numeric score for the index aggregate.
+    score_for = {"Bullish": 1.0, "Neutral": 0.0, "Bearish": -1.0}
+    weighted_sum = 0.0
+    weighted_total = 0.0
+    counts = {"Bullish": 0, "Neutral": 0, "Bearish": 0}
+    for r in rows:
+        m = int(r.get("mentions") or 0)
+        s = score_for.get(r.get("sentiment", "Neutral"), 0.0)
+        weighted_sum += s * m
+        weighted_total += m
+        counts[r.get("sentiment", "Neutral")] = counts.get(r.get("sentiment", "Neutral"), 0) + 1
+    weighted_avg = (weighted_sum / weighted_total) if weighted_total else 0.0
+    # 0-100 index — design shows "+71" style.
+    index_val = int(round(weighted_avg * 100))
+
+    # Distribution percentages (counts of tickers, not mentions — easier to read).
+    n_total = sum(counts.values()) or 1
+    dist = {
+        "bullish_pct": round(counts["Bullish"] / n_total * 100),
+        "neutral_pct": round(counts["Neutral"] / n_total * 100),
+        "bearish_pct": round(counts["Bearish"] / n_total * 100),
+    }
+
+    table_rows: list[dict] = []
+    # Sort by mentions desc.
+    for i, r in enumerate(sorted(rows, key=lambda x: int(x.get("mentions") or 0), reverse=True)[:12], start=1):
+        m = int(r.get("mentions") or 0)
+        u = int(r.get("upvotes") or 0)
+        # Upvotes-per-mention ratio — proxy for "calls/puts" sentiment depth.
+        ratio = u / m if m else 0
+        # Map ratio onto a -100..+100 score for the chip.
+        score = max(-100, min(100, int(round((ratio - 10) * 8))))
+        sentiment_label = r.get("sentiment", "Neutral")
+        table_rows.append({
+            "rank":       i,
+            "ticker":     (r.get("ticker") or "").upper(),
+            "name":       r.get("name") or "",
+            "posts":      m,
+            "posts_str":  f"{m:,}",
+            "upvotes":    u,
+            "upvotes_str": f"{u:,}",
+            "ratio":      ratio,
+            "ratio_str":  f"{ratio:.1f}x",
+            "ratio_pct":  min(int(ratio / 25 * 100), 100),
+            "sentiment_label": sentiment_label,
+            "score":      score,
+            "score_str":  (f"+{score}" if score >= 0 else f"{score}"),
+            "score_up":   score >= 0,
+        })
+
+    return {
+        "have_data":    True,
+        "index":        index_val,
+        "index_str":    (f"+{index_val}" if index_val >= 0 else f"{index_val}"),
+        "index_up":     index_val >= 0,
+        "label":        ("Strongly bullish" if index_val >= 50
+                         else "Bullish" if index_val >= 20
+                         else "Neutral" if index_val >= -20
+                         else "Bearish" if index_val >= -50
+                         else "Strongly bearish"),
+        "dist":         dist,
+        "total_posts":  sum(int(r.get("mentions") or 0) for r in rows),
+        "rows":         table_rows,
+    }
+
+
+_RETAIL_FG_BAND_LABELS = {
+    "extreme_fear": "Extreme Fear", "fear": "Fear",
+    "neutral": "Neutral",
+    "greed": "Greed", "extreme_greed": "Extreme Greed",
+}
+
+
+def _retail_kpi_strip_v2(apewisdom: list[dict], fear_greed: dict | None) -> list[dict]:
+    """Top KPI strip — six headline retail metrics."""
+    total_mentions = sum(int(r.get("mentions") or 0) for r in apewisdom)
+    total_upvotes  = sum(int(r.get("upvotes") or 0) for r in apewisdom)
+    fg_score = fear_greed.get("score") if fear_greed else None
+    fg_label = (fear_greed.get("rating") or "").title() if fear_greed else "—"
+    bullish_count = sum(
+        1 for r in apewisdom
+        if int(r.get("mentions") or 0) > 0
+        and int(r.get("upvotes") or 0) / max(int(r.get("mentions") or 1), 1) > 5
+    )
+    return [
+        {"label": "Tickers tracked",   "value": f"{len(apewisdom):,}",      "delta": None, "up": None},
+        {"label": "Total mentions",    "value": f"{total_mentions:,}",       "delta": None, "up": None},
+        {"label": "Total upvotes",     "value": f"{total_upvotes:,}",        "delta": None, "up": None},
+        {"label": "Bullish (>5 upv/m)", "value": f"{bullish_count}",         "delta": None, "up": None},
+        {"label": "Fear & Greed",      "value": (str(int(fg_score)) if isinstance(fg_score, (int, float)) else "—"),
+         "delta": fg_label or None, "up": None},
+        {"label": "Market mood",       "value": fg_label or "—",             "delta": None, "up": None},
+    ]
+
+
+def _retail_sentiment_payload(apewisdom: list[dict], fear_greed: dict | None) -> dict:
+    """Sentiment tab payload — Market Mood gauge + 3 callout cards."""
+    # CNN Fear & Greed gauge data + four reference points.
+    fg = None
+    if fear_greed:
+        def _fg_int(v):
+            """Coerce CNN's float scores → display-ready integers."""
+            try:
+                return int(round(float(v))) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        score_int = _fg_int(fear_greed.get("score"))
+        rating = (fear_greed.get("rating") or "").lower().replace(" ", "_")
+        fg = {
+            "score":       score_int,
+            "score_str":   f"{score_int}" if score_int is not None else "—",
+            "rating":      _RETAIL_FG_BAND_LABELS.get(rating, (fear_greed.get("rating") or "—").title()),
+            "rating_key":  rating or "neutral",
+            "marker_pct":  max(0.0, min(100.0, float(score_int))) if score_int is not None else 50.0,
+            "previous_close":  _fg_int(fear_greed.get("previous_close")),
+            "one_week_ago":    _fg_int(fear_greed.get("one_week_ago")),
+            "one_month_ago":   _fg_int(fear_greed.get("one_month_ago")),
+            "one_year_ago":    _fg_int(fear_greed.get("one_year_ago")),
         }
 
+    # Most mentioned — top by raw mention count.
+    most_mentioned = None
+    if apewisdom:
+        top = sorted(apewisdom, key=lambda r: int(r.get("mentions") or 0), reverse=True)[0]
+        most_mentioned = {
+            "ticker":       (top.get("ticker") or "").upper(),
+            "name":         top.get("name") or "",
+            "mentions":     int(top.get("mentions") or 0),
+            "mentions_str": f"{int(top.get('mentions') or 0):,}",
+            "upvotes":      int(top.get("upvotes") or 0),
+            "upvotes_str":  f"{int(top.get('upvotes') or 0):,}",
+        }
+
+    # Biggest rank mover — largest absolute rank improvement (rank_24h_ago - rank).
+    biggest_mover = None
+    if apewisdom:
+        candidates = []
+        for r in apewisdom:
+            rank = int(r.get("rank") or 0)
+            r24  = r.get("rank_24h_ago")
+            if rank and r24:
+                try:
+                    delta = int(r24) - rank   # positive = rose in rank
+                    candidates.append((abs(delta), delta, r))
+                except (TypeError, ValueError):
+                    continue
+        if candidates:
+            candidates.sort(key=lambda c: c[0], reverse=True)
+            _abs, delta, top = candidates[0]
+            biggest_mover = {
+                "ticker":   (top.get("ticker") or "").upper(),
+                "name":     top.get("name") or "",
+                "delta":    delta,
+                "delta_str": f"+{delta}" if delta > 0 else str(delta),
+                "delta_up": delta > 0,
+                "rank":     int(top.get("rank") or 0),
+                "rank_24h": int(top.get("rank_24h_ago") or 0),
+            }
+
+    # Top 5 trending — first 5 by rank.
+    top_trending = []
+    for r in sorted(apewisdom or [], key=lambda x: int(x.get("rank") or 999))[:5]:
+        top_trending.append({
+            "ticker": (r.get("ticker") or "").upper(),
+            "name":   r.get("name") or "",
+        })
+
+    return {
+        "fear_greed":     fg,
+        "most_mentioned": most_mentioned,
+        "biggest_mover":  biggest_mover,
+        "top_trending":   top_trending,
+    }
+
+
+def _retail_velocity_color(velocity_pct: float) -> str:
+    """Map % velocity → CSS variable name for v2 design tokens.  Mirrors
+    the v1 ``_velocity_to_color`` semantics but yields token names rather
+    than raw hex so dark/light themes both resolve correctly."""
+    if   velocity_pct >= 100: return "var(--pp-up)"
+    elif velocity_pct >= 30:  return "rgba(35, 162, 110, 0.65)"
+    elif velocity_pct >= 0:   return "rgba(35, 162, 110, 0.3)"
+    elif velocity_pct >= -30: return "rgba(220, 38, 38, 0.35)"
+    else:                     return "var(--pp-down)"
+
+
+def _squarify_treemap(items: list[dict], width: float = 100.0, height: float = 100.0) -> list[dict]:
+    """Squarified treemap layout (Bruls/Huijsen/van Wijk 2000).
+
+    Packs `items` into a rectangle of `width × height` while keeping each
+    box's aspect ratio as close to 1:1 as possible.  Coordinates are
+    emitted in the same unit as the input dimensions — pass 100 to get
+    percentages ready for HTML `style="left: X%; top: Y%; …"`.
+
+    Each item must expose a positive `value`.  Output preserves every
+    field of the input dicts plus `x`, `y`, `w`, `h`.
+    """
+    if not items:
+        return []
+    sorted_items = sorted(items, key=lambda d: -max(d.get("value", 0), 1))
+    total_v = sum(max(it.get("value", 0), 1) for it in sorted_items) or 1
+    scale = (width * height) / total_v
+
+    def _row_worst_aspect(row: list[dict], side: float) -> float:
+        if not row or side <= 0:
+            return float("inf")
+        s = sum(max(it.get("value", 0), 1) for it in row) * scale
+        if s <= 0:
+            return float("inf")
+        thick = s / side
+        worst = 1.0
+        for it in row:
+            long_edge = max(max(it.get("value", 0), 1) * scale / max(thick, 1e-9), 1e-9)
+            ratio = max(thick / long_edge, long_edge / thick)
+            if ratio > worst:
+                worst = ratio
+        return worst
+
+    boxes: list[dict] = []
+    queue = list(sorted_items)
+    x, y, w, h = 0.0, 0.0, width, height
+
+    while queue:
+        side = min(w, h)
+        if side <= 0:
+            break
+        row: list[dict] = []
+        # Greedy: keep adding items while the worst aspect ratio is improving.
+        while queue:
+            cand = row + [queue[0]]
+            if not row or _row_worst_aspect(cand, side) <= _row_worst_aspect(row, side):
+                row = cand
+                queue.pop(0)
+            else:
+                break
+        if not row:
+            break
+
+        row_v = sum(max(it.get("value", 0), 1) for it in row) or 1
+        if w >= h:
+            # Long axis is horizontal — lay row out as a vertical strip on the left.
+            thick = (row_v * scale) / h
+            cy = y
+            for it in row:
+                bh = max(it.get("value", 0), 1) * h / row_v
+                boxes.append({**it, "x": x, "y": cy, "w": thick, "h": bh})
+                cy += bh
+            x += thick
+            w -= thick
+        else:
+            # Long axis is vertical — lay row out as a horizontal strip on top.
+            thick = (row_v * scale) / w
+            cx = x
+            for it in row:
+                bw = max(it.get("value", 0), 1) * w / row_v
+                boxes.append({**it, "x": cx, "y": y, "w": bw, "h": thick})
+                cx += bw
+            y += thick
+            h -= thick
+
+    return boxes
+
+
+def _retail_leaderboard_payload(lb: dict) -> dict:
+    """Leaderboard tab payload — pre-computes treemap geometry, scatter
+    bubble coords, and an enriched leaderboard table.
+
+    Treemap uses the squarified algorithm (boxes get near-1:1 aspect
+    ratios).  Bubble chart geometry is computed in viewBox space so the
+    SVG renders without a JS library — keeps the page lightweight and
+    consistent with v2 charts.
+    """
+    rows  = lb.get("leaderboard_rows") or []
+    treem = lb.get("treemap_data") or []
+    bub   = lb.get("bubble_data") or []
+    meta  = lb.get("metadata") or {}
+
+    # ── Treemap geometry: squarified, % units (HTML-positioned boxes).
+    boxes: list[dict] = []
+    if treem:
+        layout = _squarify_treemap(treem, width=100.0, height=100.0)
+        for d in layout:
+            boxes.append({
+                "ticker":   d.get("name") or "",
+                "value":    d.get("value", 0),
+                # Round to 2 decimals — keeps the inline-style strings short.
+                "x":        round(d["x"], 2),
+                "y":        round(d["y"], 2),
+                "w":        round(d["w"], 2),
+                "h":        round(d["h"], 2),
+                "color":    _retail_velocity_color(d.get("velocity_pct", 0)),
+                "mentions": d.get("mentions", 0),
+                "velocity_pct": d.get("velocity_pct", 0),
+                "engagement_ratio": d.get("engagement_ratio", 0),
+                "guru_count": d.get("guru_count", 0),
+            })
+
+    # ── Bubble chart geometry.
+    # x = engagement (upv/m), y = velocity (%).  Auto-scale to data extents.
+    bub_w, bub_h = 760.0, 460.0
+    pad_l, pad_r, pad_t, pad_b = 64.0, 18.0, 18.0, 36.0
+    plot_w = bub_w - pad_l - pad_r
+    plot_h = bub_h - pad_t - pad_b
+    bubbles: list[dict] = []
+    if bub:
+        xs = [b.get("x", 0) for b in bub]
+        ys = [b.get("y", 0) for b in bub]
+        rs = [max(b.get("r", 0), 1) for b in bub]
+        x_min, x_max = (min(xs), max(xs))
+        y_min, y_max = (min(ys), max(ys))
+        r_max = max(rs) or 1
+        # Pad ranges 10% so bubbles aren't cropped at the edges.
+        x_pad = (x_max - x_min) * 0.1 or 1
+        y_pad = (y_max - y_min) * 0.1 or 1
+        x_lo, x_hi = x_min - x_pad, x_max + x_pad
+        y_lo, y_hi = y_min - y_pad, y_max + y_pad
+        x_rng = (x_hi - x_lo) or 1
+        y_rng = (y_hi - y_lo) or 1
+        for b in bub:
+            sx = pad_l + ((b.get("x", 0) - x_lo) / x_rng) * plot_w
+            sy = pad_t + (1 - (b.get("y", 0) - y_lo) / y_rng) * plot_h
+            radius = 6 + (max(b.get("r", 0), 1) / r_max) * 22
+            bubbles.append({
+                "ticker": b.get("ticker") or "",
+                "name":   b.get("name") or "",
+                "cx":     round(sx, 1),
+                "cy":     round(sy, 1),
+                "r":      round(radius, 1),
+                "x":      b.get("x", 0),
+                "y":      b.get("y", 0),
+                "size":   b.get("r", 0),
+                "guru_count": b.get("guru_count", 0),
+                "rank":   b.get("rank", 0),
+                "is_guru": (b.get("guru_count") or 0) > 0,
+            })
+
+    # ── Velocity table — keep top 50 to render server-side; full 500 not needed.
+    table = []
+    for r in rows[:50]:
+        rc = r.get("rank_change", 0)
+        table.append({
+            **r,
+            "rank_change":     rc,
+            "rank_change_str": (f"+{rc}" if rc > 0 else (f"{rc}" if rc < 0 else "—")),
+            "rank_change_up":  rc > 0,
+            "velocity_str":    f"{r.get('velocity_pct', 0):+.1f}%",
+            "velocity_up":     r.get("velocity_pct", 0) >= 0,
+            "mentions_str":    f"{r.get('mentions', 0):,}",
+            "engagement_str":  f"{r.get('engagement_ratio', 0):.1f}",
+        })
+
+    return {
+        "treemap_boxes": boxes,
+        "bubbles":       bubbles,
+        "bubble_vb_w":   bub_w,
+        "bubble_vb_h":   bub_h,
+        "bubble_pad":    {"left": pad_l, "right": pad_r, "top": pad_t, "bot": pad_b},
+        "table":         table,
+        "total_count":   meta.get("count", 0),
+        "timestamp":     meta.get("timestamp", ""),
+        "market_mood":   meta.get("market_mood"),
+        "market_score":  meta.get("market_score"),
+    }
+
+
+def _retail_calendar_payload(uploads: list[dict], channels: list[dict]) -> dict:
+    """Calendar tab payload — recent YouTube uploads grid + channel directory."""
+    from datetime import datetime, timezone
+
+    def _fmt_relative(ts: str | None) -> str:
+        if not ts:
+            return ""
+        try:
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - dt
+            secs = max(int(delta.total_seconds()), 0)
+            if secs < 3600:        return f"{secs // 60}m ago"
+            if secs < 86400:       return f"{secs // 3600}h ago"
+            return f"{secs // 86400}d ago"
+        except Exception:
+            return ""
+
+    upload_rows = []
+    for u in uploads or []:
+        tickers = u.get("tickers") or []
+        # Tickers can land as list, comma-joined string, or null — normalise.
+        if isinstance(tickers, str):
+            tickers = [t.strip() for t in tickers.split(",") if t.strip()]
+        upload_rows.append({
+            "video_id":      u.get("video_id"),
+            "title":         u.get("title") or "",
+            "channel_name":  u.get("channel_name") or "",
+            "channel_id":    u.get("channel_id"),
+            "thumbnail_url": u.get("thumbnail_url") or "",
+            "video_url":     u.get("video_url") or (
+                f"https://www.youtube.com/watch?v={u.get('video_id')}" if u.get("video_id") else ""
+            ),
+            "ago_str":       _fmt_relative(u.get("scheduled_at")),
+            "tickers":       tickers[:1],  # one chip per card for the v1 look
+        })
+
+    channel_rows = []
+    for c in channels or []:
+        subs = c.get("subscriber_count") or 0
+        posts = c.get("avg_posts_per_week")
+        channel_rows.append({
+            "channel_id":    c.get("channel_id"),
+            "channel_name":  c.get("channel_name") or "",
+            "thumbnail_url": c.get("thumbnail_url") or "",
+            "handle":        c.get("handle") or "",
+            "subscribers":   int(subs),
+            "subs_str":      f"{int(subs):,}" if subs else "—",
+            "posts_str":     (f"{float(posts):.1f}" if posts is not None else "—"),
+        })
+
+    return {
+        "uploads":      upload_rows[:12],   # cap visible grid at 12
+        "uploads_total": len(upload_rows),
+        "channels":     channel_rows,
+        "channels_total": len(channel_rows),
+    }
+
+
+_RETAIL_VIEWS = ("sentiment", "leaderboard", "calendar")
+
+
+def _retail_ticker_map_compute() -> dict:
+    """Build the {ticker → [guru names]} map for the retail leaderboard.
+    Sync compute fn — `_l2_cached` runs it in a worker thread and shares
+    the result across uvicorn workers via Supabase, so we never amplify
+    the heavy `load_cache_from_supabase` call across multiple workers.
+    """
+    from filings import cache as _cache, client as _client
+    from filings.superinvestors import SUPERINVESTORS_BY_CIK
+    fund_cache = _cache.load_cache_from_supabase() or {}
+    return _client.build_ticker_ownership_map(fund_cache, SUPERINVESTORS_BY_CIK) or {}
+
+
+@router.get("/retail", response_class=HTMLResponse)
+async def preview_retail(request: Request, view: str = "sentiment"):
+    """Retail page — three tabs (Sentiment / Leaderboard / Calendar), wired
+    through the existing v1 helpers in :mod:`filings.sentiment` and
+    :mod:`filings.youtube_cache`.
+
+    Sentiment   — CNN Fear & Greed gauge + 3 callout cards (most-mentioned,
+                  biggest rank mover, top-5 trending).
+    Leaderboard — Reddit velocity heatmap + hype-vs-quality scatter + table.
+    Calendar    — Recent YouTube uploads (48h) + finance-channel directory.
+    """
+    if view not in _RETAIL_VIEWS:
+        view = "sentiment"
+
+    bounded = functools.partial(_bounded, page="Retail page")
+    from filings import sentiment as _sent
+    from filings import youtube_cache as _yt
+
+    # 5-way fan-out — every fetch is L2-cached.  `ticker_map` is the
+    # Supabase-backed {ticker → guru names} overlay; first cold hit pays
+    # ~5s, subsequent hits across all uvicorn workers are instant.
+    apewisdom_data, fear_greed, yt_uploads, yt_channels, ticker_map = await asyncio.gather(
+        bounded(to_heavy(_sent._get_apewisdom_all),     timeout=6.0, fallback=[],       name="apewisdom"),
+        bounded(to_heavy(_sent._get_cnn_fear_greed),    timeout=4.0, fallback=None,     name="fear_greed"),
+        bounded(to_heavy(_yt.get_recent_youtube_uploads, 50),
+                                                        timeout=4.0, fallback=[],       name="yt_uploads"),
+        bounded(to_heavy(_yt.get_youtube_channels),     timeout=4.0, fallback=[],       name="yt_channels"),
+        bounded(
+            _l2_cached(
+                "redesign:retail:ticker_map_v1",
+                ttl_seconds=3600,
+                compute=_retail_ticker_map_compute,
+                category="redesign_retail",
+            ),
+            timeout=10.0, fallback={}, name="ticker_map",
+        ),
+    )
+
+    # `_sent.build_retail_leaderboard_data` has its own 30-min L1 cache that
+    # ignores its arguments.  If we just got a real ticker_map but the L1
+    # cache was filled earlier with an empty one, drop it so the next call
+    # rebuilds with gurus.  (Encapsulation-violating cache poke; the proper
+    # fix is teaching `build_retail_leaderboard_data` to key on its inputs.)
+    if ticker_map:
+        old = getattr(_sent, "_leaderboard_cache", None)
+        if old:
+            try:
+                _ts, prev = old
+                if not any((r.get("guru_count") or 0) > 0 for r in (prev.get("leaderboard_rows") or [])):
+                    _sent._leaderboard_cache = None
+            except Exception as exc:
+                logger.warning("Retail page: leaderboard cache bust failed: %s", exc)
+
+    leaderboard = await to_light(
+        _sent.build_retail_leaderboard_data,
+        apewisdom_data or [], ticker_map, fear_greed,
+    )
+
+    sentiment_ctx  = _retail_sentiment_payload(apewisdom_data or [], fear_greed)
+    leaderboard_ctx = _retail_leaderboard_payload(leaderboard)
+    calendar_ctx    = _retail_calendar_payload(yt_uploads or [], yt_channels or [])
+
     ctx = {
-        "request":          request,
-        **_shell_context("Retail"),
-        "retail_kpi":       _retail_kpi_strip(payload),
-        "retail_featured":  featured_ctx,
-        "retail_trending":  _retail_trending_rows(trending),
-        "retail_is_mock":   payload.get("is_mock", False),
-        "retail_tab":       "Pulse",
+        "request":         request,
+        **(await _shell_context(request, "Retail")),
+        "retail_view":     view,
+        "retail_kpi":      _retail_kpi_strip_v2(apewisdom_data or [], fear_greed),
+        # Per-tab payloads
+        "sentiment":       sentiment_ctx,
+        "leaderboard":     leaderboard_ctx,
+        "calendar":        calendar_ctx,
     }
     return templates.TemplateResponse("_redesign/retail.html", ctx)
 
 
+# ── Yields tab ────────────────────────────────────────────────────────────
+
+# Tenor mapping: treasury_data uses "1 Mo"/"10 Yr"; the design speaks in
+# "1M"/"10Y" tokens.  Fixed order so the curve renders left → right with
+# the natural maturity progression.
+_YIELD_TENOR_ORDER: list[tuple[str, str]] = [
+    ("1 Mo", "1M"), ("3 Mo", "3M"), ("6 Mo", "6M"),
+    ("1 Yr", "1Y"), ("2 Yr", "2Y"), ("3 Yr", "3Y"),
+    ("5 Yr", "5Y"), ("7 Yr", "7Y"), ("10 Yr", "10Y"),
+    ("20 Yr", "20Y"), ("30 Yr", "30Y"),
+]
+
+
+def _yields_curve_payload(curve_data: dict | None) -> dict:
+    """Convert treasury_data.get_yield_curve() output → SVG-ready chart payload."""
+    if not curve_data:
+        return {"have_data": False, "rows": [], "line_d": "", "ticks": []}
+
+    yields = curve_data.get("yields") or {}
+    rows = []
+    for source_key, label in _YIELD_TENOR_ORDER:
+        if source_key in yields:
+            rows.append({"tenor": label, "yield": yields[source_key]})
+
+    if len(rows) < 3:
+        return {"have_data": False, "rows": [], "line_d": "", "ticks": []}
+
+    # ViewBox sized 1500×240 to match the typical full-width container's
+    # natural aspect ratio (~6:1) so `preserveAspectRatio="none"` becomes a
+    # near-identity transform — no horizontal stretch / no warped slopes.
+    width, height = 1500.0, 240.0
+    pad_top, pad_bot = 15.0, 25.0
+    pad_x = 40.0
+    plot_h = height - pad_top - pad_bot
+    plot_w = width - 2 * pad_x
+
+    vals = [r["yield"] for r in rows]
+    lo, hi = min(vals), max(vals)
+    rng = hi - lo if hi > lo else 1
+    pad = rng * 0.15
+    lo, hi = lo - pad, hi + pad
+    rng = hi - lo if hi > lo else 1
+
+    pts: list[tuple[float, float]] = []
+    for i, r in enumerate(rows):
+        x = pad_x + (i / max(len(rows) - 1, 1)) * plot_w
+        y = pad_top + (1 - (r["yield"] - lo) / rng) * plot_h
+        pts.append((round(x, 1), round(y, 1)))
+
+    line_d = " ".join(("M" if i == 0 else "L") + f"{x} {y}" for i, (x, y) in enumerate(pts))
+    ticks = [{"label": r["tenor"], "x": p[0]} for r, p in zip(rows, pts)]
+    dots  = [{"x": p[0], "y": p[1]} for p in pts]
+
+    # Per-tenor hover payload — JSON-serialized for the mousemove handler
+    # so the tooltip can show {tenor, yield} on hover.
+    chart_history = [
+        {"x": p[0], "y": p[1], "tenor": r["tenor"], "yield_pct": r["yield"],
+         "yield_str": f"{r['yield']:.2f}%"}
+        for r, p in zip(rows, pts)
+    ]
+
+    return {
+        "have_data": True,
+        "rows":      [{"tenor": r["tenor"], "yield_str": f"{r['yield']:.2f}%"} for r in rows],
+        "line_d":    line_d,
+        "dots":      dots,
+        "ticks":     ticks,
+        "as_of":     curve_data.get("date") or "",
+        "inverted":  bool(curve_data.get("inverted")),
+        "vb_width":  width,
+        "vb_height": height,
+        "chart_history": chart_history,
+    }
+
+
+def _yields_spreads(curve_data: dict | None) -> list[dict]:
+    """Compute key spreads from the yield curve."""
+    if not curve_data:
+        return []
+    y = curve_data.get("yields") or {}
+
+    def _g(*keys):
+        for k in keys:
+            if k in y:
+                return y[k]
+        return None
+
+    pairs = [
+        ("2s10s",  "10Y - 2Y · recession watch", _g("10 Yr"), _g("2 Yr")),
+        ("3M-10Y", "10Y - 3M · curve slope",     _g("10 Yr"), _g("3 Mo")),
+        ("5s30s",  "30Y - 5Y · long-end shape",  _g("30 Yr"), _g("5 Yr")),
+        ("2s30s",  "30Y - 2Y · cycle pulse",     _g("30 Yr"), _g("2 Yr")),
+    ]
+    rows = []
+    for label, desc, long_y, short_y in pairs:
+        if long_y is None or short_y is None:
+            continue
+        spread = long_y - short_y
+        rows.append({
+            "name":     label,
+            "desc":     desc,
+            "value_pp": spread,
+            "value_str": f"{spread:+.2f}%",
+            "inverted": spread < 0,
+        })
+    return rows
+
+
+# ── FX & Commodities tab ──────────────────────────────────────────────────
+
+# Display order + symbol translation for the FX panel.
+_FX_DISPLAY_ORDER: list[tuple[str, str, str]] = [
+    ("EUR", "EURUSD", "Euro / US Dollar"),
+    ("GBP", "GBPUSD", "British Pound / US Dollar"),
+    ("JPY", "USDJPY", "US Dollar / Japanese Yen"),
+    ("CAD", "USDCAD", "US Dollar / Canadian Dollar"),
+    ("AUD", "AUDUSD", "Australian Dollar"),
+    ("CHF", "USDCHF", "US Dollar / Swiss Franc"),
+    ("CNY", "USDCNY", "US Dollar / Chinese Yuan"),
+    ("MXN", "USDMXN", "US Dollar / Mexican Peso"),
+]
+
+
+def _fx_panel_rows(fx_payload: dict | None) -> list[dict]:
+    """Build the FX panel rows from frankfurter latest + sparkline data.
+
+    Frankfurter quotes per-USD (USD→FX), so EUR/GBP/AUD get inverted to
+    show the conventional FX/USD pair.  Day delta is derived from the
+    last two points of the sparkline series when available.
+    """
+    if not fx_payload:
+        return []
+    latest_obj = fx_payload.get("latest") or {}
+    rates = latest_obj.get("rates") or []
+    sparklines = fx_payload.get("sparklines") or {}
+
+    by_code = {r["code"]: r for r in rates}
+    out: list[dict] = []
+    for code, sym, name in _FX_DISPLAY_ORDER:
+        rec = by_code.get(code)
+        if not rec:
+            continue
+        usd_per_one = rec.get("inverse")    # 1 EUR = X USD
+        per_usd     = rec.get("rate")       # 1 USD = X EUR
+        # Convention: EUR/GBP/AUD use FX/USD form; the rest USD/FX.
+        invert = code in ("EUR", "GBP", "AUD")
+        value = usd_per_one if invert else per_usd
+        if value is None:
+            continue
+        # Sparkline series — value-side aligned with display direction.
+        ts = sparklines.get(code) or []
+        series: list[float] = []
+        for p in ts:
+            r = p.get("rate")
+            if r is None:
+                continue
+            v = (1.0 / r) if invert else r
+            series.append(v)
+        d_pct = None
+        if len(series) >= 2 and series[-2]:
+            d_pct = (series[-1] - series[-2]) / series[-2]
+        out.append({
+            "sym":   sym,
+            "name":  name,
+            "value": value,
+            "value_str": f"{value:,.4f}" if value < 100 else f"{value:,.2f}",
+            "delta_pct": d_pct,
+            "delta_str": (f"{d_pct * 100:+.2f}%" if d_pct is not None else "—"),
+            "up":    (d_pct >= 0) if d_pct is not None else None,
+            "spark": series[-30:] if series else [],
+        })
+    return out
+
+
+# Commodity universe — uses get_index_market_data() output for the four
+# yfinance front-month futures we already cache, plus the spot Treasury
+# yield index for "10Y" — same data plumbing the Home page uses.
+_COMMODITY_SYMBOLS: list[tuple[str, str, str, str]] = [
+    ("CL=F", "WTI",   "Crude oil",     "$/bbl"),
+    ("GC=F", "Gold",  "Gold",          "$/oz"),
+    ("SI=F", "Silver","Silver",        "$/oz"),
+    ("NG=F", "NatGas","Natural gas",   "$/MMBtu"),
+]
+
+
+def _commodities_panel_rows(index_payload: dict | None) -> list[dict]:
+    """Pluck commodity rows out of the existing index_market_data feed."""
+    if not index_payload or not isinstance(index_payload, dict):
+        return []
+    out: list[dict] = []
+    for sym_yf, label, name, unit in _COMMODITY_SYMBOLS:
+        rec = index_payload.get(sym_yf)
+        if not isinstance(rec, dict):
+            continue
+        price = rec.get("price")
+        pct   = rec.get("pct_change")    # already in %
+        spark = rec.get("spark") or []
+        out.append({
+            "sym":   label,
+            "name":  name,
+            "unit":  unit,
+            "value": price,
+            "value_str": (f"{price:,.2f}" if isinstance(price, (int, float)) else "—"),
+            "delta_pct": (pct / 100.0 if isinstance(pct, (int, float)) else None),
+            "delta_str": (f"{pct:+.2f}%" if isinstance(pct, (int, float)) else "—"),
+            "up":    (pct >= 0) if isinstance(pct, (int, float)) else None,
+            # Spark from index_market_data is already 0–1 normalized 20pts.
+            "spark": spark,
+        })
+    return out
+
+
+# ── Macro Calendar tab — high-impact upcoming releases ────────────────────
+
+async def _macro_calendar_rows(*, top_n: int = 12) -> list[dict]:
+    try:
+        from filings import economic_calendar
+        bundle = await to_heavy(economic_calendar.fetch_economic_events, "all", "us", "all")
+    except Exception as exc:
+        logger.warning("Macro calendar fetch failed: %s", exc)
+        return []
+    if not bundle:
+        return []
+    days = bundle.get("events_by_date") or []
+    out: list[dict] = []
+    for day in days:
+        if not isinstance(day, dict):
+            continue
+        date_iso = day.get("date") or ""
+        for ev in (day.get("entries") or []):
+            out.append({
+                "d":          _short_date(date_iso) or date_iso[:10],
+                "raw_date":   date_iso[:10],
+                "evt":        ev.get("event") or "—",
+                "when":       (ev.get("time") or "—") + (" ET" if ev.get("time") else ""),
+                "impact":     (ev.get("impact") or "low").lower(),
+                "consensus":  ev.get("estimate_fmt") or "—",
+                "prior":      ev.get("previous_fmt") or "—",
+                "actual":     ev.get("actual_fmt") or "—",
+                "released":   bool(ev.get("is_released")),
+            })
+    # Sort high-impact first within each date to surface the most-watched events.
+    impact_rank = {"high": 0, "medium": 1, "low": 2}
+    out.sort(key=lambda r: (r.get("raw_date", ""), impact_rank.get(r["impact"], 9)))
+    # Prefer high+medium impact; fall back to all if not enough.
+    headliners = [r for r in out if r["impact"] in ("high", "medium")]
+    rows = (headliners or out)[:top_n]
+    return rows
+
+
+# ── Heatmap tab — sector grid + global indices ────────────────────────────
+
+# GICS sector labels → palette (same colours as Funds page sectors).
+_HEATMAP_SECTOR_LABELS: dict[str, str] = {
+    "Information Technology": "Tech",
+    "Communication Services": "Comm",
+    "Consumer Discretionary": "Cons Disc",
+    "Financials":             "Financials",
+    "Industrials":            "Industrials",
+    "Health Care":            "Health Care",
+    "Consumer Staples":       "Cons Staples",
+    "Materials":              "Materials",
+    "Real Estate":            "Real Estate",
+    "Utilities":              "Utilities",
+    "Energy":                 "Energy",
+}
+
+
+def _heatmap_sectors(*, period: str = "1D") -> list[dict]:
+    """Aggregate S&P 500 daily moves by GICS sector — average ticker
+    pct_change weighted by uniform weight (the design renders the average
+    daily move per sector, not market-cap-weighted, since we don't carry
+    per-ticker market cap on the hot path)."""
+    try:
+        from filings import market_data
+    except Exception:
+        return []
+    sp_data = market_data.get_sp500_market_data(period) or {}
+    constituents = market_data.get_sp500_constituents() or []
+    ticker_to_sector = {(c.get("ticker") or "").upper(): c.get("sector") or "" for c in constituents}
+
+    from collections import defaultdict
+    by_sector: dict[str, list[float]] = defaultdict(list)
+    for tk, rec in sp_data.items():
+        if not isinstance(rec, dict) or tk == "_metadata":
+            continue
+        sector = ticker_to_sector.get(tk)
+        pct = rec.get("pct_change")
+        if not sector or not isinstance(pct, (int, float)):
+            continue
+        by_sector[sector].append(pct)
+
+    rows: list[dict] = []
+    for sector, label in _HEATMAP_SECTOR_LABELS.items():
+        if sector not in by_sector or not by_sector[sector]:
+            continue
+        avg = sum(by_sector[sector]) / len(by_sector[sector])
+        rows.append({
+            "name":   label,
+            "sector": sector,
+            "delta":  avg / 100.0,        # 0..1 fraction
+            "delta_str": f"{avg:+.2f}%",
+            "n":      len(by_sector[sector]),
+        })
+
+    # Sort biggest-up → biggest-down so the grid reads as a hot/cold gradient.
+    rows.sort(key=lambda r: r["delta"], reverse=True)
+    return rows
+
+
+def _heatmap_global_indices(index_payload: dict | None) -> list[dict]:
+    """Build the global-indices table from the cached index_market_data feed."""
+    if not isinstance(index_payload, dict):
+        return []
+    universe = [
+        ("US",   "^GSPC", "S&P 500"),
+        ("US",   "^IXIC", "Nasdaq"),
+        ("US",   "^DJI",  "Dow Jones"),
+        ("US",   "^RUT",  "Russell 2000"),
+        ("Vol",  "^VIX",  "VIX"),
+    ]
+    rows: list[dict] = []
+    for region, sym, name in universe:
+        rec = index_payload.get(sym)
+        if not isinstance(rec, dict):
+            continue
+        price = rec.get("price")
+        pct = rec.get("pct_change")     # already in %
+        rows.append({
+            "region":    region,
+            "name":      name,
+            "price_str": (f"{price:,.2f}" if isinstance(price, (int, float)) else "—"),
+            "today_str": (f"{pct:+.2f}%" if isinstance(pct, (int, float)) else "—"),
+            "today_up":  (pct >= 0) if isinstance(pct, (int, float)) else None,
+            "spark":     rec.get("spark") or [],
+        })
+    return rows
+
+
 @router.get("/macro", response_class=HTMLResponse)
 async def preview_macro(request: Request):
-    """Macro page — Indicators tab is live, others are placeholders."""
-    payload = await _fetch_macro_indicators()
+    """Macro page — all 5 tabs render real data on the initial load."""
+    bounded = functools.partial(_bounded, page="Macro page")
+
+    from filings import treasury_data as _treasury_data
+    from filings import frankfurter   as _frankfurter
+    from filings import market_data   as _market_data
+
+    payload, yield_curve, fx_payload, idx_payload, calendar_rows = await asyncio.gather(
+        bounded(_fetch_macro_indicators(),                          timeout=8.0, fallback={},   name="indicators"),
+        bounded(to_heavy(_treasury_data.get_yield_curve),           timeout=6.0, fallback=None, name="yield_curve"),
+        bounded(to_heavy(_frankfurter.get_fx_dashboard),            timeout=6.0, fallback=None, name="fx"),
+        bounded(to_heavy(_market_data.get_index_market_data),       timeout=6.0, fallback=None, name="index_md"),
+        bounded(_macro_calendar_rows(top_n=12),                     timeout=5.0, fallback=[],   name="calendar"),
+    )
+
     indicators = payload.get("indicators") or []
     indicators_by_id = {i["series_id"]: i for i in indicators}
-
     kpi_items = _macro_kpi_strip(indicators_by_id)
     groups = _macro_groups(payload)
-
-    # Page hero counts/sub — total tracked indicators + last-updated stamp.
     indicator_count = sum(len(g["rows"]) for g in groups) or len(indicators)
-    last_updated = payload.get("last_updated", "")
-    is_mock = bool(payload.get("is_mock"))
+
+    # Sector heatmap is one of the slowest operations on cold path
+    # (~10-15s for the S&P 500 constituent fetch).  Wrap in L2 cache with
+    # a 5-minute TTL so warm hits are instant.
+    sector_rows = await bounded(
+        _l2_cached(
+            "redesign:macro:heatmap_sectors:1d",
+            ttl_seconds=300,
+            compute=_heatmap_sectors,
+            category="macro",
+        ),
+        timeout=12.0, fallback=[], name="heatmap_sectors",
+    )
 
     ctx = {
         "request":      request,
-        **_shell_context("Macro"),
+        **(await _shell_context(request, "Macro")),
         "page_title":   "Macro",
         "macro_kpi":    kpi_items,
         "macro_groups": groups,
         "macro_count":  indicator_count,
-        "macro_updated": last_updated,
-        "macro_is_mock": is_mock,
-        # Active tab — drives which content block renders + segment highlight.
-        "macro_tab":    "Indicators",
+        "macro_updated": payload.get("last_updated", ""),
+        "macro_is_mock": bool(payload.get("is_mock")),
+        # Tab payloads:
+        "yields_curve":     _yields_curve_payload(yield_curve),
+        "yields_spreads":   _yields_spreads(yield_curve),
+        "fx_rows":          _fx_panel_rows(fx_payload),
+        "commodity_rows":   _commodities_panel_rows(idx_payload),
+        "macro_calendar":   calendar_rows,
+        "heatmap_sectors":  sector_rows,
+        "heatmap_indices":  _heatmap_global_indices(idx_payload),
+        "macro_tab":        "Indicators",
     }
     return templates.TemplateResponse("_redesign/macro.html", ctx)
 

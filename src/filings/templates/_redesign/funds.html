@@ -1,36 +1,33 @@
 {#-
   PaperPanda Redesign — Funds detail page
-  Mirrors design_handoff_paperpanda/page-funds.jsx
+  5 tabs: Portfolio · Activity · Performance · Sectors · Filings
+  Default CIK = 1067983 (Berkshire); ?cik= to load any of the 85 superinvestors;
+  ?tab= deep-links a pane.
 
-  Single-page detail view (no functional sub-tabs).  Top segment is
-  rendered for design parity; only Holdings is wired.  All sections
-  (KPI strip, AUM history, Recent activity, Holdings table, Sector
-  allocation, New+Adds, Cuts+Exits) render in one scroll.
-
-  Real data: supabase_cache "13f:{cik}" — populated by the standard
-  13F pipeline (client.get_fund_summary).  Default CIK = 1067983
-  (Berkshire); ?cik=… to load any of the 85 superinvestors.
+  Real data flows:
+    - 13F holdings + per-quarter changes:  supabase_cache "13f:{cik}"
+    - AUM history:                         edgartools historical 13F-HRs (L2 24h)
+    - Per-holding price + sparkline:       market_data SP500 batch + sparkline cache
+    - Capital deployed:                    aum_data deployment row
+    - SEC filings list:                    edgartools Company.get_filings (L2 24h)
 -#}
 {% extends "_redesign/base.html" %}
 {% from "_redesign/macros/_primitives.html" import
      mono, kicker, label, btn, panel, panel_head, segment,
-     range_chip, kpi_strip, tag %}
+     range_chip, kpi_strip, tag, spark %}
 
 {% block title %}{{ fund_name }} · PaperPanda{% endblock %}
 
 {% block extra_css %}
-  {# Reuse macro page chrome (page hero + tab nav + body); add fund-specific. #}
   <link rel="stylesheet"
-        href="/static/css/redesign/pages/macro.css?v={{ range(1, 10**9) | random }}">
+        href="/static/css/redesign/pages/macro.css?v={{ asset_version }}">
   <link rel="stylesheet"
-        href="/static/css/redesign/pages/funds.css?v={{ range(1, 10**9) | random }}">
+        href="/static/css/redesign/pages/funds.css?v={{ asset_version }}">
 {% endblock %}
 
 {% block content %}
 
-{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━
-   Same shape as Macro hero but with action buttons (Compare / Export /
-   Follow) and an inline CIK pill on the breadcrumb row. #}
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━ #}
 <header class="pp-page-hero">
   <div class="pp-page-hero-icon" aria-hidden="true">{{ fund_icon }}</div>
   <div class="pp-page-hero-text">
@@ -49,226 +46,462 @@
     </div>
   </div>
   <div class="pp-funds-actions">
-    {{ btn("Compare", kind="ghost") }}
-    {{ btn("Export",  kind="ghost") }}
-    {{ btn("★ Follow", kind="accent") }}
+    {{ btn("Compare", kind="ghost",
+           cls="pp-btn-coming-soon",
+           attrs='disabled aria-disabled="true" title="Coming soon"') }}
+    {{ btn("Export",  kind="ghost",
+           cls="pp-btn-coming-soon",
+           attrs='disabled aria-disabled="true" title="Coming soon"') }}
+    {{ btn("★ Follow", kind="accent",
+           cls="pp-btn-coming-soon",
+           attrs='disabled aria-disabled="true" title="Coming soon"') }}
   </div>
 </header>
 
-{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━
-   Top segment — only Holdings is functional; the others stay visual to
-   match the design but render the same body content for now. #}
-<div class="pp-page-tabs">
-  {{ segment(["Holdings","Activity","Performance","Sectors","Filings"],
-             value=funds_tab|default("Holdings"),
-             id="pp-funds-tabs") }}
-  <div style="flex:1"></div>
-  {{ range_chip(value="1Y", id="pp-funds-range") }}
+{# KPI strip lives above the tab nav so it stays visible across panes — same
+   pattern as Stock + Insiders pages.  Every cell is derived from real data. #}
+<div class="pp-page-section pp-page-section-kpi">
+  {{ kpi_strip(funds_kpi) }}
 </div>
 
-{# ━━━━━━━━━━ PAGE BODY ━━━━━━━━━━ #}
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
+<div class="pp-page-tabs">
+  {{ segment(fund_tabs, value=funds_tab, id="pp-funds-tabs") }}
+</div>
+
+{# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
 <div class="pp-page-body">
 
-  {# KPI strip — AUM + Positions are real; conc / turnover / YTD vs SPY
-     are derived or pending an aggregate job. #}
-  <section class="pp-page-kpi-row">
-    {{ kpi_strip(funds_kpi) }}
+  {# ━━━━━━━━━━ PORTFOLIO ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if funds_tab == 'Portfolio' %} is-active{% endif %}"
+           data-tab-pane="Portfolio">
+
+    <div class="pp-funds-row-portfolio">
+      {% call panel(cls="pp-funds-conc-panel") %}
+        {{ panel_head("Portfolio concentration",
+                      sub="Top 10 holdings + Other") }}
+        {% if funds_concentration.have_data %}
+          <div class="pp-funds-conc-body">
+            <svg class="pp-funds-conc-svg"
+                 viewBox="{{ funds_concentration.viewbox }}"
+                 aria-label="Portfolio concentration donut">
+              {% for w in funds_concentration.wedges %}
+                <path d="{{ w.d }}" fill="{{ w.color }}"/>
+              {% endfor %}
+            </svg>
+            <ul class="pp-funds-conc-legend">
+              {% for item in funds_concentration.legend %}
+                <li class="pp-funds-conc-legend-row">
+                  <span class="pp-funds-conc-swatch" style="background: {{ item.color }};"></span>
+                  <span class="pp-mono pp-funds-conc-tk">{{ item.ticker }}</span>
+                  <span class="pp-mono pp-funds-conc-pct">{{ item.pct }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">No holdings cached for this filer.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+    </div>
+
+    {% call panel(cls="pp-funds-holdings-panel") %}
+      {% call panel_head("Top 10 holdings",
+                         sub=("%d of %d positions"|format(funds_holdings|length, funds_pos_total))) %}
+        <a class="pp-link-coral" href="?cik={{ fund_cik }}&tab=Activity">View all activity →</a>
+      {% endcall %}
+      <table class="pp-table pp-funds-holdings-table">
+        <thead>
+          <tr>
+            <th class="pp-num pp-funds-th-rank">#</th>
+            <th>Holding</th>
+            <th class="pp-num">Shares</th>
+            <th class="pp-num">Value</th>
+            <th>Port %</th>
+            <th class="pp-num">QoQ Δ</th>
+            <th class="pp-num">Last</th>
+            <th class="pp-num">Day</th>
+            <th class="pp-num pp-funds-th-spark">1M</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in funds_holdings %}
+            <tr>
+              <td class="pp-num pp-funds-td-rank">
+                <span class="pp-mono pp-dim2">{{ "%02d"|format(r.rank) }}</span>
+              </td>
+              <td>
+                <a class="pp-funds-tkr" href="/_v2/stock/{{ r.ticker }}">{{ r.ticker }}</a>
+                <span class="pp-funds-name">{{ r.name }}</span>
+              </td>
+              <td class="pp-num pp-mono">{{ r.shares }}</td>
+              <td class="pp-num pp-mono pp-funds-value">{{ r.value }}</td>
+              <td>
+                <div class="pp-funds-port-cell">
+                  <div class="pp-funds-port-bar">
+                    <div class="pp-funds-port-bar-fill"
+                         style="width: {{ [r.port * 200, 100]|min|round(1) }}%;"></div>
+                  </div>
+                  <span class="pp-mono pp-funds-port-pct">{{ r.port_pct_str }}</span>
+                </div>
+              </td>
+              <td class="pp-num">
+                {% if r.qoq_kind == 'added' %}
+                  {{ tag('ADDED', text=r.qoq) }}
+                {% elif r.qoq_kind == 'reduced' %}
+                  {{ tag('REDUCED', text=r.qoq) }}
+                {% elif r.qoq_kind == 'new' %}
+                  {{ tag('NEW') }}
+                {% else %}
+                  <span class="pp-mono pp-dim2">{{ r.qoq }}</span>
+                {% endif %}
+              </td>
+              <td class="pp-num pp-mono">{{ r.last if r.last is not none else '—' }}</td>
+              <td class="pp-num pp-mono {% if r.day_up == True %}pp-up{% elif r.day_up == False %}pp-down{% else %}pp-dim{% endif %}">
+                {{ r.day if r.day is not none else '—' }}
+              </td>
+              <td class="pp-num">
+                {% if r.spark %}
+                  {{ spark(r.spark, color=("var(--pp-up)" if r.spark_up else "var(--pp-down)"), w=70, h=20) }}
+                {% else %}
+                  <span class="pp-mono pp-dim2">—</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endcall %}
   </section>
 
-  {# AUM history (1.7fr) + Recent activity (1fr) #}
-  <section class="pp-funds-row-aum">
-    {% call panel(cls="pp-funds-aum-panel") %}
-      {% call panel_head("AUM history", sub="Quarterly") %}
-        <span class="pp-mono pp-up pp-funds-aum-qoq">+$2.1B QoQ</span>
+  {# ━━━━━━━━━━ ACTIVITY ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if funds_tab == 'Activity' %} is-active{% endif %}"
+           data-tab-pane="Activity">
+
+    <div class="pp-funds-row-aum">
+      {% call panel(cls="pp-funds-activity-panel") %}
+        {{ panel_head("Recent activity", sub="last " ~ (funds_activity|length) ~ " quarters") }}
+        <div class="pp-funds-activity-body">
+          {% if funds_activity %}
+            {% for f in funds_activity %}
+              <div class="pp-funds-activity-row{% if f.current %} is-current{% endif %}">
+                <span class="pp-funds-activity-dot{% if f.current %} is-current{% endif %}"></span>
+                <div>
+                  <div class="pp-funds-activity-q">{{ f.quarter }}</div>
+                  <div class="pp-funds-activity-meta">{{ f.filing_date }} · {{ f.count_str }}</div>
+                </div>
+                <span class="pp-mono pp-funds-activity-aum {{ 'pp-up' if f.aum_up == True else ('pp-down' if f.aum_up == False else 'pp-dim') }}">
+                  {{ f.aum_delta }} AUM
+                </span>
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="pp-page-placeholder pp-funds-activity-empty">
+              <div class="pp-page-placeholder-sub">No recent filings cached.</div>
+            </div>
+          {% endif %}
+        </div>
       {% endcall %}
-      <div class="pp-funds-aum-body">
-        {# Static demo curve — need quarterly AUM history series to wire
-           to real data.  fund.quarterly_changes has periods but not the
-           total AUM per quarter; needs a multi-quarter aggregator job. #}
-        <svg class="pp-funds-aum-svg"
-             viewBox="0 0 600 200" preserveAspectRatio="none"
-             aria-label="AUM history">
-          {% for i in range(4) %}
-            <line class="pp-home-chart-grid"
-                  x1="0" x2="600"
-                  y1="{{ i * 55 + 10 }}" y2="{{ i * 55 + 10 }}"/>
-          {% endfor %}
-          {# Climbing curve — 32 points hand-shaped.  M0 180 → L… → 600 ~50.
-             Use namespace() for the accumulator string — bare {% set %}
-             inside a Jinja loop doesn't escape the loop scope. #}
-          {%- set _aum_pts = [] -%}
-          {%- for i in range(32) -%}
-            {%- set _x = (i * 600 / 31)|round(1) -%}
-            {%- set _y = (180 - i * 4.5)|round(1) -%}
-            {%- set _ = _aum_pts.append([_x, _y]) -%}
-          {%- endfor -%}
-          {%- set _ns = namespace(line="") -%}
-          {%- for p in _aum_pts -%}
-            {%- if loop.first -%}
-              {%- set _ns.line = "M" ~ p[0] ~ " " ~ p[1] -%}
-            {%- else -%}
-              {%- set _ns.line = _ns.line ~ " L" ~ p[0] ~ " " ~ p[1] -%}
-            {%- endif -%}
-          {%- endfor -%}
-          <path d="{{ _ns.line }} L 600 200 L 0 200 Z" fill="var(--pp-accent)" fill-opacity="0.08"/>
-          <path d="{{ _ns.line }}" class="pp-funds-aum-line"
-                vector-effect="non-scaling-stroke"/>
-          {% for p in _aum_pts %}
-            {% if loop.index0 % 4 == 0 %}
-              <circle class="pp-funds-aum-dot"
-                      cx="{{ p[0] }}" cy="{{ p[1] }}" r="2.5"
-                      vector-effect="non-scaling-stroke"/>
-            {% endif %}
-          {% endfor %}
-        </svg>
-        <div class="pp-funds-aum-axis">
-          {% for q in ["Q2 '23","Q4 '23","Q2 '24","Q4 '24","Q2 '25","Q4 '25","Q1 '26"] %}
-            <span class="pp-mono pp-funds-aum-axis-tick">{{ q }}</span>
+
+      <div class="pp-funds-row-3col-stacked">
+        {% call panel() %}
+          {{ panel_head("New + Adds", sub="this quarter") }}
+          {% if funds_adds %}
+            {% for r in funds_adds %}
+              <div class="pp-funds-change-row">
+                <span class="pp-mono pp-funds-change-tkr">{{ r.ticker }}</span>
+                <div class="pp-funds-change-cell">
+                  <div class="pp-funds-change-name">{{ r.name }}</div>
+                  <span class="pp-mono pp-funds-change-val">{{ r.val }}</span>
+                </div>
+                {{ tag(r.action) }}
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="pp-page-placeholder">
+              <div class="pp-page-placeholder-sub">No adds this quarter.</div>
+            </div>
+          {% endif %}
+        {% endcall %}
+
+        {% call panel() %}
+          {{ panel_head("Cuts + Exits", sub="this quarter") }}
+          {% if funds_cuts %}
+            {% for r in funds_cuts %}
+              <div class="pp-funds-change-row">
+                <span class="pp-mono pp-funds-change-tkr">{{ r.ticker }}</span>
+                <div class="pp-funds-change-cell">
+                  <div class="pp-funds-change-name">{{ r.name }}</div>
+                  <span class="pp-mono pp-funds-change-val">{{ r.val }}</span>
+                </div>
+                {{ tag(r.action) }}
+              </div>
+            {% endfor %}
+          {% else %}
+            <div class="pp-page-placeholder">
+              <div class="pp-page-placeholder-sub">No cuts this quarter.</div>
+            </div>
+          {% endif %}
+        {% endcall %}
+      </div>
+    </div>
+
+    {# Quarterly changes browser — quarter chips switch the table below. #}
+    {% call panel(cls="pp-funds-qchg-panel") %}
+      {% call panel_head("Position changes",
+                         sub=(funds_quarter_diffs|length ~ " quarters available")) %}
+      {% endcall %}
+      {% if funds_quarter_diffs %}
+        <div class="pp-funds-qchg-tabs" id="pp-funds-qchg-tabs">
+          {% for q in funds_quarter_diffs %}
+            <button class="pp-funds-qchg-tab{% if loop.first %} is-active{% endif %}"
+                    type="button" data-qchg-key="{{ loop.index0 }}">
+              <span class="pp-mono pp-funds-qchg-tab-q">{{ q.label }}</span>
+              <span class="pp-mono pp-funds-qchg-tab-n">{{ q.trade_count }} trades</span>
+            </button>
           {% endfor %}
         </div>
-      </div>
-    {% endcall %}
-
-    {% call panel(cls="pp-funds-activity-panel") %}
-      {{ panel_head("Recent activity", sub="last 4 quarters") }}
-      <div class="pp-funds-activity-body">
-        {% if funds_activity %}
-          {% for f in funds_activity %}
-            <div class="pp-funds-activity-row{% if f.current %} is-current{% endif %}">
-              <span class="pp-funds-activity-dot{% if f.current %} is-current{% endif %}"></span>
-              <div>
-                <div class="pp-funds-activity-q">{{ f.quarter }}</div>
-                <div class="pp-funds-activity-meta">{{ f.filing_date }} · {{ f.count_str }}</div>
+        {% for q in funds_quarter_diffs %}
+          <div class="pp-funds-qchg-pane{% if loop.first %} is-active{% endif %}"
+               data-qchg-pane="{{ loop.index0 }}">
+            {% if q.rows %}
+              <table class="pp-table pp-funds-holdings-table">
+                <thead>
+                  <tr>
+                    <th class="pp-num pp-funds-th-rank">#</th>
+                    <th>Ticker</th>
+                    <th>Issuer</th>
+                    <th>Action</th>
+                    <th class="pp-num">Share Δ</th>
+                    <th class="pp-num">% Δ</th>
+                    <th class="pp-num">Shares held</th>
+                    <th class="pp-num">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in q.rows %}
+                    <tr>
+                      <td class="pp-num pp-funds-td-rank">
+                        <span class="pp-mono pp-dim2">{{ "%02d"|format(loop.index) }}</span>
+                      </td>
+                      <td>
+                        <a class="pp-funds-tkr" href="/_v2/stock/{{ r.ticker }}">{{ r.ticker }}</a>
+                      </td>
+                      <td class="pp-funds-name pp-text">{{ r.name }}</td>
+                      <td>{{ tag(r.action) }}</td>
+                      <td class="pp-num pp-mono {{ 'pp-up' if r.share_chg_up else 'pp-down' }}">
+                        {{ r.share_chg }}
+                      </td>
+                      <td class="pp-num pp-mono {% if r.pct_up == True %}pp-up{% elif r.pct_up == False %}pp-down{% else %}pp-dim{% endif %}">
+                        {{ r.pct_str }}
+                      </td>
+                      <td class="pp-num pp-mono">{{ r.shares_now }}</td>
+                      <td class="pp-num pp-mono pp-funds-value">{{ r.value_now }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div class="pp-page-placeholder">
+                <div class="pp-page-placeholder-sub">No position changes for this quarter.</div>
               </div>
-              <span class="pp-mono pp-funds-activity-aum {{ 'pp-up' if f.aum_up == True else ('pp-down' if f.aum_up == False else 'pp-dim') }}">
-                {{ f.aum_delta }} AUM
-              </span>
+            {% endif %}
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">No quarterly diff history cached.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+  </section>
+
+  {# ━━━━━━━━━━ PERFORMANCE ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if funds_tab == 'Performance' %} is-active{% endif %}"
+           data-tab-pane="Performance">
+
+    {% call panel(cls="pp-funds-aum-panel") %}
+      {% call panel_head("13F equity history",
+                         sub="Long US equity from quarterly 13F-HRs · last " ~ (funds_aum_chart.points|length) ~ "q") %}
+        {% if funds_aum_chart.qoq_str %}
+          <span class="pp-mono pp-funds-aum-qoq {{ 'pp-up' if funds_aum_chart.qoq_up else 'pp-down' }}">
+            {{ funds_aum_chart.qoq_str }}
+          </span>
+        {% endif %}
+      {% endcall %}
+      <div class="pp-funds-aum-body">
+        {% if funds_aum_chart.have_data %}
+          <div class="pp-funds-aum-chart"
+               data-history='{{ funds_aum_chart.chart_history|tojson }}'
+               data-vb-w="{{ funds_aum_chart.vb_width|int }}"
+               data-vb-h="{{ funds_aum_chart.vb_height|int }}">
+            {# Y-axis labels (left rail) — anchored to the SVG by absolute
+               positioning that maps viewBox y → percent of container.  Keeps
+               the labels in sync even though the SVG stretches horizontally. #}
+            <div class="pp-funds-aum-yaxis">
+              {% for yl in funds_aum_chart.y_labels %}
+                <span class="pp-mono pp-funds-aum-yaxis-label"
+                      style="top: {{ (yl.y / funds_aum_chart.vb_height * 100)|round(2) }}%;">
+                  {{ yl.label }}
+                </span>
+              {% endfor %}
             </div>
-          {% endfor %}
+            <svg class="pp-funds-aum-svg"
+                 viewBox="0 0 {{ funds_aum_chart.vb_width|int }} {{ funds_aum_chart.vb_height|int }}"
+                 preserveAspectRatio="none"
+                 aria-label="13F equity history">
+              {% for gy in funds_aum_chart.grid_ys %}
+                <line class="pp-funds-aum-grid"
+                      x1="0" x2="{{ funds_aum_chart.vb_width|int }}"
+                      y1="{{ gy }}" y2="{{ gy }}"
+                      vector-effect="non-scaling-stroke"/>
+              {% endfor %}
+              <path d="{{ funds_aum_chart.fill_d }}"
+                    fill="var(--pp-accent)" fill-opacity="0.08"/>
+              <path d="{{ funds_aum_chart.line_d }}"
+                    class="pp-funds-aum-line"
+                    vector-effect="non-scaling-stroke"/>
+              {% for p in funds_aum_chart.points %}
+                <circle class="pp-funds-aum-dot"
+                        cx="{{ p.x }}" cy="{{ p.y }}" r="2.5"
+                        vector-effect="non-scaling-stroke"/>
+              {% endfor %}
+              {# Hover crosshair + emphasised hover dot — hidden until JS toggles them. #}
+              <line class="pp-funds-aum-crosshair"
+                    x1="0" x2="0" y1="0" y2="{{ funds_aum_chart.vb_height|int }}"
+                    vector-effect="non-scaling-stroke"/>
+              <circle class="pp-funds-aum-hover-dot"
+                      cx="0" cy="0" r="3.5"
+                      vector-effect="non-scaling-stroke"/>
+            </svg>
+            {# HTML tooltip — outside the SVG so text doesn't horizontally
+               stretch with `preserveAspectRatio="none"`.  JS positions it
+               on mousemove. #}
+            <div class="pp-funds-aum-tooltip" hidden>
+              <span class="pp-funds-aum-tt-q"></span>
+              <span class="pp-mono pp-funds-aum-tt-value"></span>
+              <span class="pp-mono pp-funds-aum-tt-delta"></span>
+            </div>
+          </div>
+          <div class="pp-funds-aum-axis">
+            {% for tk in funds_aum_chart.ticks %}
+              <span class="pp-mono pp-funds-aum-axis-tick"
+                    style="position:absolute; left: {{ (tk.x / funds_aum_chart.vb_width * 100)|round(2) }}%; transform: translateX(-50%);">
+                {{ tk.label }}
+              </span>
+            {% endfor %}
+          </div>
         {% else %}
-          <div class="pp-page-placeholder pp-funds-activity-empty">
-            <div class="pp-page-placeholder-sub">No recent filings cached.</div>
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">
+              13F equity history not yet available for this filer.
+            </div>
           </div>
         {% endif %}
       </div>
     {% endcall %}
-  </section>
-
-  {# HOLDINGS — dense table.  10 of {total} positions. #}
-  {% call panel(cls="pp-funds-holdings-panel") %}
-    {% call panel_head("Top 10 holdings",
-                       sub=("%d of %d positions"|format(funds_holdings|length, funds_pos_total))) %}
-      <div class="pp-funds-holdings-controls">
-        {{ segment(["All","Adds","Cuts","New","Exits"], value="All", mono=True) }}
-        <a class="pp-link-coral" href="#">View all {{ funds_pos_total }} →</a>
-      </div>
-    {% endcall %}
-    <table class="pp-table pp-funds-holdings-table">
-      <thead>
-        <tr>
-          <th class="pp-num pp-funds-th-rank">#</th>
-          <th>Holding</th>
-          <th class="pp-num">Shares</th>
-          <th class="pp-num">Value</th>
-          <th>Port %</th>
-          <th class="pp-num">QoQ Δ</th>
-          <th class="pp-num">Last</th>
-          <th class="pp-num">Day</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in funds_holdings %}
-          <tr>
-            <td class="pp-num pp-funds-td-rank">
-              <span class="pp-mono pp-dim2">{{ "%02d"|format(r.rank) }}</span>
-            </td>
-            <td>
-              <span class="pp-funds-tkr">{{ r.ticker }}</span>
-              <span class="pp-funds-name">{{ r.name }}</span>
-            </td>
-            <td class="pp-num pp-mono">{{ r.shares }}</td>
-            <td class="pp-num pp-mono pp-funds-value">{{ r.value }}</td>
-            <td>
-              <div class="pp-funds-port-cell">
-                <div class="pp-funds-port-bar">
-                  <div class="pp-funds-port-bar-fill"
-                       style="width: {{ [r.port * 200, 100]|min|round(1) }}%;"></div>
-                </div>
-                <span class="pp-mono pp-funds-port-pct">{{ r.port_pct_str }}</span>
-              </div>
-            </td>
-            <td class="pp-num">
-              <span class="pp-mono pp-dim2">{{ r.qoq }}</span>
-            </td>
-            <td class="pp-num pp-mono pp-dim">
-              {{ r.last if r.last is not none else '—' }}
-            </td>
-            <td class="pp-num pp-mono pp-dim">
-              {{ r.day if r.day is not none else '—' }}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endcall %}
-
-  {# 3-col: Sector allocation (mock) · New+Adds · Cuts+Exits #}
-  <section class="pp-funds-row-3col">
-    {% call panel() %}
-      {{ panel_head("Sector allocation", sub="Q1 2026") }}
-      <div class="pp-funds-sectors">
-        {% for s in funds_sectors %}
-          <div class="pp-funds-sector-row">
-            <div class="pp-funds-sector-row-head">
-              <span class="pp-funds-sector-name">{{ s.name }}</span>
-              <span class="pp-mono pp-funds-sector-pct">{{ "%.1f"|format(s.pct * 100) }}%</span>
-            </div>
-            <div class="pp-funds-sector-bar">
-              <div class="pp-funds-sector-bar-fill"
-                   style="width: {{ "%.0f"|format(s.pct * 100) }}%;
-                          background: {{ s.color }};"></div>
-            </div>
-          </div>
-        {% endfor %}
-      </div>
-    {% endcall %}
 
     {% call panel() %}
-      {{ panel_head("New + Adds", sub="this quarter") }}
-      {% if funds_adds %}
-        {% for r in funds_adds %}
-          <div class="pp-funds-change-row">
-            <span class="pp-mono pp-funds-change-tkr">{{ r.ticker }}</span>
-            <div class="pp-funds-change-cell">
-              <div class="pp-funds-change-name">{{ r.name }}</div>
-              <span class="pp-mono pp-funds-change-val">{{ r.val }}</span>
+      {% call panel_head("Capital deployed",
+                         sub="Cash & equivalents from XBRL 10-K/10-Q (may not include all liquid assets)") %}
+      {% endcall %}
+      {% if funds_capital.have_data %}
+        <div class="pp-funds-capital-grid"
+             style="grid-template-columns: repeat({{ funds_capital.cells|length }}, 1fr);">
+          {% for c in funds_capital.cells %}
+            <div class="pp-funds-capital-cell">
+              <span class="pp-mono pp-funds-capital-label">{{ c.label }}</span>
+              <span class="pp-mono pp-funds-capital-value">{{ c.value }}</span>
+              {% if c.sub %}
+                <span class="pp-mono pp-funds-capital-sub">{{ c.sub }}</span>
+              {% endif %}
             </div>
-            {{ tag(r.action) }}
-          </div>
-        {% endfor %}
+          {% endfor %}
+        </div>
       {% else %}
         <div class="pp-page-placeholder">
-          <div class="pp-page-placeholder-sub">No adds this quarter.</div>
+          <div class="pp-page-placeholder-sub">
+            Capital deployment metrics not cached for this filer.
+          </div>
         </div>
       {% endif %}
     {% endcall %}
+  </section>
+
+  {# ━━━━━━━━━━ SECTORS ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if funds_tab == 'Sectors' %} is-active{% endif %}"
+           data-tab-pane="Sectors">
 
     {% call panel() %}
-      {{ panel_head("Cuts + Exits", sub="this quarter") }}
-      {% if funds_cuts %}
-        {% for r in funds_cuts %}
-          <div class="pp-funds-change-row">
-            <span class="pp-mono pp-funds-change-tkr">{{ r.ticker }}</span>
-            <div class="pp-funds-change-cell">
-              <div class="pp-funds-change-name">{{ r.name }}</div>
-              <span class="pp-mono pp-funds-change-val">{{ r.val }}</span>
+      {{ panel_head("Sector allocation",
+                    sub=("by GICS · " ~ fund_quarter_label) if fund_quarter_label else "by GICS") }}
+      {% if funds_sectors %}
+        <div class="pp-funds-sectors">
+          {% for s in funds_sectors %}
+            <div class="pp-funds-sector-row">
+              <div class="pp-funds-sector-row-head">
+                <span class="pp-funds-sector-name">{{ s.name }}</span>
+                <span class="pp-mono pp-funds-sector-pct">{{ "%.1f"|format(s.pct * 100) }}%</span>
+              </div>
+              <div class="pp-funds-sector-bar">
+                <div class="pp-funds-sector-bar-fill"
+                     style="width: {{ "%.0f"|format(s.pct * 100) }}%;
+                            background: {{ s.color }};"></div>
+              </div>
             </div>
-            {{ tag(r.action) }}
-          </div>
-        {% endfor %}
+          {% endfor %}
+        </div>
       {% else %}
         <div class="pp-page-placeholder">
-          <div class="pp-page-placeholder-sub">No cuts this quarter.</div>
+          <div class="pp-page-placeholder-sub">
+            Sector breakdown not yet derivable for this filer's holdings.
+          </div>
+        </div>
+      {% endif %}
+    {% endcall %}
+  </section>
+
+  {# ━━━━━━━━━━ FILINGS ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if funds_tab == 'Filings' %} is-active{% endif %}"
+           data-tab-pane="Filings">
+
+    {% call panel() %}
+      {{ panel_head("SEC filings",
+                    sub=(funds_filings|length ~ " most-recent filings")) }}
+      {% if funds_filings %}
+        <table class="pp-table pp-funds-filings-table">
+          <thead>
+            <tr>
+              <th>Form</th>
+              <th>Description</th>
+              <th class="pp-num">Filed</th>
+              <th class="pp-num">Accession</th>
+              <th class="pp-num pp-funds-th-link"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in funds_filings %}
+              <tr>
+                <td>
+                  <span class="pp-mono pp-funds-filing-form">{{ f.form }}</span>
+                </td>
+                <td class="pp-text">{{ f.kind }}</td>
+                <td class="pp-num pp-mono pp-dim">{{ f.filing_label }}</td>
+                <td class="pp-num pp-mono pp-dim2">{{ f.accession }}</td>
+                <td class="pp-num">
+                  <a class="pp-link-coral" href="{{ f.url }}" target="_blank" rel="noopener">View →</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">
+            SEC filings not yet cached — refresh in a few minutes.
+          </div>
         </div>
       {% endif %}
     {% endcall %}
@@ -276,4 +509,149 @@
 
 </div>
 
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  /* Top-level pane switcher — shared shape with Macro / Insiders / Congress.
+     Keeps the URL in sync via History API so deep-link sharing works. */
+  var seg = document.getElementById('pp-funds-tabs');
+  if (!seg) return;
+  var panes = document.querySelectorAll('.pp-page-pane');
+  if (!panes.length) return;
+  function activate(name) {
+    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+      var match = o.getAttribute('data-value') === name;
+      o.classList.toggle('is-active', match);
+      o.setAttribute('aria-selected', match ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    });
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.set('tab', name);
+      window.history.replaceState({}, '', url.toString());
+    } catch (_) { /* noop */ }
+  }
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    if (name) activate(name);
+  });
+})();
+
+(function () {
+  /* AUM history chart — hover crosshair + tooltip.  Pattern mirrors the
+     home-page hero chart: viewBox stays in 1200x240 coords, mousemove maps
+     pixel x → viewBox x → nearest history index, then we update the
+     crosshair / hover-dot positions in viewBox coords and the HTML
+     tooltip in container-pixel coords (so text doesn't stretch). */
+  var wrap = document.querySelector('.pp-funds-aum-chart');
+  if (!wrap) return;
+  var svg       = wrap.querySelector('.pp-funds-aum-svg');
+  var crosshair = wrap.querySelector('.pp-funds-aum-crosshair');
+  var hoverDot  = wrap.querySelector('.pp-funds-aum-hover-dot');
+  var tooltip   = wrap.querySelector('.pp-funds-aum-tooltip');
+  if (!svg || !crosshair || !hoverDot || !tooltip) return;
+
+  var ttQ     = tooltip.querySelector('.pp-funds-aum-tt-q');
+  var ttValue = tooltip.querySelector('.pp-funds-aum-tt-value');
+  var ttDelta = tooltip.querySelector('.pp-funds-aum-tt-delta');
+
+  var vbW = parseFloat(wrap.getAttribute('data-vb-w')) || 1200;
+  var vbH = parseFloat(wrap.getAttribute('data-vb-h')) || 240;
+
+  var history = [];
+  try { history = JSON.parse(wrap.getAttribute('data-history') || '[]'); }
+  catch (e) { history = []; }
+  if (!history.length) return;
+
+  function show()  { crosshair.classList.add('is-visible');
+                     hoverDot.classList.add('is-visible');
+                     tooltip.hidden = false; }
+  function hide()  { crosshair.classList.remove('is-visible');
+                     hoverDot.classList.remove('is-visible');
+                     tooltip.hidden = true; }
+
+  function nearestIdx(vbx) {
+    /* Linear scan — only 12 points. */
+    var best = 0, bestD = Infinity;
+    for (var i = 0; i < history.length; i++) {
+      var d = Math.abs(history[i].x - vbx);
+      if (d < bestD) { best = i; bestD = d; }
+    }
+    return best;
+  }
+
+  function fmtDelta(pct) {
+    if (pct === null || pct === undefined) return '—';
+    var sign = pct >= 0 ? '+' : '';
+    return sign + pct.toFixed(1) + '%';
+  }
+
+  function update(ev) {
+    var rect = svg.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    var pxX = ev.clientX - rect.left;
+    if (pxX < 0 || pxX > rect.width) { hide(); return; }
+    var vbx = (pxX / rect.width) * vbW;
+    var i   = nearestIdx(vbx);
+    var pt  = history[i];
+    if (!pt) { hide(); return; }
+
+    crosshair.setAttribute('x1', pt.x);
+    crosshair.setAttribute('x2', pt.x);
+    hoverDot.setAttribute('cx', pt.x);
+    hoverDot.setAttribute('cy', pt.y);
+
+    /* Tooltip text */
+    ttQ.textContent     = pt.quarter;
+    ttValue.textContent = pt.value_str;
+    if (pt.delta_pct === null || pt.delta_pct === undefined) {
+      ttDelta.textContent = '—';
+      ttDelta.classList.remove('pp-up', 'pp-down');
+    } else {
+      ttDelta.textContent = fmtDelta(pt.delta_pct) + ' QoQ';
+      ttDelta.classList.toggle('pp-up',   pt.delta_pct >= 0);
+      ttDelta.classList.toggle('pp-down', pt.delta_pct <  0);
+    }
+
+    /* Tooltip position — px-relative to wrap.  Anchor the tooltip just
+       above the hover dot's container y so it floats above the line. */
+    var wrapRect = wrap.getBoundingClientRect();
+    var ttX = pxX + (rect.left - wrapRect.left);
+    var ttY = (pt.y / vbH) * rect.height + (rect.top - wrapRect.top);
+    tooltip.style.left = ttX + 'px';
+    tooltip.style.top  = ttY + 'px';
+    show();
+  }
+
+  svg.addEventListener('mousemove', update);
+  svg.addEventListener('mouseenter', update);
+  svg.addEventListener('mouseleave', hide);
+})();
+
+(function () {
+  /* Activity tab — quarterly position-changes selector.  Click a quarter
+     chip to swap the visible diff table.  All quarters render server-side
+     so switching is instant (no fetch). */
+  var tabs = document.getElementById('pp-funds-qchg-tabs');
+  if (!tabs) return;
+  var panes = document.querySelectorAll('.pp-funds-qchg-pane');
+  tabs.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.pp-funds-qchg-tab');
+    if (!btn) return;
+    var key = btn.getAttribute('data-qchg-key');
+    tabs.querySelectorAll('.pp-funds-qchg-tab').forEach(function (b) {
+      b.classList.toggle('is-active', b === btn);
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-qchg-pane') === key);
+    });
+  });
+})();
+</script>
 {% endblock %}

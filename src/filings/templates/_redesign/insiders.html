@@ -2,7 +2,7 @@
   PaperPanda Redesign — Insiders page
   Mirrors design_handoff_paperpanda/page-insiders.jsx
 
-  Tabs: Filings · Clusters · People · Companies · Calendar
+  Tabs: Filings · Clusters
   Default = Filings (live).  Other 4 tabs are placeholders.
 
   Real data: insider_trading.get_latest_insider_trades() — global feed
@@ -12,7 +12,7 @@
 {% extends "_redesign/base.html" %}
 {% from "_redesign/macros/_primitives.html" import
      mono, kicker, label, btn, panel, panel_head, segment,
-     range_chip, kpi_strip, tag %}
+     range_chip, kpi_strip, tag, spark %}
 
 {% block title %}Insiders · PaperPanda{% endblock %}
 
@@ -51,44 +51,139 @@
 
 {# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
 <div class="pp-page-tabs">
-  {{ segment(["Filings","Clusters","People","Companies","Calendar"],
+  {{ segment(["Filings","Clusters"],
              value=insiders_tab|default("Filings"),
              id="pp-insiders-tabs") }}
-  <div style="flex:1"></div>
-  {{ range_chip(value="30D") }}
 </div>
 
 {# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
 <div class="pp-page-body">
 
-  {# ── FILINGS (default — LIVE) ── #}
+  {# ━━━━━━━━━━ FILINGS (default tab) ━━━━━━━━━━
+     Filter axes (each a query-string param; clicks navigate via `<a>` tags):
+       - direction: latest / purchases / sales  (top sub-pill)
+       - role:      All / CEO / CFO / Director / 10pct / Other
+       - plan:      All / open / 10b5-1
+     The Filings + Momentum window is fixed at 30 days under the hood
+     (no UI control); other subtabs use the wider 6-month set. #}
   <section class="pp-page-pane is-active" data-tab-pane="Filings">
 
-    {# Filter row — Action / Role / Plan + showing-count.
-       Visual-only for now; client filtering will be added when we route
-       individual filter values to /_v2/api/insiders. #}
+    {# ── Direction sub-pill (Latest / Purchases / Sales) ── #}
+    <div class="pp-insiders-toplevel">
+      <div class="pp-segment pp-insiders-direction" role="tablist">
+        {% for k, label_text in insiders_directions %}
+          <a class="pp-segment-opt{% if k == insiders_direction %} is-active{% endif %}"
+             href="?direction={{ k }}&role={{ insiders_role }}&plan={{ insiders_plan }}"
+             role="tab"
+             aria-selected="{{ 'true' if k == insiders_direction else 'false' }}">
+            {{ label_text }}
+          </a>
+        {% endfor %}
+      </div>
+    </div>
+
+    {# ── Insider Momentum bar chart (top-5 buys + top-5 sells by net $) ── #}
+    {% if insiders_momentum.have_data %}
+      {% call panel(cls="pp-insiders-momentum-panel") %}
+        {{ panel_head("Insider momentum",
+                      sub="Top-5 buys + top-5 sells by net dollar flow") }}
+        {# `data-bars` (not `data-history`) — discrete bar payload with x/w
+           geometry, distinct from the time-series `data-history` arrays the
+           other charts emit. Hover JS binary-searches barCenters, not pt.x. #}
+        <div class="pp-insiders-momentum-body pp-insiders-momentum-chart"
+             data-bars='{{ insiders_momentum.bars|tojson }}'
+             data-vb-w="{{ insiders_momentum.vb_width|int }}"
+             data-vb-h="{{ insiders_momentum.vb_height|int }}">
+          <svg class="pp-insiders-momentum-svg"
+               viewBox="0 0 {{ insiders_momentum.vb_width|int }} {{ insiders_momentum.vb_height|int }}"
+               preserveAspectRatio="none"
+               aria-label="Insider Momentum chart">
+            {# Grid + y-axis labels — same anchor pattern as the funds AUM chart. #}
+            {% for gy in insiders_momentum.grid_ys %}
+              <line class="pp-insiders-momentum-grid"
+                    x1="{{ insiders_momentum.left_pad }}"
+                    x2="{{ insiders_momentum.vb_width|int }}"
+                    y1="{{ gy }}" y2="{{ gy }}"
+                    vector-effect="non-scaling-stroke"/>
+            {% endfor %}
+            {# Zero line emphasised — bars sprout from here. #}
+            <line class="pp-insiders-momentum-zero"
+                  x1="{{ insiders_momentum.left_pad }}"
+                  x2="{{ insiders_momentum.vb_width|int }}"
+                  y1="{{ insiders_momentum.zero_y }}"
+                  y2="{{ insiders_momentum.zero_y }}"
+                  vector-effect="non-scaling-stroke"/>
+            {# Bars + ticker labels. #}
+            {% for b in insiders_momentum.bars %}
+              <rect class="pp-insiders-momentum-bar {% if b.is_buy %}is-buy{% else %}is-sell{% endif %}"
+                    x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"/>
+            {% endfor %}
+            {# Y-axis labels (left rail).  Rendered as SVG <text> so they
+               position cleanly inside the same coordinate system. #}
+            {% for yl in insiders_momentum.y_labels %}
+              <text class="pp-insiders-momentum-ylabel"
+                    x="{{ insiders_momentum.left_pad - 8 }}" y="{{ yl.y + 4 }}"
+                    text-anchor="end">{{ yl.label }}</text>
+            {% endfor %}
+            {# Ticker labels under each bar — placed below the zero line for
+               positive bars (so they don't overlap the bar) and above for
+               negatives.  Simpler: always anchor at the bottom of the chart. #}
+            {% for b in insiders_momentum.bars %}
+              <text class="pp-insiders-momentum-tklabel {% if b.is_buy %}is-buy{% else %}is-sell{% endif %}"
+                    x="{{ b.label_x }}" y="{{ insiders_momentum.vb_height|int - 8 }}"
+                    text-anchor="middle">{{ b.ticker }}</text>
+            {% endfor %}
+          </svg>
+          <div class="pp-insiders-momentum-tooltip" hidden>
+            <span class="pp-mono pp-insiders-momentum-tt-tk"></span>
+            <span class="pp-mono pp-insiders-momentum-tt-v"></span>
+          </div>
+          <div class="pp-insiders-momentum-legend">
+            <span class="pp-mono pp-up">Green = Purchases</span>
+            <span class="pp-mono pp-dim2">·</span>
+            <span class="pp-mono pp-down">Red = Sales</span>
+          </div>
+        </div>
+      {% endcall %}
+    {% endif %}
+
+    {# ── Role + Plan filters + showing count ── #}
     <div class="pp-insiders-filters">
       <div class="pp-insiders-filter-group">
-        {{ label("Action") }}
-        {{ segment(["All","BUY","SELL"], value="All", mono=True) }}
-      </div>
-      <div class="pp-insiders-filter-group">
         {{ label("Role") }}
-        {{ segment(["All","CEO","CFO","Director","10% own."], value="All", mono=True) }}
+        <div class="pp-segment pp-segment-mono">
+          {%- set _role_labels = {"All":"All", "CEO":"CEO", "CFO":"CFO",
+                                  "Director":"Director", "10pct":"10% own.",
+                                  "Other":"Other"} -%}
+          {% for k in insiders_role_keys %}
+            <a class="pp-segment-opt{% if k == insiders_role %} is-active{% endif %}"
+               href="?direction={{ insiders_direction }}&role={{ k }}&plan={{ insiders_plan }}">
+              {{ _role_labels[k] }}
+            </a>
+          {% endfor %}
+        </div>
       </div>
       <div class="pp-insiders-filter-group">
         {{ label("Plan") }}
-        {{ segment(["All","Open","10b5-1"], value="All", mono=True) }}
+        <div class="pp-segment pp-segment-mono">
+          {%- set _plan_labels = {"All":"All", "open":"Open", "10b5-1":"10b5-1"} -%}
+          {% for k in insiders_plan_keys %}
+            <a class="pp-segment-opt{% if k == insiders_plan %} is-active{% endif %}"
+               href="?direction={{ insiders_direction }}&role={{ insiders_role }}&plan={{ k }}">
+              {{ _plan_labels[k] }}
+            </a>
+          {% endfor %}
+        </div>
       </div>
       <div style="flex:1"></div>
       <span class="pp-mono pp-insiders-count">
-        Showing <span class="pp-ink-strong">{{ insiders_rows|length }}</span> of {{ insiders_total }} filings · 30d
+        <span class="pp-ink-strong">{{ insiders_total_str }}</span> filings
       </span>
     </div>
 
-    {# Notable callout — coral left-border accent panel for the most
-       impactful BUY in the window.  This is the `notable_panel` pattern
-       flagged in the gap audit. #}
+    {# ── Notable callout — coral-bordered headline for the largest BUY
+         when the active filter slices include open-market buys.  Sub-text
+         is now derived from the actual filing (no static "Filed same day"). #}
     {% if insiders_notable %}
       {% set _n = insiders_notable %}
       {% call panel(cls="pp-insiders-notable-panel") %}
@@ -98,109 +193,177 @@
             <div class="pp-insiders-notable-headline">
               <span class="pp-accent-color">{{ _n.person }} ({{ _n.role }})</span> bought
               <span class="pp-up">{{ _n.value }}</span> of
-              <span class="pp-mono pp-insiders-notable-tkr">{{ _n.ticker }}</span>
-              — open-market trade.
+              <span class="pp-mono pp-insiders-notable-tkr">{{ _n.ticker }}</span>.
             </div>
             <span class="pp-mono pp-insiders-notable-meta">
-              {{ _n.shares }} shares @ {{ _n.price }} · No 10b5-1 plan · Filed same day
+              {{ _n.shares }} shares @ {{ _n.price }}
             </span>
           </div>
-          {{ btn("View profile →", kind="ghost") }}
         </div>
       {% endcall %}
     {% endif %}
 
-    {# Filings table — 9 columns, alternating row tint for flagged BUYs. #}
-    {% call panel() %}
-      <table class="pp-table pp-insiders-table">
-        <thead>
-          <tr>
-            <th>Insider</th>
-            <th>Role</th>
-            <th>Ticker</th>
-            <th>Action</th>
-            <th class="pp-num">Shares</th>
-            <th class="pp-num">Price</th>
-            <th class="pp-num">Value</th>
-            <th>Plan</th>
-            <th class="pp-num">Trade date</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in insiders_rows %}
-            <tr class="{% if r.flag %}pp-insiders-row-flagged{% endif %}">
-              <td>
-                <span class="pp-insiders-name">{{ r.person }}</span>
-                {% if r.flag %}<span class="pp-insiders-star">★</span>{% endif %}
-              </td>
-              <td class="pp-text">{{ r.role }}</td>
-              <td><span class="pp-mono pp-insiders-tkr">{{ r.ticker }}</span></td>
-              <td>{{ tag(r.action) }}</td>
-              <td class="pp-num pp-mono pp-text">{{ r.shares }}</td>
-              <td class="pp-num pp-mono pp-text">{{ r.price }}</td>
-              <td class="pp-num pp-mono pp-insiders-value">{{ r.value }}</td>
-              <td>
-                <span class="pp-mono pp-insiders-plan {% if r.plan == 'open' %}is-open{% endif %}">
-                  {{ r.plan }}
-                </span>
-              </td>
-              <td class="pp-num pp-mono pp-text">{{ r.date }}</td>
+    {# ── Collapsible filings table — one row per ticker, click to expand
+         to the per-insider detail.  Falls back to an empty-state when the
+         active filter set returns nothing. #}
+    {% if insiders_grouped %}
+      {% call panel() %}
+        <table class="pp-table pp-insiders-table pp-insiders-grouped-table">
+          <thead>
+            <tr>
+              <th class="pp-insiders-th-tkr">Ticker</th>
+              <th>Issuer</th>
+              <th>Activity</th>
+              <th class="pp-num">Net flow</th>
+              <th class="pp-num pp-insiders-th-toggle"></th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% endcall %}
+          </thead>
+          <tbody>
+            {% for g in insiders_grouped %}
+              <tr class="pp-insiders-grouped-summary" data-grouped-key="{{ loop.index0 }}">
+                <td><span class="pp-mono pp-insiders-tkr">{{ g.ticker }}</span></td>
+                <td class="pp-text pp-insiders-grouped-name">{{ g.name or "—" }}</td>
+                <td>
+                  {% if g.tag_kind == 'BUY' %}
+                    {{ tag('BUY', text=g.tag_label) }}
+                  {% elif g.tag_kind == 'SELL' %}
+                    {{ tag('SELL', text=g.tag_label) }}
+                  {% else %}
+                    <span class="pp-mono pp-dim">{{ g.tag_label }}</span>
+                  {% endif %}
+                </td>
+                <td class="pp-num pp-mono pp-insiders-grouped-net {% if g.net > 0 %}pp-up{% elif g.net < 0 %}pp-down{% else %}pp-dim{% endif %}">
+                  {{ g.net_str }}
+                </td>
+                <td class="pp-num">
+                  <span class="pp-insiders-grouped-chevron" aria-hidden="true">▾</span>
+                </td>
+              </tr>
+              <tr class="pp-insiders-grouped-detail" data-grouped-detail="{{ loop.index0 }}" hidden>
+                <td colspan="5">
+                  <table class="pp-insiders-grouped-subtable">
+                    <thead>
+                      <tr>
+                        <th>Insider</th>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th class="pp-num">Shares</th>
+                        <th class="pp-num">Price</th>
+                        <th class="pp-num">Value</th>
+                        <th class="pp-num">Date</th>
+                        <th class="pp-num pp-insiders-th-sec">SEC</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for r in g.filings %}
+                        <tr>
+                          <td class="pp-insiders-name">{{ r.person }}</td>
+                          <td class="pp-dim">{{ r.role }}</td>
+                          <td>{{ tag(r.action) }}</td>
+                          <td class="pp-num pp-mono pp-text">{{ r.shares }}</td>
+                          <td class="pp-num pp-mono pp-text">{{ r.price }}</td>
+                          <td class="pp-num pp-mono pp-insiders-value">{{ r.value }}</td>
+                          <td class="pp-num pp-mono pp-text">{{ r.date }}</td>
+                          <td class="pp-num">
+                            {% if r.sec_url %}
+                              <a class="pp-link-coral" href="{{ r.sec_url }}" target="_blank" rel="noopener">↗</a>
+                            {% else %}
+                              <span class="pp-dim2">—</span>
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">
+            No filings match this filter combination.
+            <a href="?direction=latest&role=All&plan=All" class="pp-link-coral">Reset filters</a>.
+          </div>
+        </div>
+      {% endcall %}
+    {% endif %}
 
   </section>
 
-  {# ── 4 placeholder panes ── #}
+  {# ━━━━━━━━━━ CLUSTERS ━━━━━━━━━━ #}
   <section class="pp-page-pane" data-tab-pane="Clusters">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">⊕</div>
-        <div class="pp-page-placeholder-title">Clusters tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          ≥3 insiders trading the same direction in 30d.  Highest-signal
-          pattern; needs a `cluster_card` primitive (flagged in audit).
-        </div>
+    {# Cluster direction sub-pill — server-rendered links carrying the active
+       filter state via the `cluster` query param.  Counts come from the
+       unfiltered cluster list so users see how many of each kind exist. #}
+    <div class="pp-insiders-filters">
+      <div class="pp-segment pp-segment-mono">
+        {%- set _cluster_labels = {
+          "All":  "All clusters · " ~ insiders_clusters_all_count,
+          "BUY":  "Buy clusters · "  ~ insiders_clusters_buy_count,
+          "SELL": "Sell clusters · " ~ insiders_clusters_sell_count,
+        } -%}
+        {% for k in insiders_cluster_keys %}
+          <a class="pp-segment-opt{% if k == insiders_cluster %} is-active{% endif %}"
+             href="?direction={{ insiders_direction }}&role={{ insiders_role }}&plan={{ insiders_plan }}&cluster={{ k }}#Clusters">
+            {{ _cluster_labels[k] }}
+          </a>
+        {% endfor %}
       </div>
-    {% endcall %}
-  </section>
-  <section class="pp-page-pane" data-tab-pane="People">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">◐</div>
-        <div class="pp-page-placeholder-title">People tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Per-insider profile cards — track record, recent trades, sectors.
-          Needs a `person_card` primitive.
-        </div>
+      <div style="flex:1"></div>
+      <span class="pp-mono pp-insiders-count">
+        {{ insiders_clusters|length }} shown · 30d window
+      </span>
+    </div>
+
+    {% if insiders_clusters %}
+      <div class="pp-insiders-clusters-grid">
+        {% for c in insiders_clusters %}
+          {% call panel(cls="pp-insiders-cluster-card") %}
+            <div class="pp-insiders-cluster-head">
+              <div class="pp-insiders-cluster-id">
+                <span class="pp-mono pp-insiders-cluster-tkr">{{ c.ticker }}</span>
+                <div class="pp-insiders-cluster-name">{{ c.name }}</div>
+              </div>
+              {{ tag('ADDED' if c.direction == 'BUY' else 'REDUCED', text=c.direction ~ ' CLUSTER') }}
+              <div style="flex:1"></div>
+              <div class="pp-insiders-cluster-stat">
+                <span class="pp-mono pp-insiders-cluster-stat-val">{{ c.count }}</span>
+                <span class="pp-mono pp-insiders-cluster-stat-label">insiders</span>
+              </div>
+              <div class="pp-insiders-cluster-stat">
+                <span class="pp-mono pp-insiders-cluster-stat-val">{{ c.value }}</span>
+                <span class="pp-mono pp-insiders-cluster-stat-label">volume</span>
+              </div>
+            </div>
+            <div class="pp-insiders-cluster-members">
+              {% for m in c.members %}
+                <div class="pp-insiders-cluster-member">
+                  <div class="pp-insiders-cluster-mn">
+                    <span class="pp-insiders-cluster-mname">{{ m.p }}</span>
+                    <span class="pp-mono pp-insiders-cluster-mrole">{{ m.r }}</span>
+                  </div>
+                  <span class="pp-mono pp-insiders-cluster-mvalue">{{ m.v }}</span>
+                  <span class="pp-mono pp-insiders-cluster-mdate">{{ m.d }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          {% endcall %}
+        {% endfor %}
       </div>
-    {% endcall %}
-  </section>
-  <section class="pp-page-pane" data-tab-pane="Companies">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">▣</div>
-        <div class="pp-page-placeholder-title">Companies tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Aggregate view by ticker — sentiment bar, net flow, count.
-          Existing aggregate_top_tickers can power this.
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">
+            No active clusters in the last 30 days. Try the Filings tab for
+            individual transactions.
+          </div>
         </div>
-      </div>
-    {% endcall %}
-  </section>
-  <section class="pp-page-pane" data-tab-pane="Calendar">
-    {% call panel() %}
-      <div class="pp-page-placeholder">
-        <div class="pp-page-placeholder-icon">◷</div>
-        <div class="pp-page-placeholder-title">Calendar tab — coming soon</div>
-        <div class="pp-page-placeholder-sub">
-          Blackout-window timeline — needs T-30/T+2 derivation off
-          earnings_calendar.
-        </div>
-      </div>
-    {% endcall %}
+      {% endcall %}
+    {% endif %}
   </section>
 
 </div>
@@ -229,6 +392,105 @@
     if (!opt) return;
     var name = opt.getAttribute('data-value');
     if (name) activate(name);
+  });
+
+  /* Activate the tab named by the URL hash on first paint — lets sub-pill
+     links (Clusters: All/BUY/SELL) reload the page server-side while still
+     landing the user on the right tab. */
+  var hashName = (location.hash || '').replace(/^#/, '');
+  if (hashName && [...seg.querySelectorAll('.pp-segment-opt')].some(o => o.getAttribute('data-value') === hashName)) {
+    activate(hashName);
+  }
+})();
+
+(function () {
+  /* Insider Momentum hover — find the nearest bar by center x; highlight
+     it and show a tooltip outside the SVG (so text isn't stretched by
+     `preserveAspectRatio="none"`). */
+  var wrap = document.querySelector('.pp-insiders-momentum-chart');
+  if (!wrap) return;
+  var svg     = wrap.querySelector('.pp-insiders-momentum-svg');
+  var tooltip = wrap.querySelector('.pp-insiders-momentum-tooltip');
+  if (!svg || !tooltip) return;
+  var ttTk = tooltip.querySelector('.pp-insiders-momentum-tt-tk');
+  var ttV  = tooltip.querySelector('.pp-insiders-momentum-tt-v');
+
+  var vbW = parseFloat(wrap.getAttribute('data-vb-w')) || 1500;
+  var vbH = parseFloat(wrap.getAttribute('data-vb-h')) || 280;
+  var bars = [];
+  try { bars = JSON.parse(wrap.getAttribute('data-bars') || '[]'); }
+  catch (e) {}
+  if (!bars.length) return;
+
+  var rects = svg.querySelectorAll('.pp-insiders-momentum-bar');
+  function clearActive() {
+    rects.forEach(function (r) { r.classList.remove('is-active'); });
+  }
+
+  /* Pre-compute bar centers in viewBox space (sorted) so we can binary-search
+     instead of scanning every bar on each mousemove tick. */
+  var barCenters = bars.map(function (b) { return b.x + b.w / 2; });
+  function nearest(vbx) {
+    var lo = 0, hi = barCenters.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (barCenters[mid] < vbx) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0 && Math.abs(barCenters[lo - 1] - vbx) < Math.abs(barCenters[lo] - vbx)) return lo - 1;
+    return lo;
+  }
+
+  var svgRect = null, wrapRect = null;
+  function snapshotRects() { svgRect = svg.getBoundingClientRect(); wrapRect = wrap.getBoundingClientRect(); }
+  window.addEventListener('resize', function () { svgRect = null; wrapRect = null; });
+
+  function update(ev) {
+    if (!svgRect) snapshotRects();
+    if (svgRect.width <= 0) return;
+    var px = ev.clientX - svgRect.left;
+    if (px < 0 || px > svgRect.width) { hide(); return; }
+    var vbx = (px / svgRect.width) * vbW;
+    var idx = nearest(vbx);
+    if (idx < 0) { hide(); return; }
+    var b = bars[idx];
+    clearActive();
+    if (rects[idx]) rects[idx].classList.add('is-active');
+    ttTk.textContent = b.ticker + (b.is_buy ? ' · BUY' : ' · SELL');
+    ttTk.classList.toggle('pp-up',   !!b.is_buy);
+    ttTk.classList.toggle('pp-down', !b.is_buy);
+    ttV.textContent  = b.value_str;
+    var ttX = ((b.x + b.w / 2) / vbW) * svgRect.width + (svgRect.left - wrapRect.left);
+    var ttY = (b.y / vbH) * svgRect.height + (svgRect.top - wrapRect.top);
+    tooltip.style.left = ttX + 'px';
+    tooltip.style.top  = ttY + 'px';
+    tooltip.hidden = false;
+  }
+  function hide() {
+    clearActive();
+    tooltip.hidden = true;
+  }
+  svg.addEventListener('mousemove',  update);
+  svg.addEventListener('mouseenter', function (ev) { snapshotRects(); update(ev); });
+  svg.addEventListener('mouseleave', hide);
+})();
+
+(function () {
+  /* Collapsible per-ticker rows on the Filings tab.  Clicking a summary
+     row toggles the matching detail row; chevron rotates 180° in CSS. */
+  var rows = document.querySelectorAll('.pp-insiders-grouped-summary');
+  if (!rows.length) return;
+  rows.forEach(function (row) {
+    row.addEventListener('click', function () {
+      var key = row.getAttribute('data-grouped-key');
+      var detail = document.querySelector(
+        '.pp-insiders-grouped-detail[data-grouped-detail="' + key + '"]'
+      );
+      if (!detail) return;
+      var open = !detail.hidden;
+      detail.hidden = open;
+      row.classList.toggle('is-open', !open);
+    });
   });
 })();
 </script>
