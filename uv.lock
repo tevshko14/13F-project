@@ -48,13 +48,13 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "brotli", specifier = ">=1.1" },
-    { name = "edgartools", specifier = ">=5.13" },
-    { name = "fastapi", extras = ["standard"], specifier = ">=0.115" },
+    { name = "edgartools", specifier = ">=5.13,<6" },
+    { name = "fastapi", extras = ["standard"], specifier = ">=0.115,<1" },
     { name = "finnhub-python", specifier = ">=2.4" },
     { name = "gunicorn", specifier = ">=22.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
-    { name = "jinja2", specifier = "==3.1.6" },
+    { name = "jinja2", specifier = ">=3.1" },
     { name = "psycopg2-binary", specifier = ">=2.9" },
     { name = "pyjwt", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },

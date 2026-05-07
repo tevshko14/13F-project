@@ -450,4 +450,1091 @@
 }
 
 .pp-macro-regions-table { width: 100%; }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * EARNINGS TAB — Scorecard + Calendar sub-panes
+ *
+ * Sub-segment is a thin tab strip that swaps two server-rendered subpanes via
+ * a class toggle.  Same visual treatment used for the macro page's main tab
+ * nav (segment macro), but compact: padded inside the pane instead of the
+ * full-width topbar.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-macro-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 4px;
+}
+.pp-macro-subtabs-meta {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+
+.pp-macro-subpane { display: none; flex-direction: column; gap: 18px; }
+.pp-macro-subpane.is-active { display: flex; }
+
+/* Filter row — pill groups (INDEX · SECTOR · PERIOD) ─────────────────── */
+
+.pp-macro-earn-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  padding: 14px 18px;
+  border: 1px solid var(--pp-line2);
+  background: var(--pp-panel);
+}
+.pp-macro-earn-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.pp-macro-pill-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.pp-macro-pill-row-wrap { flex-wrap: wrap; }
+
+.pp-macro-pill {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 5px 10px;
+  border: 1px solid var(--pp-line2);
+  background: var(--pp-bg);
+  color: var(--pp-text);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color 0.08s ease, color 0.08s ease, background 0.08s ease;
+}
+.pp-macro-pill:hover {
+  border-color: var(--pp-accent);
+  color: var(--pp-ink);
+}
+.pp-macro-pill.is-active {
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  border-color: var(--pp-ink);
+}
+
+/* Donut charts — Beat vs Miss distribution ───────────────────────────── */
+
+.pp-macro-donut-body {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 26px;
+  padding: 22px 24px;
+  align-items: center;
+}
+.pp-macro-donut {
+  width: 160px;
+  height: 160px;
+}
+.pp-macro-donut-pct {
+  font-family: var(--pp-font-display, var(--pp-font-mono));
+  font-size: 28px;
+  font-weight: 700;
+  fill: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+.pp-macro-donut-cap {
+  font-family: var(--pp-font-mono);
+  font-size: 9px;
+  fill: var(--pp-dim);
+  letter-spacing: 1.6px;
+}
+.pp-macro-donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pp-macro-donut-row {
+  display: grid;
+  grid-template-columns: 12px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--pp-text);
+}
+.pp-macro-donut-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 10px;     /* explicit override of zero-radius rule — legend dot only */
+  display: inline-block;
+}
+.pp-macro-donut-num {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--pp-ink);
+}
+
+/* Trend chart — beat rate vs market reaction ─────────────────────────── */
+
+.pp-macro-trend-panel { /* no-op; reserved for layout overrides */ }
+.pp-macro-trend-body  { padding: 22px 24px 18px; position: relative; }
+.pp-macro-trend-svg {
+  display: block;
+  width: 100%;
+  height: 280px;
+}
+.pp-macro-trend-xaxis {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 60px 0;
+}
+.pp-macro-trend-tick {
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.6px;
+}
+.pp-macro-trend-legend {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  margin-top: 14px;
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 0.4px;
+  flex-wrap: wrap;
+}
+.pp-macro-trend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.pp-macro-trend-swatch-eps { background: var(--pp-accent); }
+.pp-macro-trend-swatch-rev { background: var(--pp-ink); }
+
+/* Earnings results table — sorted by reaction ───────────────────────── */
+
+.pp-macro-earn-table-wrap {
+  overflow-x: auto;
+}
+.pp-macro-earn-table {
+  width: 100%;
+  min-width: 720px;
+}
+.pp-macro-earn-name {
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Calendar week grid — Mon-Fri columns ─────────────────────────────── */
+
+.pp-macro-week-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0;
+  padding: 0;
+}
+.pp-macro-week-day {
+  border-right: 1px solid var(--pp-line);
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+}
+.pp-macro-week-day:last-child { border-right: none; }
+.pp-macro-week-day.is-today .pp-macro-week-day-head {
+  background: color-mix(in srgb, var(--pp-accent) 15%, var(--pp-panel));
+  border-bottom-color: var(--pp-accent);
+}
+.pp-macro-week-day-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--pp-line2);
+  background: var(--pp-sub);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pp-macro-week-dow {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: var(--pp-dim);
+}
+.pp-macro-week-date {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+}
+.pp-macro-week-day-body {
+  padding: 10px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.pp-macro-week-row {
+  display: grid;
+  grid-template-columns: 30px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  font-size: 11px;
+  text-decoration: none;
+  color: var(--pp-text);
+  padding: 4px 0;
+  transition: color 0.08s ease;
+}
+.pp-macro-week-row:hover { color: var(--pp-ink); }
+.pp-macro-week-time {
+  font-size: 9px;
+  color: var(--pp-dim2);
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.pp-macro-week-tick {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+}
+.pp-macro-week-si {
+  background: transparent;
+  color: var(--pp-accent);
+  border: 1px solid var(--pp-accent);
+  font-size: 9px;
+  padding: 1px 4px;
+}
+.pp-macro-week-more {
+  font-size: 10px;
+  margin-top: 2px;
+  letter-spacing: 0.4px;
+}
+.pp-macro-week-empty {
+  font-size: 10px;
+  color: var(--pp-dim2);
+  margin-top: 6px;
+}
+
+/* Calendar list — grouped by day, full table per day ────────────────── */
+
+.pp-macro-cal-list {
+  display: flex;
+  flex-direction: column;
+}
+.pp-macro-cal-day {
+  border-bottom: 1px solid var(--pp-line2);
+}
+.pp-macro-cal-day:last-child { border-bottom: none; }
+.pp-macro-cal-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 14px 22px 8px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-macro-cal-day-iso {
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 0.4px;
+}
+.pp-macro-cal-day-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+}
+.pp-macro-cal-day-count {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+.pp-macro-cal-table {
+  width: 100%;
+  min-width: 720px;
+}
+.pp-macro-cal-table th {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--pp-dim);
+}
+.pp-macro-cal-name {
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-macro-cal-link { text-decoration: none; }
+.pp-macro-cal-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.pp-macro-cal-si {
+  background: transparent;
+  color: var(--pp-accent);
+  border: 1px solid var(--pp-accent);
+  font-size: 9px;
+  padding: 1px 5px;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * PERFORMANCE TAB — Market breadth
+ *
+ * Layout: status pill + up/down ratio bar in a single panel, then a
+ * 2-up row (sector bars + top movers), then the momentum chart at the
+ * bottom.  All using the same panel/spacing tokens as the rest of the page.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-macro-perf-tone {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 24px;
+  padding: 20px 24px;
+  align-items: center;
+}
+.pp-macro-perf-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 18px;
+  border: 1px solid var(--pp-line2);
+}
+.pp-macro-perf-status-up   { border-color: var(--pp-up);   color: var(--pp-up);   }
+.pp-macro-perf-status-down { border-color: var(--pp-down); color: var(--pp-down); }
+.pp-macro-perf-status-dim  { border-color: var(--pp-dim2); color: var(--pp-dim);  }
+
+.pp-macro-perf-status-kicker {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  font-family: var(--pp-font-mono);
+}
+.pp-macro-perf-status-label {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.pp-macro-perf-ratio { display: flex; flex-direction: column; gap: 8px; }
+.pp-macro-perf-ratio-bar {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  background: var(--pp-line2);
+  overflow: hidden;
+}
+.pp-macro-perf-ratio-up   { background: var(--pp-up);   height: 100%; display: block; }
+.pp-macro-perf-ratio-flat { background: var(--pp-dim2); height: 100%; display: block; }
+.pp-macro-perf-ratio-dn   { background: var(--pp-down); height: 100%; display: block; }
+
+.pp-macro-perf-ratio-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
+.pp-macro-perf-divergence {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px dashed var(--pp-accent);
+  margin-top: 4px;
+}
+.pp-macro-perf-divergence-bullish { border-color: var(--pp-up);   }
+.pp-macro-perf-divergence-bearish { border-color: var(--pp-down); }
+.pp-macro-perf-divergence-kicker {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: var(--pp-accent);
+}
+.pp-macro-perf-divergence-msg {
+  font-size: 12px;
+  color: var(--pp-text);
+}
+
+/* Sector performance bars ────────────────────────────────────────────── */
+
+.pp-macro-sector-bars {
+  padding: 14px 22px 16px;
+  display: flex;
+  flex-direction: column;
+}
+.pp-macro-sector-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 56px 60px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-macro-sector-row:last-child { border-bottom: none; }
+.pp-macro-sector-name {
+  font-size: 12px;
+  color: var(--pp-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-macro-sector-bar {
+  position: relative;
+  height: 8px;
+  background: var(--pp-line2);
+  overflow: hidden;
+}
+.pp-macro-sector-bar-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--pp-up), var(--pp-accent));
+}
+.pp-macro-sector-pct {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pp-macro-sector-meta {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  text-align: right;
+}
+
+/* Top movers — gainers/losers split list ────────────────────────────── */
+
+.pp-macro-movers {
+  padding: 16px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pp-macro-movers-group { display: flex; flex-direction: column; gap: 4px; }
+.pp-macro-movers-kicker {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  margin-bottom: 4px;
+}
+.pp-macro-mover-row {
+  display: grid;
+  grid-template-columns: 60px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--pp-text);
+  text-decoration: none;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-macro-mover-row:last-child { border-bottom: none; }
+.pp-macro-mover-row:hover { color: var(--pp-ink); }
+.pp-macro-mover-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Momentum chart ─────────────────────────────────────────────────────── */
+
+.pp-macro-momentum-panel { /* no-op */ }
+.pp-macro-momentum-body {
+  padding: 22px 26px 18px;
+  position: relative;
+}
+.pp-macro-momentum-svg {
+  display: block;
+  width: 100%;
+  height: 260px;
+}
+.pp-macro-momentum-xaxis {
+  position: relative;
+  height: 18px;
+  margin-top: 4px;
+}
+.pp-macro-momentum-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+/* Mobile — collapse two-column donut/movers rows into stacks ────────── */
+
+@media (max-width: 900px) {
+  .pp-macro-donut-body { grid-template-columns: 1fr; }
+  .pp-macro-perf-tone { grid-template-columns: 1fr; }
+  .pp-macro-sector-row { grid-template-columns: 110px 1fr 50px; }
+  .pp-macro-sector-meta { display: none; }
+  .pp-macro-week-grid { grid-template-columns: 1fr; }
+  .pp-macro-week-day { border-right: none; border-bottom: 1px solid var(--pp-line); }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * EVENTS CALENDAR (v1 enhancements) — countdown chip + week event rows +
+ * Just-Released collapsible.  Reuses .pp-macro-week-* from the Earnings
+ * Calendar so the visual rhythm stays consistent.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-macro-events-countdown-panel { /* layout reset for the countdown row */ }
+.pp-macro-events-countdown {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 18px 24px;
+}
+.pp-macro-events-countdown-evt { flex: 1; min-width: 0; }
+.pp-macro-events-countdown-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+}
+.pp-macro-events-countdown-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+.pp-macro-events-countdown-clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-macro-events-cd-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 56px;
+}
+.pp-macro-events-cd-num {
+  font-family: var(--pp-font-display, var(--pp-font-mono));
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--pp-accent);
+  letter-spacing: -1px;
+  line-height: 1;
+}
+.pp-macro-events-cd-cap {
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: var(--pp-dim);
+  margin-top: 4px;
+}
+.pp-macro-events-cd-sep {
+  font-size: 24px;
+  color: var(--pp-accent);
+  font-weight: 700;
+  align-self: flex-start;
+  margin-top: 4px;
+}
+
+/* Events Calendar week-grid rows reuse `.pp-macro-week-row` from the
+   Earnings Calendar; only the per-impact left-border modifiers + the
+   impact-tinted variant live here.  Column widths are slightly tweaked
+   for the no-link, baseline-aligned event layout. */
+.pp-macro-week-row--evt {
+  grid-template-columns: 36px 1fr;
+  align-items: baseline;
+  padding-left: 6px;
+  border-left: 2px solid transparent;
+}
+.pp-macro-week-row--evt-high   { border-left-color: var(--pp-down);   }
+.pp-macro-week-row--evt-medium { border-left-color: var(--pp-accent); }
+.pp-macro-week-row--evt-low    { border-left-color: var(--pp-dim2);   }
+.pp-macro-week-evt {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+
+/* Mini "any high-impact this day" indicator dot in the week-day header. */
+.pp-macro-week-flag {
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--pp-down);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--pp-down) 25%, transparent);
+}
+
+/* Just-Released collapsible — uses native <details>/<summary>. */
+.pp-macro-events-released {
+  background: var(--pp-panel);
+  border: 1px solid var(--pp-line2);
+}
+.pp-macro-events-released-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  cursor: pointer;
+  list-style: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.08s ease;
+}
+.pp-macro-events-released-head::-webkit-details-marker { display: none; }
+.pp-macro-events-released[open] .pp-macro-events-released-head {
+  border-bottom-color: var(--pp-line);
+}
+.pp-macro-events-released-arrow {
+  font-size: 12px;
+  color: var(--pp-dim);
+  transition: transform 0.1s ease;
+}
+.pp-macro-events-released[open] .pp-macro-events-released-arrow {
+  transform: rotate(0deg);
+}
+.pp-macro-events-released:not([open]) .pp-macro-events-released-arrow {
+  transform: rotate(-90deg);
+}
+.pp-macro-events-released-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pp-ink);
+}
+.pp-macro-events-released-table { width: 100%; }
+
+/* Impact pill in the released table */
+.pp-macro-events-imp {
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 1px 6px;
+  border: 1px solid var(--pp-line2);
+}
+.pp-macro-events-imp-high   { color: var(--pp-down);   border-color: var(--pp-down);   }
+.pp-macro-events-imp-medium { color: var(--pp-accent); border-color: var(--pp-accent); }
+.pp-macro-events-imp-low    { color: var(--pp-dim);    border-color: var(--pp-line2);  }
+.pp-macro-events-cat {
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  margin-left: 6px;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * INDICATORS TAB (v1 enhancements) — featured 3-up chart row + group filter
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-macro-featured-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.pp-macro-featured-panel { /* layout reset; no padding override */ }
+.pp-macro-featured-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 14px 18px 8px;
+  gap: 14px;
+}
+.pp-macro-featured-id { display: flex; flex-direction: column; gap: 2px; }
+.pp-macro-featured-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+}
+.pp-macro-featured-code {
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.pp-macro-featured-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.pp-macro-featured-value {
+  font-family: var(--pp-font-display, var(--pp-font-mono));
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.pp-macro-featured-delta {
+  font-size: 11px;
+  font-weight: 600;
+}
+.pp-macro-featured-svg {
+  display: block;
+  width: 100%;
+  height: 140px;
+  padding: 4px 8px 12px;
+  box-sizing: border-box;
+}
+
+/* Indicator group filter — hides non-matching panels via CSS only.
+   Server-rendered initial state controlled by the same .is-hidden class. */
+.pp-macro-ind-group.is-hidden { display: none; }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * YIELDS TAB — National Debt panel (v1 enhancement)
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-macro-debt-panel { margin-top: 18px; }
+.pp-macro-debt-body { padding: 18px 24px 24px; position: relative; }
+.pp-macro-debt-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.pp-macro-debt-value {
+  font-family: var(--pp-font-display, var(--pp-font-mono));
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--pp-down);
+  letter-spacing: -1px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.pp-macro-debt-meta {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+.pp-macro-debt-svg {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+.pp-macro-debt-xaxis {
+  position: relative;
+  height: 18px;
+  margin-top: 4px;
+}
+.pp-macro-debt-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--pp-dim);
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * FX TAB — 4-up mini-chart grid (v1 enhancement) + exchange-rates table
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-macro-fx-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.pp-macro-fx-chart-panel { /* layout reset only */ }
+.pp-macro-fx-chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 14px 18px 6px;
+}
+.pp-macro-fx-chart-pair {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+}
+.pp-macro-fx-chart-meta {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+/* Wrapper for the SVG so we can layer absolute-positioned axis labels. */
+.pp-macro-fx-chart-svg {
+  display: block;
+  width: 100%;
+  height: 180px;
+  padding: 0 8px 4px;
+  box-sizing: border-box;
+}
+.pp-macro-fx-chart-xaxis {
+  position: relative;
+  height: 14px;
+  padding: 0 30px;
+  margin-top: 2px;
+  margin-bottom: 14px;
+}
+.pp-macro-fx-chart-tick {
+  position: absolute;
+  transform: translateX(-50%) rotate(-25deg);
+  transform-origin: top left;
+  font-size: 9px;
+  color: var(--pp-dim);
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+.pp-macro-fx-chart-yaxis {
+  /* Spec calls for left-edge labels; rendering them inline keeps the
+     mini-chart legible without an extra grid column.  Hidden for now —
+     the path itself communicates direction; numeric ticks would crowd
+     the small viewport.  Kept as a placeholder for future enrichment. */
+  display: none;
+}
+
+/* Exchange rates table */
+.pp-macro-fx-table { width: 100%; }
+.pp-macro-fx-table th {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--pp-dim);
+}
+.pp-macro-fx-table td {
+  font-size: 13px;
+}
+
+
+/* ─── Mobile: stack the new two-column grids ────────────────────────── */
+
+@media (max-width: 1080px) {
+  .pp-macro-featured-grid    { grid-template-columns: 1fr; }
+  .pp-macro-fx-charts-grid   { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .pp-macro-events-countdown { flex-direction: column; align-items: flex-start; gap: 14px; }
+  .pp-macro-events-countdown-clock { width: 100%; justify-content: space-between; }
+  .pp-macro-events-cd-num { font-size: 24px; }
+  .pp-macro-debt-svg { height: 160px; }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SENTIMENT TAB — Google Trends 8-category dashboard (Macro Trends > Sentiment)
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-macro-sentiment-intro {
+  font-size: 13px;
+  color: var(--pp-dim);
+  line-height: 1.5;
+  margin: 0 0 18px 0;
+}
+
+.pp-macro-sentiment-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.pp-macro-sent-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 240px;
+}
+.pp-macro-sent-head {
+  padding: 14px 16px 6px;
+}
+.pp-macro-sent-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+}
+
+.pp-macro-sent-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 16px 14px;
+}
+.pp-macro-sent-tag {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 9px;
+  background: var(--pp-sub);
+  color: var(--pp-text);
+  border: 1px solid var(--pp-line2);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.pp-macro-sent-svg {
+  display: block;
+  width: 100%;
+  height: 110px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  margin-top: auto;
+}
+.pp-macro-sent-foot {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 16px 12px;
+  font-size: 9px;
+  letter-spacing: 0.4px;
+}
+.pp-macro-sent-axis { font-size: 9px; }
+
+/* Empty state — keeps card height stable so the grid doesn't collapse. */
+.pp-macro-sent-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.pp-macro-sentiment-foot {
+  margin-top: 18px;
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 0.2px;
+}
+.pp-macro-sentiment-foot a {
+  color: var(--pp-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pp-macro-sentiment-foot a:hover { color: var(--pp-ink); }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * VOLATILITY TAB — Put/Call ratio · VIX term structure · CBOE SKEW Index
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+/* Put/Call panel layout — top stats row + chart with axis labels. */
+.pp-macro-vol-pc-body {
+  padding: 18px 24px 24px;
+  position: relative;
+}
+.pp-macro-vol-pc-stats {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+  margin-bottom: 14px;
+}
+.pp-macro-vol-pc-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pp-macro-vol-pc-cur {
+  font-family: var(--pp-font-display, var(--pp-font-mono));
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -1px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.pp-macro-vol-pc-signal {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  padding: 3px 9px;
+  align-self: flex-start;
+  border: 1px solid currentColor;
+}
+.pp-macro-vol-pc-signal-up   { color: var(--pp-up);   }
+.pp-macro-vol-pc-signal-down { color: var(--pp-down); }
+.pp-macro-vol-pc-signal-dim  { color: var(--pp-dim);  }
+
+.pp-macro-vol-pc-svg {
+  display: block;
+  width: 100%;
+  height: 240px;
+}
+/* Y-axis labels overlaid on the SVG — tracks the same coords. */
+.pp-macro-vol-pc-yaxis {
+  position: absolute;
+  top: 70px;             /* below the stats row */
+  left: 26px;
+  height: 240px;
+  width: 28px;
+  pointer-events: none;
+}
+.pp-macro-vol-pc-ytick {
+  position: absolute;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: var(--pp-dim);
+  letter-spacing: 0.3px;
+}
+.pp-macro-vol-pc-xaxis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+
+/* VIX term structure — small line chart with per-tenor axis below. */
+.pp-macro-vol-vix-body {
+  padding: 18px 24px 22px;
+  position: relative;
+}
+.pp-macro-vol-vix-svg {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+.pp-macro-vol-vix-axis {
+  position: relative;
+  height: 36px;
+  margin-top: 4px;
+}
+.pp-macro-vol-vix-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.pp-macro-vol-vix-tenor {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--pp-dim);
+}
+.pp-macro-vol-vix-val {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+}
+.pp-macro-vol-vix-updated {
+  display: block;
+  margin-top: 8px;
+  font-size: 9px;
+  letter-spacing: 0.3px;
+  text-align: right;
+}
+
+/* SKEW chart — same shape as P/C ratio body, no stats row. */
+.pp-macro-vol-skew-body {
+  padding: 18px 24px 24px;
+  position: relative;
+}
+.pp-macro-vol-skew-svg {
+  display: block;
+  width: 100%;
+  height: 200px;
+}
+
+
+/* ─── Mobile: stack two-column rows in Sentiment + Volatility ─────── */
+
+@media (max-width: 1080px) {
+  .pp-macro-sentiment-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 720px) {
+  .pp-macro-sentiment-grid { grid-template-columns: 1fr; }
+  .pp-macro-vol-pc-cur { font-size: 24px; }
+  .pp-macro-vol-pc-svg { height: 180px; }
+  .pp-macro-vol-pc-yaxis { display: none; }   /* mobile: drop the y-axis ticks */
+}
 .pp-macro-regions-table thead th.pp-macro-th-spark { width: 96px; }

@@ -970,8 +970,14 @@ def _load_finnhub_symbol_names() -> dict[str, str]:
 def _load_finnhub_earnings_calendar() -> list[dict] | None:
     """Fetch Finnhub /calendar/earnings for past 1 week + next 4 weeks.
 
-    Returns flat list of dicts preserving ALL Finnhub fields, or None.
-    Cached in-memory for ``_ECAL_TTL`` seconds.
+    Finnhub caps each response at ~1500 entries.  A single 5-week query
+    routinely hits that cap and silently drops the earliest week (so the
+    current week's reports vanish mid-week — see CRWV/IREN repro).  We
+    paginate by fetching in 1-week chunks (~200-400 entries each) and
+    deduplicating on (symbol, date) before caching the merged list.
+
+    Returns the merged entry list, or None on hard failure.  Cached
+    in-memory for ``_ECAL_TTL`` seconds.
     """
     global _ecal_cache
 
@@ -984,33 +990,47 @@ def _load_finnhub_earnings_calendar() -> list[dict] | None:
     if not key:
         return None
 
-    end = datetime.now() + timedelta(weeks=4)
-    start = datetime.now() - timedelta(weeks=1)
+    today = datetime.now()
+    earliest = today - timedelta(weeks=1)
+    latest   = today + timedelta(weeks=4)
 
-    try:
-        r = httpx.get(
-            "https://finnhub.io/api/v1/calendar/earnings",
-            params={
-                "from": start.strftime("%Y-%m-%d"),
-                "to": end.strftime("%Y-%m-%d"),
-                "token": key,
-            },
-            timeout=20,
-        )
-        r.raise_for_status()
-        data = r.json()
+    # Build week-sized windows: [earliest, +6d], (+7d, +13d], … until we
+    # cover `latest`.  Each request is independent + idempotent — we
+    # tolerate a partial failure on any single window.
+    windows: list[tuple[str, str]] = []
+    cursor = earliest
+    while cursor <= latest:
+        end_of_week = min(cursor + timedelta(days=6), latest)
+        windows.append((cursor.strftime("%Y-%m-%d"), end_of_week.strftime("%Y-%m-%d")))
+        cursor = end_of_week + timedelta(days=1)
 
-        entries = data.get("earningsCalendar", [])
-        if not entries:
-            logger.info("Finnhub earnings calendar returned 0 entries")
-            return None
+    seen: set[tuple[str, str]] = set()
+    result: list[dict] = []
+    failed = 0
 
-        result = []
+    for w_start, w_end in windows:
+        try:
+            r = httpx.get(
+                "https://finnhub.io/api/v1/calendar/earnings",
+                params={"from": w_start, "to": w_end, "token": key},
+                timeout=15,
+            )
+            r.raise_for_status()
+            entries = r.json().get("earningsCalendar") or []
+        except Exception as exc:
+            failed += 1
+            logger.warning("Finnhub %s..%s fetch failed: %s", w_start, w_end, exc)
+            continue
+
         for item in entries:
             sym = item.get("symbol", "")
-            d = item.get("date")
+            d   = item.get("date", "")
             if not sym or not d:
                 continue
+            sig = (sym, d)
+            if sig in seen:
+                continue
+            seen.add(sig)
             result.append({
                 "symbol": sym,
                 "date": d,
@@ -1023,22 +1043,24 @@ def _load_finnhub_earnings_calendar() -> list[dict] | None:
                 "year": item.get("year"),
             })
 
-        with _ecal_lock:
-            _ecal_cache = {"entries": result, "fetched_at": time.time()}
-
-        logger.info(
-            "Finnhub earnings calendar: %d entries, %s to %s",
-            len(result), start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"),
-        )
-        return result
-
-    except Exception:
-        logger.warning("Finnhub earnings calendar fetch failed", exc_info=True)
-        # Return stale cache if available
+    if not result and failed == len(windows):
+        # Total wipeout — preserve last good cache rather than poison.
         with _ecal_lock:
             if _ecal_cache is not None:
                 return _ecal_cache["entries"]
         return None
+
+    with _ecal_lock:
+        _ecal_cache = {"entries": result, "fetched_at": time.time()}
+
+    logger.info(
+        "Finnhub earnings calendar: %d entries across %d windows (%s..%s, failed=%d)",
+        len(result), len(windows),
+        windows[0][0] if windows else "?",
+        windows[-1][1] if windows else "?",
+        failed,
+    )
+    return result
 
 
 def _calendar_date_range(period: str) -> tuple[str, str]:

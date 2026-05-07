@@ -47,7 +47,7 @@ _INDEX_PC_URL = "https://cdn.cboe.com/resources/options/volume_and_call_put_rati
 _EQUITY_PC_URL = "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/equitypc.csv"
 
 # ── yfinance timeout session (shared with market_data.py) ──────────────────
-from filings.market_data import _yf_session  # noqa: E402  # reuse single session
+from filings.market_data import _yf_session, _YF_TIMEOUT  # noqa: E402  # reuse single session + shared timeout
 
 
 def _cached_or_fetch(cache_key: str, fetcher, kind: str = "putcall"):

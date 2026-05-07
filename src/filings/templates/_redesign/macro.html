@@ -52,7 +52,7 @@
 
 {# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
 <div class="pp-page-tabs">
-  {{ segment(["Indicators","Yields","FX & Commodities","Calendar","Heatmap"],
+  {{ segment(["Indicators","Yields","FX & Commodities","Events Calendar","Sentiment","Volatility","Heatmap","Earnings","Performance"],
              value=macro_tab|default("Indicators"),
              id="pp-macro-tabs") }}
 </div>
@@ -60,11 +60,77 @@
 {# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
 <div class="pp-page-body">
 
+  {% set _macro_tab = macro_tab|default("Indicators") %}
   {# ── INDICATORS (default tab — LIVE) ── #}
-  <section class="pp-page-pane is-active" data-tab-pane="Indicators">
+  <section class="pp-page-pane{% if _macro_tab == 'Indicators' %} is-active{% endif %}" data-tab-pane="Indicators">
+
+    {# ── Featured charts row — Fed Funds, CPI, Unemployment ── #}
+    {% if macro_featured %}
+      <div class="pp-macro-featured-grid">
+        {% for c in macro_featured %}
+          {% call panel(cls="pp-macro-featured-panel") %}
+            <div class="pp-macro-featured-head">
+              <div class="pp-macro-featured-id">
+                <span class="pp-macro-featured-name">{{ c.name }}</span>
+                <span class="pp-mono pp-dim pp-macro-featured-code">{{ c.series_id }}</span>
+              </div>
+              <div class="pp-macro-featured-stats">
+                <span class="pp-macro-featured-value">{{ c.value_fmt }}</span>
+                <span class="pp-mono pp-macro-featured-delta {% if c.direction == 'up' %}pp-up{% elif c.direction == 'down' %}pp-down{% else %}pp-dim{% endif %}">
+                  {%- if c.direction == "up" %}▲ {% elif c.direction == "down" %}▼ {% endif -%}
+                  {{ c.change_fmt }}
+                </span>
+              </div>
+            </div>
+            <svg class="pp-macro-featured-svg"
+                 viewBox="0 0 {{ c.vb_w }} {{ c.vb_h }}"
+                 preserveAspectRatio="none"
+                 aria-label="{{ c.name }}">
+              {% for t in c.y_ticks %}
+                <line class="pp-home-chart-grid"
+                      x1="50" x2="{{ c.vb_w - 50 }}"
+                      y1="{{ t.y }}" y2="{{ t.y }}"
+                      vector-effect="non-scaling-stroke"/>
+              {% endfor %}
+              {% if c.kind == "bar" %}
+                {% for b in c.bars %}
+                  <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                        fill="{{ c.color }}" opacity="0.85"/>
+                {% endfor %}
+              {% else %}
+                <path d="{{ c.path_d }}" fill="none"
+                      stroke="{{ c.color }}" stroke-width="2.4"
+                      vector-effect="non-scaling-stroke"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              {% endif %}
+            </svg>
+          {% endcall %}
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {# ── Group filter sub-segment ── #}
+    {% set _group_keys = ["all"] + (macro_groups|map(attribute="key")|list) %}
+    {% set _group_labels = ["All"] + (macro_groups|map(attribute="label")|list) %}
+    <div class="pp-macro-subtabs">
+      <div class="pp-segment pp-segment-mono pp-segment-accent" id="pp-macro-ind-groups" role="tablist">
+        {% for i in range(_group_keys|length) %}
+          {% set k = _group_keys[i] %}
+          {% set lbl = _group_labels[i] %}
+          <span class="pp-segment-opt {% if (macro_ind_group|default('all')) == k %}is-active{% endif %}"
+                data-value="{{ k }}"
+                role="tab" tabindex="0">{{ lbl }}</span>
+        {% endfor %}
+      </div>
+      <span class="pp-mono pp-dim pp-macro-subtabs-meta">
+        {{ macro_count|default(0) }} indicators · FRED
+      </span>
+    </div>
+
+    {# ── Indicators grid — filtered by group ── #}
     <div class="pp-macro-indicators-grid">
       {% for g in macro_groups %}
-        {% call panel() %}
+        {% call panel(cls=("pp-macro-ind-group is-hidden" if (macro_ind_group != "all" and macro_ind_group != g.key) else "pp-macro-ind-group"), id=("pp-macro-ind-group-" ~ g.key)) %}
           {{ panel_head(g.label) }}
           {% for r in g.rows %}
             <div class="pp-macro-row">
@@ -91,7 +157,7 @@
   </section>
 
   {# ━━━━━━━━━━ YIELDS ━━━━━━━━━━ #}
-  <section class="pp-page-pane" data-tab-pane="Yields">
+  <section class="pp-page-pane{% if _macro_tab == 'Yields' %} is-active{% endif %}" data-tab-pane="Yields">
     {% call panel(cls="pp-macro-yields-panel") %}
       {{ panel_head("US Treasury yield curve",
                     sub=("As of " ~ yields_curve.as_of) if yields_curve.as_of else "Daily par yield") }}
@@ -172,10 +238,111 @@
         </div>
       {% endif %}
     {% endcall %}
+
+    {# ── National Debt panel — last 30 daily values (Treasury Fiscal Data) ── #}
+    {% if yields_debt.have_data %}
+      {% call panel(cls="pp-macro-debt-panel") %}
+        {{ panel_head("National Debt",
+                      sub="Total public debt outstanding · " ~ yields_debt.latest_date) }}
+        <div class="pp-macro-debt-body">
+          <div class="pp-macro-debt-headline">
+            <span class="pp-macro-debt-value">${{ yields_debt.latest_t }}T</span>
+            <span class="pp-mono pp-dim pp-macro-debt-meta">last 30 trading days</span>
+          </div>
+          <svg class="pp-macro-debt-svg"
+               viewBox="0 0 {{ yields_debt.vb_w }} {{ yields_debt.vb_h }}"
+               preserveAspectRatio="none"
+               aria-label="National debt over time">
+            {% for b in yields_debt.bars %}
+              <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                    fill="var(--pp-down)" opacity="0.78">
+                <title>{{ b.date }} · ${{ b.debt_t }}T</title>
+              </rect>
+            {% endfor %}
+          </svg>
+          <div class="pp-macro-debt-xaxis">
+            {% for tk in yields_debt.x_ticks %}
+              <span class="pp-mono pp-macro-debt-tick"
+                    style="left: {{ (tk.x / yields_debt.vb_w * 100) }}%;">{{ tk.label }}</span>
+            {% endfor %}
+          </div>
+        </div>
+      {% endcall %}
+    {% endif %}
   </section>
 
   {# ━━━━━━━━━━ FX & COMMODITIES ━━━━━━━━━━ #}
-  <section class="pp-page-pane" data-tab-pane="FX &amp; Commodities">
+  <section class="pp-page-pane{% if _macro_tab == 'FX & Commodities' %} is-active{% endif %}" data-tab-pane="FX &amp; Commodities">
+
+    {# ── 4-up mini-chart grid: USD/EUR · USD/GBP · USD/JPY · USD/CNY ── #}
+    {% if fx_charts %}
+      <div class="pp-macro-fx-charts-grid">
+        {% for c in fx_charts %}
+          {% call panel(cls="pp-macro-fx-chart-panel") %}
+            <div class="pp-macro-fx-chart-head">
+              <span class="pp-macro-fx-chart-pair">{{ c.label }}</span>
+              <span class="pp-mono pp-dim pp-macro-fx-chart-meta">{{ c.days }} days</span>
+            </div>
+            <svg class="pp-macro-fx-chart-svg"
+                 viewBox="0 0 {{ c.vb_w }} {{ c.vb_h }}"
+                 preserveAspectRatio="none"
+                 aria-label="{{ c.label }} timeseries">
+              {% for t in c.y_ticks %}
+                <line class="pp-home-chart-grid"
+                      x1="30" x2="{{ c.vb_w - 30 }}"
+                      y1="{{ t.y }}" y2="{{ t.y }}"
+                      vector-effect="non-scaling-stroke"/>
+              {% endfor %}
+              <path d="{{ c.path_d }}" fill="none"
+                    stroke="{{ c.color }}" stroke-width="2"
+                    vector-effect="non-scaling-stroke"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div class="pp-macro-fx-chart-xaxis">
+              {% for tk in c.x_ticks %}
+                <span class="pp-mono pp-macro-fx-chart-tick"
+                      style="left: {{ (tk.x / c.vb_w * 100) }}%;">{{ tk.label }}</span>
+              {% endfor %}
+            </div>
+            <div class="pp-macro-fx-chart-yaxis">
+              {% for t in c.y_ticks %}
+                <span class="pp-mono pp-macro-fx-chart-ytick"
+                      style="top: {{ (t.y / c.vb_h * 100) }}%;">{{ t.label }}</span>
+              {% endfor %}
+            </div>
+          {% endcall %}
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    {# ── Exchange rates table — base USD ── #}
+    {% if fx_table.have_data %}
+      {% call panel() %}
+        {{ panel_head("Exchange Rates",
+                      sub="Base: USD · " ~ fx_table.as_of) }}
+        <table class="pp-table pp-macro-fx-table">
+          <thead>
+            <tr>
+              <th>Currency</th>
+              <th>Code</th>
+              <th class="pp-num">1 USD =</th>
+              <th class="pp-num">1 UNIT = USD</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in fx_table.rows %}
+              <tr>
+                <td>{{ r.name }}</td>
+                <td><span class="pp-mono pp-ink-strong">{{ r.code }}</span></td>
+                <td class="pp-num pp-mono">{{ r.per_usd }}</td>
+                <td class="pp-num pp-mono">{{ r.usd_per }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endcall %}
+    {% endif %}
+
     <div class="pp-macro-fx-row">
       {% call panel() %}
         {{ panel_head("FX", sub="majors · spot") }}
@@ -237,51 +404,240 @@
     </div>
   </section>
 
-  {# ━━━━━━━━━━ CALENDAR ━━━━━━━━━━ #}
-  <section class="pp-page-pane" data-tab-pane="Calendar">
-    {% if macro_calendar %}
-      {% call panel() %}
-        <div class="pp-macro-calendar">
-          {% for e in macro_calendar %}
-            <div class="pp-macro-cal-row">
-              <div class="pp-macro-cal-date">
-                <span class="pp-mono pp-macro-cal-d">{{ e.d }}</span>
-                <span class="pp-mono pp-macro-cal-when">{{ e.when }}</span>
+  {# ━━━━━━━━━━ EVENTS CALENDAR (v1 enhancements) ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if _macro_tab == 'Events Calendar' %} is-active{% endif %}" data-tab-pane="Events Calendar">
+
+    {% if events.have_data %}
+
+      {# Countdown chip — next high-impact unreleased event.  ISO datetime
+         is server-rendered; JS ticks the seconds locally. #}
+      {% if events.countdown %}
+        {% call panel(cls="pp-macro-events-countdown-panel") %}
+          <div class="pp-macro-events-countdown"
+               data-iso="{{ events.countdown.iso_datetime }}">
+            <div class="pp-macro-events-countdown-evt">
+              <div class="pp-macro-events-countdown-name">{{ events.countdown.event }}</div>
+              <span class="pp-mono pp-dim pp-macro-events-countdown-meta">
+                {{ events.countdown.date }} at {{ events.countdown.time }} ET
+              </span>
+            </div>
+            <div class="pp-macro-events-countdown-clock">
+              <div class="pp-macro-events-cd-cell">
+                <span class="pp-macro-events-cd-num" data-cd-d>—</span>
+                <span class="pp-mono pp-macro-events-cd-cap">DAYS</span>
               </div>
-              <span class="pp-macro-cal-dot pp-macro-cal-impact-{{ e.impact }}" aria-hidden="true"></span>
-              <div class="pp-macro-cal-text">
-                <div class="pp-macro-cal-evt">{{ e.evt }}</div>
-                <span class="pp-mono pp-macro-cal-impact-label">{{ e.impact }} impact</span>
+              <span class="pp-macro-events-cd-sep">:</span>
+              <div class="pp-macro-events-cd-cell">
+                <span class="pp-macro-events-cd-num" data-cd-h>—</span>
+                <span class="pp-mono pp-macro-events-cd-cap">HOURS</span>
               </div>
-              <div class="pp-macro-cal-cell">
-                {{ label("Consensus") }}
-                <span class="pp-mono pp-macro-cal-num">{{ e.consensus }}</span>
+              <span class="pp-macro-events-cd-sep">:</span>
+              <div class="pp-macro-events-cd-cell">
+                <span class="pp-macro-events-cd-num" data-cd-m>—</span>
+                <span class="pp-mono pp-macro-events-cd-cap">MIN</span>
               </div>
-              <div class="pp-macro-cal-cell">
-                {{ label("Prior") }}
-                <span class="pp-mono pp-macro-cal-num pp-dim">{{ e.prior }}</span>
-              </div>
-              <div class="pp-macro-cal-cell">
-                {{ label("Actual") }}
-                <span class="pp-mono pp-macro-cal-num {% if e.released %}pp-ink{% else %}pp-dim2{% endif %}">
-                  {{ e.actual }}
-                </span>
+              <span class="pp-macro-events-cd-sep">:</span>
+              <div class="pp-macro-events-cd-cell">
+                <span class="pp-macro-events-cd-num" data-cd-s>—</span>
+                <span class="pp-mono pp-macro-events-cd-cap">SEC</span>
               </div>
             </div>
-          {% endfor %}
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      {{ kpi_strip(events.kpi_strip) }}
+
+      {# Filters: period · country · impact ── #}
+      <div class="pp-macro-earn-filters">
+        <div class="pp-macro-earn-filter-group">
+          {{ label("PERIOD") }}
+          <div class="pp-macro-pill-row">
+            {% for k, lbl in events.periods.items() %}
+              <a class="pp-macro-pill {% if events.current_period == k %}is-active{% endif %}"
+                 href="?tab=events-calendar&ev_period={{ k }}&ev_country={{ events.current_country }}&ev_impact={{ events.current_impact }}&ev_view={{ ev_view }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
         </div>
-      {% endcall %}
+        <div class="pp-macro-earn-filter-group">
+          {{ label("IMPACT") }}
+          <div class="pp-macro-pill-row">
+            {% for k, lbl in events.impact_choices.items() %}
+              <a class="pp-macro-pill {% if events.current_impact == k %}is-active{% endif %}"
+                 href="?tab=events-calendar&ev_period={{ events.current_period }}&ev_country={{ events.current_country }}&ev_impact={{ k }}&ev_view={{ ev_view }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="pp-macro-earn-filter-group">
+          {{ label("COUNTRY") }}
+          <div class="pp-macro-pill-row">
+            {% for k, lbl in events.countries.items() %}
+              <a class="pp-macro-pill {% if events.current_country == k %}is-active{% endif %}"
+                 href="?tab=events-calendar&ev_period={{ events.current_period }}&ev_country={{ k }}&ev_impact={{ events.current_impact }}&ev_view={{ ev_view }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      {# View toggle — Week ↔ List.  Same pattern as Earnings sub-segment. #}
+      <div class="pp-macro-subtabs">
+        {{ segment(["Week","List"],
+                   value=("List" if ev_view == "list" else "Week"),
+                   id="pp-macro-events-view", mono=True, accent=True) }}
+        <span class="pp-mono pp-dim pp-macro-subtabs-meta">
+          {{ events.metrics.total_events|default(0) }} events ·
+          {{ events.metrics.released_count|default(0) }} released
+          {%- if events.is_mock %} · DEMO{% endif %}
+        </span>
+      </div>
+
+      {# ── WEEK VIEW ── #}
+      <div class="pp-macro-subpane{% if ev_view != 'list' %} is-active{% endif %}" data-subpane="Week">
+        {% if events.week_grid %}
+          {% call panel() %}
+            {{ panel_head("Trading week · economic events",
+                          sub="Mon-Fri · countries: " ~ events.countries.get(events.current_country, "")) }}
+            <div class="pp-macro-week-grid">
+              {% for cell in events.week_grid %}
+                <div class="pp-macro-week-day {% if cell.is_today %}is-today{% endif %}">
+                  <div class="pp-macro-week-day-head">
+                    <span class="pp-mono pp-macro-week-dow">{{ cell.dow }}</span>
+                    <span class="pp-macro-week-date">{{ cell.label }}</span>
+                    {% if cell.has_flag %}
+                      <span class="pp-macro-week-flag" aria-label="High impact"></span>
+                    {% endif %}
+                  </div>
+                  <div class="pp-macro-week-day-body">
+                    {% if cell.entries %}
+                      {% for e in cell.entries[:8] %}
+                        <div class="pp-macro-week-row pp-macro-week-row--evt pp-macro-week-row--evt-{{ e.impact|default('low') }}">
+                          <span class="pp-mono pp-macro-week-time">{{ e.time_label or "TBD" }}</span>
+                          <span class="pp-macro-week-evt" title="{{ e.event }}">{{ e.event }}</span>
+                        </div>
+                      {% endfor %}
+                      {% if cell.entries|length > 8 %}
+                        <span class="pp-mono pp-dim2 pp-macro-week-more">
+                          + {{ cell.entries|length - 8 }} more
+                        </span>
+                      {% endif %}
+                    {% else %}
+                      <span class="pp-mono pp-dim2 pp-macro-week-empty">No events</span>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endcall %}
+        {% endif %}
+      </div>
+
+      {# ── LIST VIEW ── #}
+      <div class="pp-macro-subpane{% if ev_view == 'list' %} is-active{% endif %}" data-subpane="List">
+        {% call panel() %}
+          {{ panel_head("All events · detail",
+                        sub=events.periods.get(events.current_period, "") ~ " · " ~
+                            events.impact_choices.get(events.current_impact, "")) }}
+          <div class="pp-macro-calendar">
+            {% for day in events.events_by_date %}
+              {% for e in day.entries %}
+                <div class="pp-macro-cal-row">
+                  <div class="pp-macro-cal-date">
+                    <span class="pp-mono pp-macro-cal-d">{{ e.date[5:] }}</span>
+                    <span class="pp-mono pp-macro-cal-when">{{ e.time_label or "TBD" }}{% if e.time %} ET{% endif %}</span>
+                  </div>
+                  <span class="pp-macro-cal-dot pp-macro-cal-impact-{{ e.impact|default('low') }}" aria-hidden="true"></span>
+                  <div class="pp-macro-cal-text">
+                    <div class="pp-macro-cal-evt">{{ e.event }}</div>
+                    <span class="pp-mono pp-macro-cal-impact-label">{{ e.impact|default('low') }} impact{% if e.category %} · {{ e.category }}{% endif %}</span>
+                  </div>
+                  <div class="pp-macro-cal-cell">
+                    {{ label("Consensus") }}
+                    <span class="pp-mono pp-macro-cal-num">{{ e.estimate_fmt or "—" }}</span>
+                  </div>
+                  <div class="pp-macro-cal-cell">
+                    {{ label("Prior") }}
+                    <span class="pp-mono pp-macro-cal-num pp-dim">{{ e.previous_fmt or "—" }}</span>
+                  </div>
+                  <div class="pp-macro-cal-cell">
+                    {{ label("Actual") }}
+                    <span class="pp-mono pp-macro-cal-num {% if e.is_released and e.delta_direction == 'hot' %}pp-up{% elif e.is_released and e.delta_direction == 'cold' %}pp-down{% elif e.is_released %}pp-ink{% else %}pp-dim2{% endif %}">
+                      {{ e.actual_fmt or "—" }}
+                    </span>
+                  </div>
+                </div>
+              {% endfor %}
+            {% else %}
+              <div class="pp-page-placeholder">
+                <div class="pp-page-placeholder-sub">No events found for this filter.</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endcall %}
+      </div>
+
+      {# ── Just Released — collapsed by default, expandable ── #}
+      {% if events.just_released %}
+        <details class="pp-macro-events-released" open>
+          <summary class="pp-macro-events-released-head">
+            <span class="pp-macro-events-released-arrow" aria-hidden="true">▾</span>
+            <span class="pp-macro-events-released-title">
+              Just Released ({{ events.just_released|length }})
+            </span>
+          </summary>
+          <table class="pp-table pp-macro-events-released-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Event</th>
+                <th>Impact</th>
+                <th class="pp-num">Forecast</th>
+                <th class="pp-num">Actual</th>
+                <th class="pp-num">Previous</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for e in events.just_released %}
+                <tr>
+                  <td><span class="pp-mono">{{ e.time_label or "—" }}</span></td>
+                  <td>{{ e.event }}{% if e.category %} <span class="pp-mono pp-dim2 pp-macro-events-cat">{{ e.category }}</span>{% endif %}</td>
+                  <td>
+                    <span class="pp-mono pp-macro-events-imp pp-macro-events-imp-{{ e.impact|default('low') }}">
+                      {{ (e.impact or "low")|upper }}
+                    </span>
+                  </td>
+                  <td class="pp-num pp-mono">{{ e.estimate_fmt or "—" }}</td>
+                  <td class="pp-num pp-mono {% if e.delta_direction == 'hot' %}pp-up{% elif e.delta_direction == 'cold' %}pp-down{% else %}pp-ink{% endif %}">
+                    {{ e.actual_fmt or "—" }}
+                  </td>
+                  <td class="pp-num pp-mono pp-dim">{{ e.previous_fmt or "—" }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </details>
+      {% endif %}
+
     {% else %}
       {% call panel() %}
         <div class="pp-page-placeholder">
-          <div class="pp-page-placeholder-sub">No upcoming macro releases found.</div>
+          <div class="pp-page-placeholder-title">No events for this filter</div>
+          <div class="pp-page-placeholder-sub">
+            Try <a href="?tab=events-calendar&ev_period=next_week">Next Week</a>
+            or <a href="?tab=events-calendar&ev_country=all">All Countries</a>.
+          </div>
         </div>
       {% endcall %}
     {% endif %}
   </section>
 
   {# ━━━━━━━━━━ HEATMAP ━━━━━━━━━━ #}
-  <section class="pp-page-pane" data-tab-pane="Heatmap">
+  <section class="pp-page-pane{% if _macro_tab == 'Heatmap' %} is-active{% endif %}" data-tab-pane="Heatmap">
     {% call panel(cls="pp-macro-heat-panel") %}
       {{ panel_head("Sector heatmap", sub="S&P 500 · today's average move per GICS sector") }}
       {% if heatmap_sectors %}
@@ -350,6 +706,793 @@
     {% endcall %}
   </section>
 
+  {# ━━━━━━━━━━ SENTIMENT — Google Trends macro dashboard ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if _macro_tab == 'Sentiment' %} is-active{% endif %}" data-tab-pane="Sentiment">
+    <p class="pp-macro-sentiment-intro">
+      Search interest for market-moving macro keywords over the last 3 months.
+      Rising interest in &quot;recession&quot; or &quot;stock market crash&quot; often precedes volatility.
+    </p>
+
+    <div class="pp-macro-sentiment-grid">
+      {% for c in (sentiment.cards or []) %}
+        {% call panel(cls="pp-macro-sent-panel") %}
+          <div class="pp-macro-sent-head">
+            <span class="pp-macro-sent-title">{{ c.category }}</span>
+          </div>
+          <div class="pp-macro-sent-tags">
+            {% for kw in c.keywords %}
+              <span class="pp-macro-sent-tag">{{ kw }}</span>
+            {% endfor %}
+          </div>
+          {% if c.have_data %}
+            <svg class="pp-macro-sent-svg"
+                 viewBox="0 0 {{ c.chart.vb_w }} {{ c.chart.vb_h }}"
+                 preserveAspectRatio="none"
+                 aria-label="{{ c.category }} search interest">
+              {% for ln in c.chart.lines %}
+                <path d="{{ ln.path_d }}" fill="none"
+                      stroke="{{ ln.color }}" stroke-width="2"
+                      vector-effect="non-scaling-stroke"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              {% endfor %}
+            </svg>
+            <div class="pp-macro-sent-foot">
+              <span class="pp-mono pp-dim pp-macro-sent-axis">{{ c.chart.first_date }}</span>
+              <span class="pp-mono pp-dim pp-macro-sent-axis">{{ c.chart.last_date }}</span>
+            </div>
+          {% else %}
+            <div class="pp-macro-sent-empty">
+              <span class="pp-mono pp-dim2">
+                {%- if sentiment.is_warming %}Data warming up · refresh in a minute
+                {%- else %}Data temporarily unavailable{% endif -%}
+              </span>
+            </div>
+          {% endif %}
+        {% endcall %}
+      {% endfor %}
+    </div>
+
+    <p class="pp-macro-sentiment-foot">
+      Data from <a href="https://trends.google.com/" target="_blank" rel="noopener">Google Trends</a>
+      (relative search interest 0-100).  Updated daily.
+    </p>
+  </section>
+
+  {# ━━━━━━━━━━ VOLATILITY — Put/Call · VIX · SKEW ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if _macro_tab == 'Volatility' %} is-active{% endif %}" data-tab-pane="Volatility">
+
+    {# ── Sub-segment: Total / Index / Equity drives the P/C ratio source ── #}
+    <div class="pp-macro-subtabs">
+      <div class="pp-segment pp-segment-mono pp-segment-accent" id="pp-macro-vol-pcseg" role="tablist">
+        {% for k, lbl in (vol.pc_types or {}).items() %}
+          <a class="pp-segment-opt {% if (vol.current_pc or 'total') == k %}is-active{% endif %}"
+             href="?tab=volatility&pc_type={{ k }}"
+             data-value="{{ k }}" role="tab" tabindex="0">{{ lbl }}</a>
+        {% endfor %}
+      </div>
+      <span class="pp-mono pp-dim pp-macro-subtabs-meta">
+        Volatility &amp; Options Sentiment
+      </span>
+    </div>
+
+    <div class="pp-row pp-row-2-1">
+      {# ── Put/Call Ratio (1 year) ── #}
+      {% call panel() %}
+        {{ panel_head("Put/Call Ratio",
+                      sub=(vol.pc.ratio_label|default('Total')) ~ " · 1 Year") }}
+        {% if vol.pc.have_data %}
+          <div class="pp-macro-vol-pc-body">
+            <div class="pp-macro-vol-pc-stats">
+              <div class="pp-macro-vol-pc-stat">
+                {{ label("CURRENT") }}
+                <span class="pp-macro-vol-pc-cur">{{ vol.pc.current }}</span>
+              </div>
+              <div class="pp-macro-vol-pc-stat">
+                {{ label("SIGNAL") }}
+                <span class="pp-macro-vol-pc-signal pp-macro-vol-pc-signal-{{ vol.pc.signal.tone }}">
+                  {{ vol.pc.signal.label }}
+                </span>
+              </div>
+            </div>
+            <svg class="pp-macro-vol-pc-svg"
+                 viewBox="0 0 {{ vol.pc.vb_w }} {{ vol.pc.vb_h }}"
+                 preserveAspectRatio="none"
+                 aria-label="Put/Call ratio history">
+              {% for t in vol.pc.y_ticks %}
+                <line class="pp-home-chart-grid"
+                      x1="50" x2="{{ vol.pc.vb_w - 8 }}"
+                      y1="{{ t.y }}" y2="{{ t.y }}"
+                      vector-effect="non-scaling-stroke"/>
+              {% endfor %}
+              {# 1.0 threshold (bearish/bullish split) #}
+              <line x1="50" x2="{{ vol.pc.vb_w - 8 }}"
+                    y1="{{ vol.pc.threshold_y }}" y2="{{ vol.pc.threshold_y }}"
+                    stroke="var(--pp-down)" stroke-width="1"
+                    stroke-dasharray="6 4"
+                    vector-effect="non-scaling-stroke"/>
+              <path d="{{ vol.pc.path_d }}" fill="none"
+                    stroke="var(--pp-up)" stroke-width="2"
+                    vector-effect="non-scaling-stroke"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div class="pp-macro-vol-pc-yaxis">
+              {% for t in vol.pc.y_ticks %}
+                <span class="pp-mono pp-macro-vol-pc-ytick"
+                      style="top: {{ (t.y / vol.pc.vb_h * 100) }}%;">{{ t.label }}</span>
+              {% endfor %}
+            </div>
+            <div class="pp-macro-vol-pc-xaxis">
+              <span class="pp-mono pp-dim">{{ vol.pc.first_date }}</span>
+              <span class="pp-mono pp-dim">{{ vol.pc.last_date }}</span>
+            </div>
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">Put/Call ratio data unavailable.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+
+      {# ── VIX term structure ── #}
+      {% call panel() %}
+        {{ panel_head("VIX Term Structure",
+                      sub=(vol.vix.state|default('—')) ~ (" · spot " ~ vol.vix.spot if vol.vix.spot else "")) }}
+        {% if vol.vix.have_data %}
+          <div class="pp-macro-vol-vix-body">
+            <svg class="pp-macro-vol-vix-svg"
+                 viewBox="0 0 {{ vol.vix.vb_w }} {{ vol.vix.vb_h }}"
+                 preserveAspectRatio="none"
+                 aria-label="VIX term structure">
+              <path d="{{ vol.vix.path_d }}" fill="none"
+                    stroke="var(--pp-accent)" stroke-width="2.4"
+                    vector-effect="non-scaling-stroke"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+              {% for d in vol.vix.dots %}
+                <circle cx="{{ d.x }}" cy="{{ d.y }}" r="4"
+                        fill="var(--pp-bg)" stroke="var(--pp-accent)" stroke-width="2"
+                        vector-effect="non-scaling-stroke"/>
+              {% endfor %}
+            </svg>
+            <div class="pp-macro-vol-vix-axis">
+              {% for d in vol.vix.dots %}
+                <span class="pp-macro-vol-vix-tick"
+                      style="left: {{ (d.x / vol.vix.vb_w * 100) }}%;">
+                  <span class="pp-mono pp-macro-vol-vix-tenor">{{ d.label }}</span>
+                  <span class="pp-mono pp-macro-vol-vix-val">{{ d.value }}</span>
+                </span>
+              {% endfor %}
+            </div>
+            {% if vol.vix.updated %}
+              <span class="pp-mono pp-dim2 pp-macro-vol-vix-updated">Updated {{ vol.vix.updated }}</span>
+            {% endif %}
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">VIX term structure data unavailable.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+    </div>
+
+    {# ── CBOE SKEW Index ── #}
+    {% call panel() %}
+      {{ panel_head("CBOE SKEW Index",
+                    sub="Tail Risk Indicator · 1 Year"
+                        ~ (" · current " ~ vol.skew.current if vol.skew.current else "")) }}
+      {% if vol.skew.have_data %}
+        <div class="pp-macro-vol-skew-body">
+          <svg class="pp-macro-vol-skew-svg"
+               viewBox="0 0 {{ vol.skew.vb_w }} {{ vol.skew.vb_h }}"
+               preserveAspectRatio="none"
+               aria-label="CBOE SKEW index">
+            {% if vol.skew.threshold_y is not none %}
+              <line x1="50" x2="{{ vol.skew.vb_w - 8 }}"
+                    y1="{{ vol.skew.threshold_y }}" y2="{{ vol.skew.threshold_y }}"
+                    stroke="var(--pp-down)" stroke-width="1"
+                    stroke-dasharray="6 4"
+                    vector-effect="non-scaling-stroke"/>
+            {% endif %}
+            <path d="{{ vol.skew.path_d }}" fill="none"
+                  stroke="var(--pp-accent)" stroke-width="2"
+                  vector-effect="non-scaling-stroke"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <div class="pp-macro-vol-pc-xaxis">
+            <span class="pp-mono pp-dim">{{ vol.skew.first_date }}</span>
+            <span class="pp-mono pp-dim">{{ vol.skew.last_date }}</span>
+          </div>
+        </div>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">SKEW index data unavailable.</div>
+        </div>
+      {% endif %}
+    {% endcall %}
+
+    <p class="pp-macro-sentiment-foot">
+      Put/Call Ratio from CBOE.  VIX data from Yahoo Finance.  SKEW from CBOE via Yahoo Finance.
+      P/C &gt; 1.0 = bearish (more puts), P/C &lt; 0.7 = bullish (more calls).
+      SKEW &gt; 130 = elevated tail risk.
+    </p>
+  </section>
+
+  {# ━━━━━━━━━━ EARNINGS — Scorecard + Calendar sub-tabs ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if _macro_tab == 'Earnings' %} is-active{% endif %}" data-tab-pane="Earnings">
+
+    {# Sub-segment switches between Scorecard and Calendar.  Both are pre-
+       rendered server-side so flipping is just a CSS toggle — same pattern
+       as the parent macro tabs. #}
+    <div class="pp-macro-subtabs">
+      {{ segment(["Scorecard","Calendar"],
+                 value=("Calendar" if earn_view == "calendar" else "Scorecard"),
+                 id="pp-macro-earn-subtabs", mono=True, accent=True) }}
+      <span class="pp-mono pp-dim pp-macro-subtabs-meta">
+        {{ earn.current_quarter|default("") }}
+        {%- if earn.metrics and earn.metrics.total -%}
+          &nbsp;·&nbsp;{{ earn.metrics.total }} reporting
+        {%- endif -%}
+      </span>
+    </div>
+
+    {# ── SCORECARD sub-pane ── #}
+    <div class="pp-macro-subpane{% if earn_view != 'calendar' %} is-active{% endif %}" data-subpane="Scorecard">
+      {% if earn.have_data %}
+
+        {{ kpi_strip(earn.kpi_strip) }}
+
+        {# Index + sector filter row.  Server-side filter — clicking re-renders
+           the page with new query params (kept simple to avoid HTMX wiring). #}
+        <div class="pp-macro-earn-filters">
+          <div class="pp-macro-earn-filter-group">
+            {{ label("INDEX") }}
+            <div class="pp-macro-pill-row">
+              {% for key, lbl in earn.indices.items() %}
+                <a class="pp-macro-pill {% if earn.current_index == key %}is-active{% endif %}"
+                   href="?tab=earnings&earn_index={{ key }}{% if earn.current_sector %}&earn_sector={{ earn.current_sector }}{% endif %}">
+                  {{ lbl }}
+                </a>
+              {% endfor %}
+            </div>
+          </div>
+          <div class="pp-macro-earn-filter-group">
+            {{ label("SECTOR") }}
+            <div class="pp-macro-pill-row pp-macro-pill-row-wrap">
+              <a class="pp-macro-pill {% if not earn.current_sector %}is-active{% endif %}"
+                 href="?tab=earnings&earn_index={{ earn.current_index }}">All</a>
+              {% for s in earn.sectors %}
+                <a class="pp-macro-pill {% if earn.current_sector == s %}is-active{% endif %}"
+                   href="?tab=earnings&earn_index={{ earn.current_index }}&earn_sector={{ s|urlencode }}">
+                  {{ s }}
+                </a>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        {# ── Donuts: Beat vs Miss ── #}
+        <div class="pp-row pp-row-2">
+          {% call panel() %}
+            {{ panel_head("EPS · Beat vs Miss",
+                          sub=("%s reporting"|format(earn.metrics.total))) }}
+            <div class="pp-macro-donut-body">
+              {%- set d = earn.donut_eps -%}
+              <svg class="pp-macro-donut" viewBox="0 0 160 160" aria-label="EPS beat distribution">
+                {# Background ring #}
+                <circle cx="80" cy="80" r="{{ d.r }}" fill="none"
+                        stroke="var(--pp-line2)" stroke-width="14"/>
+                {% if d.have_data %}
+                  <g transform="rotate(-90 80 80)">
+                    {# Beats slice #}
+                    <circle cx="80" cy="80" r="{{ d.r }}" fill="none"
+                            stroke="var(--pp-up)" stroke-width="14"
+                            stroke-dasharray="{{ d.beat_dash }} {{ d.circumference }}"
+                            stroke-dashoffset="0"/>
+                    {# Misses slice #}
+                    <circle cx="80" cy="80" r="{{ d.r }}" fill="none"
+                            stroke="var(--pp-down)" stroke-width="14"
+                            stroke-dasharray="{{ d.miss_dash }} {{ d.circumference }}"
+                            stroke-dashoffset="{{ d.miss_offset }}"/>
+                    {# In-line slice #}
+                    <circle cx="80" cy="80" r="{{ d.r }}" fill="none"
+                            stroke="var(--pp-dim2)" stroke-width="14"
+                            stroke-dasharray="{{ d.inline_dash }} {{ d.circumference }}"
+                            stroke-dashoffset="{{ d.inline_offset }}"/>
+                  </g>
+                {% endif %}
+                <text x="80" y="76" text-anchor="middle"
+                      class="pp-macro-donut-pct">{{ d.beat_pct }}%</text>
+                <text x="80" y="96" text-anchor="middle"
+                      class="pp-macro-donut-cap">BEAT RATE</text>
+              </svg>
+              <div class="pp-macro-donut-legend">
+                <div class="pp-macro-donut-row">
+                  <span class="pp-macro-donut-dot" style="background: var(--pp-up);"></span>
+                  <span>Beats</span>
+                  <span class="pp-mono pp-macro-donut-num">{{ d.beats }}</span>
+                </div>
+                <div class="pp-macro-donut-row">
+                  <span class="pp-macro-donut-dot" style="background: var(--pp-down);"></span>
+                  <span>Misses</span>
+                  <span class="pp-mono pp-macro-donut-num">{{ d.misses }}</span>
+                </div>
+                <div class="pp-macro-donut-row">
+                  <span class="pp-macro-donut-dot" style="background: var(--pp-dim2);"></span>
+                  <span>In-line</span>
+                  <span class="pp-mono pp-macro-donut-num">{{ d.inline }}</span>
+                </div>
+              </div>
+            </div>
+          {% endcall %}
+
+          {% call panel() %}
+            {{ panel_head("Revenue · Beat vs Miss",
+                          sub=("%s with revenue est."|format(earn.metrics.rev_total|default(earn.metrics.total)))) }}
+            <div class="pp-macro-donut-body">
+              {%- set d = earn.donut_rev -%}
+              <svg class="pp-macro-donut" viewBox="0 0 160 160" aria-label="Revenue beat distribution">
+                <circle cx="80" cy="80" r="{{ d.r }}" fill="none"
+                        stroke="var(--pp-line2)" stroke-width="14"/>
+                {% if d.have_data %}
+                  <g transform="rotate(-90 80 80)">
+                    <circle cx="80" cy="80" r="{{ d.r }}" fill="none"
+                            stroke="var(--pp-up)" stroke-width="14"
+                            stroke-dasharray="{{ d.beat_dash }} {{ d.circumference }}"
+                            stroke-dashoffset="0"/>
+                    <circle cx="80" cy="80" r="{{ d.r }}" fill="none"
+                            stroke="var(--pp-down)" stroke-width="14"
+                            stroke-dasharray="{{ d.miss_dash }} {{ d.circumference }}"
+                            stroke-dashoffset="{{ d.miss_offset }}"/>
+                    <circle cx="80" cy="80" r="{{ d.r }}" fill="none"
+                            stroke="var(--pp-dim2)" stroke-width="14"
+                            stroke-dasharray="{{ d.inline_dash }} {{ d.circumference }}"
+                            stroke-dashoffset="{{ d.inline_offset }}"/>
+                  </g>
+                {% endif %}
+                <text x="80" y="76" text-anchor="middle"
+                      class="pp-macro-donut-pct">{{ d.beat_pct }}%</text>
+                <text x="80" y="96" text-anchor="middle"
+                      class="pp-macro-donut-cap">BEAT RATE</text>
+              </svg>
+              <div class="pp-macro-donut-legend">
+                <div class="pp-macro-donut-row">
+                  <span class="pp-macro-donut-dot" style="background: var(--pp-up);"></span>
+                  <span>Beats</span>
+                  <span class="pp-mono pp-macro-donut-num">{{ d.beats }}</span>
+                </div>
+                <div class="pp-macro-donut-row">
+                  <span class="pp-macro-donut-dot" style="background: var(--pp-down);"></span>
+                  <span>Misses</span>
+                  <span class="pp-mono pp-macro-donut-num">{{ d.misses }}</span>
+                </div>
+                <div class="pp-macro-donut-row">
+                  <span class="pp-macro-donut-dot" style="background: var(--pp-dim2);"></span>
+                  <span>In-line</span>
+                  <span class="pp-mono pp-macro-donut-num">{{ d.inline }}</span>
+                </div>
+              </div>
+            </div>
+          {% endcall %}
+        </div>
+
+        {# ── Beat-rate trend (last 8 quarters) ── #}
+        {% if earn.trend.have_data %}
+          {% call panel(cls="pp-macro-trend-panel") %}
+            {{ panel_head("Beat rate vs market reaction",
+                          sub="last 8 quarters · solid lines = beat rate, bars = avg next-day price change") }}
+            <div class="pp-macro-trend-body">
+              <svg class="pp-macro-trend-svg"
+                   viewBox="0 0 {{ earn.trend.vb_w }} {{ earn.trend.vb_h }}"
+                   preserveAspectRatio="none"
+                   aria-label="Quarterly beat rate trend">
+                {# Y-axis grid lines #}
+                {% for t in earn.trend.y_pct %}
+                  <line class="pp-home-chart-grid"
+                        x1="{{ earn.trend.pad_x }}" x2="{{ earn.trend.vb_w - earn.trend.pad_x }}"
+                        y1="{{ t.y }}" y2="{{ t.y }}"
+                        vector-effect="non-scaling-stroke"/>
+                {% endfor %}
+                {# Reaction bars (centered around vertical mid) #}
+                {% for b in earn.trend.bars %}
+                  <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                        fill="{{ 'var(--pp-up)' if b.up else 'var(--pp-down)' }}"
+                        opacity="0.45"/>
+                {% endfor %}
+                {# EPS beat-rate line (coral) #}
+                <path d="{{ earn.trend.eps_path }}"
+                      fill="none" stroke="var(--pp-accent)" stroke-width="2.4"
+                      vector-effect="non-scaling-stroke"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+                {# Rev beat-rate line (ink) #}
+                <path d="{{ earn.trend.rev_path }}"
+                      fill="none" stroke="var(--pp-ink)" stroke-width="2.4"
+                      vector-effect="non-scaling-stroke" stroke-dasharray="6 4"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+                {# Dots #}
+                {% for d in earn.trend.eps_dots %}
+                  <circle cx="{{ d.x }}" cy="{{ d.y }}" r="3.5"
+                          fill="var(--pp-bg)" stroke="var(--pp-accent)" stroke-width="2"
+                          vector-effect="non-scaling-stroke"/>
+                {% endfor %}
+                {% for d in earn.trend.rev_dots %}
+                  <circle cx="{{ d.x }}" cy="{{ d.y }}" r="3.5"
+                          fill="var(--pp-bg)" stroke="var(--pp-ink)" stroke-width="2"
+                          vector-effect="non-scaling-stroke"/>
+                {% endfor %}
+              </svg>
+              <div class="pp-macro-trend-xaxis">
+                {% for q in earn.trend.quarters %}
+                  <span class="pp-mono pp-macro-trend-tick">{{ q }}</span>
+                {% endfor %}
+              </div>
+              <div class="pp-macro-trend-legend">
+                <span class="pp-mono"><span class="pp-macro-trend-swatch pp-macro-trend-swatch-eps"></span> EPS beat rate</span>
+                <span class="pp-mono"><span class="pp-macro-trend-swatch pp-macro-trend-swatch-rev"></span> Revenue beat rate</span>
+                <span class="pp-mono pp-dim">bars = next-day reaction</span>
+              </div>
+            </div>
+          {% endcall %}
+        {% endif %}
+
+        {# ── Results table — sorted by largest market reaction ── #}
+        {% if earn.results %}
+          {% call panel() %}
+            {{ panel_head("Results · biggest reactions",
+                          sub=("top %s of %s reports"|format(earn.results|length, earn.results_total))) }}
+            <div class="pp-macro-earn-table-wrap">
+              <table class="pp-table pp-macro-earn-table">
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Company</th>
+                    <th>Sector</th>
+                    <th class="pp-num">EPS surp.</th>
+                    <th class="pp-num">Rev surp.</th>
+                    <th class="pp-num">Reaction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for r in earn.results %}
+                    <tr>
+                      <td><span class="pp-mono pp-ink-strong">{{ r.symbol }}</span></td>
+                      <td class="pp-macro-earn-name">{{ r.name }}</td>
+                      <td class="pp-dim">{{ r.sector or "—" }}</td>
+                      <td class="pp-num pp-mono {% if r.eps_beat == True %}pp-up{% elif r.eps_beat == False %}pp-down{% else %}pp-dim{% endif %}">
+                        {%- if r.eps_surprise_pct is not none -%}
+                          {{ "%+.2f%%"|format(r.eps_surprise_pct) }}
+                        {%- else -%}—{%- endif -%}
+                      </td>
+                      <td class="pp-num pp-mono {% if r.rev_beat == True %}pp-up{% elif r.rev_beat == False %}pp-down{% else %}pp-dim{% endif %}">
+                        {%- if r.rev_surprise_pct is not none -%}
+                          {{ "%+.2f%%"|format(r.rev_surprise_pct) }}
+                        {%- else -%}—{%- endif -%}
+                      </td>
+                      <td class="pp-num pp-mono {% if r.price_change is not none and r.price_change >= 0 %}pp-up{% elif r.price_change is not none %}pp-down{% else %}pp-dim{% endif %}">
+                        {%- if r.price_change is not none -%}
+                          {{ "%+.2f%%"|format(r.price_change) }}
+                        {%- else -%}—{%- endif -%}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endcall %}
+        {% endif %}
+
+      {% else %}
+        {% call panel() %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-title">Earnings data warming up</div>
+            <div class="pp-page-placeholder-sub">No completed reports for this quarter yet — check back when the next batch lands.</div>
+          </div>
+        {% endcall %}
+      {% endif %}
+    </div>
+
+    {# ── CALENDAR sub-pane ── #}
+    {# Filters always render (so users can pick a period that has data even
+       if the default `this_week` is empty mid-week).  Empty-state placeholder
+       lives inside the panel so the filter row stays visible. #}
+    <div class="pp-macro-subpane{% if earn_view == 'calendar' %} is-active{% endif %}" data-subpane="Calendar">
+
+      {% if ecal.kpi_strip %}{{ kpi_strip(ecal.kpi_strip) }}{% endif %}
+
+      <div class="pp-macro-earn-filters">
+        <div class="pp-macro-earn-filter-group">
+          {{ label("INDEX") }}
+          <div class="pp-macro-pill-row">
+            {% for key, lbl in (ecal.indices or {}).items() %}
+              <a class="pp-macro-pill {% if ecal.current_index == key %}is-active{% endif %}"
+                 href="?tab=earnings&earn_view=calendar&cal_index={{ key }}&cal_period={{ ecal.current_period|default('this_week') }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="pp-macro-earn-filter-group">
+          {{ label("PERIOD") }}
+          <div class="pp-macro-pill-row">
+            {% for key, lbl in (ecal.periods or {}).items() %}
+              <a class="pp-macro-pill {% if ecal.current_period == key %}is-active{% endif %}"
+                 href="?tab=earnings&earn_view=calendar&cal_index={{ ecal.current_index|default('all') }}&cal_period={{ key }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      {% if ecal.have_data %}
+
+        {# ── Week grid (Mon-Fri) ── #}
+        {% if ecal.week_grid %}
+          {% call panel() %}
+            {{ panel_head("Trading week · earnings releases",
+                          sub="Mon-Fri · before/after each session") }}
+            <div class="pp-macro-week-grid">
+              {% for cell in ecal.week_grid %}
+                <div class="pp-macro-week-day {% if cell.is_today %}is-today{% endif %}">
+                  <div class="pp-macro-week-day-head">
+                    <span class="pp-mono pp-macro-week-dow">{{ cell.dow }}</span>
+                    <span class="pp-macro-week-date">{{ cell.label }}</span>
+                  </div>
+                  <div class="pp-macro-week-day-body">
+                    {% if cell.entries %}
+                      {% for e in cell.entries[:6] %}
+                        <a class="pp-macro-week-row" href="/stock/{{ e.symbol }}">
+                          <span class="pp-mono pp-macro-week-time">{{ e.hour|upper or "—" }}</span>
+                          <span class="pp-mono pp-macro-week-tick">{{ e.symbol }}</span>
+                          {% if e.is_superinvestor %}
+                            <span class="pp-tag pp-mono pp-macro-week-si"
+                                  title="Held by {{ (e.si_names|default([]))|join(', ') }}">SI</span>
+                          {% endif %}
+                        </a>
+                      {% endfor %}
+                      {% if cell.entries|length > 6 %}
+                        <span class="pp-mono pp-dim2 pp-macro-week-more">
+                          + {{ cell.entries|length - 6 }} more
+                        </span>
+                      {% endif %}
+                    {% else %}
+                      <span class="pp-mono pp-dim2 pp-macro-week-empty">—</span>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endcall %}
+        {% endif %}
+
+        {# ── List view — all upcoming, grouped by date ── #}
+        {% call panel() %}
+          {{ panel_head("Upcoming releases · detail",
+                        sub=ecal.indices.get(ecal.current_index, "") ~ " · " ~ ecal.periods.get(ecal.current_period, "")) }}
+          <div class="pp-macro-cal-list">
+            {% for day in ecal.upcoming %}
+              <div class="pp-macro-cal-day">
+                <div class="pp-macro-cal-day-head">
+                  <span class="pp-mono pp-macro-cal-day-iso">{{ day.date }}</span>
+                  <span class="pp-macro-cal-day-label">{{ day.date_label }}</span>
+                  <span class="pp-mono pp-dim pp-macro-cal-day-count">{{ day.entries|length }} reports</span>
+                </div>
+                <table class="pp-table pp-macro-cal-table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Ticker</th>
+                      <th>Company</th>
+                      <th>Sector</th>
+                      <th class="pp-num">EPS est.</th>
+                      <th class="pp-num">Rev est.</th>
+                      <th>Holdings</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {# Show all entries — busy earnings days legitimately
+                       run 500+ tickers; truncating hides high-profile names
+                       that aren't in the top-by-revenue slice. #}
+                    {% for e in day.entries %}
+                      <tr>
+                        <td><span class="pp-mono pp-dim">{{ e.hour_label or "—" }}</span></td>
+                        <td><a class="pp-mono pp-ink-strong pp-macro-cal-link" href="/stock/{{ e.symbol }}">{{ e.symbol }}</a></td>
+                        <td class="pp-macro-cal-name">{{ e.name }}</td>
+                        <td class="pp-dim">{{ e.sector or "—" }}</td>
+                        <td class="pp-num pp-mono">
+                          {%- if e.epsEstimate is not none -%}
+                            {{ "%.2f"|format(e.epsEstimate) }}
+                          {%- else -%}—{%- endif -%}
+                        </td>
+                        <td class="pp-num pp-mono">{{ e.revenueEstimate_fmt or "—" }}</td>
+                        <td>
+                          {% if e.is_superinvestor %}
+                            <span class="pp-tag pp-mono pp-macro-cal-si"
+                                  title="Held by {{ (e.si_names|default([]))|join(', ') }}">SI · {{ (e.si_names|default([]))|length }}</span>
+                          {% else %}
+                            <span class="pp-mono pp-dim2">—</span>
+                          {% endif %}
+                        </td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="pp-page-placeholder">
+                <div class="pp-page-placeholder-sub">No earnings reports scheduled for this period.</div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endcall %}
+
+      {% else %}
+        {% call panel() %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-title">No reports in this window</div>
+            <div class="pp-page-placeholder-sub">
+              Try <a href="?tab=earnings&earn_view=calendar&cal_period=next_week">Next Week</a>
+              or <a href="?tab=earnings&earn_view=calendar&cal_period=next_2w">Next 2 Weeks</a> for upcoming releases.
+            </div>
+          </div>
+        {% endcall %}
+      {% endif %}
+    </div>
+  </section>
+
+  {# ━━━━━━━━━━ PERFORMANCE — Market breadth ━━━━━━━━━━ #}
+  <section class="pp-page-pane{% if _macro_tab == 'Performance' %} is-active{% endif %}" data-tab-pane="Performance">
+    {% if perf.have_data %}
+
+      {{ kpi_strip(perf.kpi_strip) }}
+
+      {# Filter row — index + period.  Mirrors v1 segmented controls. #}
+      <div class="pp-macro-earn-filters">
+        <div class="pp-macro-earn-filter-group">
+          {{ label("INDEX") }}
+          <div class="pp-macro-pill-row">
+            {% for key, lbl in perf.indices.items() %}
+              <a class="pp-macro-pill {% if perf.current_index == key %}is-active{% endif %}"
+                 href="?tab=performance&perf_index={{ key }}&perf_period={{ perf.current_period }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="pp-macro-earn-filter-group">
+          {{ label("PERIOD") }}
+          <div class="pp-macro-pill-row">
+            {% for key, lbl in perf.periods.items() %}
+              <a class="pp-macro-pill {% if perf.current_period == key %}is-active{% endif %}"
+                 href="?tab=performance&perf_index={{ perf.current_index }}&perf_period={{ key }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      {# ── Status + Up/Down ratio ── #}
+      {% call panel() %}
+        {{ panel_head("Market tone",
+                      sub=perf.data_index_name ~ " · " ~ perf.data_period_label) }}
+        <div class="pp-macro-perf-tone">
+          <div class="pp-macro-perf-status pp-macro-perf-status-{{ perf.status.tone }}">
+            <span class="pp-mono pp-macro-perf-status-kicker">STATUS</span>
+            <span class="pp-macro-perf-status-label">{{ perf.status.label }}</span>
+          </div>
+          <div class="pp-macro-perf-ratio">
+            <div class="pp-macro-perf-ratio-bar">
+              <span class="pp-macro-perf-ratio-up"   style="width: {{ perf.advance_pct }}%;"></span>
+              <span class="pp-macro-perf-ratio-flat" style="width: {{ perf.unchanged_pct }}%;"></span>
+              <span class="pp-macro-perf-ratio-dn"   style="width: {{ perf.decline_pct }}%;"></span>
+            </div>
+            <div class="pp-macro-perf-ratio-meta">
+              <span class="pp-mono pp-up">▲ {{ perf.metrics.advances }} advancing ({{ perf.advance_pct }}%)</span>
+              <span class="pp-mono pp-down">▼ {{ perf.metrics.declines }} declining ({{ perf.decline_pct }}%)</span>
+            </div>
+          </div>
+          {% if perf.divergence %}
+            <div class="pp-macro-perf-divergence pp-macro-perf-divergence-{{ perf.divergence.type }}">
+              <span class="pp-mono pp-macro-perf-divergence-kicker">DIVERGENCE</span>
+              <span class="pp-macro-perf-divergence-msg">{{ perf.divergence.message }}</span>
+            </div>
+          {% endif %}
+        </div>
+      {% endcall %}
+
+      {# ── Sector performance bars + top movers ── #}
+      <div class="pp-row pp-row-2-1">
+        {% call panel() %}
+          {{ panel_head("Sector performance",
+                        sub="% of names advancing within each GICS sector") }}
+          <div class="pp-macro-sector-bars">
+            {% for s in perf.sector_breadth %}
+              <div class="pp-macro-sector-row">
+                <span class="pp-macro-sector-name">{{ s.sector }}</span>
+                <div class="pp-macro-sector-bar">
+                  <span class="pp-macro-sector-bar-fill"
+                        style="width: {{ s.up_pct }}%;"></span>
+                </div>
+                <span class="pp-mono pp-macro-sector-pct">{{ s.up_pct }}%</span>
+                <span class="pp-mono pp-dim2 pp-macro-sector-meta">
+                  {{ s.up }}/{{ s.total }}
+                </span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endcall %}
+
+        {% call panel() %}
+          {{ panel_head("Top movers", sub="biggest single-name moves") }}
+          <div class="pp-macro-movers">
+            <div class="pp-macro-movers-group">
+              <div class="pp-mono pp-macro-movers-kicker pp-up">GAINERS</div>
+              {% for m in perf.top_gainers %}
+                <a class="pp-macro-mover-row" href="/stock/{{ m.ticker }}">
+                  <span class="pp-mono pp-ink-strong">{{ m.ticker }}</span>
+                  <span class="pp-macro-mover-name">{{ m.name }}</span>
+                  <span class="pp-mono pp-up">+{{ m.pct }}%</span>
+                </a>
+              {% endfor %}
+            </div>
+            <div class="pp-macro-movers-group">
+              <div class="pp-mono pp-macro-movers-kicker pp-down">LOSERS</div>
+              {% for m in perf.top_losers %}
+                <a class="pp-macro-mover-row" href="/stock/{{ m.ticker }}">
+                  <span class="pp-mono pp-ink-strong">{{ m.ticker }}</span>
+                  <span class="pp-macro-mover-name">{{ m.name }}</span>
+                  <span class="pp-mono pp-down">{{ m.pct }}%</span>
+                </a>
+              {% endfor %}
+            </div>
+          </div>
+        {% endcall %}
+      </div>
+
+      {# ── Momentum chart: cumulative A/D vs index price ── #}
+      {% if perf.momentum.have_data %}
+        {% call panel(cls="pp-macro-momentum-panel") %}
+          {{ panel_head("Market momentum",
+                        sub="cumulative advance/decline line vs " ~ perf.momentum.index_name ~ " · last " ~ perf.momentum.n_days ~ " sessions") }}
+          <div class="pp-macro-momentum-body">
+            <svg class="pp-macro-momentum-svg"
+                 viewBox="0 0 {{ perf.momentum.vb_w }} {{ perf.momentum.vb_h }}"
+                 preserveAspectRatio="none"
+                 aria-label="A/D line vs index">
+              {# A/D line (coral, primary) #}
+              <path d="{{ perf.momentum.ad_path }}"
+                    fill="none" stroke="var(--pp-accent)" stroke-width="2.4"
+                    vector-effect="non-scaling-stroke"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+              {# Index price (ink, secondary) #}
+              <path d="{{ perf.momentum.px_path }}"
+                    fill="none" stroke="var(--pp-ink)" stroke-width="2"
+                    vector-effect="non-scaling-stroke" stroke-dasharray="6 4"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <div class="pp-macro-momentum-xaxis">
+              {% for tk in perf.momentum.x_labels %}
+                <span class="pp-mono pp-macro-momentum-tick"
+                      style="left: {{ (tk.x / perf.momentum.vb_w * 100) }}%;">{{ tk.label }}</span>
+              {% endfor %}
+            </div>
+            <div class="pp-macro-trend-legend">
+              <span class="pp-mono"><span class="pp-macro-trend-swatch pp-macro-trend-swatch-eps"></span> A/D line (cumulative)</span>
+              <span class="pp-mono"><span class="pp-macro-trend-swatch pp-macro-trend-swatch-rev"></span> {{ perf.momentum.index_name }} price</span>
+            </div>
+          </div>
+        {% endcall %}
+      {% endif %}
+
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-title">Market data warming up</div>
+          <div class="pp-page-placeholder-sub">yfinance is fetching constituent prices — refresh in a few seconds.</div>
+        </div>
+      {% endcall %}
+    {% endif %}
+  </section>
+
 </div>
 
 {% endblock %}
@@ -358,27 +1501,85 @@
 {# Same tab-switcher pattern as Home — vanilla JS, no HTMX.  All panes are
    server-rendered up front so switches are instant. #}
 <script>
-(function () {
-  var seg = document.getElementById('pp-macro-tabs');
+/* Tab/sub-tab activator — generalised over the four near-identical IIFEs
+   that originally lived here.  Toggles `is-active` on segment options +
+   panes by matching `data-value` to the selected pane's data attribute.
+   Set `hideMode` when a non-active panel should be `is-hidden` instead
+   (and `allKey` to recognise the no-filter sentinel). */
+function ppBindActivator(opts) {
+  var seg = document.getElementById(opts.segId);
   if (!seg) return;
-  var panes = document.querySelectorAll('.pp-page-pane');
-  if (!panes.length) return;
-  function activate(name) {
+  var scopeRoot = opts.scoped ? (seg.closest('.pp-page-pane') || document) : document;
+  var panels = scopeRoot.querySelectorAll(opts.paneSelector);
+  if (!panels.length) return;
+  var hideMode = !!opts.hideMode;
+  var allKey   = opts.allKey || null;
+  function paneKey(p) {
+    if (opts.paneAttr) return p.getAttribute(opts.paneAttr);
+    if (opts.paneIdPrefix) return (p.id || '').replace(opts.paneIdPrefix, '');
+    return null;
+  }
+  function activate(value) {
     seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
-      var match = o.getAttribute('data-value') === name;
+      var match = o.getAttribute('data-value') === value;
       o.classList.toggle('is-active', match);
       o.setAttribute('aria-selected', match ? 'true' : 'false');
     });
-    panes.forEach(function (p) {
-      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+    panels.forEach(function (p) {
+      var k = paneKey(p);
+      if (hideMode) {
+        p.classList.toggle('is-hidden', !(value === allKey || value === k));
+      } else {
+        p.classList.toggle('is-active', value === k);
+      }
     });
   }
   seg.addEventListener('click', function (ev) {
     var opt = ev.target.closest('.pp-segment-opt');
     if (!opt) return;
-    var name = opt.getAttribute('data-value');
-    if (name) activate(name);
+    var value = opt.getAttribute('data-value');
+    if (value) activate(value);
   });
+}
+
+/* Parent tab nav (page-level), Earnings sub-tabs (scoped), Events Calendar
+   week/list view (scoped), Indicators group filter (hide-mode). */
+ppBindActivator({segId: 'pp-macro-tabs',         paneSelector: '.pp-page-pane',     paneAttr: 'data-tab-pane'});
+ppBindActivator({segId: 'pp-macro-earn-subtabs', paneSelector: '.pp-macro-subpane', paneAttr: 'data-subpane', scoped: true});
+ppBindActivator({segId: 'pp-macro-events-view',  paneSelector: '.pp-macro-subpane', paneAttr: 'data-subpane', scoped: true});
+ppBindActivator({segId: 'pp-macro-ind-groups',   paneSelector: '.pp-macro-ind-group', paneIdPrefix: 'pp-macro-ind-group-', hideMode: true, allKey: 'all'});
+
+/* Events Calendar — countdown clock.  Re-evaluates every second; if the
+   target ISO datetime has passed we just show 0s and stop ticking. */
+(function () {
+  var root = document.querySelector('.pp-macro-events-countdown');
+  if (!root) return;
+  var iso = root.getAttribute('data-iso');
+  if (!iso) return;
+  // Local-time render: assume the ISO is in ET (no offset suffix), append
+  // an explicit -04:00 / -05:00 if you need DST-perfect accuracy.  For
+  // now Date.parse() interprets it as local — close enough for a count.
+  var target = new Date(iso).getTime();
+  if (isNaN(target)) return;
+  var dEl = root.querySelector('[data-cd-d]');
+  var hEl = root.querySelector('[data-cd-h]');
+  var mEl = root.querySelector('[data-cd-m]');
+  var sEl = root.querySelector('[data-cd-s]');
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function tick() {
+    var diff = Math.max(0, target - Date.now());
+    var s = Math.floor(diff / 1000);
+    var d = Math.floor(s / 86400); s -= d * 86400;
+    var h = Math.floor(s / 3600);  s -= h * 3600;
+    var m = Math.floor(s / 60);    s -= m * 60;
+    if (dEl) dEl.textContent = d;
+    if (hEl) hEl.textContent = pad(h);
+    if (mEl) mEl.textContent = pad(m);
+    if (sEl) sEl.textContent = pad(s);
+    if (diff <= 0) clearInterval(handle);
+  }
+  tick();
+  var handle = setInterval(tick, 1000);
 })();
 
 (function () {
