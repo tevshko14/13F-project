@@ -627,7 +627,7 @@
                 <td class="pp-stock-own-mgr">{{ r.chamber }}</td>
                 <td>{{ tag(r.action) }}</td>
                 <td class="pp-stock-own-num pp-stock-own-val pp-mono">{{ r.size }}</td>
-                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date }}</td>
+                <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date | dt_long }}</td>
                 <td class="pp-stock-own-num pp-mono pp-stock-own-days {{ 'is-fast' if r.days < 10 else ('is-mid' if r.days < 30 else 'is-slow') }}">
                   {{ r.days }} days
                 </td>
@@ -880,7 +880,7 @@
             {% for r in own_filings %}
               <tr data-form-type="{{ r.type }}">
                 <td><span class="pp-stock-own-form-pill pp-mono">{{ r.type }}</span></td>
-                <td class="pp-stock-own-mgr pp-mono">{{ r.filed }}</td>
+                <td class="pp-stock-own-mgr pp-mono">{{ r.filed | dt_long }}</td>
                 <td class="pp-stock-own-fund">{{ r.period }}</td>
                 <td class="pp-stock-own-mgr">{{ r.desc }}</td>
                 <td class="pp-stock-own-num">
@@ -1039,7 +1039,7 @@
                           <span class="pp-dim">—</span>
                         {%- endif -%}
                       </td>
-                      <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date }}</td>
+                      <td class="pp-stock-own-num pp-mono pp-dim">{{ r.date | dt_long }}</td>
                     </tr>
                   {% endfor %}
                 </tbody>

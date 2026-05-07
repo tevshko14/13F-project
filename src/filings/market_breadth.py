@@ -657,8 +657,11 @@ def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
     if cached is not None:
         return cached
 
-    # L2: check Supabase for processed results
-    sb_key = f"result:{cache_key}"
+    # L2: check Supabase for processed results.  Cache key is suffixed with
+    # `:v2` so the schema upgrade that added `as_of` invalidates older rows
+    # — without the suffix the v2 macro page would render "Market tone" with
+    # a stale payload that lacks the new timestamp field for up to 6 hours.
+    sb_key = f"result:{cache_key}:v2"
     try:
         from filings import supabase_cache
         l2 = supabase_cache.get_cached(sb_key)
@@ -682,6 +685,13 @@ def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
     metrics = _compute_breadth(close_df, pct_changes, period)
     treemap = _build_treemap(close_df, constituents, pct_changes, vol_df)
 
+    # Latest close date — surface to the UI so "feels hardcoded" perceptions
+    # have a concrete "as of YYYY-MM-DD" timestamp to anchor them.
+    try:
+        as_of = close_df.index[-1].strftime("%Y-%m-%d")
+    except Exception:
+        as_of = ""
+
     data = {
         "metrics": metrics,
         "treemap": treemap,
@@ -689,6 +699,7 @@ def fetch_breadth_data(index: str = "sp500", period: str = "1d") -> dict:
         "index_key": index,
         "period": period,
         "period_label": PERIOD_CHOICES.get(period, period),
+        "as_of": as_of,
         # Insight fields — reuse pre-computed pct_changes
         "sector_breadth": _compute_sector_breadth(pct_changes, constituents, period),
         "above_50d": _compute_pct_above_ma(close_df),

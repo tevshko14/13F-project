@@ -46,7 +46,7 @@
 
     {# Rates Table #}
     <div class="fx-card fx-card-full">
-        <h3>Exchange Rates <span style="font-size: 0.75em; font-weight: 400; color: var(--pp-text-muted);">Base: USD · {{ fx_data.latest.date }}</span></h3>
+        <h3>Exchange Rates <span style="font-size: 0.75em; font-weight: 400; color: var(--pp-text-muted);">Base: USD · {{ fx_data.latest.date | dt_long }}</span></h3>
         <div style="overflow-x: auto;">
         <table class="fx-table">
             <thead>

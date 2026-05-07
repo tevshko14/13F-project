@@ -64,9 +64,9 @@ router = APIRouter(prefix="/_v2", tags=["redesign-preview"])
 
 
 def _today_label() -> str:
-    """Reproduce the topbar kicker format ('FRI MAY 2, 2026 · MARKETS OPEN')."""
+    """Topbar kicker — canonical 'MAY 06 2026' (uppercase MMM DD YYYY)."""
     now = datetime.now(ZoneInfo("America/New_York"))
-    return now.strftime("%a %b %-d, %Y").upper()
+    return now.strftime("%b %d %Y").upper()
 
 
 def _market_status() -> str:
@@ -214,14 +214,14 @@ async def _bounded(coro, *, timeout: float, fallback, name: str, page: str = "pa
 
 
 def _short_date(iso: str) -> str:
-    """Repeated 'YYYY-MM-DD…' → 'Mon DD' formatter used by every calendar
-    parser and the activity feed."""
-    if not iso:
-        return ""
-    try:
-        return datetime.fromisoformat(iso[:10]).strftime("%b %d")
-    except Exception:
-        return iso[:10]
+    """Repeated 'YYYY-MM-DD…' → 'Mon DD YYYY' formatter used by every
+    calendar parser and the activity feed.
+
+    Returns the canonical product date format (MMM DD YYYY).  Year-less
+    "MMM DD" callers should switch to ``filings.dates_format.format_date_short``.
+    """
+    from filings.dates_format import format_date
+    return format_date(iso, fallback=iso[:10] if iso else "")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -766,7 +766,7 @@ def _feargreed_as_of_now() -> str:
     which matches what the user is actually seeing.
     """
     now = datetime.now(timezone.utc)
-    return now.strftime("%b %-d, %Y %-I:%M %p UTC")
+    return now.strftime("%b %d %Y %-I:%M %p UTC")
 
 
 def _feargreed_band(value: int) -> str:
@@ -2832,10 +2832,16 @@ _FUND_META: dict[str, dict] = _build_fund_meta()
 
 
 def _format_dollars(v: float | int | None, *, full=False) -> str:
-    """Compact dollar formatter — $312.4B / $11.4B / $83M / $1.6B / $5.9B etc."""
+    """Dollar formatter — compact ($312.4B / $11.4B / $83M) by default,
+    or fully unabbreviated comma-separated ($312,400,000,000) when
+    ``full=True``.  Used in places (the All Holdings table) where the
+    user expects to see exact dollar values, not the rounded compact form.
+    """
     if v is None:
         return "—"
     v = float(v)
+    if full:
+        return f"${v:,.0f}"
     if v >= 1e12:
         return f"${v / 1e12:.2f}T"
     if v >= 1e9:
@@ -3733,15 +3739,453 @@ def _funds_recent_activity_with_aum(fund: dict, history: list[dict]) -> list[dic
 _FUND_TABS = ("Portfolio", "Activity", "Performance", "Sectors", "Filings")
 
 
+def _funds_index_rows(request: Request) -> list[dict]:
+    """Build the sortable summary row for every cached superinvestor.
+
+    Sources from `request.app.state.fund_cache` (populated at app startup;
+    invalidated only when the cache reference changes).  Each row carries
+    everything the index template renders — manager + fund name, portfolio
+    value, holdings count, top-5 tickers + their stored logo IDs, filing
+    date — sized to the v2 design token system (no extra fetches).
+    """
+    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    if not fund_cache:
+        return []
+    try:
+        from filings.superinvestors import SUPERINVESTORS_BY_CIK
+    except Exception:
+        return []
+
+    rows: list[dict] = []
+    for cik, info in SUPERINVESTORS_BY_CIK.items():
+        cached = fund_cache.get(cik)
+        if not cached:
+            continue
+        top_tickers = [
+            h.get("ticker") for h in (cached.get("top_holdings") or [])[:5]
+            if h.get("ticker")
+        ]
+        rows.append({
+            "cik":            cik,
+            "manager":        info.display_name or info.fund_name or "—",
+            "fund_name":      cached.get("name") or info.fund_name or "—",
+            "value":          float(cached.get("total_value") or 0),
+            "value_str":      _format_dollars(cached.get("total_value")),
+            "holdings_n":     int(cached.get("total_holdings") or 0),
+            "top_tickers":    top_tickers,
+            "filing_date":    cached.get("filing_date", ""),
+            "report_period":  cached.get("report_period", ""),
+            "icon":           _icon_from_fund_name(cached.get("name") or info.fund_name or ""),
+            "href":           f"/_v2/funds/{cik}",
+        })
+    rows.sort(key=lambda r: r["value"], reverse=True)
+    return rows
+
+
+# ── Funds index payload helpers ──────────────────────────────────────────
+#
+# Four sub-tabs (Funds / Holdings / Activity / Capital Deployed) all
+# render against the same in-process ``fund_cache``.  Each helper below
+# transforms the raw cache into the shape the corresponding pane needs.
+# Mirrors v1's `/funds?view=…` page but with the v2 design system.
+
+
+def _funds_holdings_consensus(grand_portfolio, n: int = 10) -> list[dict]:
+    """Top-N stocks by holder count — drives the Consensus Leaders bar chart."""
+    out: list[dict] = []
+    max_holders = max((e.num_holders for e in grand_portfolio[:n]), default=1)
+    for e in grand_portfolio[:n]:
+        out.append({
+            "ticker":          e.ticker or (e.cusip or "")[:6],
+            "name":            e.issuer_name or "",
+            "num_holders":     e.num_holders,
+            "combined_value":  e.combined_value,
+            "combined_value_str": _format_dollars(e.combined_value),
+            "avg_weight":      round(e.avg_weight or 0, 1),
+            "top_holders":     (e.holders or [])[:3],
+            "bar_pct":         round(e.num_holders / max(max_holders, 1) * 100, 1),
+        })
+    return out
+
+
+def _funds_holdings_momentum(most_added, n: int = 15) -> list[dict]:
+    """Recent quarter momentum — top stocks added by superinvestors."""
+    out: list[dict] = []
+    max_adds = max((m.get("add_count", 0) for m in most_added[:n]), default=1)
+    for m in most_added[:n]:
+        out.append({
+            "ticker":     m.get("ticker") or (m.get("cusip", "")[:6]),
+            "name":       m.get("issuer_name", ""),
+            "add_count":  m.get("add_count", 0),
+            "adders":     [a for a in (m.get("adders") or [])[:5]],
+            "value_str":  _format_dollars(m.get("total_value", 0)),
+            "bar_pct":    round(m.get("add_count", 0) / max(max_adds, 1) * 100, 1),
+        })
+    return out
+
+
+def _funds_index_holdings_table(grand_portfolio, top_n: int = 100) -> list[dict]:
+    """Top-N stocks sorted by holder count — drives the funds-index All
+    Holdings table.
+
+    NB: distinct from the older `_funds_holdings_table` helper used by
+    the fund detail page; renamed here to avoid the same shadow that
+    collided `_funds_capital_deployed`.  ``pct_of_aggregate`` comes
+    pre-computed off each entry from `client.build_grand_portfolio`,
+    so no aggregate sum needed at this layer."""
+    rows: list[dict] = []
+    for i, e in enumerate(grand_portfolio[:top_n], start=1):
+        rows.append({
+            "rank":                i,
+            "ticker":              e.ticker or (e.cusip or "")[:6],
+            "name":                e.issuer_name or "",
+            "num_holders":         e.num_holders,
+            "combined_value":      e.combined_value,
+            "combined_value_str":  _format_dollars(e.combined_value, full=True),
+            "pct_of_aggregate":    round(e.pct_of_aggregate or 0, 2),
+            "top_holders":         (e.holders or [])[:3],
+            "more_holders":        max(0, len(e.holders or []) - 3),
+        })
+    return rows
+
+
+_ACTIVITY_STATUS = {
+    "NEW":      ("BUY",  True),
+    "ADDED":    ("ADD",  True),
+    "INCREASED": ("ADD", True),
+    "REDUCED":  ("TRIM", False),
+    "DECREASED": ("TRIM", False),
+    "EXITED":   ("SELL", False),
+    "SOLD":     ("SELL", False),
+    "BOUGHT":   ("BUY",  True),
+}
+
+
+def _classify_action(raw_status: str) -> tuple[str, bool]:
+    """Map raw 13F status → (display label, is_buy)."""
+    return _ACTIVITY_STATUS.get((raw_status or "").upper(), (raw_status or "—", False))
+
+
+_FUNDS_ACTIVITY_TOP_N = 50
+
+
+def _funds_activity_consensus(fund_cache: dict, superinvestors_by_cik: dict,
+                              *, cusip_to_ticker: dict | None = None) -> dict:
+    """Aggregate every 13F change across all funds, grouped by ticker.
+
+    Returns ``{moves: list, summary: dict}`` where each move row carries
+    buyer/seller counts, net dollar flow, sentiment label, and the full
+    per-fund detail list (for the expand-row pattern).
+
+    `changes` rows often carry only a CUSIP (no ticker); resolve via the
+    cross-fund CUSIP→ticker map so the consensus group keys collapse on
+    the same security instead of fragmenting across CUSIP prefixes.
+
+    Caller can pass a pre-built ``cusip_to_ticker`` map (e.g. the one
+    cached on ``app.state._pp_redesign_cusip_ticker``) to skip the
+    rebuild — saves ~50-150ms on warm Activity-tab hits.
+
+    Truncates to the top ``_FUNDS_ACTIVITY_TOP_N`` tickers in Python
+    BEFORE per-ticker trade sorting, so we don't sort ~5,950 throwaway
+    trade lists that the template will discard via slice anyway.
+    """
+    if cusip_to_ticker is None:
+        cusip_to_ticker = _build_cusip_ticker_map(fund_cache or {})
+
+    by_ticker: dict[str, dict] = {}
+    total_buy = 0.0
+    total_sell = 0.0
+    total_activities = 0
+
+    for cik, fund_data in (fund_cache or {}).items():
+        si = superinvestors_by_cik.get(cik)
+        if not si:
+            continue
+        for c in (fund_data.get("changes") or []):
+            raw = (c.get("status") or "").upper()
+            if not raw or raw == "UNCHANGED":
+                continue
+            cusip = c.get("cusip", "") or ""
+            ticker = c.get("ticker") or cusip_to_ticker.get(cusip)
+            # No ticker resolution → skip (un-traded names crowd the list
+            # without value; users wouldn't recognise raw CUSIP prefixes).
+            if not ticker:
+                continue
+            action, is_buy = _classify_action(raw)
+            value = float(c.get("current_value") or 0)
+            shares = float(c.get("share_change") or 0)
+            total_activities += 1
+            if is_buy:
+                total_buy += value
+            else:
+                total_sell += value
+
+            slot = by_ticker.setdefault(ticker, {
+                "ticker":      ticker,
+                "issuer":      c.get("issuer", ""),
+                "buy_count":   0,
+                "sell_count":  0,
+                "net_flow":    0.0,
+                "trades":      [],
+            })
+            slot["buy_count"]  += 1 if is_buy else 0
+            slot["sell_count"] += 0 if is_buy else 1
+            # Net flow uses signed direction so dollars cancel within each ticker
+            slot["net_flow"]   += value if is_buy else -value
+            slot["trades"].append({
+                "fund_name":    si.display_name,
+                "cik":          cik,
+                "action":       action,
+                "is_buy":       is_buy,
+                "share_change": shares,
+                "value":        value,
+                "value_str":    _format_dollars(value),
+                "share_change_str": f"{shares:+,.0f}" if shares else "—",
+                "raw_status":   raw,
+            })
+
+    # Cap to the top-N tickers BEFORE per-ticker trade sorting + sentiment
+    # decoration.  ~6,000 raw tickers but only `_FUNDS_ACTIVITY_TOP_N` ever
+    # render — sorting trade lists for the other ~5,950 was pure waste.
+    total_consensus = len(by_ticker)
+    moves_raw = sorted(
+        by_ticker.values(),
+        key=lambda m: -(m["buy_count"] + m["sell_count"]),
+    )[:_FUNDS_ACTIVITY_TOP_N]
+
+    moves: list[dict] = []
+    for m in moves_raw:
+        # Per-fund detail list sorted by absolute dollar move so the
+        # biggest mover appears first when the user expands the row.
+        m["trades"].sort(key=lambda t: -abs(t["value"]))
+        if m["net_flow"] > 0:
+            sentiment = ("BULLISH", "up")
+        elif m["net_flow"] < 0:
+            sentiment = ("BEARISH", "down")
+        else:
+            sentiment = ("NEUTRAL", "dim")
+        m["sentiment_label"] = sentiment[0]
+        m["sentiment_tone"]  = sentiment[1]
+        m["net_flow_str"]    = (
+            ("+" if m["net_flow"] >= 0 else "−") + _format_dollars(abs(m["net_flow"])).lstrip("$")
+        )
+        m["activity_n"]      = m["buy_count"] + m["sell_count"]
+        moves.append(m)
+
+    net_flow = total_buy - total_sell
+    summary = {
+        "value_sentiment":  "BULLISH" if net_flow > 0 else ("BEARISH" if net_flow < 0 else "NEUTRAL"),
+        "value_tone":       "up" if net_flow > 0 else ("down" if net_flow < 0 else "dim"),
+        "net_flow":         net_flow,
+        "net_flow_str":     ("+" if net_flow >= 0 else "−") + _format_dollars(abs(net_flow)).lstrip("$"),
+        "buying_str":       _format_dollars(total_buy),
+        "selling_str":      _format_dollars(total_sell),
+        "consensus_count":  total_consensus,
+        "total_activities": total_activities,
+    }
+    return {"moves": moves, "summary": summary}
+
+
+def _funds_capital_deployed_rows(deployment_data: dict) -> list[dict]:
+    """Sortable rows for the funds-index Capital Deployed pane.
+
+    NB: distinct from the older `_funds_capital_deployed(cik)` helper a
+    few hundred lines up, which fetches per-fund deployment for the
+    detail page.  Same domain, different consumer; renamed here to
+    avoid the shadow that broke `/_v2/funds/{cik}` after this batch.
+
+    Wraps `aum_data.build_deployment_leaderboard` and shapes each entry
+    into the row format the template wants — formatted dollar strings,
+    deployed-pct progress bar, source pill, and a stable sort key.
+    """
+    if not deployment_data:
+        return []
+    from filings import aum_data
+    leaderboard = aum_data.build_deployment_leaderboard(deployment_data)
+
+    rows: list[dict] = []
+    for i, e in enumerate(leaderboard, start=1):
+        # `deployment_ratio` is stored as a fraction (e.g. 0.46 = 46%);
+        # multiply for the percentage display.
+        ratio_raw = e.get("deployment_ratio")
+        ratio_pct = round(float(ratio_raw) * 100, 1) if ratio_raw is not None else None
+        # Deployed-bar tone: green if mostly deployed (≥ 60%), amber middle,
+        # red when most cash sits outside the 13F equity book.
+        if ratio_pct is None:
+            tone = "dim"
+        elif ratio_pct >= 60:
+            tone = "up"
+        elif ratio_pct >= 30:
+            tone = "warn"
+        else:
+            tone = "down"
+
+        cash = e.get("exact_cash") or e.get("estimated_non_equity")
+        rows.append({
+            "rank":               i,
+            "cik":                e.get("cik", ""),
+            "manager":            e.get("display_name") or e.get("fund_name") or "—",
+            "fund_name":          e.get("fund_name") or "—",
+            "raum":               e.get("raum") or 0,
+            "raum_str":           _format_dollars(e.get("raum")),
+            "thirteenf_value":    e.get("thirteenf_value") or 0,
+            "thirteenf_value_str": _format_dollars(e.get("thirteenf_value")),
+            "deployment_pct":     ratio_pct,
+            "deployment_tone":    tone,
+            "cash":               cash,
+            "cash_str":           _format_dollars(cash) if cash else "—",
+            "data_source":        (e.get("data_source") or "").upper(),
+        })
+    return rows
+
+
 @router.get("/funds", response_class=HTMLResponse)
-async def preview_funds(
+async def preview_funds_index(request: Request, view: str = "Funds"):
+    """Funds index — 4 sub-panes (Funds list / Holdings / Activity /
+    Capital Deployed).  Lands here when a user clicks "Funds" in the side
+    nav.  Each fund row deep-links into ``/_v2/funds/{cik}``.
+
+    All four panes render against the in-process ``fund_cache`` +
+    ``deployment_cache`` populated at app startup — zero upstream fetches
+    on this route, so warm hits are sub-200 ms across all sub-tabs.
+    """
+    valid_views = {"Funds", "Holdings", "Activity", "Capital Deployed"}
+    if view not in valid_views:
+        view = "Funds"
+
+    rows = _funds_index_rows(request)
+    fund_cache       = getattr(request.app.state, "fund_cache", {}) or {}
+    deployment_cache = getattr(request.app.state, "deployment_cache", {}) or {}
+
+    cache_age = ""
+    if fund_cache:
+        try:
+            from filings import cache as _cache_mod
+            cache_age = _cache_mod.get_cache_age_str(fund_cache)
+        except Exception:
+            cache_age = ""
+
+    # Per-view gating: only run the aggregations the active sub-tab actually
+    # needs.  Holdings → grand_portfolio + most_added.  Activity → consensus
+    # moves.  Funds + Capital Deployed read the in-process caches directly
+    # and skip both.  Saves ~300-700ms on the cheap tabs (3× wasted CPU
+    # before this gate) without changing what the user sees.
+    grand_portfolio: list = []
+    most_added:      list = []
+    activity_payload: dict = {"moves": [], "summary": {}}
+
+    needs_holdings = (view == "Holdings")
+    needs_activity = (view == "Activity")
+
+    aggregations: list = []
+    if fund_cache:
+        try:
+            from filings import client, market_data
+            from filings.superinvestors import SUPERINVESTORS_BY_CIK
+
+            if needs_holdings:
+                aggregations += [
+                    asyncio.to_thread(client.build_grand_portfolio,
+                                      fund_cache, SUPERINVESTORS_BY_CIK),
+                    asyncio.to_thread(market_data.build_most_added_table,
+                                      fund_cache, SUPERINVESTORS_BY_CIK),
+                ]
+            if needs_activity:
+                aggregations.append(
+                    asyncio.to_thread(_funds_activity_consensus_sync,
+                                      request, fund_cache, SUPERINVESTORS_BY_CIK),
+                )
+
+            results = await asyncio.gather(*aggregations) if aggregations else []
+            i = 0
+            if needs_holdings:
+                grand_portfolio = results[i]; i += 1
+                most_added      = results[i]; i += 1
+            if needs_activity:
+                activity_payload = results[i]; i += 1
+        except Exception as exc:
+            logger.warning("Funds index aggregation failed: %s", exc)
+
+    ctx = {
+        "request":       request,
+        **(await _shell_context(request, "Funds")),
+        "page_title":    "Funds",
+        # Tab navigation
+        "funds_index_tabs":  ["Funds", "Holdings", "Activity", "Capital Deployed"],
+        "funds_index_view":  view,
+        # Funds pane (sortable list)
+        "funds_index":   rows,
+        "funds_count":   len(rows),
+        "funds_cache_age": cache_age,
+        # Holdings pane (empty unless gated above)
+        "funds_consensus":    _funds_holdings_consensus(grand_portfolio, n=10),
+        "funds_momentum":     _funds_holdings_momentum(most_added, n=15),
+        "funds_holdings_all": _funds_index_holdings_table(grand_portfolio, top_n=100),
+        # Activity pane (empty unless gated above)
+        "funds_activity_moves":   activity_payload.get("moves", []),
+        "funds_activity_summary": activity_payload.get("summary", {}),
+        # Capital Deployed pane (cheap — reads cached deployment_cache directly)
+        "funds_capital_rows": _funds_capital_deployed_rows(deployment_cache),
+    }
+    return templates.TemplateResponse("_redesign/funds_index.html", ctx)
+
+
+def _funds_activity_consensus_sync(request: Request,
+                                    fund_cache: dict,
+                                    superinvestors_by_cik: dict) -> dict:
+    """Sync wrapper around `_funds_activity_consensus` for ``to_thread``.
+
+    Uses the request-scoped CUSIP→ticker map cached on
+    ``app.state._pp_redesign_cusip_ticker`` (also populated by the home
+    fund-flow helper) instead of rebuilding the map from scratch — saves
+    ~50-150ms on every Activity-tab hit.
+    """
+    cmap = getattr(request.app.state, "_pp_redesign_cusip_ticker", None)
+    if cmap is None:
+        cmap = _build_cusip_ticker_map(fund_cache)
+        try:
+            request.app.state._pp_redesign_cusip_ticker = cmap
+        except Exception:
+            pass
+    return _funds_activity_consensus(fund_cache, superinvestors_by_cik, cusip_to_ticker=cmap)
+
+
+@router.get("/funds/detail", response_class=HTMLResponse)
+async def preview_fund_detail_legacy(
     request: Request,
     cik: str = _DEFAULT_FUND_CIK,
     tab: str = "Portfolio",
 ):
+    """Legacy `?cik=` deep-link entry point.
+
+    Registered BEFORE the `/funds/{cik}` catch-all so FastAPI matches the
+    exact path first — otherwise ``cik="detail"`` would leak into the
+    detail handler and blow up int parsing downstream.
+
+    Old internal links carrying `/_v2/funds?cik=…` were replaced with the
+    canonical `/_v2/funds/{cik}` path; this route covers any external /
+    bookmarked links that still point at the query-string form.
+    """
+    return await _render_fund_detail(request, cik=cik, tab=tab)
+
+
+@router.get("/funds/{cik}", response_class=HTMLResponse)
+async def preview_fund_detail_by_cik(
+    request: Request,
+    cik: str,
+    tab: str = "Portfolio",
+):
+    """Funds detail — pretty-URL form `/_v2/funds/{cik}`.
+
+    Delegates to `_render_fund_detail` so the legacy `?cik=` path keeps
+    working for any external links cached during the redesign window.
+    """
+    return await _render_fund_detail(request, cik=cik, tab=tab)
+
+
+async def _render_fund_detail(request: Request, *, cik: str, tab: str):
     """Funds detail — 5 tabs (Portfolio / Activity / Performance / Sectors /
-    Filings).  Default CIK = Berkshire (1067983); ?cik= to load any of the
-    85 superinvestors; ?tab= deep-links the active pane."""
+    Filings).  ``cik`` selects the fund; ``tab`` deep-links the active pane."""
     if tab not in _FUND_TABS:
         tab = "Portfolio"
     bounded = functools.partial(_bounded, page="Funds page")
@@ -3930,13 +4374,13 @@ def _stock_format_ipo(info: dict, finnhub_profile: dict) -> str:
             ts = float(epoch)
             if ts > 1e11:  # millis
                 ts /= 1000
-            return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%b %-d, %Y")
+            return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%b %d %Y")
         except (TypeError, ValueError, OSError):
             pass
     fh_ipo = (finnhub_profile or {}).get("ipo")
     if fh_ipo:
         try:
-            return datetime.strptime(fh_ipo, "%Y-%m-%d").strftime("%b %-d, %Y")
+            return datetime.strptime(fh_ipo, "%Y-%m-%d").strftime("%b %d %Y")
         except (TypeError, ValueError):
             return str(fh_ipo)
     return "—"
@@ -4378,7 +4822,7 @@ def _stock_build_forecasts(ticker: str, current_price: float | None) -> dict:
     analyst_rows: list[dict] = []
     for r in sorted_ratings[:9]:
         try:
-            d = datetime.strptime((r.date or "")[:10], "%Y-%m-%d").strftime("%b %-d")
+            d = datetime.strptime((r.date or "")[:10], "%Y-%m-%d").strftime("%b %d")
         except (TypeError, ValueError):
             d = (r.date or "")[:10]
         target = r.current_price_target or 0
@@ -5223,7 +5667,7 @@ def _stock_build_ownership_congress(ticker: str) -> dict:
             t_dt = datetime.strptime(td, "%Y-%m-%d") if td else None
             f_dt = datetime.strptime(fd, "%Y-%m-%d") if fd else None
             days = (f_dt - t_dt).days if t_dt and f_dt else 0
-            date_str = (f_dt or t_dt).strftime("%b %-d, %Y") if (f_dt or t_dt) else ""
+            date_str = (f_dt or t_dt).strftime("%b %d %Y") if (f_dt or t_dt) else ""
         except (TypeError, ValueError):
             days, date_str = 0, fd or td
 
@@ -5301,7 +5745,7 @@ async def _stock_build_ownership_filings(ticker: str) -> dict:
             if len(rows) >= 50:
                 break
             try:
-                d = datetime.strptime(dates[i], "%Y-%m-%d").strftime("%b %-d, %Y")
+                d = datetime.strptime(dates[i], "%Y-%m-%d").strftime("%b %d %Y")
             except (TypeError, ValueError, IndexError):
                 d = dates[i] if i < len(dates) else ""
 
@@ -5515,7 +5959,7 @@ async def _fetch_stock_events_async(ticker: str, *, months_ahead: int = 6,
             event_label = "Earnings"
 
         out.append({
-            "date":  d.strftime("%b %-d"),
+            "date":  d.strftime("%b %d"),
             "event": event_label,
             "when":  when,
             "est":   est,
@@ -6747,7 +7191,7 @@ def _congress_format_date(iso_str: str) -> str:
         return "—"
     try:
         d = datetime.fromisoformat(iso_str[:10])
-        return d.strftime("%b %d, %Y")
+        return d.strftime("%b %d %Y")
     except Exception:
         return iso_str[:10]
 
@@ -8371,7 +8815,7 @@ def _profile_format_added(iso_str: str) -> str:
         return "—"
     try:
         d = datetime.fromisoformat(iso_str)
-        return d.strftime("%b %d, %Y")
+        return d.strftime("%b %d %Y")
     except Exception:
         return iso_str[:10]
 
@@ -8913,7 +9357,7 @@ def _retail_trends_chart_compute() -> dict | None:
         date_str = p.get("date") or ""
         try:
             from datetime import datetime as _dt
-            date_str = _dt.strptime(date_str, "%b %d, %Y").strftime("%b %d, %Y")
+            date_str = _dt.strptime(date_str, "%b %d, %Y").strftime("%b %d %Y")
         except Exception:
             pass
         kw_values = []
@@ -9654,23 +10098,42 @@ def _indicator_featured_chart(ind: dict) -> dict | None:
         "y_ticks":     [],
     }
 
+    unit_fmt = "%" if (ind.get("value_fmt") or "").endswith("%") else ""
     if kind == "bar":
         bar_pad = 4
         bar_w   = max(6.0, (plot_w - bar_pad * (n + 1)) / max(n, 1))
         bars: list[dict] = []
+        hover_points: list[dict] = []
         for i, v in enumerate(series):
             h = (v - s_min) / rng * plot_h
             x = pad_x + bar_pad + i * (bar_w + bar_pad)
+            bar_top_y = pad_y + plot_h - h
             bars.append({
-                "x": round(x, 2), "y": round(pad_y + plot_h - h, 2),
+                "x": round(x, 2), "y": round(bar_top_y, 2),
                 "w": round(bar_w, 2), "h": round(h, 2),
             })
+            # Anchor the hover dot to the bar's top-center.
+            hover_points.append({
+                "x":     round(x + bar_w / 2, 2),
+                "y":     round(bar_top_y, 2),
+                "label": f"#{i + 1}",  # FRED sparkline doesn't carry per-point dates
+                "value": f"{v:.2f}{unit_fmt}",
+            })
         payload["bars"] = bars
+        payload["hover_points"] = hover_points
     else:
         d_parts = []
+        hover_points = []
         for i, v in enumerate(series):
             d_parts.append(f"{'M' if i == 0 else 'L'}{_x(i):.2f} {_y(v):.2f}")
+            hover_points.append({
+                "x":     round(_x(i), 2),
+                "y":     round(_y(v), 2),
+                "label": f"Period {i + 1} of {n}",
+                "value": f"{v:.2f}{unit_fmt}",
+            })
         payload["path_d"] = " ".join(d_parts)
+        payload["hover_points"] = hover_points
 
     # 4 y-ticks for grid lines.
     for j in range(4):
@@ -9716,20 +10179,29 @@ def _debt_panel_payload(debt: dict | None) -> dict:
     debts = [float(r["debt"]) for r in rows]
     d_max = max(debts)
 
-    bars: list[dict] = []
+    bars: list[dict]          = []
+    hover_points: list[dict]  = []
     n = len(rows)
     bar_pad = 4  # gap between bars in viewBox units
     vbw, vbh = 1500, 240
     plot_h   = vbh - 30        # leave room for axis labels
     bar_w    = max(8.0, (vbw - bar_pad * (n + 1)) / max(n, 1))
     for i, r in enumerate(rows):
-        h = (float(r["debt"]) / d_max) * plot_h
-        x = bar_pad + i * (bar_w + bar_pad)
+        debt_t = round(float(r["debt"]) / 1e12, 2)
+        h      = (float(r["debt"]) / d_max) * plot_h
+        x      = bar_pad + i * (bar_w + bar_pad)
+        bar_top_y = plot_h - h
         bars.append({
-            "x": round(x, 2), "y": round(plot_h - h, 2),
-            "w": round(bar_w, 2), "h": round(h, 2),
-            "date": r["date"][5:],     # "MM-DD" — full year is implicit in latest
-            "debt_t": round(float(r["debt"]) / 1e12, 2),
+            "x":      round(x, 2), "y": round(bar_top_y, 2),
+            "w":      round(bar_w, 2), "h": round(h, 2),
+            "date":   r["date"][5:],   # "MM-DD" — full year is implicit in latest
+            "debt_t": debt_t,
+        })
+        hover_points.append({
+            "x":     round(x + bar_w / 2, 2),
+            "y":     round(bar_top_y, 2),
+            "label": r["date"],
+            "value": f"${debt_t}T",
         })
 
     # X-axis ticks every ~6 bars.
@@ -9750,6 +10222,7 @@ def _debt_panel_payload(debt: dict | None) -> dict:
         "plot_h":       plot_h,
         "bars":         bars,
         "x_ticks":      x_ticks,
+        "hover_points": hover_points,
     }
 
 
@@ -9879,9 +10352,19 @@ def _fx_chart_grid(fx_payload: dict | None) -> list[dict]:
         def _x(i, n=n): return pad_x + (plot_w * i / max(n - 1, 1))
         def _y(v):       return pad_y + plot_h * (1 - (v - s_min) / rng)
 
-        d_parts = []
+        d_parts: list[str] = []
+        hover_points: list[dict] = []
+        rate_fmt = "{:.4f}" if max(rates) < 10 else "{:.2f}"
         for i, r in enumerate(rates):
-            d_parts.append(f"{'M' if i == 0 else 'L'}{_x(i):.2f} {_y(r):.2f}")
+            x_v = _x(i)
+            y_v = _y(r)
+            d_parts.append(f"{'M' if i == 0 else 'L'}{x_v:.2f} {y_v:.2f}")
+            hover_points.append({
+                "x":     round(x_v, 2),
+                "y":     round(y_v, 2),
+                "label": series[i]["date"],
+                "value": rate_fmt.format(r),
+            })
         path_d = " ".join(d_parts)
 
         # Y-axis ticks (4 evenly-spaced).
@@ -9903,6 +10386,7 @@ def _fx_chart_grid(fx_payload: dict | None) -> list[dict]:
             "code":     code,
             "label":    f"USD/{code}",
             "color":    _FX_PAIR_COLORS.get(code, "var(--pp-accent)"),
+            "hover_points": hover_points,
             "vb_w":     vbw,
             "vb_h":     vbh,
             "path_d":   path_d,
@@ -10062,7 +10546,7 @@ def _week_grid_mon_fri(
         cell = {
             "iso":      iso,
             "dow":      d.strftime("%a").upper(),
-            "label":    d.strftime("%b %-d"),
+            "label":    d.strftime("%b %d"),
             "entries":  entries,
             "is_today": iso == today_iso,
         }
@@ -10356,6 +10840,7 @@ def _earn_trend_chart(trend: list[dict]) -> dict:
     rev_pts: list[tuple[float, float]] = []
     bars:    list[dict]                = []
     quarters: list[str]                = []
+    hover_points: list[dict]           = []
     for i, r in enumerate(rows):
         x   = _x(i)
         eps = float(r.get("eps_beat_rate") or 0)
@@ -10372,30 +10857,36 @@ def _earn_trend_chart(trend: list[dict]) -> dict:
             "up": rxn >= 0, "rxn_str": f"{rxn:+.2f}%",
         })
         quarters.append(r.get("quarter", ""))
-
-    def _path(pts: list[tuple[float, float]]) -> str:
-        return " ".join(
-            f"{'M' if i == 0 else 'L'}{p[0]:.2f} {p[1]:.2f}"
-            for i, p in enumerate(pts)
-        )
+        hover_points.append({
+            "x":     round(x, 2),
+            "y":     round(_y_pct(eps), 2),    # anchor on EPS line (primary)
+            "label": r.get("quarter", ""),
+            "rows":  [
+                {"label": "EPS Beat", "value": f"{eps:.1f}%", "color": "var(--pp-accent)"},
+                {"label": "Rev Beat", "value": f"{rev:.1f}%", "color": "var(--pp-ink)"},
+                {"label": "Reaction", "value": f"{rxn:+.2f}%",
+                 "color": "var(--pp-up)" if rxn >= 0 else "var(--pp-down)"},
+            ],
+        })
 
     return {
         "have_data": True,
         "vb_w": vbw, "vb_h": vbh,
         "pad_x": pad_x, "pad_y": pad_y,
         "plot_w": plot_w, "plot_h": plot_h,
-        "eps_path": _path(eps_pts),
-        "rev_path": _path(rev_pts),
+        "eps_path": _svg_line_path(eps_pts),
+        "rev_path": _svg_line_path(rev_pts),
         "eps_dots": [{"x": round(x, 2), "y": round(y, 2),
                       "v": rows[i].get("eps_beat_rate")} for i, (x, y) in enumerate(eps_pts)],
         "rev_dots": [{"x": round(x, 2), "y": round(y, 2),
                       "v": rows[i].get("rev_beat_rate")} for i, (x, y) in enumerate(rev_pts)],
-        "bars":      bars,
-        "quarters":  quarters,
-        "y_ticks":   [0, 25, 50, 75, 100],
-        "y_pct":     [{"y": round(_y_pct(p), 2), "label": f"{p}%"} for p in (0, 25, 50, 75, 100)],
-        "rxn_zero":  round(rxn_zero, 2),
-        "rxn_max":   round(rxn_max, 2),
+        "bars":         bars,
+        "quarters":     quarters,
+        "hover_points": hover_points,
+        "y_ticks":      [0, 25, 50, 75, 100],
+        "y_pct":        [{"y": round(_y_pct(p), 2), "label": f"{p}%"} for p in (0, 25, 50, 75, 100)],
+        "rxn_zero":     round(rxn_zero, 2),
+        "rxn_max":      round(rxn_max, 2),
     }
 
 
@@ -10609,13 +11100,32 @@ def _perf_momentum_chart(ad_line: dict) -> dict:
         except ValueError:
             continue
 
+    # Multi-line hover: each x position carries the A/D and price values.
+    # Y-anchor is the A/D point so the hover dot sits on the primary line.
+    ad_color   = "var(--pp-accent)"
+    index_name = ad_line.get("index_name", "Index")
+    px_color   = "var(--pp-ink)"
+    hover_points: list[dict] = []
+    for i, ad_v in enumerate(ads):
+        rows = [{"label": "A/D line", "value": f"{ad_v:+.0f}", "color": ad_color}]
+        p = pxs[i] if i < len(pxs) else None
+        if isinstance(p, (int, float)):
+            rows.append({"label": index_name, "value": f"{p:,.2f}", "color": px_color})
+        hover_points.append({
+            "x":     round(_x(i), 2),
+            "y":     round(_y_ad(ad_v), 2),
+            "label": dates[i],
+            "rows":  rows,
+        })
+
     return {
         "have_data": True,
         "vb_w": _PERF_VBW, "vb_h": _PERF_VBH,
         "ad_path": _svg_line_path(ad_pts),
         "px_path": _svg_line_path(px_pts),
         "x_labels": x_labels,
-        "index_name": ad_line.get("index_name", ""),
+        "hover_points": hover_points,
+        "index_name": index_name,
         "n_days": n,
     }
 
@@ -10645,6 +11155,25 @@ async def _v2_macro_performance_payload(index: str, period: str) -> dict:
     # Up-vs-down ratio bar segments — leftover slice fills with "unchanged".
     unchanged_pct = max(0.0, 100 - advance_pct - decline_pct)
 
+    # Enrich each sector breadth row with the full {up, down, unchanged}
+    # split (the v1 helper only emits `up` + `total`).  Surfacing the
+    # decline + unchanged counts lets the bar chart render a 3-segment
+    # stacked fill and the hover tooltip show the full distribution.
+    sector_breadth: list[dict] = []
+    for s in (data.get("sector_breadth") or []):
+        up_n    = int(s.get("up") or 0)
+        down_n  = int(s.get("down") or 0)
+        total_n = int(s.get("total") or 0)
+        unc_n   = max(0, total_n - up_n - down_n)
+        denom   = max(total_n, 1)
+        sector_breadth.append({
+            **s,
+            "down":          down_n,
+            "unchanged":     unc_n,
+            "down_pct":      round(down_n / denom * 100, 1),
+            "unchanged_pct": round(unc_n  / denom * 100, 1),
+        })
+
     return {
         "have_data":      bool(metrics.get("total", 0) > 0),
         "metrics":        metrics,
@@ -10653,7 +11182,7 @@ async def _v2_macro_performance_payload(index: str, period: str) -> dict:
         "unchanged_pct":  round(unchanged_pct, 1),
         "status":         status,
         "above_50d":      above,
-        "sector_breadth": data.get("sector_breadth") or [],
+        "sector_breadth": sector_breadth,
         "top_gainers":    (movers.get("gainers") or [])[:5],
         "top_losers":     (movers.get("losers")  or [])[:5],
         "divergence":     divergence,
@@ -10675,6 +11204,7 @@ async def _v2_macro_performance_payload(index: str, period: str) -> dict:
         "periods":        market_breadth.PERIOD_CHOICES,
         "data_period_label": data.get("period_label", ""),
         "data_index_name":   data.get("index_name", ""),
+        "data_as_of":        data.get("as_of", ""),
     }
 
 
@@ -10721,18 +11251,34 @@ def _sentiment_chart(payload: dict | None) -> dict:
             "avg":     payload.get("averages", {}).get(kw, 0),
         })
 
+    # Multi-line hover: one entry per x-position, each carrying a row per
+    # keyword series so the tooltip shows all values at the hover point.
+    hover_points = []
+    for j in range(n):
+        hover_points.append({
+            "x":     round(_x(j), 2),
+            "label": data[j].get("date", ""),
+            "rows":  [
+                {"label": kw,
+                 "value": str(int(series_by_kw[kw][j])),
+                 "color": kw_colors[k % len(kw_colors)]}
+                for k, kw in enumerate(keywords)
+            ],
+        })
+
     # First/last date labels for the x-axis.
     first_d = data[0].get("date", "")
     last_d  = data[-1].get("date", "")
 
     return {
-        "have_data":  True,
-        "vb_w":       vbw,
-        "vb_h":       vbh,
-        "lines":      lines,
-        "first_date": first_d,
-        "last_date":  last_d,
-        "n_points":   n,
+        "have_data":    True,
+        "vb_w":         vbw,
+        "vb_h":         vbh,
+        "lines":        lines,
+        "hover_points": hover_points,
+        "first_date":   first_d,
+        "last_date":    last_d,
+        "n_points":     n,
     }
 
 
@@ -10898,9 +11444,14 @@ def _pc_ratio_chart(rows: list[dict], ratio_type: str) -> dict:
     vbw, vbh = 1500, 280
     _x, _y, _, _ = _xy_mappers(n, vbw=vbw, vbh=vbh, pad_x=50, pad_y=24,
                                 s_min=s_min, s_max=s_max)
-    points = [(_x(i), _y(float(r["ratio"]))) for i, r in enumerate(rows)
-              if r.get("ratio") is not None]
+    valid = [(i, r) for i, r in enumerate(rows) if r.get("ratio") is not None]
+    points = [(_x(i), _y(float(r["ratio"]))) for i, r in valid]
     path_d = _svg_line_path(points)
+    hover_points = [
+        {"x": round(_x(i), 2), "y": round(_y(float(r["ratio"])), 2),
+         "label": r["date"], "value": f"{float(r['ratio']):.2f}"}
+        for i, r in valid
+    ]
 
     # 1.0 threshold dashed line (bearish/bullish split).
     threshold_y = round(_y(1.0), 2)
@@ -10935,6 +11486,7 @@ def _pc_ratio_chart(rows: list[dict], ratio_type: str) -> dict:
         "threshold_y": threshold_y,
         "y_ticks":     y_ticks,
         "x_ticks":     x_ticks,
+        "hover_points": hover_points,
         "first_date":  rows[0]["date"],
         "last_date":   rows[-1]["date"],
     }
@@ -10965,6 +11517,11 @@ def _vix_term_payload(term: dict | None) -> dict:
     dots   = [{"x": round(p[0], 2), "y": round(p[1], 2),
                "label": tenors[i]["label"], "value": values[i]}
               for i, p in enumerate(points)]
+    hover_points = [
+        {"x": round(p[0], 2), "y": round(p[1], 2),
+         "label": tenors[i]["label"], "value": f"{values[i]:.2f}"}
+        for i, p in enumerate(points)
+    ]
     return {
         "have_data": True,
         "spot":      term.get("spot"),
@@ -10974,6 +11531,7 @@ def _vix_term_payload(term: dict | None) -> dict:
         "vb_h":      vbh,
         "path_d":    _svg_line_path(points),
         "dots":      dots,
+        "hover_points": hover_points,
     }
 
 
@@ -10997,6 +11555,11 @@ def _skew_chart(rows: list[dict]) -> dict:
     _x, _y, _, _ = _xy_mappers(n, vbw=vbw, vbh=vbh, pad_x=50, pad_y=24,
                                 s_min=s_min, s_max=s_max)
     points  = [(_x(i), _y(float(r["value"]))) for i, r in enumerate(rows)]
+    hover_points = [
+        {"x": round(_x(i), 2), "y": round(_y(float(r["value"])), 2),
+         "label": r["date"], "value": f"{float(r['value']):.2f}"}
+        for i, r in enumerate(rows)
+    ]
 
     # SKEW > 130 = elevated tail risk (per CBOE).
     threshold_y = round(_y(130.0), 2) if s_min <= 130 <= s_max else None
@@ -11013,6 +11576,7 @@ def _skew_chart(rows: list[dict]) -> dict:
         "path_d":      _svg_line_path(points),
         "threshold_y": threshold_y,
         "x_ticks":     x_ticks,
+        "hover_points": hover_points,
         "first_date":  rows[0]["date"],
         "last_date":   rows[-1]["date"],
     }
@@ -11139,17 +11703,15 @@ async def preview_macro(
     groups = _macro_groups(payload)
     indicator_count = sum(len(g["rows"]) for g in groups) or len(indicators)
 
-    # Sector heatmap is one of the slowest operations on cold path
-    # (~10-15s for the S&P 500 constituent fetch).  Wrap in L2 cache with
-    # a 5-minute TTL so warm hits are instant.
-    sector_rows = await bounded(
-        _l2_cached(
-            "redesign:macro:heatmap_sectors:1d",
-            ttl_seconds=300,
-            compute=_heatmap_sectors,
-            category="macro",
-        ),
-        timeout=12.0, fallback=[], name="heatmap_sectors",
+    # Heatmap — same data + visual treatment as the homepage so the macro
+    # tab and home tab read as the same tool.  Both fetchers L2-cache + the
+    # underlying yfinance batch is shared across calls within the 5-min
+    # TTL window.  Bounded budget keeps cold-start under control.
+    heatmap_companies_rows, heatmap_sectors_rows = await asyncio.gather(
+        bounded(_fetch_home_heatmap_companies(), timeout=12.0, fallback=[],
+                name="heatmap_companies"),
+        bounded(_fetch_home_heatmap_sectors(),   timeout=8.0,  fallback=[],
+                name="heatmap_sectors_etf"),
     )
 
     active_tab = _MACRO_TABS.get((tab or "").lower(), "Indicators")
@@ -11181,8 +11743,9 @@ async def preview_macro(
         "fx_table":         _fx_rates_table(fx_payload),
         "commodity_rows":   _commodities_panel_rows(idx_payload),
         "macro_calendar":   calendar_rows,
-        "heatmap_sectors":  sector_rows,
-        "heatmap_indices":  _heatmap_global_indices(idx_payload),
+        "heatmap_companies": heatmap_companies_rows,
+        "heatmap_sectors":   heatmap_sectors_rows,
+        "heatmap_indices":   _heatmap_global_indices(idx_payload),
         "macro_tab":        active_tab,
         "earn":             earnings_payload,
         "ecal":             calendar_payload,

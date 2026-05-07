@@ -407,6 +407,51 @@
   })();
   </script>
 
+  {# ━━━━━━━━━━ SHARED TAB / SUB-TAB ACTIVATOR ━━━━━━━━━━
+       One generic helper used by every v2 page that needs CSS-toggle
+       tab switching.  Configure with:
+         ppBindActivator({segId, paneSelector, paneAttr})
+         ppBindActivator({segId, paneSelector, paneAttr, scoped: true})
+         ppBindActivator({segId, paneSelector, paneIdPrefix, hideMode: true, allKey})
+       Available globally so per-page templates don't redefine it. #}
+  <script>
+  function ppBindActivator(opts) {
+    var seg = document.getElementById(opts.segId);
+    if (!seg) return;
+    var scopeRoot = opts.scoped ? (seg.closest('.pp-page-pane') || document) : document;
+    var panels = scopeRoot.querySelectorAll(opts.paneSelector);
+    if (!panels.length) return;
+    var hideMode = !!opts.hideMode;
+    var allKey   = opts.allKey || null;
+    function paneKey(p) {
+      if (opts.paneAttr) return p.getAttribute(opts.paneAttr);
+      if (opts.paneIdPrefix) return (p.id || '').replace(opts.paneIdPrefix, '');
+      return null;
+    }
+    function activate(value) {
+      seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+        var match = o.getAttribute('data-value') === value;
+        o.classList.toggle('is-active', match);
+        o.setAttribute('aria-selected', match ? 'true' : 'false');
+      });
+      panels.forEach(function (p) {
+        var k = paneKey(p);
+        if (hideMode) {
+          p.classList.toggle('is-hidden', !(value === allKey || value === k));
+        } else {
+          p.classList.toggle('is-active', value === k);
+        }
+      });
+    }
+    seg.addEventListener('click', function (ev) {
+      var opt = ev.target.closest('.pp-segment-opt');
+      if (!opt) return;
+      var value = opt.getAttribute('data-value');
+      if (value) activate(value);
+    });
+  }
+  </script>
+
   {% block extra_scripts %}{% endblock %}
 </body>
 </html>

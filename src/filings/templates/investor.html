@@ -30,7 +30,7 @@
     <p class="fund-detail-kicker">PaperPanda Fund Terminal</p>
     <h1>{% if investor_name %}{{ investor_name }}{% else %}{{ fund.name }}{% endif %}</h1>
     <p>{{ fund.name }} &middot; CIK: {{ fund.cik }} &middot;
-       Report Period: {{ fund.report_period }} &middot; Filed: {{ fund.filing_date }}</p>
+       Report Period: {{ fund.report_period }} &middot; Filed: {{ fund.filing_date | dt_long }}</p>
 </hgroup>
 
 {# ── Tab Navigation ── #}

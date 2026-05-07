@@ -290,7 +290,7 @@ def format_for_template(row: dict | None) -> dict:
         try:
             ipo = (
                 datetime.strptime(str(row["ipo_date"])[:10], "%Y-%m-%d")
-                .strftime("%b %-d, %Y")
+                .strftime("%b %d %Y")
             )
         except (TypeError, ValueError):
             ipo = str(row["ipo_date"])

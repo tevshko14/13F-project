@@ -906,7 +906,7 @@ def build_retail_leaderboard_data(
         "leaderboard_rows": rows,
         "metadata": {
             "count": len(rows),
-            "timestamp": time.strftime("%b %-d, %Y %-I:%M %p UTC", time.gmtime()),
+            "timestamp": time.strftime("%b %d %Y %-I:%M %p UTC", time.gmtime()),
             "market_mood": fear_greed.get("rating") if fear_greed else None,
             "market_score": fear_greed.get("score") if fear_greed else None,
         },
@@ -1016,7 +1016,7 @@ def get_retail_sentiment_overview() -> dict:
         "top_movers": top_movers,
         "top_mentioned": top_mentioned,
         "metadata": {
-            "timestamp": time.strftime("%b %-d, %Y %-I:%M %p UTC", time.gmtime()),
+            "timestamp": time.strftime("%b %d %Y %-I:%M %p UTC", time.gmtime()),
         },
     }
 

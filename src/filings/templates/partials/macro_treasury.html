@@ -43,7 +43,7 @@
             {% else %}
             <span class="treas-badge normal">Normal</span>
             {% endif %}
-            <span style="font-size: 0.75em; font-weight: 400; color: var(--pp-text-muted); margin-left: 0.5em;">{{ yield_curve.date }}</span>
+            <span style="font-size: 0.75em; font-weight: 400; color: var(--pp-text-muted); margin-left: 0.5em;">{{ yield_curve.date | dt_long }}</span>
         </h3>
         <div class="treas-chart" id="treas-yield-chart"></div>
 

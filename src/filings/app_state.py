@@ -24,6 +24,13 @@ from fastapi.templating import Jinja2Templates
 # never modify env state.
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
+# Register the canonical date filters here (rather than in web.py) so
+# they're available to every template — including routers that render
+# before web.py's late-init filters land.  Filters: dt_long / dt_short /
+# dt_dow → "MMM DD YYYY" / "MMM DD" / "Wed, MMM DD YYYY".
+from filings.dates_format import register_jinja_filters as _register_date_filters  # noqa: E402
+_register_date_filters(templates.env)
+
 
 # ── Input validation regexes ──────────────────────────────────────────
 # Same patterns historically defined in web.py; kept here so routers can

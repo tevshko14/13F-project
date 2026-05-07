@@ -847,14 +847,16 @@ _SECTOR_ABBREV = {
 
 
 def _format_short_date(value: str) -> str:
-    """'2026-02-15' → 'Feb 15'."""
+    """'2026-02-15' → 'Feb 15 2026'.
+
+    Renamed semantically — this is the project's canonical "MMM DD YYYY"
+    format.  Kept under the old name (and as a Jinja filter) so existing
+    v1 templates pick up the new style without churn.
+    """
     if not value:
         return "—"
-    try:
-        dt = datetime.strptime(value[:10], "%Y-%m-%d")
-        return dt.strftime("%b %d").lstrip("0")
-    except (ValueError, TypeError):
-        return value
+    from filings.dates_format import format_date
+    return format_date(value, fallback=value)
 
 
 def _abbreviate_sector(value: str) -> str:
@@ -865,19 +867,16 @@ def _abbreviate_sector(value: str) -> str:
 
 
 def _format_pretty_date(value: str) -> str:
-    """'2026-03-02' -> 'Mar 2nd, 2026'."""
+    """'2026-03-02' -> 'Mar 02 2026' (canonical MMM DD YYYY format).
+
+    Used to emit ordinal-suffixed dates ("Mar 2nd, 2026") — switched to
+    the same canonical product format for consistency.  Old name kept so
+    Jinja filter callers don't need to change.
+    """
     if not value:
         return "—"
-    try:
-        dt = datetime.strptime(value[:10], "%Y-%m-%d")
-        day = dt.day
-        if 11 <= day <= 13:
-            suffix = "th"
-        else:
-            suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
-        return f"{dt.strftime('%b')} {day}{suffix}, {dt.year}"
-    except (ValueError, TypeError):
-        return value
+    from filings.dates_format import format_date
+    return format_date(value, fallback=value)
 
 
 def _format_value(value, prefix: str = "$", precision: int = 1) -> str:
@@ -5022,7 +5021,7 @@ async def earnings_calendar_day_api(
 
     try:
         dt = datetime.strptime(date, "%Y-%m-%d")
-        date_label = dt.strftime("%A, %B %d, %Y")
+        date_label = dt.strftime("%b %d %Y")    # canonical MMM DD YYYY
     except ValueError:
         date_label = date
 

@@ -475,7 +475,7 @@ window._edAllEvents = {{ data.events_by_date | tojson }};
 <div class="ed-countdown" id="ed-countdown-wrap">
     <div class="ed-countdown-label">
         <div class="ed-countdown-event">{{ data.countdown_target.event }}</div>
-        <div class="ed-countdown-sub">{{ data.countdown_target.date }} at {{ data.countdown_target.time or 'TBD' }} ET</div>
+        <div class="ed-countdown-sub">{{ data.countdown_target.date | dt_long }} at {{ data.countdown_target.time or 'TBD' }} ET</div>
     </div>
     <div class="ed-countdown-timer" id="ed-cd-timer">
         <div class="ed-cd-unit">

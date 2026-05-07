@@ -42,7 +42,6 @@
       {%- if macro_is_mock %} · <span class="pp-page-hero-flag">DEMO</span>{% endif %}
     </div>
   </div>
-  {{ btn("Add to dashboard", kind="ghost") }}
 </header>
 
 {# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━ #}
@@ -82,28 +81,32 @@
                 </span>
               </div>
             </div>
-            <svg class="pp-macro-featured-svg"
-                 viewBox="0 0 {{ c.vb_w }} {{ c.vb_h }}"
-                 preserveAspectRatio="none"
-                 aria-label="{{ c.name }}">
-              {% for t in c.y_ticks %}
-                <line class="pp-home-chart-grid"
-                      x1="50" x2="{{ c.vb_w - 50 }}"
-                      y1="{{ t.y }}" y2="{{ t.y }}"
-                      vector-effect="non-scaling-stroke"/>
-              {% endfor %}
-              {% if c.kind == "bar" %}
-                {% for b in c.bars %}
-                  <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
-                        fill="{{ c.color }}" opacity="0.85"/>
+            <div class="pp-chart-hover pp-macro-featured-chart"
+                 data-vb-w="{{ c.vb_w }}" data-vb-h="{{ c.vb_h }}"
+                 data-chart-points='{{ c.hover_points|default([])|tojson }}'>
+              <svg class="pp-macro-featured-svg"
+                   viewBox="0 0 {{ c.vb_w }} {{ c.vb_h }}"
+                   preserveAspectRatio="none"
+                   aria-label="{{ c.name }}">
+                {% for t in c.y_ticks %}
+                  <line class="pp-home-chart-grid"
+                        x1="50" x2="{{ c.vb_w - 50 }}"
+                        y1="{{ t.y }}" y2="{{ t.y }}"
+                        vector-effect="non-scaling-stroke"/>
                 {% endfor %}
-              {% else %}
-                <path d="{{ c.path_d }}" fill="none"
-                      stroke="{{ c.color }}" stroke-width="2.4"
-                      vector-effect="non-scaling-stroke"
-                      stroke-linecap="round" stroke-linejoin="round"/>
-              {% endif %}
-            </svg>
+                {% if c.kind == "bar" %}
+                  {% for b in c.bars %}
+                    <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                          fill="{{ c.color }}" opacity="0.85"/>
+                  {% endfor %}
+                {% else %}
+                  <path d="{{ c.path_d }}" fill="none"
+                        stroke="{{ c.color }}" stroke-width="2.4"
+                        vector-effect="non-scaling-stroke"
+                        stroke-linecap="round" stroke-linejoin="round"/>
+                {% endif %}
+              </svg>
+            </div>
           {% endcall %}
         {% endfor %}
       </div>
@@ -243,23 +246,25 @@
     {% if yields_debt.have_data %}
       {% call panel(cls="pp-macro-debt-panel") %}
         {{ panel_head("National Debt",
-                      sub="Total public debt outstanding · " ~ yields_debt.latest_date) }}
+                      sub="Total public debt outstanding · " ~ (yields_debt.latest_date | dt_long)) }}
         <div class="pp-macro-debt-body">
           <div class="pp-macro-debt-headline">
             <span class="pp-macro-debt-value">${{ yields_debt.latest_t }}T</span>
             <span class="pp-mono pp-dim pp-macro-debt-meta">last 30 trading days</span>
           </div>
-          <svg class="pp-macro-debt-svg"
-               viewBox="0 0 {{ yields_debt.vb_w }} {{ yields_debt.vb_h }}"
-               preserveAspectRatio="none"
-               aria-label="National debt over time">
-            {% for b in yields_debt.bars %}
-              <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
-                    fill="var(--pp-down)" opacity="0.78">
-                <title>{{ b.date }} · ${{ b.debt_t }}T</title>
-              </rect>
-            {% endfor %}
-          </svg>
+          <div class="pp-chart-hover pp-macro-debt-chart"
+               data-vb-w="{{ yields_debt.vb_w }}" data-vb-h="{{ yields_debt.vb_h }}"
+               data-chart-points='{{ yields_debt.hover_points|default([])|tojson }}'>
+            <svg class="pp-macro-debt-svg"
+                 viewBox="0 0 {{ yields_debt.vb_w }} {{ yields_debt.vb_h }}"
+                 preserveAspectRatio="none"
+                 aria-label="National debt over time">
+              {% for b in yields_debt.bars %}
+                <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                      fill="var(--pp-down)" opacity="0.78"/>
+              {% endfor %}
+            </svg>
+          </div>
           <div class="pp-macro-debt-xaxis">
             {% for tk in yields_debt.x_ticks %}
               <span class="pp-mono pp-macro-debt-tick"
@@ -283,21 +288,25 @@
               <span class="pp-macro-fx-chart-pair">{{ c.label }}</span>
               <span class="pp-mono pp-dim pp-macro-fx-chart-meta">{{ c.days }} days</span>
             </div>
-            <svg class="pp-macro-fx-chart-svg"
-                 viewBox="0 0 {{ c.vb_w }} {{ c.vb_h }}"
-                 preserveAspectRatio="none"
-                 aria-label="{{ c.label }} timeseries">
-              {% for t in c.y_ticks %}
-                <line class="pp-home-chart-grid"
-                      x1="30" x2="{{ c.vb_w - 30 }}"
-                      y1="{{ t.y }}" y2="{{ t.y }}"
-                      vector-effect="non-scaling-stroke"/>
-              {% endfor %}
-              <path d="{{ c.path_d }}" fill="none"
-                    stroke="{{ c.color }}" stroke-width="2"
-                    vector-effect="non-scaling-stroke"
-                    stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <div class="pp-chart-hover pp-macro-fx-chart-wrap"
+                 data-vb-w="{{ c.vb_w }}" data-vb-h="{{ c.vb_h }}"
+                 data-chart-points='{{ c.hover_points|default([])|tojson }}'>
+              <svg class="pp-macro-fx-chart-svg"
+                   viewBox="0 0 {{ c.vb_w }} {{ c.vb_h }}"
+                   preserveAspectRatio="none"
+                   aria-label="{{ c.label }} timeseries">
+                {% for t in c.y_ticks %}
+                  <line class="pp-home-chart-grid"
+                        x1="30" x2="{{ c.vb_w - 30 }}"
+                        y1="{{ t.y }}" y2="{{ t.y }}"
+                        vector-effect="non-scaling-stroke"/>
+                {% endfor %}
+                <path d="{{ c.path_d }}" fill="none"
+                      stroke="{{ c.color }}" stroke-width="2"
+                      vector-effect="non-scaling-stroke"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
             <div class="pp-macro-fx-chart-xaxis">
               {% for tk in c.x_ticks %}
                 <span class="pp-mono pp-macro-fx-chart-tick"
@@ -319,7 +328,7 @@
     {% if fx_table.have_data %}
       {% call panel() %}
         {{ panel_head("Exchange Rates",
-                      sub="Base: USD · " ~ fx_table.as_of) }}
+                      sub="Base: USD · " ~ (fx_table.as_of | dt_long)) }}
         <table class="pp-table pp-macro-fx-table">
           <thead>
             <tr>
@@ -418,7 +427,7 @@
             <div class="pp-macro-events-countdown-evt">
               <div class="pp-macro-events-countdown-name">{{ events.countdown.event }}</div>
               <span class="pp-mono pp-dim pp-macro-events-countdown-meta">
-                {{ events.countdown.date }} at {{ events.countdown.time }} ET
+                {{ events.countdown.date | dt_long }} at {{ events.countdown.time }} ET
               </span>
             </div>
             <div class="pp-macro-events-countdown-clock">
@@ -548,7 +557,7 @@
               {% for e in day.entries %}
                 <div class="pp-macro-cal-row">
                   <div class="pp-macro-cal-date">
-                    <span class="pp-mono pp-macro-cal-d">{{ e.date[5:] }}</span>
+                    <span class="pp-mono pp-macro-cal-d">{{ e.date | dt_long }}</span>
                     <span class="pp-mono pp-macro-cal-when">{{ e.time_label or "TBD" }}{% if e.time %} ET{% endif %}</span>
                   </div>
                   <span class="pp-macro-cal-dot pp-macro-cal-impact-{{ e.impact|default('low') }}" aria-hidden="true"></span>
@@ -638,31 +647,67 @@
 
   {# ━━━━━━━━━━ HEATMAP ━━━━━━━━━━ #}
   <section class="pp-page-pane{% if _macro_tab == 'Heatmap' %} is-active{% endif %}" data-tab-pane="Heatmap">
+    {# Mirrors the homepage heatmap subtab — Companies / Sectors toggle,
+       variable-size weight-driven tiles, color-mixed up/down backgrounds.
+       Reuses the same `pp-home-heatmap-*` classes + the same data
+       fetchers (`_fetch_home_heatmap_companies`, `_fetch_home_heatmap_sectors`)
+       so the two views can never visually drift. #}
     {% call panel(cls="pp-macro-heat-panel") %}
-      {{ panel_head("Sector heatmap", sub="S&P 500 · today's average move per GICS sector") }}
-      {% if heatmap_sectors %}
-        <div class="pp-macro-heat-grid">
-          {% for s in heatmap_sectors %}
-            {%- set _abs = (s.delta if s.delta >= 0 else -s.delta) -%}
-            {%- set _alpha_int = (20 + ([_abs / 0.03, 1.0]|min) * 70)|round|int -%}
-            {%- set _bg = "color-mix(in srgb, var(--pp-up) " ~ _alpha_int ~ "%, var(--pp-bg))"
-                          if s.delta >= 0
-                          else "color-mix(in srgb, var(--pp-down) " ~ _alpha_int ~ "%, var(--pp-bg))" -%}
-            <div class="pp-macro-heat-tile"
-                 style="background: {{ _bg }};">
-              <div class="pp-macro-heat-tile-name">{{ s.name }}</div>
-              <span class="pp-mono pp-macro-heat-tile-pct {% if s.delta >= 0 %}pp-up{% else %}pp-down{% endif %}">
-                {{ s.delta_str }}
-              </span>
-              <span class="pp-mono pp-macro-heat-tile-meta">{{ s.n }} names</span>
+      {% call panel_head("Market heatmap", sub="today · live") %}
+        <div class="pp-segment pp-segment-mono" id="pp-macro-heatmap-mode" role="tablist">
+          <span class="pp-segment-opt is-active" data-heatmap-mode="Companies" role="tab" tabindex="0">Companies</span>
+          <span class="pp-segment-opt"           data-heatmap-mode="Sectors"   role="tab" tabindex="0">Sectors</span>
+        </div>
+      {% endcall %}
+      <div class="pp-home-heatmap-body">
+
+        {# ── Companies grid (default visible) ── #}
+        <div class="pp-home-heatmap-grid pp-home-heatmap-grid-companies is-active"
+             data-heatmap-pane="Companies">
+          {% for c in heatmap_companies %}
+            <a class="pp-home-heatmap-tile{% if c.is_large %} is-large{% endif %}{% if c.tile_dark %} is-dark{% endif %}"
+               href="/_v2/stock/{{ c.ticker }}"
+               style="background: {{ c.tile_bg }};
+                      grid-column: span {{ c.span_col }};
+                      grid-row: span {{ c.span_row }};">
+              <span class="pp-mono pp-home-heatmap-tk">{{ c.ticker }}</span>
+              <div>
+                <span class="pp-mono pp-home-heatmap-pct">
+                  {%- if c.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(c.pct * 100) }}%
+                </span>
+                {% if c.show_mcap %}
+                  <span class="pp-mono pp-home-heatmap-mcap">{{ c.mcap }}</span>
+                {% endif %}
+              </div>
+            </a>
+          {% else %}
+            <div class="pp-page-placeholder" style="grid-column: 1 / -1;">
+              <div class="pp-page-placeholder-sub">Company data warming up.</div>
             </div>
           {% endfor %}
         </div>
-      {% else %}
-        <div class="pp-page-placeholder">
-          <div class="pp-page-placeholder-sub">Sector data warming up.</div>
+
+        {# ── Sectors grid ── #}
+        <div class="pp-home-heatmap-grid pp-home-heatmap-grid-sectors"
+             data-heatmap-pane="Sectors">
+          {% for s in heatmap_sectors %}
+            <div class="pp-home-heatmap-tile pp-home-heatmap-sector{% if s.tile_dark %} is-dark{% endif %}"
+                 style="background: {{ s.tile_bg }};
+                        grid-column: span {{ s.span_col }};">
+              <div class="pp-home-heatmap-sector-name">{{ s.name }}</div>
+              <span class="pp-mono pp-home-heatmap-sector-pct">
+                {%- if s.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(s.pct * 100) }}%
+              </span>
+              <span class="pp-mono pp-home-heatmap-sector-mcap">Mkt cap {{ s.mcap }}</span>
+            </div>
+          {% else %}
+            <div class="pp-page-placeholder" style="grid-column: 1 / -1;">
+              <div class="pp-page-placeholder-sub">Sector data warming up.</div>
+            </div>
+          {% endfor %}
         </div>
-      {% endif %}
+
+      </div>
     {% endcall %}
 
     {% call panel() %}
@@ -725,17 +770,21 @@
             {% endfor %}
           </div>
           {% if c.have_data %}
-            <svg class="pp-macro-sent-svg"
-                 viewBox="0 0 {{ c.chart.vb_w }} {{ c.chart.vb_h }}"
-                 preserveAspectRatio="none"
-                 aria-label="{{ c.category }} search interest">
-              {% for ln in c.chart.lines %}
-                <path d="{{ ln.path_d }}" fill="none"
-                      stroke="{{ ln.color }}" stroke-width="2"
-                      vector-effect="non-scaling-stroke"
-                      stroke-linecap="round" stroke-linejoin="round"/>
-              {% endfor %}
-            </svg>
+            <div class="pp-chart-hover pp-macro-sent-chart"
+                 data-vb-w="{{ c.chart.vb_w }}" data-vb-h="{{ c.chart.vb_h }}"
+                 data-chart-points='{{ c.chart.hover_points|default([])|tojson }}'>
+              <svg class="pp-macro-sent-svg"
+                   viewBox="0 0 {{ c.chart.vb_w }} {{ c.chart.vb_h }}"
+                   preserveAspectRatio="none"
+                   aria-label="{{ c.category }} search interest">
+                {% for ln in c.chart.lines %}
+                  <path d="{{ ln.path_d }}" fill="none"
+                        stroke="{{ ln.color }}" stroke-width="2"
+                        vector-effect="non-scaling-stroke"
+                        stroke-linecap="round" stroke-linejoin="round"/>
+                {% endfor %}
+              </svg>
+            </div>
             <div class="pp-macro-sent-foot">
               <span class="pp-mono pp-dim pp-macro-sent-axis">{{ c.chart.first_date }}</span>
               <span class="pp-mono pp-dim pp-macro-sent-axis">{{ c.chart.last_date }}</span>
@@ -794,27 +843,31 @@
                 </span>
               </div>
             </div>
-            <svg class="pp-macro-vol-pc-svg"
-                 viewBox="0 0 {{ vol.pc.vb_w }} {{ vol.pc.vb_h }}"
-                 preserveAspectRatio="none"
-                 aria-label="Put/Call ratio history">
-              {% for t in vol.pc.y_ticks %}
-                <line class="pp-home-chart-grid"
-                      x1="50" x2="{{ vol.pc.vb_w - 8 }}"
-                      y1="{{ t.y }}" y2="{{ t.y }}"
+            <div class="pp-chart-hover pp-macro-vol-pc-chart"
+                 data-vb-w="{{ vol.pc.vb_w }}" data-vb-h="{{ vol.pc.vb_h }}"
+                 data-chart-points='{{ vol.pc.hover_points|default([])|tojson }}'>
+              <svg class="pp-macro-vol-pc-svg"
+                   viewBox="0 0 {{ vol.pc.vb_w }} {{ vol.pc.vb_h }}"
+                   preserveAspectRatio="none"
+                   aria-label="Put/Call ratio history">
+                {% for t in vol.pc.y_ticks %}
+                  <line class="pp-home-chart-grid"
+                        x1="50" x2="{{ vol.pc.vb_w - 8 }}"
+                        y1="{{ t.y }}" y2="{{ t.y }}"
+                        vector-effect="non-scaling-stroke"/>
+                {% endfor %}
+                {# 1.0 threshold (bearish/bullish split) #}
+                <line x1="50" x2="{{ vol.pc.vb_w - 8 }}"
+                      y1="{{ vol.pc.threshold_y }}" y2="{{ vol.pc.threshold_y }}"
+                      stroke="var(--pp-down)" stroke-width="1"
+                      stroke-dasharray="6 4"
                       vector-effect="non-scaling-stroke"/>
-              {% endfor %}
-              {# 1.0 threshold (bearish/bullish split) #}
-              <line x1="50" x2="{{ vol.pc.vb_w - 8 }}"
-                    y1="{{ vol.pc.threshold_y }}" y2="{{ vol.pc.threshold_y }}"
-                    stroke="var(--pp-down)" stroke-width="1"
-                    stroke-dasharray="6 4"
-                    vector-effect="non-scaling-stroke"/>
-              <path d="{{ vol.pc.path_d }}" fill="none"
-                    stroke="var(--pp-up)" stroke-width="2"
-                    vector-effect="non-scaling-stroke"
-                    stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+                <path d="{{ vol.pc.path_d }}" fill="none"
+                      stroke="var(--pp-up)" stroke-width="2"
+                      vector-effect="non-scaling-stroke"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </div>
             <div class="pp-macro-vol-pc-yaxis">
               {% for t in vol.pc.y_ticks %}
                 <span class="pp-mono pp-macro-vol-pc-ytick"
@@ -839,20 +892,24 @@
                       sub=(vol.vix.state|default('—')) ~ (" · spot " ~ vol.vix.spot if vol.vix.spot else "")) }}
         {% if vol.vix.have_data %}
           <div class="pp-macro-vol-vix-body">
-            <svg class="pp-macro-vol-vix-svg"
-                 viewBox="0 0 {{ vol.vix.vb_w }} {{ vol.vix.vb_h }}"
-                 preserveAspectRatio="none"
-                 aria-label="VIX term structure">
-              <path d="{{ vol.vix.path_d }}" fill="none"
-                    stroke="var(--pp-accent)" stroke-width="2.4"
-                    vector-effect="non-scaling-stroke"
-                    stroke-linecap="round" stroke-linejoin="round"/>
-              {% for d in vol.vix.dots %}
-                <circle cx="{{ d.x }}" cy="{{ d.y }}" r="4"
-                        fill="var(--pp-bg)" stroke="var(--pp-accent)" stroke-width="2"
-                        vector-effect="non-scaling-stroke"/>
-              {% endfor %}
-            </svg>
+            <div class="pp-chart-hover pp-macro-vol-vix-chart"
+                 data-vb-w="{{ vol.vix.vb_w }}" data-vb-h="{{ vol.vix.vb_h }}"
+                 data-chart-points='{{ vol.vix.hover_points|default([])|tojson }}'>
+              <svg class="pp-macro-vol-vix-svg"
+                   viewBox="0 0 {{ vol.vix.vb_w }} {{ vol.vix.vb_h }}"
+                   preserveAspectRatio="none"
+                   aria-label="VIX term structure">
+                <path d="{{ vol.vix.path_d }}" fill="none"
+                      stroke="var(--pp-accent)" stroke-width="2.4"
+                      vector-effect="non-scaling-stroke"
+                      stroke-linecap="round" stroke-linejoin="round"/>
+                {% for d in vol.vix.dots %}
+                  <circle cx="{{ d.x }}" cy="{{ d.y }}" r="4"
+                          fill="var(--pp-bg)" stroke="var(--pp-accent)" stroke-width="2"
+                          vector-effect="non-scaling-stroke"/>
+                {% endfor %}
+              </svg>
+            </div>
             <div class="pp-macro-vol-vix-axis">
               {% for d in vol.vix.dots %}
                 <span class="pp-macro-vol-vix-tick"
@@ -881,6 +938,9 @@
                         ~ (" · current " ~ vol.skew.current if vol.skew.current else "")) }}
       {% if vol.skew.have_data %}
         <div class="pp-macro-vol-skew-body">
+          <div class="pp-chart-hover pp-macro-vol-skew-chart"
+               data-vb-w="{{ vol.skew.vb_w }}" data-vb-h="{{ vol.skew.vb_h }}"
+               data-chart-points='{{ vol.skew.hover_points|default([])|tojson }}'>
           <svg class="pp-macro-vol-skew-svg"
                viewBox="0 0 {{ vol.skew.vb_w }} {{ vol.skew.vb_h }}"
                preserveAspectRatio="none"
@@ -897,6 +957,7 @@
                   vector-effect="non-scaling-stroke"
                   stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
+          </div>{# /pp-chart-hover #}
           <div class="pp-macro-vol-pc-xaxis">
             <span class="pp-mono pp-dim">{{ vol.skew.first_date }}</span>
             <span class="pp-mono pp-dim">{{ vol.skew.last_date }}</span>
@@ -1080,6 +1141,9 @@
             {{ panel_head("Beat rate vs market reaction",
                           sub="last 8 quarters · solid lines = beat rate, bars = avg next-day price change") }}
             <div class="pp-macro-trend-body">
+              <div class="pp-chart-hover pp-macro-trend-chart"
+                   data-vb-w="{{ earn.trend.vb_w }}" data-vb-h="{{ earn.trend.vb_h }}"
+                   data-chart-points='{{ earn.trend.hover_points|default([])|tojson }}'>
               <svg class="pp-macro-trend-svg"
                    viewBox="0 0 {{ earn.trend.vb_w }} {{ earn.trend.vb_h }}"
                    preserveAspectRatio="none"
@@ -1119,6 +1183,7 @@
                           vector-effect="non-scaling-stroke"/>
                 {% endfor %}
               </svg>
+              </div>{# /pp-chart-hover #}
               <div class="pp-macro-trend-xaxis">
                 {% for q in earn.trend.quarters %}
                   <span class="pp-mono pp-macro-trend-tick">{{ q }}</span>
@@ -1263,18 +1328,32 @@
           {% endcall %}
         {% endif %}
 
-        {# ── List view — all upcoming, grouped by date ── #}
-        {% call panel() %}
+        {# ── List view — day-tabs strip with horizontal scroll + per-day
+           top-20 preview + "Show all" expand.  Mirrors the Funds page
+           Position-changes UI: one tab per quarter/day, content panes
+           swap via CSS class flip. #}
+        {% call panel(cls="pp-macro-cal-list-panel") %}
           {{ panel_head("Upcoming releases · detail",
                         sub=ecal.indices.get(ecal.current_index, "") ~ " · " ~ ecal.periods.get(ecal.current_period, "")) }}
-          <div class="pp-macro-cal-list">
+          {% if ecal.upcoming %}
+            {# Day-tab strip — horizontally scrollable when ≥ 5 days. #}
+            <div class="pp-macro-cal-tabs" id="pp-macro-cal-tabs" role="tablist">
+              {% for day in ecal.upcoming %}
+                <button class="pp-macro-cal-tab{% if loop.first %} is-active{% endif %}"
+                        type="button" data-cal-day="{{ loop.index0 }}"
+                        role="tab" aria-selected="{{ 'true' if loop.first else 'false' }}">
+                  <span class="pp-mono pp-macro-cal-tab-d">{{ day.dow }}</span>
+                  <span class="pp-macro-cal-tab-date">{{ day.date | dt_long }}</span>
+                  <span class="pp-mono pp-macro-cal-tab-n">{{ day.entries|length }} reports</span>
+                </button>
+              {% endfor %}
+            </div>
+
+            {# Per-day pane — first one active by default; JS toggles `is-active`.
+               Each pane shows top 20 by default; "Show all" reveals the rest. #}
             {% for day in ecal.upcoming %}
-              <div class="pp-macro-cal-day">
-                <div class="pp-macro-cal-day-head">
-                  <span class="pp-mono pp-macro-cal-day-iso">{{ day.date }}</span>
-                  <span class="pp-macro-cal-day-label">{{ day.date_label }}</span>
-                  <span class="pp-mono pp-dim pp-macro-cal-day-count">{{ day.entries|length }} reports</span>
-                </div>
+              <div class="pp-macro-cal-day-pane{% if loop.first %} is-active{% endif %}"
+                   data-cal-pane="{{ loop.index0 }}">
                 <table class="pp-table pp-macro-cal-table">
                   <thead>
                     <tr>
@@ -1288,11 +1367,11 @@
                     </tr>
                   </thead>
                   <tbody>
-                    {# Show all entries — busy earnings days legitimately
-                       run 500+ tickers; truncating hides high-profile names
-                       that aren't in the top-by-revenue slice. #}
                     {% for e in day.entries %}
-                      <tr>
+                      {# First 20 always visible; rows past 20 are hidden by
+                         default and revealed when the parent pane gets
+                         `is-expanded` via the Show all button. #}
+                      <tr{% if loop.index > 20 %} class="pp-macro-cal-overflow"{% endif %}>
                         <td><span class="pp-mono pp-dim">{{ e.hour_label or "—" }}</span></td>
                         <td><a class="pp-mono pp-ink-strong pp-macro-cal-link" href="/stock/{{ e.symbol }}">{{ e.symbol }}</a></td>
                         <td class="pp-macro-cal-name">{{ e.name }}</td>
@@ -1315,13 +1394,19 @@
                     {% endfor %}
                   </tbody>
                 </table>
-              </div>
-            {% else %}
-              <div class="pp-page-placeholder">
-                <div class="pp-page-placeholder-sub">No earnings reports scheduled for this period.</div>
+                {% if day.entries|length > 20 %}
+                  <button class="pp-macro-cal-expand" type="button" data-cal-expand="{{ loop.index0 }}">
+                    <span class="pp-macro-cal-expand-show">Show all {{ day.entries|length }} reports</span>
+                    <span class="pp-macro-cal-expand-hide">Collapse to top 20</span>
+                  </button>
+                {% endif %}
               </div>
             {% endfor %}
-          </div>
+          {% else %}
+            <div class="pp-page-placeholder">
+              <div class="pp-page-placeholder-sub">No earnings reports scheduled for this period.</div>
+            </div>
+          {% endif %}
         {% endcall %}
 
       {% else %}
@@ -1373,7 +1458,8 @@
       {# ── Status + Up/Down ratio ── #}
       {% call panel() %}
         {{ panel_head("Market tone",
-                      sub=perf.data_index_name ~ " · " ~ perf.data_period_label) }}
+                      sub=perf.data_index_name ~ " · " ~ perf.data_period_label
+                          ~ (" · as of " ~ (perf.data_as_of | dt_long) if perf.data_as_of else "")) }}
         <div class="pp-macro-perf-tone">
           <div class="pp-macro-perf-status pp-macro-perf-status-{{ perf.status.tone }}">
             <span class="pp-mono pp-macro-perf-status-kicker">STATUS</span>
@@ -1403,19 +1489,61 @@
       <div class="pp-row pp-row-2-1">
         {% call panel() %}
           {{ panel_head("Sector performance",
-                        sub="% of names advancing within each GICS sector") }}
+                        sub="advance/decline split within each GICS sector"
+                            ~ (" · as of " ~ (perf.data_as_of | dt_long) if perf.data_as_of else "")) }}
           <div class="pp-macro-sector-bars">
             {% for s in perf.sector_breadth %}
-              <div class="pp-macro-sector-row">
+              <div class="pp-macro-sector-row" tabindex="0">
                 <span class="pp-macro-sector-name">{{ s.sector }}</span>
+                {# Three-segment stacked bar: ▲ green up · grey unchanged
+                   · ▼ red down.  Widths are pre-computed percentages so
+                   the template stays declarative; segments only render
+                   when their share is non-zero so a perfectly-mixed
+                   sector doesn't show ghost slivers. #}
                 <div class="pp-macro-sector-bar">
-                  <span class="pp-macro-sector-bar-fill"
-                        style="width: {{ s.up_pct }}%;"></span>
+                  {% if s.up_pct > 0 %}
+                    <span class="pp-macro-sector-bar-up"
+                          style="width: {{ s.up_pct }}%;"
+                          aria-hidden="true"></span>
+                  {% endif %}
+                  {% if s.unchanged_pct > 0 %}
+                    <span class="pp-macro-sector-bar-flat"
+                          style="width: {{ s.unchanged_pct }}%;"
+                          aria-hidden="true"></span>
+                  {% endif %}
+                  {% if s.down_pct > 0 %}
+                    <span class="pp-macro-sector-bar-dn"
+                          style="width: {{ s.down_pct }}%;"
+                          aria-hidden="true"></span>
+                  {% endif %}
                 </div>
                 <span class="pp-mono pp-macro-sector-pct">{{ s.up_pct }}%</span>
-                <span class="pp-mono pp-dim2 pp-macro-sector-meta">
-                  {{ s.up }}/{{ s.total }}
-                </span>
+                <span class="pp-mono pp-dim2 pp-macro-sector-meta">{{ s.up }}/{{ s.total }}</span>
+
+                {# Hover/focus tooltip — full advance/decline distribution.
+                   Hidden by default; row :hover/:focus-within reveals it.
+                   Sits absolutely above the bar so it doesn't push layout. #}
+                <div class="pp-macro-sector-tip" aria-hidden="true">
+                  <div class="pp-macro-sector-tip-head">
+                    <span class="pp-macro-sector-tip-name">{{ s.sector }}</span>
+                    <span class="pp-mono pp-dim2 pp-macro-sector-tip-total">{{ s.total }} names</span>
+                  </div>
+                  <div class="pp-macro-sector-tip-row">
+                    <span class="pp-macro-sector-tip-dot pp-macro-sector-tip-dot-up"></span>
+                    <span class="pp-macro-sector-tip-label">Advancing</span>
+                    <span class="pp-mono pp-up pp-macro-sector-tip-val">{{ s.up }} · {{ s.up_pct }}%</span>
+                  </div>
+                  <div class="pp-macro-sector-tip-row">
+                    <span class="pp-macro-sector-tip-dot pp-macro-sector-tip-dot-flat"></span>
+                    <span class="pp-macro-sector-tip-label">Unchanged</span>
+                    <span class="pp-mono pp-dim pp-macro-sector-tip-val">{{ s.unchanged }} · {{ s.unchanged_pct }}%</span>
+                  </div>
+                  <div class="pp-macro-sector-tip-row">
+                    <span class="pp-macro-sector-tip-dot pp-macro-sector-tip-dot-dn"></span>
+                    <span class="pp-macro-sector-tip-label">Declining</span>
+                    <span class="pp-mono pp-down pp-macro-sector-tip-val">{{ s.down }} · {{ s.down_pct }}%</span>
+                  </div>
+                </div>
               </div>
             {% endfor %}
           </div>
@@ -1452,8 +1580,12 @@
       {% if perf.momentum.have_data %}
         {% call panel(cls="pp-macro-momentum-panel") %}
           {{ panel_head("Market momentum",
-                        sub="cumulative advance/decline line vs " ~ perf.momentum.index_name ~ " · last " ~ perf.momentum.n_days ~ " sessions") }}
+                        sub="cumulative advance/decline line vs " ~ perf.momentum.index_name ~ " · last " ~ perf.momentum.n_days ~ " sessions"
+                            ~ (" · as of " ~ (perf.data_as_of | dt_long) if perf.data_as_of else "")) }}
           <div class="pp-macro-momentum-body">
+            <div class="pp-chart-hover pp-macro-momentum-chart"
+                 data-vb-w="{{ perf.momentum.vb_w }}" data-vb-h="{{ perf.momentum.vb_h }}"
+                 data-chart-points='{{ perf.momentum.hover_points|default([])|tojson }}'>
             <svg class="pp-macro-momentum-svg"
                  viewBox="0 0 {{ perf.momentum.vb_w }} {{ perf.momentum.vb_h }}"
                  preserveAspectRatio="none"
@@ -1469,6 +1601,7 @@
                     vector-effect="non-scaling-stroke" stroke-dasharray="6 4"
                     stroke-linecap="round" stroke-linejoin="round"/>
             </svg>
+            </div>{# /pp-chart-hover #}
             <div class="pp-macro-momentum-xaxis">
               {% for tk in perf.momentum.x_labels %}
                 <span class="pp-mono pp-macro-momentum-tick"
@@ -1482,6 +1615,12 @@
           </div>
         {% endcall %}
       {% endif %}
+
+      <p class="pp-macro-sentiment-foot">
+        Breadth + sector rotation + top movers from S&amp;P 500 / NASDAQ 100 / Dow 30 close-to-close.
+        A/D line tracks the daily net of advancing minus declining names (cumulative).
+        Data via yfinance · close prices through {{ (perf.data_as_of | dt_long) if perf.data_as_of else "latest session" }}.
+      </p>
 
     {% else %}
       {% call panel() %}
@@ -1501,53 +1640,65 @@
 {# Same tab-switcher pattern as Home — vanilla JS, no HTMX.  All panes are
    server-rendered up front so switches are instant. #}
 <script>
-/* Tab/sub-tab activator — generalised over the four near-identical IIFEs
-   that originally lived here.  Toggles `is-active` on segment options +
-   panes by matching `data-value` to the selected pane's data attribute.
-   Set `hideMode` when a non-active panel should be `is-hidden` instead
-   (and `allKey` to recognise the no-filter sentinel). */
-function ppBindActivator(opts) {
-  var seg = document.getElementById(opts.segId);
+/* `ppBindActivator` is defined in base.html so all v2 pages can use it. */
+
+/* Heatmap segment uses `data-heatmap-mode="..."` instead of `data-value="..."`
+   (consistent with the homepage version).  Mirror it onto data-value before
+   the activator binds so the shared helper finds it. */
+(function () {
+  var seg = document.getElementById('pp-macro-heatmap-mode');
   if (!seg) return;
-  var scopeRoot = opts.scoped ? (seg.closest('.pp-page-pane') || document) : document;
-  var panels = scopeRoot.querySelectorAll(opts.paneSelector);
-  if (!panels.length) return;
-  var hideMode = !!opts.hideMode;
-  var allKey   = opts.allKey || null;
-  function paneKey(p) {
-    if (opts.paneAttr) return p.getAttribute(opts.paneAttr);
-    if (opts.paneIdPrefix) return (p.id || '').replace(opts.paneIdPrefix, '');
-    return null;
-  }
-  function activate(value) {
-    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
-      var match = o.getAttribute('data-value') === value;
-      o.classList.toggle('is-active', match);
-      o.setAttribute('aria-selected', match ? 'true' : 'false');
-    });
-    panels.forEach(function (p) {
-      var k = paneKey(p);
-      if (hideMode) {
-        p.classList.toggle('is-hidden', !(value === allKey || value === k));
-      } else {
-        p.classList.toggle('is-active', value === k);
-      }
-    });
-  }
-  seg.addEventListener('click', function (ev) {
-    var opt = ev.target.closest('.pp-segment-opt');
-    if (!opt) return;
-    var value = opt.getAttribute('data-value');
-    if (value) activate(value);
+  seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+    if (!o.getAttribute('data-value') && o.getAttribute('data-heatmap-mode')) {
+      o.setAttribute('data-value', o.getAttribute('data-heatmap-mode'));
+    }
   });
-}
+})();
 
 /* Parent tab nav (page-level), Earnings sub-tabs (scoped), Events Calendar
-   week/list view (scoped), Indicators group filter (hide-mode). */
-ppBindActivator({segId: 'pp-macro-tabs',         paneSelector: '.pp-page-pane',     paneAttr: 'data-tab-pane'});
-ppBindActivator({segId: 'pp-macro-earn-subtabs', paneSelector: '.pp-macro-subpane', paneAttr: 'data-subpane', scoped: true});
-ppBindActivator({segId: 'pp-macro-events-view',  paneSelector: '.pp-macro-subpane', paneAttr: 'data-subpane', scoped: true});
-ppBindActivator({segId: 'pp-macro-ind-groups',   paneSelector: '.pp-macro-ind-group', paneIdPrefix: 'pp-macro-ind-group-', hideMode: true, allKey: 'all'});
+   week/list view (scoped), Indicators group filter (hide-mode), Heatmap
+   Companies/Sectors toggle (scoped). */
+ppBindActivator({segId: 'pp-macro-tabs',           paneSelector: '.pp-page-pane',     paneAttr: 'data-tab-pane'});
+ppBindActivator({segId: 'pp-macro-earn-subtabs',   paneSelector: '.pp-macro-subpane', paneAttr: 'data-subpane', scoped: true});
+ppBindActivator({segId: 'pp-macro-events-view',    paneSelector: '.pp-macro-subpane', paneAttr: 'data-subpane', scoped: true});
+ppBindActivator({segId: 'pp-macro-ind-groups',     paneSelector: '.pp-macro-ind-group', paneIdPrefix: 'pp-macro-ind-group-', hideMode: true, allKey: 'all'});
+ppBindActivator({segId: 'pp-macro-heatmap-mode',   paneSelector: '.pp-home-heatmap-grid', paneAttr: 'data-heatmap-pane', scoped: true});
+
+/* Earnings Calendar — day-tabs strip (horizontal scroll) + per-day expand.
+   Mirrors the Funds page Position-changes UI: one tab per upcoming day,
+   panes swap via class toggle, optional "Show all" reveals rows past 20. */
+(function () {
+  var tabs = document.getElementById('pp-macro-cal-tabs');
+  if (!tabs) return;
+  var panes = document.querySelectorAll('.pp-macro-cal-day-pane');
+  if (!panes.length) return;
+
+  function activate(idx) {
+    tabs.querySelectorAll('.pp-macro-cal-tab').forEach(function (t) {
+      var on = t.getAttribute('data-cal-day') === idx;
+      t.classList.toggle('is-active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    panes.forEach(function (p) {
+      p.classList.toggle('is-active', p.getAttribute('data-cal-pane') === idx);
+    });
+  }
+  tabs.addEventListener('click', function (ev) {
+    var btn = ev.target.closest('.pp-macro-cal-tab');
+    if (!btn) return;
+    var idx = btn.getAttribute('data-cal-day');
+    if (idx) activate(idx);
+  });
+
+  // Show-all / collapse expand toggle per pane.
+  document.querySelectorAll('.pp-macro-cal-expand').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var idx = btn.getAttribute('data-cal-expand');
+      var pane = document.querySelector('.pp-macro-cal-day-pane[data-cal-pane="' + idx + '"]');
+      if (pane) pane.classList.toggle('is-expanded');
+    });
+  });
+})();
 
 /* Events Calendar — countdown clock.  Re-evaluates every second; if the
    target ISO datetime has passed we just show 0s and stop ticking. */
@@ -1581,6 +1732,161 @@ ppBindActivator({segId: 'pp-macro-ind-groups',   paneSelector: '.pp-macro-ind-gr
   tick();
   var handle = setInterval(tick, 1000);
 })();
+
+/* ─── Generic chart-hover binder ────────────────────────────────────────
+ *
+ * Auto-binds any `.pp-chart-hover` wrapper that has a `data-chart-points`
+ * JSON attribute.  Each point is `{x, y?, label, value?, rows?}`:
+ *
+ *   - `x` is in viewBox units (must be monotonically increasing — we
+ *     binary-search for the nearest x on every mousemove)
+ *   - `y` is in viewBox units (single-line charts).  Multi-line / bar
+ *     charts can omit it; the hover dot won't render but the crosshair
+ *     + tooltip still work.
+ *   - Single-line tooltip: `label` (uppercase mono kicker) + `value`
+ *     (big mono number)
+ *   - Multi-line tooltip: `label` + `rows: [{label, value, color?}]`
+ *     — each row gets a coloured dot and is laid out via CSS grid
+ *
+ * Reads `data-vb-w` / `data-vb-h` from the wrapper for coord scaling.
+ * Crosshair line + hover dot + tooltip element are auto-injected if
+ * missing — the wrapper just needs the SVG.  Cancellable via TaskStop
+ * by removing the class.
+ */
+function ppBindChartHover(wrap) {
+  var svg = wrap.querySelector('svg');
+  if (!svg) return;
+  var points;
+  try { points = JSON.parse(wrap.getAttribute('data-chart-points') || '[]'); }
+  catch (e) { return; }
+  if (!points.length) return;
+
+  var vbW = parseFloat(wrap.getAttribute('data-vb-w')) || 1500;
+  var vbH = parseFloat(wrap.getAttribute('data-vb-h')) || 240;
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  // Inject hover overlay elements if not already present so callers
+  // don't have to repeat them in 12 templates.
+  var cross = svg.querySelector('.pp-chart-crosshair');
+  if (!cross) {
+    cross = document.createElementNS(SVG_NS, 'line');
+    cross.setAttribute('class', 'pp-chart-crosshair');
+    cross.setAttribute('x1', '0'); cross.setAttribute('x2', '0');
+    cross.setAttribute('y1', '0'); cross.setAttribute('y2', String(vbH));
+    cross.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(cross);
+  }
+  var dot = svg.querySelector('.pp-chart-hover-dot');
+  if (!dot) {
+    dot = document.createElementNS(SVG_NS, 'circle');
+    dot.setAttribute('class', 'pp-chart-hover-dot');
+    dot.setAttribute('cx', '0'); dot.setAttribute('cy', '0');
+    dot.setAttribute('r', '4.5');
+    dot.setAttribute('vector-effect', 'non-scaling-stroke');
+    svg.appendChild(dot);
+  }
+  var tt = wrap.querySelector('.pp-chart-tooltip');
+  if (!tt) {
+    tt = document.createElement('div');
+    tt.className = 'pp-chart-tooltip';
+    tt.hidden = true;
+    tt.innerHTML = '<span class="pp-chart-tt-label"></span>' +
+                   '<span class="pp-chart-tt-value"></span>' +
+                   '<div class="pp-chart-tt-rows"></div>';
+    wrap.appendChild(tt);
+  }
+  var ttLabel = tt.querySelector('.pp-chart-tt-label');
+  var ttValue = tt.querySelector('.pp-chart-tt-value');
+  var ttRows  = tt.querySelector('.pp-chart-tt-rows');
+
+  // Binary search — points.x is monotonically increasing.
+  function nearest(vbx) {
+    var lo = 0, hi = points.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (points[mid].x < vbx) lo = mid + 1; else hi = mid;
+    }
+    if (lo > 0 && Math.abs(points[lo - 1].x - vbx) < Math.abs(points[lo].x - vbx)) return lo - 1;
+    return lo;
+  }
+
+  function show() {
+    cross.classList.add('is-visible');
+    dot.classList.add('is-visible');
+    tt.hidden = false;
+  }
+  function hide() {
+    cross.classList.remove('is-visible');
+    dot.classList.remove('is-visible');
+    tt.hidden = true;
+  }
+
+  // Cache rects on mouseenter — stable until the next layout.
+  var svgRect = null, wrapRect = null;
+  function snapshotRects() {
+    svgRect  = svg.getBoundingClientRect();
+    wrapRect = wrap.getBoundingClientRect();
+  }
+  window.addEventListener('resize', function () { svgRect = null; wrapRect = null; });
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+
+  function update(ev) {
+    if (!svgRect) snapshotRects();
+    if (svgRect.width <= 0) return;
+    var px = ev.clientX - svgRect.left;
+    if (px < 0 || px > svgRect.width) { hide(); return; }
+    var vbx = (px / svgRect.width) * vbW;
+    var pt  = points[nearest(vbx)];
+    if (!pt) { hide(); return; }
+
+    cross.setAttribute('x1', pt.x);
+    cross.setAttribute('x2', pt.x);
+    if (pt.y !== undefined && pt.y !== null) {
+      dot.setAttribute('cx', pt.x);
+      dot.setAttribute('cy', pt.y);
+      dot.classList.add('is-visible');
+    } else {
+      dot.classList.remove('is-visible');
+    }
+
+    // Single-line vs multi-line tooltip — choose by which fields are set.
+    if (pt.rows && pt.rows.length) {
+      ttLabel.textContent = pt.label || '';
+      ttValue.textContent = '';
+      ttValue.style.display = 'none';
+      ttRows.innerHTML = pt.rows.map(function (r) {
+        var dotStyle = r.color ? 'background:' + r.color + ';' : '';
+        return '<div class="pp-chart-tt-row">' +
+               '<span class="pp-chart-tt-row-dot" style="' + dotStyle + '"></span>' +
+               '<span class="pp-chart-tt-row-label">' + escapeHtml(r.label || '') + '</span>' +
+               '<span class="pp-chart-tt-row-value">' + escapeHtml(r.value || '') + '</span>' +
+               '</div>';
+      }).join('');
+    } else {
+      ttLabel.textContent = pt.label || '';
+      ttValue.textContent = pt.value || '';
+      ttValue.style.display = '';
+      ttRows.innerHTML = '';
+    }
+
+    var ttX = px + (svgRect.left - wrapRect.left);
+    var anchorY = (pt.y !== undefined && pt.y !== null) ? pt.y : (vbH / 2);
+    var ttY = (anchorY / vbH) * svgRect.height + (svgRect.top - wrapRect.top);
+    tt.style.left = ttX + 'px';
+    tt.style.top  = ttY + 'px';
+    show();
+  }
+  svg.addEventListener('mousemove',  update);
+  svg.addEventListener('mouseenter', function (ev) { snapshotRects(); update(ev); });
+  svg.addEventListener('mouseleave', hide);
+}
+
+document.querySelectorAll('.pp-chart-hover').forEach(ppBindChartHover);
 
 (function () {
   /* Yield curve hover — same pattern as the Funds AUM chart.  History array

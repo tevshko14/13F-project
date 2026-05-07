@@ -541,3 +541,637 @@ a.pp-funds-tkr:hover { color: var(--pp-accent); }
   border: 1px solid var(--pp-accent);
   letter-spacing: 0.6px;
 }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * FUNDS INDEX — landing page list of all 85 superinvestors
+ *
+ * Same `.pp-table` + `.pp-sortable` mechanism the rest of the redesign uses
+ * (sortable-table.js auto-attaches the chevrons + click handler).  Each
+ * row is two clickable surfaces (manager name + fund name) so users can
+ * use either column as the entry point.  Top-holding chips inside the
+ * row link straight to the v2 stock page.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-funds-index-panel { /* layout reset; table handles its own spacing */ }
+.pp-funds-index-meta {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+.pp-funds-index-table-wrap {
+  overflow-x: auto;
+}
+.pp-funds-index-table {
+  width: 100%;
+  min-width: 980px;
+}
+.pp-funds-index-table thead th {
+  padding: 12px 14px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--pp-dim);
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line2);
+  white-space: nowrap;
+}
+.pp-funds-index-table thead th.pp-num { text-align: right; }
+.pp-funds-index-table tbody td {
+  padding: 14px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.pp-funds-index-table tbody tr:last-child td { border-bottom: none; }
+.pp-funds-index-table td.pp-num { text-align: right; }
+
+.pp-funds-index-row { transition: background 0.08s ease; }
+.pp-funds-index-row:hover { background: var(--pp-sub); }
+
+.pp-funds-index-mgr {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--pp-text);
+}
+.pp-funds-index-mgr:hover { color: var(--pp-ink); }
+.pp-funds-index-icon {
+  width: 26px;
+  height: 26px;
+  background: var(--pp-ink);
+  color: var(--pp-bg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  flex-shrink: 0;
+}
+.pp-funds-index-mgr-name {
+  font-weight: 600;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+  white-space: nowrap;
+}
+.pp-funds-index-fund {
+  color: var(--pp-text);
+  text-decoration: none;
+  letter-spacing: -0.1px;
+}
+.pp-funds-index-fund:hover { color: var(--pp-ink); text-decoration: underline; text-underline-offset: 3px; }
+
+.pp-funds-index-tickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 280px;
+}
+.pp-funds-index-tk {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 3px 7px;
+  background: var(--pp-bg);
+  color: var(--pp-text);
+  border: 1px solid var(--pp-line2);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color 0.08s ease, color 0.08s ease;
+}
+.pp-funds-index-tk:hover {
+  border-color: var(--pp-accent);
+  color: var(--pp-ink);
+}
+
+@media (max-width: 720px) {
+  .pp-funds-index-tickers { max-width: 200px; }
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * FUNDS INDEX — sub-pane styles (Holdings · Activity · Capital Deployed)
+ *
+ * `pp-page-pane` already provides the show/hide CSS-toggle behaviour via
+ * the `.is-active` class — the sub-tab activator at the bottom of the
+ * page just flips that class.  All styles below scope to the funds
+ * index variants of those panes.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+
+/* ─── HOLDINGS · Consensus Leaders bar list ────────────────────────────── */
+
+.pp-funds-consensus-rows {
+  padding: 14px 22px 16px;
+  display: flex;
+  flex-direction: column;
+}
+.pp-funds-consensus-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 36px;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 6px;
+  border-bottom: 1px solid var(--pp-line);
+  position: relative;
+  cursor: default;
+  outline: none;
+  transition: background 0.08s ease;
+}
+.pp-funds-consensus-row:last-child { border-bottom: none; }
+.pp-funds-consensus-row:hover,
+.pp-funds-consensus-row:focus-within { background: var(--pp-sub); }
+
+.pp-funds-consensus-tk {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+}
+.pp-funds-consensus-bar {
+  position: relative;
+  height: 10px;
+  background: var(--pp-line2);
+  overflow: hidden;
+}
+.pp-funds-consensus-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--pp-up);
+}
+.pp-funds-consensus-n {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Hover tooltip — same approach as the macro Sector performance bars. */
+.pp-funds-consensus-tip {
+  position: absolute;
+  left: 80px;
+  bottom: calc(100% - 4px);
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  min-width: 280px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0s linear 0.1s;
+}
+.pp-funds-consensus-row:hover .pp-funds-consensus-tip,
+.pp-funds-consensus-row:focus-within .pp-funds-consensus-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0s linear 0s;
+}
+.pp-funds-consensus-tip-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-funds-consensus-tip-tk {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.pp-funds-consensus-tip-name {
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 0.2px;
+}
+.pp-funds-consensus-tip-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+}
+.pp-funds-consensus-tip-stat { display: flex; flex-direction: column; gap: 2px; }
+.pp-funds-consensus-tip-holders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pp-line);
+}
+.pp-funds-consensus-tip-holder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--pp-text);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+
+/* ─── HOLDINGS · Recent Momentum vertical bars ────────────────────────── */
+
+.pp-funds-momentum-bars {
+  padding: 14px 22px 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(46px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+.pp-funds-momentum-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  cursor: default;
+  outline: none;
+  padding: 4px 0;
+  height: 220px;
+  justify-content: flex-end;
+}
+.pp-funds-momentum-bar-track {
+  width: 100%;
+  height: 160px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 4px;
+}
+.pp-funds-momentum-bar-fill {
+  width: 100%;
+  background: var(--pp-accent);
+  transition: filter 0.08s ease;
+}
+.pp-funds-momentum-bar:hover .pp-funds-momentum-bar-fill,
+.pp-funds-momentum-bar:focus-within .pp-funds-momentum-bar-fill {
+  filter: brightness(1.15);
+}
+.pp-funds-momentum-tk {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  color: var(--pp-ink);
+}
+.pp-funds-momentum-n {
+  font-size: 11px;
+  color: var(--pp-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-funds-momentum-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  min-width: 220px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0s linear 0.1s;
+}
+.pp-funds-momentum-bar:hover .pp-funds-momentum-tip,
+.pp-funds-momentum-bar:focus-within .pp-funds-momentum-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0s linear 0s;
+}
+.pp-funds-momentum-tip-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-funds-momentum-tip-name {
+  font-size: 11px;
+  color: var(--pp-dim);
+}
+.pp-funds-momentum-tip-stat { display: flex; flex-direction: column; gap: 2px; }
+.pp-funds-momentum-tip-adders {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--pp-line);
+}
+.pp-funds-momentum-tip-adder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+  color: var(--pp-text);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+
+/* ─── HOLDINGS · All-Holdings table ────────────────────────────────────── */
+
+.pp-funds-allhold-panel { /* layout reset */ }
+.pp-funds-allhold-wrap { overflow-x: auto; }
+.pp-funds-allhold-table {
+  width: 100%;
+  min-width: 980px;
+}
+.pp-funds-allhold-table thead th {
+  padding: 12px 14px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--pp-dim);
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line2);
+  white-space: nowrap;
+}
+.pp-funds-allhold-table thead th.pp-num { text-align: right; }
+.pp-funds-allhold-table tbody td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.pp-funds-allhold-table tbody tr:hover { background: var(--pp-sub); }
+.pp-funds-allhold-table tbody tr:last-child td { border-bottom: none; }
+.pp-funds-allhold-tk { text-decoration: none; }
+.pp-funds-allhold-tk:hover { text-decoration: underline; text-underline-offset: 3px; }
+.pp-funds-allhold-name {
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-funds-allhold-holders {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 320px;
+}
+.pp-funds-allhold-holder {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  white-space: nowrap;
+  letter-spacing: 0.1px;
+  color: var(--pp-text);
+}
+.pp-funds-allhold-more {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  align-self: center;
+}
+
+
+/* ─── ACTIVITY · KPI strip + consensus moves with expand ────────────── */
+
+.pp-funds-act-sent { letter-spacing: -0.3px; }
+.pp-funds-act-sent-up   { color: var(--pp-up);   }
+.pp-funds-act-sent-down { color: var(--pp-down); }
+.pp-funds-act-sent-dim  { color: var(--pp-dim);  }
+
+.pp-funds-act-panel { /* layout reset */ }
+.pp-funds-act-list {
+  display: flex;
+  flex-direction: column;
+}
+.pp-funds-act-row { border-bottom: 1px solid var(--pp-line); }
+.pp-funds-act-row:last-child { border-bottom: none; }
+
+/* Click-to-expand summary row — grid: ticker | name | sentiment | counts | net | chev */
+.pp-funds-act-summary {
+  display: grid;
+  grid-template-columns: 80px 1fr 84px 200px 110px 28px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 22px;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background 0.08s ease;
+}
+.pp-funds-act-summary:hover { background: var(--pp-sub); }
+.pp-funds-act-tkr {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.pp-funds-act-issuer {
+  font-size: 13px;
+  color: var(--pp-text);
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-funds-act-counts {
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 0.3px;
+  text-align: right;
+}
+.pp-funds-act-net {
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.pp-funds-act-chev {
+  font-size: 10px;
+  color: var(--pp-dim);
+  transition: transform 0.12s ease;
+  text-align: right;
+}
+.pp-funds-act-summary.is-open .pp-funds-act-chev { transform: rotate(90deg); }
+
+/* Sentiment pills */
+.pp-funds-act-sent-up,
+.pp-funds-act-sent-down,
+.pp-funds-act-sent-dim {
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  border: 1px solid currentColor;
+  text-align: center;
+}
+/* The labels above re-use the existing tone-color rules (pp-up/pp-down/pp-dim
+   variants); a quick override block keeps borders matching the text color. */
+
+/* Detail body */
+.pp-funds-act-detail {
+  padding: 0 22px 18px;
+  background: var(--pp-sub);
+  border-top: 1px solid var(--pp-line);
+}
+.pp-funds-act-detail-table {
+  width: 100%;
+  margin-top: 12px;
+}
+.pp-funds-act-detail-table thead th {
+  padding: 10px 14px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--pp-dim);
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-funds-act-detail-table thead th.pp-num { text-align: right; }
+.pp-funds-act-detail-table tbody td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 12px;
+  vertical-align: middle;
+}
+.pp-funds-act-detail-table tbody tr:last-child td { border-bottom: none; }
+.pp-funds-act-detail-table td.pp-num { text-align: right; }
+.pp-funds-act-detail-fund {
+  color: var(--pp-text);
+  text-decoration: none;
+  font-weight: 600;
+}
+.pp-funds-act-detail-fund:hover { color: var(--pp-ink); text-decoration: underline; text-underline-offset: 3px; }
+
+/* BUY / SELL / TRIM / ADD pills inside the detail table. */
+.pp-funds-act-tag-buy {
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--pp-up);
+  border: 1px solid var(--pp-up);
+}
+.pp-funds-act-tag-sell {
+  font-size: 10px;
+  letter-spacing: 1px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--pp-down);
+  border: 1px solid var(--pp-down);
+}
+
+.pp-funds-act-foot {
+  padding: 12px 22px;
+  border-top: 1px solid var(--pp-line);
+  text-align: center;
+}
+
+
+/* ─── CAPITAL DEPLOYED — sortable table with progress bars ────────── */
+
+.pp-funds-cap-wrap { overflow-x: auto; }
+.pp-funds-cap-table {
+  width: 100%;
+  min-width: 1080px;
+}
+.pp-funds-cap-table thead th {
+  padding: 12px 14px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--pp-dim);
+  text-align: left;
+  border-bottom: 1px solid var(--pp-line2);
+  white-space: nowrap;
+}
+.pp-funds-cap-table thead th.pp-num { text-align: right; }
+.pp-funds-cap-table tbody td {
+  padding: 14px;
+  border-bottom: 1px solid var(--pp-line);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.pp-funds-cap-table tbody tr:hover { background: var(--pp-sub); }
+.pp-funds-cap-table tbody tr:last-child td { border-bottom: none; }
+.pp-funds-cap-table td.pp-num { text-align: right; }
+
+.pp-funds-cap-mgr {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-decoration: none;
+  color: var(--pp-text);
+}
+.pp-funds-cap-mgr:hover { color: var(--pp-ink); }
+.pp-funds-cap-mgr-name {
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.1px;
+}
+.pp-funds-cap-fund-name {
+  font-size: 11px;
+  color: var(--pp-dim);
+}
+
+.pp-funds-cap-bar {
+  position: relative;
+  height: 18px;
+  background: var(--pp-line2);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  min-width: 200px;
+}
+.pp-funds-cap-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--pp-dim2);    /* default — overridden by tone modifiers below */
+}
+.pp-funds-cap-bar-up   .pp-funds-cap-bar-fill { background: var(--pp-up);     }
+.pp-funds-cap-bar-warn .pp-funds-cap-bar-fill { background: var(--pp-accent); }
+.pp-funds-cap-bar-down .pp-funds-cap-bar-fill { background: var(--pp-down);   }
+.pp-funds-cap-bar-pct {
+  position: absolute;
+  right: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pp-funds-cap-source {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  padding: 3px 8px;
+  border: 1px solid var(--pp-line2);
+  color: var(--pp-dim);
+}
+.pp-funds-cap-source-xbrl { color: var(--pp-up);     border-color: var(--pp-up);     }
+.pp-funds-cap-source-adv  { color: var(--pp-accent); border-color: var(--pp-accent); }
+
+
+/* ─── Mobile collapses ─────────────────────────────────────────────── */
+
+@media (max-width: 1080px) {
+  .pp-funds-act-summary { grid-template-columns: 64px 1fr 72px 130px 90px 24px; gap: 10px; padding: 12px 16px; }
+  .pp-funds-momentum-bars { grid-template-columns: repeat(auto-fit, minmax(40px, 1fr)); }
+}
+@media (max-width: 720px) {
+  .pp-funds-act-summary { grid-template-columns: 56px 1fr 70px 24px; }
+  .pp-funds-act-counts, .pp-funds-act-net { display: none; }
+  .pp-funds-allhold-holders { max-width: 200px; }
+}

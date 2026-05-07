@@ -1223,9 +1223,11 @@ def fetch_earnings_calendar(
     for d in sorted(upcoming_by_date.keys()):
         try:
             dt = datetime.strptime(d, "%Y-%m-%d")
-            label = dt.strftime("%A, %B %d")  # "Monday, March 10"
+            label = dt.strftime("%b %d %Y")  # canonical "Mar 10 2026"
+            dow   = dt.strftime("%a").upper()  # "MON" — used in day-tab kicker
         except ValueError:
             label = d
+            dow   = ""
         # Sort entries within a day: by revenue estimate descending (market cap proxy)
         # Large-cap companies (higher revenue) appear first
         entries = sorted(
@@ -1233,7 +1235,7 @@ def fetch_earnings_calendar(
             key=lambda e: (e.get("revenueEstimate") or 0),
             reverse=True,
         )
-        upcoming.append({"date": d, "date_label": label, "entries": entries})
+        upcoming.append({"date": d, "date_label": label, "dow": dow, "entries": entries})
 
     # Sort just_reported by date descending, then by revenue estimate descending
     just_reported.sort(
@@ -1308,7 +1310,8 @@ def _build_mock_calendar(
     for day_offset in range(5):  # Mon-Fri
         d = monday + timedelta(days=day_offset)
         d_str = d.strftime("%Y-%m-%d")
-        d_label = d.strftime("%A, %B %d")
+        d_label = d.strftime("%b %d %Y")    # canonical MMM DD YYYY
+        d_dow   = d.strftime("%a").upper()  # match the live path's `dow` field
         count = rng.randint(2, 6)
         chosen = rng.sample(symbols, min(count, len(symbols)))
         entries = []
@@ -1336,7 +1339,7 @@ def _build_mock_calendar(
                 "si_names": [],
                 "has_page": True,
             })
-        upcoming.append({"date": d_str, "date_label": d_label, "entries": entries})
+        upcoming.append({"date": d_str, "date_label": d_label, "dow": d_dow, "entries": entries})
 
     all_entries = [e for day in upcoming for e in day["entries"]]
     return {

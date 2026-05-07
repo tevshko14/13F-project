@@ -1,0 +1,496 @@
+{#-
+  PaperPanda Redesign — Funds index page
+
+  Four sub-panes mirroring the v1 /funds page (Funds list · Holdings ·
+  Activity · Capital Deployed) under the v2 design system.  Lands here
+  when a user clicks "Funds" in the side nav (the previous default
+  landed straight on Berkshire's detail page).  Every row in the Funds
+  pane deep-links into `/_v2/funds/{cik}` for the full detail view.
+
+  Data source: in-process `app.state.fund_cache` + `deployment_cache`
+  (populated at app startup); no upstream fetches on this route.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment %}
+
+{% block title %}Funds · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  {# macro.css ships the shared `.pp-page-*` chrome (hero, tabs, panes,
+     placeholders) — link it first so the funds index inherits the same
+     show/hide behaviour as the rest of the v2 detail pages. #}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ asset_version }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/funds.css?v={{ asset_version }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━ #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">𝟏𝟑𝐅</div>
+  <div class="pp-page-hero-text">
+    <h1 class="pp-page-hero-title">Funds</h1>
+    <div class="pp-page-hero-sub">
+      {{ funds_count }} superinvestors tracked · 13F-HR filings synced quarterly
+      {%- if funds_cache_age %} · Data {{ funds_cache_age }}{% endif %}
+    </div>
+  </div>
+</header>
+
+{# ━━━━━━━━━━ SUB-TAB NAV ━━━━━━━━━━ #}
+<div class="pp-page-tabs">
+  {{ segment(funds_index_tabs,
+             value=funds_index_view|default("Funds"),
+             id="pp-funds-index-tabs") }}
+</div>
+
+{# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
+<div class="pp-page-body">
+
+  {# ────────── FUNDS PANE — sortable list of all 85 funds ────────── #}
+  <section class="pp-page-pane{% if funds_index_view == 'Funds' %} is-active{% endif %}"
+           data-tab-pane="Funds">
+    {% if funds_index %}
+      {% call panel(cls="pp-funds-index-panel") %}
+        {% call panel_head("All funds",
+                           sub="Click any investor or fund to drill into the full 13F profile") %}
+          <span class="pp-mono pp-dim pp-funds-index-meta">
+            Sorted by portfolio value
+          </span>
+        {% endcall %}
+        <div class="pp-funds-index-table-wrap">
+          <table class="pp-table pp-sortable pp-funds-index-table">
+            <thead>
+              <tr>
+                <th>Investor</th>
+                <th>Fund</th>
+                <th class="pp-num">Portfolio value</th>
+                <th class="pp-num">Holdings</th>
+                <th>Top holdings</th>
+                <th>Period</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for f in funds_index %}
+                <tr class="pp-funds-index-row">
+                  <td>
+                    <a class="pp-funds-index-mgr" href="{{ f.href }}">
+                      <span class="pp-funds-index-icon" aria-hidden="true">{{ f.icon }}</span>
+                      <span class="pp-funds-index-mgr-name">{{ f.manager }}</span>
+                    </a>
+                  </td>
+                  <td>
+                    <a class="pp-funds-index-fund" href="{{ f.href }}">{{ f.fund_name }}</a>
+                  </td>
+                  <td class="pp-num pp-mono pp-ink-strong"
+                      data-sort="{{ f.value }}">{{ f.value_str }}</td>
+                  <td class="pp-num pp-mono"
+                      data-sort="{{ f.holdings_n }}">{{ f.holdings_n }}</td>
+                  <td>
+                    <div class="pp-funds-index-tickers">
+                      {% for tk in f.top_tickers %}
+                        <a class="pp-mono pp-funds-index-tk" href="/_v2/stock/{{ tk }}">{{ tk }}</a>
+                      {% endfor %}
+                    </div>
+                  </td>
+                  <td class="pp-mono pp-dim"
+                      data-sort="{{ f.report_period }}">{{ f.filing_date | dt_long }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endcall %}
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-title">Fund cache warming up</div>
+          <div class="pp-page-placeholder-sub">
+            The 13F cache hasn't loaded yet.  Refresh in a few seconds.
+          </div>
+        </div>
+      {% endcall %}
+    {% endif %}
+  </section>
+
+  {# ────────── HOLDINGS PANE — consensus + momentum + all-holdings ────────── #}
+  <section class="pp-page-pane{% if funds_index_view == 'Holdings' %} is-active{% endif %}"
+           data-tab-pane="Holdings">
+
+    {# Consensus Leaders + Recent Momentum side by side. #}
+    <div class="pp-row pp-row-2">
+      {# ── Consensus Leaders — top 10 stocks by holder count ── #}
+      {% call panel() %}
+        {{ panel_head("Consensus Leaders",
+                      sub="Top 10 stocks by total superinvestor ownership · hover for details") }}
+        {% if funds_consensus %}
+          <div class="pp-funds-consensus-rows">
+            {% for c in funds_consensus %}
+              <div class="pp-funds-consensus-row" tabindex="0">
+                <span class="pp-mono pp-funds-consensus-tk">{{ c.ticker }}</span>
+                <div class="pp-funds-consensus-bar">
+                  <span class="pp-funds-consensus-bar-fill"
+                        style="width: {{ c.bar_pct }}%;"></span>
+                </div>
+                <span class="pp-mono pp-funds-consensus-n">{{ c.num_holders }}</span>
+
+                {# Hover tooltip — full breakdown for this stock. #}
+                <div class="pp-funds-consensus-tip" aria-hidden="true">
+                  <div class="pp-funds-consensus-tip-head">
+                    <span class="pp-mono pp-ink-strong pp-funds-consensus-tip-tk">{{ c.ticker }}</span>
+                    <span class="pp-funds-consensus-tip-name">{{ c.name }}</span>
+                  </div>
+                  <div class="pp-funds-consensus-tip-stats">
+                    <div class="pp-funds-consensus-tip-stat">
+                      {{ label("HOLDERS") }}
+                      <span class="pp-mono pp-ink-strong">{{ c.num_holders }} superinvestors</span>
+                    </div>
+                    <div class="pp-funds-consensus-tip-stat">
+                      {{ label("AVG WEIGHT") }}
+                      <span class="pp-mono pp-ink-strong">{{ c.avg_weight }}%</span>
+                    </div>
+                    <div class="pp-funds-consensus-tip-stat">
+                      {{ label("COMBINED VALUE") }}
+                      <span class="pp-mono pp-ink-strong">{{ c.combined_value_str }}</span>
+                    </div>
+                  </div>
+                  {% if c.top_holders %}
+                    <div class="pp-funds-consensus-tip-holders">
+                      {{ label("TOP HOLDERS") }}
+                      <ul class="pp-funds-consensus-tip-holder-list">
+                        {% for h in c.top_holders %}
+                          <li>{{ h }}</li>
+                        {% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">No aggregated holdings available.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+
+      {# ── Recent Momentum — top stocks added this quarter ── #}
+      {% call panel() %}
+        {{ panel_head("Recent Momentum",
+                      sub="Top stocks added this quarter · hover bars for buyer concentration") }}
+        {% if funds_momentum %}
+          <div class="pp-funds-momentum-bars">
+            {% for m in funds_momentum %}
+              <div class="pp-funds-momentum-bar" tabindex="0">
+                <div class="pp-funds-momentum-bar-track">
+                  <span class="pp-funds-momentum-bar-fill"
+                        style="height: {{ m.bar_pct }}%;"></span>
+                </div>
+                <span class="pp-mono pp-funds-momentum-tk">{{ m.ticker }}</span>
+                <span class="pp-mono pp-funds-momentum-n">{{ m.add_count }}</span>
+                <div class="pp-funds-momentum-tip" aria-hidden="true">
+                  <div class="pp-funds-momentum-tip-head">
+                    <span class="pp-mono pp-ink-strong">{{ m.ticker }}</span>
+                    <span class="pp-funds-momentum-tip-name">{{ m.name }}</span>
+                  </div>
+                  <div class="pp-funds-momentum-tip-stat">
+                    {{ label("ADDS") }}
+                    <span class="pp-mono pp-ink-strong">{{ m.add_count }} funds added</span>
+                  </div>
+                  <div class="pp-funds-momentum-tip-stat">
+                    {{ label("COMBINED ADD VALUE") }}
+                    <span class="pp-mono pp-ink-strong">{{ m.value_str }}</span>
+                  </div>
+                  {% if m.adders %}
+                    <div class="pp-funds-momentum-tip-adders">
+                      {{ label("LATEST BUYERS") }}
+                      <ul class="pp-funds-momentum-tip-adder-list">
+                        {% for a in m.adders %}<li>{{ a }}</li>{% endfor %}
+                      </ul>
+                    </div>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="pp-page-placeholder">
+            <div class="pp-page-placeholder-sub">No quarterly momentum data available.</div>
+          </div>
+        {% endif %}
+      {% endcall %}
+    </div>
+
+    {# ── All Holdings table — top 100 stocks sorted by holder count ── #}
+    {% if funds_holdings_all %}
+      {% call panel(cls="pp-funds-allhold-panel") %}
+        {% call panel_head("All Holdings",
+                           sub="Top 100 stocks sorted by holder count") %}
+        {% endcall %}
+        <div class="pp-funds-allhold-wrap">
+          <table class="pp-table pp-sortable pp-funds-allhold-table">
+            <thead>
+              <tr>
+                <th class="pp-num">#</th>
+                <th>Ticker</th>
+                <th>Stock</th>
+                <th class="pp-num">Holders</th>
+                <th class="pp-num">Combined value</th>
+                <th class="pp-num">% of aggregate</th>
+                <th>Held by</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for h in funds_holdings_all %}
+                <tr>
+                  <td class="pp-num pp-mono pp-dim2">{{ "%02d"|format(h.rank) }}</td>
+                  <td>
+                    <a class="pp-mono pp-ink-strong pp-funds-allhold-tk" href="/_v2/stock/{{ h.ticker }}">{{ h.ticker }}</a>
+                  </td>
+                  <td class="pp-funds-allhold-name">{{ h.name }}</td>
+                  <td class="pp-num pp-mono pp-ink-strong"
+                      data-sort="{{ h.num_holders }}">{{ h.num_holders }}</td>
+                  <td class="pp-num pp-mono"
+                      data-sort="{{ h.combined_value }}">{{ h.combined_value_str }}</td>
+                  <td class="pp-num pp-mono pp-dim"
+                      data-sort="{{ h.pct_of_aggregate }}">{{ h.pct_of_aggregate }}%</td>
+                  <td>
+                    <div class="pp-funds-allhold-holders">
+                      {% for nm in h.top_holders %}
+                        <span class="pp-mono pp-funds-allhold-holder">{{ nm }}</span>
+                      {% endfor %}
+                      {% if h.more_holders %}
+                        <span class="pp-mono pp-dim2 pp-funds-allhold-more">
+                          +{{ h.more_holders }} more
+                        </span>
+                      {% endif %}
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endcall %}
+    {% endif %}
+  </section>
+
+  {# ────────── ACTIVITY PANE — consensus moves with expand-row ────────── #}
+  <section class="pp-page-pane{% if funds_index_view == 'Activity' %} is-active{% endif %}"
+           data-tab-pane="Activity">
+
+    {# KPI summary strip — sentiment + flow + counts. #}
+    {% if funds_activity_summary %}
+      {% set _s = funds_activity_summary %}
+      <div class="pp-page-section pp-page-section-kpi">
+        <div class="pp-kpi-strip" style="grid-template-columns:repeat(5,1fr);">
+          <div class="pp-kpi-cell">
+            <div class="pp-label">$Value sentiment</div>
+            <div class="pp-kpi-value pp-funds-act-sent pp-funds-act-sent-{{ _s.value_tone }}">{{ _s.value_sentiment }}</div>
+          </div>
+          <div class="pp-kpi-cell">
+            <div class="pp-label">Net dollar flow</div>
+            <div class="pp-kpi-value {% if _s.net_flow > 0 %}pp-up{% elif _s.net_flow < 0 %}pp-down{% endif %}">{{ _s.net_flow_str }}</div>
+          </div>
+          <div class="pp-kpi-cell">
+            <div class="pp-label">Buying</div>
+            <div class="pp-kpi-value pp-up">{{ _s.buying_str }}</div>
+          </div>
+          <div class="pp-kpi-cell">
+            <div class="pp-label">Selling</div>
+            <div class="pp-kpi-value pp-down">{{ _s.selling_str }}</div>
+          </div>
+          <div class="pp-kpi-cell">
+            <div class="pp-label">Total activities</div>
+            <div class="pp-kpi-value">{{ _s.total_activities }}</div>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+
+    {% if funds_activity_moves %}
+      {% call panel(cls="pp-funds-act-panel") %}
+        {% call panel_head("Consensus moves",
+                           sub=(funds_activity_summary.consensus_count|default(funds_activity_moves|length) ~ " tickers traded across the 85 superinvestors · click to expand each ticker's per-fund detail")) %}
+        {% endcall %}
+        <div class="pp-funds-act-list">
+          {% for m in funds_activity_moves %}
+            {%- set _key = "fa-" ~ loop.index0 -%}
+            <div class="pp-funds-act-row">
+              <button class="pp-funds-act-summary"
+                      type="button"
+                      data-act-row="{{ _key }}"
+                      aria-expanded="false">
+                <span class="pp-mono pp-ink-strong pp-funds-act-tkr">{{ m.ticker }}</span>
+                <span class="pp-funds-act-issuer">{{ m.issuer }}</span>
+                <span class="pp-mono pp-tag pp-funds-act-sent-{{ m.sentiment_tone }}">
+                  {{ m.sentiment_label }}
+                </span>
+                <span class="pp-mono pp-funds-act-counts">
+                  {{ m.buy_count }} Buying · {{ m.sell_count }} Selling
+                </span>
+                <span class="pp-mono pp-funds-act-net {% if m.net_flow >= 0 %}pp-up{% else %}pp-down{% endif %}">
+                  {{ m.net_flow_str }}
+                </span>
+                <span class="pp-funds-act-chev" aria-hidden="true">▶</span>
+              </button>
+              <div class="pp-funds-act-detail" data-act-row-detail="{{ _key }}" hidden>
+                <table class="pp-table pp-funds-act-detail-table">
+                  <thead>
+                    <tr>
+                      <th>Fund</th>
+                      <th>Action</th>
+                      <th class="pp-num">Share Δ</th>
+                      <th class="pp-num">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for tr in m.trades %}
+                      <tr>
+                        <td>
+                          <a class="pp-funds-act-detail-fund" href="/_v2/funds/{{ tr.cik }}">{{ tr.fund_name }}</a>
+                        </td>
+                        <td>
+                          <span class="pp-mono pp-tag {% if tr.is_buy %}pp-funds-act-tag-buy{% else %}pp-funds-act-tag-sell{% endif %}">
+                            {{ tr.action }}
+                          </span>
+                        </td>
+                        <td class="pp-num pp-mono {% if tr.is_buy %}pp-up{% else %}pp-down{% endif %}">{{ tr.share_change_str }}</td>
+                        <td class="pp-num pp-mono pp-ink-strong">{{ tr.value_str }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+        {% if funds_activity_summary.consensus_count and funds_activity_summary.consensus_count > funds_activity_moves|length %}
+          <div class="pp-funds-act-foot">
+            <span class="pp-mono pp-dim">
+              Showing top {{ funds_activity_moves|length }} of
+              {{ funds_activity_summary.consensus_count }} consensus moves.
+            </span>
+          </div>
+        {% endif %}
+      {% endcall %}
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-title">No activity recorded</div>
+          <div class="pp-page-placeholder-sub">No 13F changes detected this quarter.</div>
+        </div>
+      {% endcall %}
+    {% endif %}
+  </section>
+
+  {# ────────── CAPITAL DEPLOYED PANE ────────── #}
+  <section class="pp-page-pane{% if funds_index_view == 'Capital Deployed' %} is-active{% endif %}"
+           data-tab-pane="Capital Deployed">
+    {% if funds_capital_rows %}
+      {% call panel() %}
+        {% call panel_head("Capital deployed",
+                           sub="Estimated equity-deployment ratio per fund · % of AUM allocated to 13F-reportable equities") %}
+        {% endcall %}
+        <div class="pp-funds-cap-wrap">
+          <table class="pp-table pp-sortable pp-funds-cap-table">
+            <thead>
+              <tr>
+                <th class="pp-num">#</th>
+                <th>Investor</th>
+                <th class="pp-num">Total AUM</th>
+                <th class="pp-num">13F equity</th>
+                <th>Deployed</th>
+                <th class="pp-num">Cash (est.)</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in funds_capital_rows %}
+                <tr>
+                  <td class="pp-num pp-mono pp-dim2">{{ "%02d"|format(r.rank) }}</td>
+                  <td>
+                    <a class="pp-funds-cap-mgr" href="/_v2/funds/{{ r.cik }}">
+                      <span class="pp-funds-cap-mgr-name">{{ r.manager }}</span>
+                      <span class="pp-funds-cap-fund-name">{{ r.fund_name }}</span>
+                    </a>
+                  </td>
+                  <td class="pp-num pp-mono pp-ink-strong"
+                      data-sort="{{ r.raum }}">{{ r.raum_str }}</td>
+                  <td class="pp-num pp-mono"
+                      data-sort="{{ r.thirteenf_value }}">{{ r.thirteenf_value_str }}</td>
+                  <td data-sort="{{ r.deployment_pct or 0 }}">
+                    {% if r.deployment_pct is not none %}
+                      <div class="pp-funds-cap-bar pp-funds-cap-bar-{{ r.deployment_tone }}">
+                        <span class="pp-funds-cap-bar-fill"
+                              style="width: {{ r.deployment_pct }}%;"></span>
+                        <span class="pp-mono pp-funds-cap-bar-pct">{{ r.deployment_pct }}%</span>
+                      </div>
+                    {% else %}
+                      <span class="pp-mono pp-dim2">—</span>
+                    {% endif %}
+                  </td>
+                  <td class="pp-num pp-mono"
+                      data-sort="{{ r.cash or 0 }}">{{ r.cash_str }}</td>
+                  <td>
+                    {% if r.data_source %}
+                      <span class="pp-mono pp-funds-cap-source pp-funds-cap-source-{{ r.data_source|lower }}">{{ r.data_source }}</span>
+                    {% else %}
+                      <span class="pp-mono pp-dim2">—</span>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endcall %}
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-title">Deployment cache warming up</div>
+          <div class="pp-page-placeholder-sub">
+            Fund-level AUM + cash data hasn't loaded yet.  Refresh in a few seconds.
+          </div>
+        </div>
+      {% endcall %}
+    {% endif %}
+  </section>
+
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+/* Sub-tab activator — uses the shared `ppBindActivator` from base.html. */
+ppBindActivator({
+  segId: 'pp-funds-index-tabs',
+  paneSelector: '.pp-page-pane',
+  paneAttr: 'data-tab-pane',
+});
+
+/* Activity expand-row — Congress page pattern.  Click summary to toggle
+   detail visibility; chev rotates via CSS. */
+(function () {
+  var rows = document.querySelectorAll('.pp-funds-act-summary');
+  rows.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.getAttribute('data-act-row');
+      var detail = document.querySelector('[data-act-row-detail="' + key + '"]');
+      var open = btn.getAttribute('aria-expanded') === 'true';
+      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+      btn.classList.toggle('is-open', !open);
+      if (detail) {
+        if (open) detail.setAttribute('hidden', '');
+        else      detail.removeAttribute('hidden');
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}

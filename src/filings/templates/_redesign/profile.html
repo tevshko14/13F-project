@@ -296,7 +296,7 @@
           <tbody>
             {% for inv in profile_invoices %}
               <tr>
-                <td><span class="pp-mono pp-dim">{{ inv.date }}</span></td>
+                <td><span class="pp-mono pp-dim">{{ inv.date | dt_long }}</span></td>
                 <td class="pp-text">{{ inv.label }}</td>
                 <td class="pp-num pp-mono pp-ink-strong">{{ inv.amount }}</td>
                 <td class="pp-num">

@@ -122,16 +122,21 @@ def _date_range_for_period(period: str) -> tuple[str, str]:
 
 
 def _date_label(date_str: str) -> str:
-    """Convert ``YYYY-MM-DD`` to human-friendly label."""
+    """Convert ``YYYY-MM-DD`` to human-friendly label.
+
+    Uses the canonical product format (``MMM DD YYYY``) with a
+    ``Today``/``Tomorrow`` prefix when applicable.
+    """
     try:
         dt = datetime.strptime(date_str, "%Y-%m-%d")
         today = datetime.now().date()
         d = dt.date()
+        formatted = dt.strftime("%b %d %Y")
         if d == today:
-            return f"Today — {dt.strftime('%A, %B %-d')}"
-        elif d == today + timedelta(days=1):
-            return f"Tomorrow — {dt.strftime('%A, %B %-d')}"
-        return dt.strftime("%A, %B %-d, %Y")
+            return f"Today — {formatted}"
+        if d == today + timedelta(days=1):
+            return f"Tomorrow — {formatted}"
+        return formatted
     except ValueError:
         return date_str
 

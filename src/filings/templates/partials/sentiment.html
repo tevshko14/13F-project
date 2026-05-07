@@ -570,7 +570,7 @@
         <tbody>
             {% for a in alphavantage.articles %}
             <tr>
-                <td class="text-muted text-small">{{ a.published }}</td>
+                <td class="text-muted text-small">{{ a.published | dt_long }}</td>
                 <td class="text-small">{{ a.source }}</td>
                 <td>
                     <a href="{{ a.url }}" target="_blank" rel="noopener">

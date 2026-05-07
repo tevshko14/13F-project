@@ -41,8 +41,8 @@
     <div class="pp-page-hero-sub">
       {% if fund_manager %}{{ fund_manager }} · {% endif %}
       {% if fund_city %}{{ fund_city }} · {% endif %}
-      {% if fund_filing_date %}Filed {{ fund_filing_date }}{% endif %}
-      {% if fund_report_period %} for period ending {{ fund_report_period }}{% endif %}
+      {% if fund_filing_date %}Filed {{ fund_filing_date | dt_long }}{% endif %}
+      {% if fund_report_period %} for period ending {{ fund_report_period | dt_long }}{% endif %}
     </div>
   </div>
   <div class="pp-funds-actions">
@@ -190,7 +190,7 @@
                 <span class="pp-funds-activity-dot{% if f.current %} is-current{% endif %}"></span>
                 <div>
                   <div class="pp-funds-activity-q">{{ f.quarter }}</div>
-                  <div class="pp-funds-activity-meta">{{ f.filing_date }} · {{ f.count_str }}</div>
+                  <div class="pp-funds-activity-meta">{{ f.filing_date | dt_long }} · {{ f.count_str }}</div>
                 </div>
                 <span class="pp-mono pp-funds-activity-aum {{ 'pp-up' if f.aum_up == True else ('pp-down' if f.aum_up == False else 'pp-dim') }}">
                   {{ f.aum_delta }} AUM

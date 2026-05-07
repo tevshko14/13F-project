@@ -491,7 +491,7 @@ def fetch_interest_over_time(
     count = 0
 
     for idx, row in df.iterrows():
-        date_str = idx.strftime("%b %d, %Y")
+        date_str = idx.strftime("%b %d %Y")
         values: dict[str, int] = {}
         for kw in keywords:
             val = int(row.get(kw, 0)) if kw in row.index else 0

@@ -189,7 +189,7 @@
       {% call panel(cls="pp-insiders-notable-panel") %}
         <div class="pp-insiders-notable">
           <div class="pp-insiders-notable-text">
-            <span class="pp-mono pp-insiders-notable-kicker">★ Open-market buy · {{ _n.date }}</span>
+            <span class="pp-mono pp-insiders-notable-kicker">★ Open-market buy · {{ _n.date | dt_long }}</span>
             <div class="pp-insiders-notable-headline">
               <span class="pp-accent-color">{{ _n.person }} ({{ _n.role }})</span> bought
               <span class="pp-up">{{ _n.value }}</span> of
@@ -263,7 +263,7 @@
                           <td class="pp-num pp-mono pp-text">{{ r.shares }}</td>
                           <td class="pp-num pp-mono pp-text">{{ r.price }}</td>
                           <td class="pp-num pp-mono pp-insiders-value">{{ r.value }}</td>
-                          <td class="pp-num pp-mono pp-text">{{ r.date }}</td>
+                          <td class="pp-num pp-mono pp-text">{{ r.date | dt_long }}</td>
                           <td class="pp-num">
                             {% if r.sec_url %}
                               <a class="pp-link-coral" href="{{ r.sec_url }}" target="_blank" rel="noopener">↗</a>

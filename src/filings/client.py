@@ -1146,10 +1146,25 @@ def build_ticker_ownership_map(
     return by_ticker
 
 
+_grand_portfolio_cache: tuple[int, list] | None = None
+
+
 def build_grand_portfolio(
     cache_data: dict, superinvestors_by_cik: dict
 ) -> list[GrandPortfolioEntry]:
-    """Build aggregated grand portfolio from cached data. Zero API calls."""
+    """Build aggregated grand portfolio from cached data. Zero API calls.
+
+    Memoised on ``id(cache_data)`` — the fund_cache dict object is rebuilt
+    only when the underlying cache reloads at startup or via the
+    background sweep, so identity comparison is sufficient and avoids
+    walking 85 funds × all_holdings on every funds-index render.
+    Mirrors the pattern `market_data.build_most_added_table` already uses.
+    """
+    global _grand_portfolio_cache
+    cache_id = id(cache_data)
+    if _grand_portfolio_cache is not None and _grand_portfolio_cache[0] == cache_id:
+        return _grand_portfolio_cache[1]
+
     # Group by CUSIP across all funds
     by_cusip: dict[str, dict] = {}
     total_aggregate = 0
@@ -1203,6 +1218,7 @@ def build_grand_portfolio(
 
     # Sort by number of holders (desc), then by combined value (desc)
     entries.sort(key=lambda e: (-e.num_holders, -e.combined_value))
+    _grand_portfolio_cache = (cache_id, entries)
     return entries
 
 

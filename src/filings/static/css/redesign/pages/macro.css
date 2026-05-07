@@ -719,39 +719,101 @@
   margin-top: 6px;
 }
 
-/* Calendar list — grouped by day, full table per day ────────────────── */
+/* Calendar list — day-tab strip + per-day table.  Strip is horizontally
+   scrollable when the period spans 5+ days; mirrors the Funds page
+   Position-changes UI but with overflow-x instead of flex-wrap so a
+   user with a busy week doesn't lose the at-a-glance week shape. */
 
-.pp-macro-cal-list {
+.pp-macro-cal-list-panel { /* layout reset; per-day pane handles padding */ }
+
+.pp-macro-cal-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 14px 18px 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.pp-macro-cal-tabs::-webkit-scrollbar { height: 6px; }
+.pp-macro-cal-tabs::-webkit-scrollbar-thumb {
+  background: var(--pp-line2);
+}
+
+.pp-macro-cal-tab {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 9px 14px;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  white-space: nowrap;
+  flex: 0 0 auto;        /* prevent flex shrinking — keeps tab widths legible */
+  transition: border-color 0.08s ease, background 0.08s ease, color 0.08s ease;
 }
-.pp-macro-cal-day {
-  border-bottom: 1px solid var(--pp-line2);
+.pp-macro-cal-tab:hover { border-color: var(--pp-ink); }
+.pp-macro-cal-tab.is-active {
+  background: var(--pp-ink);
+  border-color: var(--pp-ink);
+  color: var(--pp-bg);
 }
-.pp-macro-cal-day:last-child { border-bottom: none; }
-.pp-macro-cal-day-head {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  padding: 14px 22px 8px;
-  border-bottom: 1px solid var(--pp-line);
+.pp-macro-cal-tab.is-active .pp-macro-cal-tab-d,
+.pp-macro-cal-tab.is-active .pp-macro-cal-tab-date,
+.pp-macro-cal-tab.is-active .pp-macro-cal-tab-n {
+  color: var(--pp-bg);
 }
-.pp-macro-cal-day-iso {
-  font-size: 11px;
+.pp-macro-cal-tab-d {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
   color: var(--pp-dim);
-  letter-spacing: 0.4px;
 }
-.pp-macro-cal-day-label {
+.pp-macro-cal-tab-date {
   font-size: 14px;
   font-weight: 700;
   color: var(--pp-ink);
   letter-spacing: -0.2px;
 }
-.pp-macro-cal-day-count {
-  margin-left: auto;
-  font-size: 11px;
+.pp-macro-cal-tab-n {
+  font-size: 10px;
+  color: var(--pp-dim);
   letter-spacing: 0.4px;
 }
+
+.pp-macro-cal-day-pane { display: none; padding: 0; }
+.pp-macro-cal-day-pane.is-active { display: block; }
+
+/* Rows past the top-20 cap are hidden by default; revealed when the parent
+   pane gets `is-expanded` (toggled by the Show all button). */
+.pp-macro-cal-overflow { display: none; }
+.pp-macro-cal-day-pane.is-expanded .pp-macro-cal-overflow { display: table-row; }
+
+/* Show-all / collapse button — sits below the table; swaps copy via the
+   parent pane's `is-expanded` class. */
+.pp-macro-cal-expand {
+  display: block;
+  width: 100%;
+  padding: 12px 18px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--pp-line);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--pp-accent);
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.08s ease;
+}
+.pp-macro-cal-expand:hover { background: var(--pp-sub); }
+
+.pp-macro-cal-expand .pp-macro-cal-expand-hide { display: none; }
+.pp-macro-cal-day-pane.is-expanded .pp-macro-cal-expand .pp-macro-cal-expand-show { display: none; }
+.pp-macro-cal-day-pane.is-expanded .pp-macro-cal-expand .pp-macro-cal-expand-hide { display: inline; }
 .pp-macro-cal-table {
   width: 100%;
   min-width: 720px;
@@ -868,10 +930,18 @@
   grid-template-columns: 140px 1fr 56px 60px;
   align-items: center;
   gap: 12px;
-  padding: 8px 0;
+  padding: 8px 4px;
   border-bottom: 1px solid var(--pp-line);
+  position: relative;       /* anchor for the absolute hover tooltip */
+  cursor: default;
+  transition: background 0.08s ease;
+  outline: none;
 }
 .pp-macro-sector-row:last-child { border-bottom: none; }
+.pp-macro-sector-row:hover,
+.pp-macro-sector-row:focus-within {
+  background: var(--pp-sub);
+}
 .pp-macro-sector-name {
   font-size: 12px;
   color: var(--pp-text);
@@ -879,17 +949,29 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Three-segment stacked bar — flexbox so segment widths sum to 100%
+   without explicit absolute math.  Each child is a horizontal slice,
+   widths driven by inline `style="width: …%"` from the template. */
 .pp-macro-sector-bar {
   position: relative;
-  height: 8px;
+  height: 10px;
   background: var(--pp-line2);
   overflow: hidden;
+  display: flex;
 }
-.pp-macro-sector-bar-fill {
+.pp-macro-sector-bar-up,
+.pp-macro-sector-bar-flat,
+.pp-macro-sector-bar-dn {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--pp-up), var(--pp-accent));
+  flex-shrink: 0;
+  transition: opacity 0.12s ease;
 }
+.pp-macro-sector-bar-up   { background: var(--pp-up);   }
+.pp-macro-sector-bar-flat { background: var(--pp-dim2); opacity: 0.55; }
+.pp-macro-sector-bar-dn   { background: var(--pp-down); }
+
 .pp-macro-sector-pct {
   font-size: 12px;
   font-weight: 700;
@@ -901,6 +983,80 @@
   font-size: 10px;
   letter-spacing: 0.4px;
   text-align: right;
+}
+
+/* Hover tooltip — sits above the bar, hidden until the row is hovered
+   or focused.  Pure CSS — keeps the row interaction-light and avoids
+   another JS handler.  Pinned to the bar column via grid-column. */
+.pp-macro-sector-tip {
+  grid-column: 2 / 5;        /* span bar + pct + meta columns */
+  position: absolute;
+  left: 152px;               /* matches the left-name column width + gap */
+  bottom: calc(100% - 4px);
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  min-width: 220px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0s linear 0.1s;
+}
+.pp-macro-sector-row:hover .pp-macro-sector-tip,
+.pp-macro-sector-row:focus-within .pp-macro-sector-tip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: opacity 0.1s ease, transform 0.1s ease, visibility 0s linear 0s;
+}
+.pp-macro-sector-tip-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 14px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-macro-sector-tip-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.2px;
+}
+.pp-macro-sector-tip-total {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+}
+.pp-macro-sector-tip-row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  align-items: center;
+  gap: 10px;
+}
+.pp-macro-sector-tip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 8px;       /* small UI dot — explicit override */
+  display: inline-block;
+}
+.pp-macro-sector-tip-dot-up   { background: var(--pp-up);   }
+.pp-macro-sector-tip-dot-flat { background: var(--pp-dim2); }
+.pp-macro-sector-tip-dot-dn   { background: var(--pp-down); }
+.pp-macro-sector-tip-label {
+  font-size: 11px;
+  color: var(--pp-text);
+}
+.pp-macro-sector-tip-val {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Top movers — gainers/losers split list ────────────────────────────── */
@@ -1536,5 +1692,197 @@
   .pp-macro-vol-pc-cur { font-size: 24px; }
   .pp-macro-vol-pc-svg { height: 180px; }
   .pp-macro-vol-pc-yaxis { display: none; }   /* mobile: drop the y-axis ticks */
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * HEATMAP — companies + sectors grids, mirrored from the homepage so both
+ * views can never visually drift.  Same `.pp-home-heatmap-*` classes the
+ * home page uses; CSS rules duplicated here so the macro page doesn't have
+ * to load home.css.  Keep these in sync if home.css changes.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-home-heatmap-body { padding: 18px; }
+.pp-home-heatmap-grid { display: none; gap: 6px; }
+.pp-home-heatmap-grid.is-active { display: grid; }
+
+.pp-home-heatmap-grid-companies { grid-template-columns: repeat(6, 1fr); }
+.pp-home-heatmap-grid-sectors {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.pp-home-heatmap-tile {
+  border: 1px solid var(--pp-line2);
+  padding: 14px 14px;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  color: var(--pp-ink);
+  text-decoration: none;
+  transition: filter 0.08s ease;
+}
+a.pp-home-heatmap-tile:hover { filter: brightness(1.08); }
+.pp-home-heatmap-tile.is-dark,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-tk,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-pct,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-mcap,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-sector-name,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-sector-pct,
+.pp-home-heatmap-tile.is-dark .pp-home-heatmap-sector-mcap {
+  color: #fff;
+}
+.pp-home-heatmap-tile.is-large {
+  min-height: 140px;
+  justify-content: space-between;
+}
+.pp-home-heatmap-tk {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.3px;
+}
+.pp-home-heatmap-tile.is-large .pp-home-heatmap-tk { font-size: 20px; }
+.pp-home-heatmap-pct {
+  display: block;
+  color: var(--pp-ink);
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-home-heatmap-tile.is-large .pp-home-heatmap-pct {
+  font-size: 16px;
+  margin-top: 6px;
+}
+.pp-home-heatmap-mcap {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+}
+
+.pp-home-heatmap-sector { padding: 16px 18px; min-height: 76px; }
+.pp-home-heatmap-sector-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+}
+.pp-home-heatmap-sector-pct {
+  display: block;
+  color: var(--pp-ink);
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 6px;
+  letter-spacing: -0.3px;
+  font-variant-numeric: tabular-nums;
+}
+.pp-home-heatmap-sector-mcap {
+  display: block;
+  font-size: 10px;
+  color: var(--pp-dim);
+  margin-top: 2px;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * SHARED CHART HOVER LAYER
+ *
+ * Generalisation of the yield-curve hover pattern.  Any chart wrapper with
+ * `.pp-chart-hover` + `data-chart-points` gets a crosshair, hover dot, and
+ * tooltip auto-bound by `ppBindChartHover` in macro.html.
+ *
+ * Tooltip lives outside the SVG so `preserveAspectRatio="none"` doesn't
+ * stretch its text.  Multi-line tooltips (sentiment, earnings trend) render
+ * a row per series via `.pp-chart-tt-row` — the JS injects them.
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-chart-hover {
+  /* Wrappers need to be positioning roots so the absolute-positioned
+     tooltip aligns with the cursor.  Most chart panels are already
+     `position: relative`, but the new ones (Sentiment, Indicator
+     featured) aren't — applying it here is a safe no-op for the rest. */
+  position: relative;
+}
+
+.pp-chart-crosshair {
+  stroke: var(--pp-accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+  pointer-events: none;
+}
+.pp-chart-crosshair.is-visible { opacity: 1; }
+
+.pp-chart-hover-dot {
+  fill: var(--pp-accent);
+  stroke: var(--pp-bg);
+  stroke-width: 1.5;
+  opacity: 0;
+  transition: opacity 0.08s ease;
+  pointer-events: none;
+}
+.pp-chart-hover-dot.is-visible { opacity: 1; }
+
+.pp-chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  transform: translate(-50%, calc(-100% - 14px));
+  white-space: nowrap;
+  z-index: 5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  min-width: 100px;
+}
+.pp-chart-tooltip[hidden] { display: none; }
+.pp-chart-tt-label {
+  font-family: var(--pp-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  color: var(--pp-dim);
+  text-transform: uppercase;
+}
+.pp-chart-tt-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+}
+.pp-chart-tt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pp-chart-tt-row {
+  display: grid;
+  grid-template-columns: 8px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+.pp-chart-tt-row-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 8px;       /* small UI dot — explicit override of zero-radius rule */
+  display: inline-block;
+}
+.pp-chart-tt-row-label {
+  color: var(--pp-text);
+  white-space: nowrap;
+}
+.pp-chart-tt-row-value {
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 .pp-macro-regions-table thead th.pp-macro-th-spark { width: 96px; }
