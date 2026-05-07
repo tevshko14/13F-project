@@ -7902,7 +7902,7 @@ def _insiders_clusters_panel(trades: list, top_n: int = 4) -> list[dict]:
             person = m.insider_name or "—"
             mv = _insider_value_dollars(m)
             existing = per_person.get(person)
-            if existing is None or mv > existing["v"]:
+            if existing is None or mv > existing["v_raw"]:
                 per_person[person] = {
                     "p":  person,
                     "r":  _shorten_role((m.title or "").split(",")[0].strip()),
