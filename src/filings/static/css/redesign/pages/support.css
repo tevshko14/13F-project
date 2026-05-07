@@ -1,0 +1,520 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * v2 SUPPORT PAGE — Panda Fund + Stripe checkout
+ *
+ * Strict design-system adherence:
+ *   • Hero, panels, tags, segments, kpi cells inherit from primitives.css
+ *   • Color tokens only — no hex literals.  Coral (`--pp-accent`) for the
+ *     brand-primary highlights (MOST POPULAR, primary CTAs, hover borders).
+ *     Green (`--pp-up`) reserved for *positive data* (funded months, goal
+ *     reached); never for UI accents.
+ *   • Padding follows v2 panel rhythm: 18px / 22px / 26px family — same as
+ *     macro / insiders / congress / retail.
+ *   • Hover states: border-color shifts only.  No translateY, no shadows.
+ * ───────────────────────────────────────────────────────────────────────*/
+
+.pp-support-hero { margin-bottom: 18px; }
+
+/* ── Progress meter ────────────────────────────────────────────────────
+   Single panel, 2-row layout: amount + goal / track / footnote.
+   Same vertical rhythm as the home-page hero KPI block. */
+.pp-support-meter-panel { margin-bottom: 14px; padding: 18px 22px; }
+.pp-support-meter { display: flex; flex-direction: column; gap: 10px; }
+.pp-support-meter-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.pp-support-meter-amount {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1;
+}
+/* Goal-reached pill — reuses the same shape as Activity tab BULLISH pill. */
+.pp-support-goal-reached {
+  font-size: 9.5px;
+  letter-spacing: 0.6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(47, 125, 84, 0.16);
+  color: var(--pp-up);
+  border: 1px solid rgba(47, 125, 84, 0.4);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.pp-support-meter-goal {
+  font-size: 12px;
+  color: var(--pp-dim);
+}
+.pp-support-meter-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--pp-line);
+  overflow: hidden;
+}
+.pp-support-meter-fill {
+  height: 100%;
+  background: var(--pp-up);
+  border-radius: 999px;
+  transition: width 0.4s ease;
+}
+.pp-support-meter-label {
+  font-size: 11px;
+  letter-spacing: 0.4px;
+  color: var(--pp-dim);
+}
+
+/* ── Thank-you banner — same shape as a panel-notable callout ──────────*/
+.pp-support-thanks-panel {
+  margin-bottom: 14px;
+  padding: 16px 22px;
+  border-left: 3px solid var(--pp-accent);
+}
+.pp-support-thanks {
+  display: flex; align-items: center; gap: 14px;
+}
+.pp-support-thanks-kicker {
+  font-size: 9.5px;
+  letter-spacing: 1px;
+  color: var(--pp-accent);
+  text-transform: uppercase;
+  font-weight: 700;
+  display: inline-block;
+  margin-bottom: 4px;
+}
+.pp-support-thanks-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  margin: 0 0 2px 0;
+  letter-spacing: -0.01em;
+}
+.pp-support-thanks-msg {
+  font-size: 12px;
+  color: var(--pp-text);
+  margin: 0;
+}
+
+/* ── Donate widget (toggle + tier cards) ───────────────────────────────*/
+.pp-support-donate-panel { margin-bottom: 18px; padding: 18px 22px; }
+.pp-support-donate { display: flex; flex-direction: column; gap: 16px; }
+.pp-support-donate-toggle { align-self: flex-start; }
+.pp-support-donate-pane { width: 100%; }
+
+/* Tier card — flat panel-style button. NO emojis (v2 uses small mono
+   labels, never decorative chrome).  Hover = border-color shift only. */
+.pp-support-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.pp-support-tier-grid-single {
+  grid-template-columns: minmax(280px, 360px);
+  justify-content: center;
+}
+
+.pp-support-tier {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 22px 16px 18px;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: border-color 0.1s ease, background 0.1s ease;
+  text-align: center;
+  font: inherit;
+  color: inherit;
+}
+.pp-support-tier:hover {
+  border-color: var(--pp-accent);
+}
+.pp-support-tier.is-popular {
+  border-color: var(--pp-accent);
+}
+
+/* MOST POPULAR ribbon — same chip shape as a tag.pp-tag, coral-on-coral. */
+.pp-support-tier-badge {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  letter-spacing: 0.8px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+  font-weight: 800;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pp-support-tier-name {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--pp-dim);
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+.pp-support-tier-price {
+  font-family: var(--pp-font-display);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.6px;
+  color: var(--pp-ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.pp-support-tier-price small {
+  font-family: var(--pp-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  color: var(--pp-dim);
+}
+.pp-support-tier-desc {
+  font-size: 12px;
+  color: var(--pp-text);
+  line-height: 1.45;
+  max-width: 260px;
+  margin: 4px auto 2px;
+}
+
+/* CTA pill at bottom — borrows the same pp-tag base, accent fill on
+   popular tier, neutral fill otherwise.  Hover swap handled by parent. */
+.pp-support-tier-cta {
+  margin-top: 8px;
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--pp-line);
+  color: var(--pp-text);
+  border: 1px solid var(--pp-line2);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-family: var(--pp-font-mono);
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+.pp-support-tier.is-popular .pp-support-tier-cta {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+  border-color: var(--pp-accent);
+}
+.pp-support-tier:hover .pp-support-tier-cta {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+  border-color: var(--pp-accent);
+}
+
+/* ── Stripe Checkout overlay — same flat surface as the feedback modal */
+.pp-support-checkout-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.pp-support-checkout-overlay[hidden] { display: none; }
+.pp-support-checkout-card {
+  position: relative;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  border-radius: 4px;
+  padding: 28px 22px 20px;
+  max-width: 480px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.pp-support-checkout-close {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--pp-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.pp-support-checkout-close:hover { background: var(--pp-line); color: var(--pp-ink); }
+.pp-support-checkout-loading {
+  text-align: center;
+  padding: 36px 0;
+  font-size: 12px;
+  color: var(--pp-dim);
+  font-family: var(--pp-font-mono);
+}
+
+/* ── Cost / roadmap tile grid ──────────────────────────────────────────
+   Five-column grid of mini-panels.  Icons rendered as small mono kicker
+   (e.g. DATA / INFRA / DB / DNS / AI) — matches the v2 KPI cell
+   pattern far better than 26px emojis. */
+.pp-support-section-panel { margin-bottom: 18px; padding: 18px 22px; }
+.pp-support-cost-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.pp-support-cost-tile {
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  border-radius: 4px;
+  padding: 14px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.1s ease;
+}
+.pp-support-cost-tile:hover { border-color: var(--pp-accent); }
+.pp-support-cost-kicker {
+  font-family: var(--pp-font-mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--pp-accent);
+  text-transform: uppercase;
+}
+.pp-support-cost-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  letter-spacing: -0.01em;
+}
+.pp-support-cost-sub {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--pp-dim);
+  font-family: var(--pp-font-mono);
+}
+.pp-support-cost-desc {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--pp-text);
+  margin-top: 2px;
+}
+
+/* ── Funding history chart — matches insider-momentum chart shape ──────*/
+.pp-support-chart-wrap { position: relative; margin-top: 4px; }
+.pp-support-chart-svg {
+  display: block;
+  width: 100%;
+  height: 280px;
+}
+.pp-support-chart-grid {
+  stroke: var(--pp-line);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+.pp-support-chart-ylabel {
+  fill: var(--pp-dim);
+  font-size: 10px;
+  font-family: var(--pp-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.pp-support-chart-goal-line {
+  stroke: var(--pp-accent);
+  stroke-width: 1.4;
+  stroke-dasharray: 5 4;
+  opacity: 0.65;
+}
+.pp-support-chart-goal-text {
+  fill: var(--pp-accent);
+  font-size: 10px;
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+.pp-support-chart-bar {
+  rx: 2;
+  ry: 2;
+  transition: opacity 0.08s ease;
+}
+.pp-support-chart-bar.is-funded     { fill: var(--pp-up);    opacity: 0.85; }
+.pp-support-chart-bar.is-subsidized { fill: var(--pp-line2); opacity: 0.7;  }
+.pp-support-chart-wrap:hover .pp-support-chart-bar { opacity: 0.5; }
+.pp-support-chart-bar:hover { opacity: 1 !important; }
+.pp-support-chart-bar-value {
+  fill: var(--pp-ink);
+  font-size: 10px;
+  font-family: var(--pp-font-mono);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pp-support-chart-bar-label {
+  fill: var(--pp-dim);
+  font-size: 9.5px;
+  font-family: var(--pp-font-mono);
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.pp-support-chart-legend {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.4px;
+  color: var(--pp-dim);
+  font-family: var(--pp-font-mono);
+}
+.pp-support-chart-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.pp-support-chart-swatch.is-funded     { background: var(--pp-up); }
+.pp-support-chart-swatch.is-subsidized { background: var(--pp-line2); }
+
+/* ── Footer rows (YouTube + Feedback) ──────────────────────────────────
+   2-up panel grid, both centered, 16px copy, ghost button.  Mirrors the
+   double-CTA pattern at the bottom of the v2 funds page. */
+.pp-support-foot-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.pp-support-foot-panel { padding: 22px; text-align: center; }
+.pp-support-foot-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.01em;
+}
+.pp-support-foot-text {
+  font-size: 12.5px;
+  color: var(--pp-text);
+  line-height: 1.5;
+  margin: 0 auto 14px;
+  max-width: 380px;
+}
+.pp-support-yt-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  border-radius: 4px;
+  text-decoration: none;
+  color: var(--pp-ink);
+  font-size: 12px;
+  font-family: var(--pp-font-mono);
+  letter-spacing: 0.3px;
+  transition: border-color 0.1s ease;
+}
+.pp-support-yt-link:hover { border-color: var(--pp-accent); }
+.pp-support-yt-icon { width: 16px; height: 12px; }
+
+/* ── Feedback modal — same flat surface as checkout overlay ────────────*/
+.pp-support-feedback-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+.pp-support-feedback-overlay[hidden] { display: none; }
+.pp-support-feedback-card {
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  border-radius: 4px;
+  width: 100%;
+  max-width: 720px;
+  height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pp-support-feedback-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--pp-line);
+}
+.pp-support-feedback-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--pp-ink);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.pp-support-feedback-close {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--pp-dim);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.pp-support-feedback-close:hover { background: var(--pp-line); color: var(--pp-ink); }
+.pp-support-feedback-body { flex: 1; position: relative; }
+.pp-support-feedback-body iframe {
+  width: 100%; height: 100%; border: 0; display: block;
+}
+.pp-support-feedback-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--pp-dim);
+  font-family: var(--pp-font-mono);
+  pointer-events: none;
+}
+
+/* ── Sidebar Panda Fund widget — clickable wrapper ─────────────────────*/
+a.pp-side-support {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  cursor: pointer;
+  transition: border-color 0.1s ease;
+}
+a.pp-side-support:hover { border-color: var(--pp-accent); }
+
+/* ── Responsive ────────────────────────────────────────────────────────*/
+@media (max-width: 1100px) {
+  .pp-support-tier-grid { grid-template-columns: 1fr; }
+  .pp-support-cost-grid { grid-template-columns: repeat(2, 1fr); }
+  .pp-support-foot-row  { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .pp-support-meter-amount { font-size: 24px; }
+  .pp-support-cost-grid    { grid-template-columns: 1fr; }
+}

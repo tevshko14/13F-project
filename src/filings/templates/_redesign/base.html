@@ -24,13 +24,16 @@
   <meta name="robots" content="noindex,nofollow">
   <title>{% block title %}PaperPanda{% endblock %}</title>
 
-  {#- Anti-FOUC: set theme before any CSS paints. -#}
+  {#- Anti-FOUC: set theme before any CSS paints.
+      Default is dark — only respect localStorage if the user has
+      explicitly toggled to light.  System prefers-color-scheme is
+      intentionally ignored so the brand renders the same out-of-the-box
+      experience regardless of OS settings. -#}
   <script>
     (function() {
       try {
         var saved = localStorage.getItem('pp-theme');
-        var prefDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        var theme = saved || (prefDark ? 'dark' : 'light');
+        var theme = (saved === 'light' || saved === 'dark') ? saved : 'dark';
         document.documentElement.setAttribute('data-theme', theme);
       } catch (e) { /* ignore */ }
     })();
@@ -118,8 +121,125 @@
   })();
   </script>
   {% block extra_head_scripts %}{% endblock %}
+
+  {#- ClerkJS SDK — loads modal sign-in / sign-up overlays.  Same setup as
+      v1 base.html so the helpers (ppOpenSignIn / ppOpenSignUp / ppSignOut)
+      stay name-stable across pages.  Templates flip `.pp-auth-signin` /
+      `.pp-auth-signout` elements based on Clerk's user state. -#}
+  {% if clerk_publishable_key %}
+    <script
+      async crossorigin="anonymous"
+      data-clerk-publishable-key="{{ clerk_publishable_key }}"
+      src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+      onload="window.Clerk.load().then(ppClerkReady)"></script>
+    <script>
+    function ppClerkReady() {
+      ppUpdateAuthUI(window.Clerk.user);
+      window.Clerk.addListener(function (resources) { ppUpdateAuthUI(resources.user); });
+    }
+    /* Single source of truth — `data-pp-authed` on <body> drives every
+       auth-gated UI swap (sidebar CTAs, topbar avatar, gate visibility).
+       CSS rules in app-shell.css read this attr; pure data-driven, no
+       per-element style mutation. */
+    function ppUpdateAuthUI(user) {
+      document.body.setAttribute('data-pp-authed', user ? 'true' : 'false');
+    }
+    function ppOpenSignIn() {
+      if (window.Clerk) {
+        window.Clerk.openSignIn({
+          afterSignInUrl: window.location.href,
+          afterSignUpUrl: window.location.href,
+        });
+      }
+    }
+    function ppOpenSignUp() {
+      if (window.Clerk) {
+        window.Clerk.openSignUp({
+          afterSignInUrl: window.location.href,
+          afterSignUpUrl: window.location.href,
+        });
+      }
+    }
+    function ppSignOut() {
+      if (window.Clerk) {
+        window.Clerk.signOut().then(function () { window.location.reload(); });
+      }
+    }
+
+    /* ── Auth-required gate ──
+       Per-feature copy lives in JS rather than the template so a single
+       DOM dialog covers every gated CTA across the app.  Add a new entry
+       here when adding a new gated feature; mark up the trigger with
+       `data-auth-required="<key>"` and (optionally) `data-auth-href="…"`
+       to navigate after sign-in completes. */
+    var PP_GATE_COPY = {
+      alerts: {
+        feature: 'Alerts',
+        desc: 'Custom alerts notify you when funds you follow file new positions, tickers you watch hit unusual flow, or politicians you track make new moves. Sign in to set them up.',
+      },
+      watchlist: {
+        feature: 'your Watchlist',
+        desc: 'Build a personal watchlist that tracks insider buys, congressional trades, and superinvestor moves on the tickers you care about. Sign in to start one.',
+      },
+      profile: {
+        feature: 'your Profile',
+        desc: 'Your profile holds your watchlist, alerts, and notification settings. Sign in to set it up.',
+      },
+    };
+    function ppGateOpen(key) {
+      var copy = PP_GATE_COPY[key] || {feature: 'this feature',
+        desc: 'Sign in to unlock the rest of PaperPanda.'};
+      var overlay = document.getElementById('pp-gate-overlay');
+      if (!overlay) return;
+      var feat = overlay.querySelector('.pp-gate-feature');
+      var desc = overlay.querySelector('.pp-gate-desc');
+      if (feat) feat.textContent = copy.feature;
+      if (desc) desc.textContent = copy.desc;
+      overlay.hidden = false;
+      document.body.style.overflow = 'hidden';
+    }
+    function ppGateClose() {
+      var overlay = document.getElementById('pp-gate-overlay');
+      if (!overlay) return;
+      overlay.hidden = true;
+      document.body.style.overflow = '';
+    }
+    /* Single delegated click handler.  Bubble phase is fine because we
+       always preventDefault when we want to intercept — the native nav /
+       onclick hasn't fired yet at this point in the bubble.  Handles:
+         • [data-auth-required] triggers — gate or proceed
+         • #pp-gate-overlay backdrop — close
+         • .pp-gate-close button — close */
+    document.addEventListener('click', function (ev) {
+      if (ev.target.matches('.pp-gate-close, .pp-gate-close *')) {
+        ppGateClose();
+        return;
+      }
+      if (ev.target.id === 'pp-gate-overlay') {
+        ppGateClose();
+        return;
+      }
+      var trigger = ev.target.closest('[data-auth-required]');
+      if (!trigger) return;
+      if (window.Clerk && window.Clerk.user) {
+        // Signed-in: <a> uses native href, <button> falls through to data-auth-href.
+        var href = trigger.getAttribute('data-auth-href');
+        if (href && trigger.tagName !== 'A') {
+          ev.preventDefault();
+          window.location.href = href;
+        }
+        return;
+      }
+      ev.preventDefault();
+      ppGateOpen(trigger.getAttribute('data-auth-required'));
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') ppGateClose();
+    });
+    </script>
+  {% endif %}
 </head>
-<body>
+<body data-pp-authed="{{ 'true' if is_authed else 'false' }}">
   <div class="pp-app">
 
     {# ━━━━━━━━━━ SIDEBAR ━━━━━━━━━━ #}
@@ -144,7 +264,7 @@
       {%- set nav_groups = [
         {"hd": "Overview", "items": [
           {"name": "Home",          "href": "/_v2/home",                  "badge": ""},
-          {"name": "Watchlist",     "href": "/_v2/profile?tab=Watchlist", "badge": ""},
+          {"name": "Watchlist",     "href": "/_v2/profile?tab=Watchlist", "badge": "", "auth": "watchlist"},
           {"name": "Notifications", "href": "/_v2/notifications",         "badge": notif_unread|default("")},
         ]},
         {"hd": "Markets", "items": [
@@ -166,6 +286,7 @@
           {% for item in group['items'] %}
             <a class="pp-nav-item{% if item.name == nav_active %} is-active{% endif %}"
                href="{{ item.href }}"
+               {% if item.get('auth') %}data-auth-required="{{ item.auth }}"{% endif %}
                {% if item.name == nav_active %}aria-current="page"{% endif %}>
               <span class="pp-nav-item-name">{{ item.name }}</span>
               {% if item.badge %}<span class="pp-nav-badge">{{ item.badge }}</span>{% endif %}
@@ -176,8 +297,21 @@
 
       <div class="pp-side-spacer"></div>
 
-      {# Panda Fund support card — same data feed as the old support widget. #}
-      <div class="pp-side-support">
+      {#- Auth CTA — guests see Sign in / Create account, signed-in users
+          see Sign out.  Visibility is driven entirely by `data-pp-authed`
+          on the <body> element (set SSR + flipped at runtime by
+          ppUpdateAuthUI).  No inline styles, no per-element toggling. -#}
+      <div class="pp-side-auth pp-auth-signin">
+        <button type="button" class="pp-side-auth-primary" onclick="ppOpenSignIn()">Sign in</button>
+        <button type="button" class="pp-side-auth-secondary" onclick="ppOpenSignUp()">Create account</button>
+      </div>
+      <div class="pp-side-auth pp-auth-signout">
+        <button type="button" class="pp-side-auth-secondary" onclick="ppSignOut()">Sign out</button>
+      </div>
+
+      {# Panda Fund support card — links to /_v2/support; same Stripe-backed
+         data feed as the v1 widget. #}
+      <a class="pp-side-support" href="/_v2/support">
         <div class="pp-side-support-kicker">SUPPORT</div>
         <div class="pp-side-support-title">Feed the panda</div>
         <div class="pp-side-support-bar">
@@ -188,7 +322,7 @@
           ${{ panda_raised|default(84) }} / ${{ panda_goal|default(200) }} ·
           {{ panda_month|default('') }}
         </span>
-      </div>
+      </a>
     </aside>
 
     {# ━━━━━━━━━━ TOPBAR ━━━━━━━━━━ #}
@@ -213,9 +347,13 @@
       </span>
 
       {% from "_redesign/macros/_primitives.html" import btn, avatar %}
-      {{ btn("+ Alert", kind="accent", attrs='onclick="window.location.href=\'/_v2/profile?tab=Alerts\'"') }}
-      <a href="/_v2/profile" aria-label="Profile" style="text-decoration:none;">
-        {{ avatar(user_initials|default("PP", true), accent=True) }}
+      {{ btn("+ Alert", kind="accent",
+             attrs='data-auth-required="alerts" data-auth-href="/_v2/profile?tab=Alerts"') }}
+      <a href="{{ '/_v2/profile' if is_authed else '#' }}"
+         aria-label="{{ 'Profile' if is_authed else 'Sign in' }}"
+         {% if not is_authed %}data-auth-required="profile" data-auth-href="/_v2/profile"{% endif %}
+         style="text-decoration:none;">
+        {{ avatar(user_initials|default(""), accent=True, guest=(not is_authed)) }}
       </a>
     </header>
 
@@ -224,6 +362,15 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  {# ━━━━━━━━━━ AUTH GATE ━━━━━━━━━━
+     Shared sign-in dialog.  Any element with `data-auth-required="…"`
+     opens it on click when no Clerk session exists.  Guest-only — signed-in
+     users never see the gate so we skip its ~2KB of inert markup. #}
+  {% if not is_authed %}
+    {% from "_redesign/macros/_primitives.html" import auth_gate %}
+    {{ auth_gate() }}
+  {% endif %}
 
   {# ━━━━━━━━━━ THEME TOGGLE + LIVE CLOCK ━━━━━━━━━━ #}
   <script>

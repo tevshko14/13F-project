@@ -170,6 +170,50 @@ html, body { height: 100%; }
 /* Sidebar footer — Panda Fund support panel */
 .pp-side-spacer { flex: 1; min-height: 12px; }
 
+/* Auth CTA — sits above the Panda Fund widget.  Visibility driven
+   entirely by `data-pp-authed` on <body>: SSR sets the initial value
+   from request.state.profile; ppUpdateAuthUI flips it at runtime when
+   Clerk loads or the session changes.  Pure CSS swap — no per-element
+   inline styles, no class-toggling. */
+body[data-pp-authed="true"]  .pp-auth-signin  { display: none; }
+body[data-pp-authed="false"] .pp-auth-signout { display: none; }
+
+.pp-side-auth {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.pp-side-auth-primary,
+.pp-side-auth-secondary {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  padding: 9px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s ease, border-color 0.1s ease, color 0.1s ease;
+}
+.pp-side-auth-primary {
+  background: var(--pp-accent);
+  color: var(--pp-accent-ink);
+  border: 1px solid var(--pp-accent);
+}
+.pp-side-auth-primary:hover {
+  filter: brightness(1.08);
+}
+.pp-side-auth-secondary {
+  background: transparent;
+  color: var(--pp-text);
+  border: 1px solid var(--pp-line2);
+}
+.pp-side-auth-secondary:hover {
+  border-color: var(--pp-accent);
+  color: var(--pp-ink);
+}
+
 .pp-side-support {
   padding: 14px;
   background: var(--pp-sub);

@@ -355,6 +355,154 @@
   color: var(--pp-accent-ink);
 }
 
+/* Guest variant — render the silhouette SVG instead of initials.
+   Neutral surface so the guest state reads as "no profile yet" rather
+   than a populated user.  Hover-able when wrapping <a> opens the gate. */
+.pp-avatar-guest {
+  background: var(--pp-line);
+  color: var(--pp-text);
+  border: 1px solid var(--pp-line2);
+  cursor: pointer;
+  transition: color 0.1s ease, border-color 0.1s ease;
+}
+.pp-avatar-guest svg { display: block; }
+.pp-avatar-guest:hover {
+  color: var(--pp-accent);
+  border-color: var(--pp-accent);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Auth gate dialog — shown when guests click any [data-auth-required] CTA
+ * ───────────────────────────────────────────────────────────────────────────*/
+
+.pp-gate-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+  backdrop-filter: blur(4px);
+}
+.pp-gate-overlay[hidden] { display: none; }
+.pp-gate-card {
+  position: relative;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-line2);
+  border-radius: 6px;
+  padding: 32px 28px 24px;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+}
+.pp-gate-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  margin: 0 auto 18px;
+  border-radius: 6px;
+  background: rgba(35, 162, 110, 0.12);
+  color: var(--pp-up);
+}
+.pp-gate-title {
+  font-family: var(--pp-font-display);
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--pp-ink);
+  margin: 0 0 10px 0;
+  line-height: 1.2;
+}
+.pp-gate-desc {
+  font-size: 13px;
+  color: var(--pp-text);
+  line-height: 1.55;
+  margin: 0 0 22px 0;
+}
+.pp-gate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.pp-gate-btn {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  padding: 10px 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: filter 0.1s ease, border-color 0.1s ease, color 0.1s ease, background 0.1s ease;
+}
+.pp-gate-btn-primary {
+  background: var(--pp-up);
+  color: var(--pp-accent-ink);
+  border: 1px solid var(--pp-up);
+}
+.pp-gate-btn-primary:hover { filter: brightness(1.08); }
+.pp-gate-btn-secondary {
+  background: transparent;
+  color: var(--pp-up);
+  border: 1px solid var(--pp-up);
+}
+.pp-gate-btn-secondary:hover {
+  background: rgba(35, 162, 110, 0.08);
+}
+.pp-gate-note {
+  font-size: 11px;
+  color: var(--pp-dim);
+  letter-spacing: 0.2px;
+  margin: 0;
+}
+.pp-gate-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--pp-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.pp-gate-close:hover { background: var(--pp-line); color: var(--pp-ink); }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Clerk modal — size override
+ * Defaults to ~325px wide which feels cramped for an account creation flow.
+ * The .cl-modalContent / .cl-rootBox / .cl-card selectors are part of
+ * Clerk's documented theming API.  !important is required because Clerk
+ * inlines width/maxWidth via JS, and the card lives in a flex container
+ * so we have to also force `flex: 1 1 auto` to let it stretch. */
+:root { --pp-clerk-modal-width: 480px; }
+
+.cl-modalContent,
+.cl-rootBox.cl-signIn-root,
+.cl-rootBox.cl-signUp-root,
+.cl-rootBox.cl-userProfile-root,
+.cl-cardBox {
+  width: 100% !important;
+  max-width: var(--pp-clerk-modal-width) !important;
+}
+.cl-card {
+  width: 100% !important;
+  max-width: var(--pp-clerk-modal-width) !important;
+  flex: 1 1 auto !important;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * Tables — terminal density, mono numbers, sharp 1px rules
  * The README spec: header padding 10×14, body padding 9×14, fontSize 12.

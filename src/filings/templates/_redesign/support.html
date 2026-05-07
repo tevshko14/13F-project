@@ -1,0 +1,491 @@
+{#-
+  PaperPanda Redesign — Support page (Panda Fund)
+  Reuses every backend helper from the v1 page (_support_page_context,
+  _get_panda_fund_stats, /api/create-checkout-session, /api/session-status,
+  /support/thank-you).  Only the markup + CSS gets a v2 redesign — no
+  Stripe wiring is forked.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head %}
+
+{% block title %}Support · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  {# macro.css carries the shared pp-page-hero / pp-page-pane styling
+     every multi-tab v2 page relies on. #}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ asset_version }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/support.css?v={{ asset_version }}">
+{% endblock %}
+
+{% block extra_head_scripts %}
+  {# Stripe Embedded Checkout SDK — loaded async, used by the donate
+     widget below.  Stripe handles its own iframe so no CSP changes. #}
+  <script async src="https://js.stripe.com/v3/"></script>
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ HERO ━━━━━━━━━━ #}
+<header class="pp-page-hero pp-support-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">$</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">PaperPanda Support</span>
+    <h1 class="pp-page-hero-title">The Panda Fund</h1>
+    <div class="pp-page-hero-sub">
+      PaperPanda is free and open. Here's exactly where your support goes — no mystery, no paywall.
+    </div>
+  </div>
+</header>
+
+{# ━━━━━━━━━━ PROGRESS METER ━━━━━━━━━━ #}
+{% call panel(cls="pp-support-meter-panel") %}
+  <div class="pp-support-meter">
+    <div class="pp-support-meter-head">
+      <span class="pp-support-meter-amount">
+        ${{ raised_this_month }}
+        {% if goal_reached %}
+          <span class="pp-mono pp-tag pp-support-goal-reached">Goal reached!</span>
+        {% endif %}
+      </span>
+      <span class="pp-mono pp-support-meter-goal">of ${{ monthly_goal }} monthly goal</span>
+    </div>
+    <div class="pp-support-meter-track">
+      <div class="pp-support-meter-fill"
+           style="width: {{ progress_pct }}%;"></div>
+    </div>
+    <div class="pp-mono pp-support-meter-label">
+      {{ progress_pct }}% funded for {{ current_month_name }}
+    </div>
+  </div>
+{% endcall %}
+
+{# ━━━━━━━━━━ THANK-YOU BANNER (post-checkout) ━━━━━━━━━━ #}
+{% if show_thank_you is defined and show_thank_you %}
+{% call panel(cls="pp-support-thanks-panel") %}
+  <div class="pp-support-thanks" id="pp-support-thanks" hidden>
+    <div>
+      <span class="pp-mono pp-support-thanks-kicker">★ Thank you</span>
+      <h3 class="pp-support-thanks-title">Your contribution landed.</h3>
+      <p class="pp-support-thanks-msg" id="pp-support-thanks-msg">
+        Every dollar goes directly to keeping PaperPanda free and running.
+      </p>
+    </div>
+  </div>
+{% endcall %}
+<script>
+(function () {
+  var sid = new URLSearchParams(window.location.search).get('session_id');
+  if (!sid) return;
+  fetch('/api/session-status?session_id=' + encodeURIComponent(sid))
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.status !== 'complete') return;
+      var banner = document.getElementById('pp-support-thanks');
+      if (!banner) return;
+      banner.hidden = false;
+      if (d.customer_email) {
+        document.getElementById('pp-support-thanks-msg').textContent =
+          'A receipt has been sent to ' + d.customer_email + '. Thank you!';
+      }
+    })
+    .catch(function () {});
+})();
+</script>
+{% endif %}
+
+{# ━━━━━━━━━━ DONATE WIDGET — Monthly / One-time toggle ━━━━━━━━━━ #}
+{% call panel(cls="pp-support-donate-panel") %}
+  <div class="pp-support-donate">
+    <div class="pp-support-donate-toggle pp-segment pp-segment-mono" role="tablist" id="pp-support-donate-toggle">
+      <button type="button" class="pp-segment-opt" data-pane="monthly" role="tab" aria-selected="false">Monthly</button>
+      <button type="button" class="pp-segment-opt is-active" data-pane="onetime" role="tab" aria-selected="true">One-time</button>
+    </div>
+
+    {# ── Monthly tier cards — flat panel buttons, no decorative emojis ── #}
+    <div class="pp-support-donate-pane" data-pane="monthly" hidden>
+      {% if stripe_configured %}
+        <div class="pp-support-tier-grid">
+          <button type="button" class="pp-support-tier"
+                  data-price="{{ price_bamboo }}" data-mode="subscription">
+            <span class="pp-support-tier-name">Bamboo</span>
+            <span class="pp-support-tier-price">$5<small>/mo</small></span>
+            <span class="pp-support-tier-desc">Cover a slice of API + hosting</span>
+            <span class="pp-support-tier-cta">Subscribe</span>
+          </button>
+
+          <button type="button" class="pp-support-tier is-popular"
+                  data-price="{{ price_panda }}" data-mode="subscription">
+            <span class="pp-support-tier-badge">Most popular</span>
+            <span class="pp-support-tier-name">Panda</span>
+            <span class="pp-support-tier-price">$15<small>/mo</small></span>
+            <span class="pp-support-tier-desc">Keep the lights on for a week</span>
+            <span class="pp-support-tier-cta">Subscribe</span>
+          </button>
+
+          <button type="button" class="pp-support-tier"
+                  data-price="{{ price_giant_panda }}" data-mode="subscription">
+            <span class="pp-support-tier-name">Giant Panda</span>
+            <span class="pp-support-tier-price">$30<small>/mo</small></span>
+            <span class="pp-support-tier-desc">Fund a whole month single-handedly</span>
+            <span class="pp-support-tier-cta">Subscribe</span>
+          </button>
+        </div>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">Monthly support tiers coming soon.</div>
+        </div>
+      {% endif %}
+    </div>
+
+    {# ── One-time donation card ── #}
+    <div class="pp-support-donate-pane is-active" data-pane="onetime">
+      {% if stripe_configured and price_onetime %}
+        <div class="pp-support-tier-grid pp-support-tier-grid-single">
+          <button type="button" class="pp-support-tier is-popular"
+                  data-price="{{ price_onetime }}" data-mode="payment">
+            <span class="pp-support-tier-badge">Most popular</span>
+            <span class="pp-support-tier-name">One-Time Donation</span>
+            <span class="pp-support-tier-price">Pay what you want</span>
+            <span class="pp-support-tier-desc">Every dollar helps cover API costs and hosting</span>
+            <span class="pp-support-tier-cta">Donate Now</span>
+          </button>
+        </div>
+      {% else %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-sub">One-time donations coming soon.</div>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endcall %}
+
+{# ━━━━━━━━━━ STRIPE CHECKOUT OVERLAY ━━━━━━━━━━ #}
+<div class="pp-support-checkout-overlay" id="pp-support-checkout" hidden>
+  <div class="pp-support-checkout-card">
+    <button type="button" class="pp-support-checkout-close" aria-label="Close" id="pp-support-checkout-close">×</button>
+    <div class="pp-support-checkout-loading" id="pp-support-checkout-loading">Loading checkout…</div>
+    <div id="pp-support-checkout-mount"></div>
+  </div>
+</div>
+
+{# ━━━━━━━━━━ WHERE THE MONEY GOES ━━━━━━━━━━ #}
+{% call panel(cls="pp-support-section-panel") %}
+  {{ panel_head("Where the money goes",
+                sub="Every dollar goes directly to keeping PaperPanda running — real-time data feeds, cloud infrastructure, and the tools that make development possible. There are no salaries, no investors, no hidden fees.") }}
+  <div class="pp-support-cost-grid">
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">DATA</span>
+      <span class="pp-support-cost-name">Data APIs</span>
+      <span class="pp-support-cost-sub">SEC · Glassdoor · PDL</span>
+    </div>
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">INFRA</span>
+      <span class="pp-support-cost-name">Cloud Hosting</span>
+      <span class="pp-support-cost-sub">Railway</span>
+    </div>
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">DB</span>
+      <span class="pp-support-cost-name">Database</span>
+      <span class="pp-support-cost-sub">Supabase Postgres</span>
+    </div>
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">DNS</span>
+      <span class="pp-support-cost-name">Domain &amp; DNS</span>
+      <span class="pp-support-cost-sub">Namecheap</span>
+    </div>
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">AI</span>
+      <span class="pp-support-cost-name">AI Coding</span>
+      <span class="pp-support-cost-sub">Assistants</span>
+    </div>
+  </div>
+{% endcall %}
+
+{# ━━━━━━━━━━ FUNDING HISTORY CHART ━━━━━━━━━━ #}
+{% call panel(cls="pp-support-section-panel") %}
+  {{ panel_head("Funding History",
+                sub="Monthly raised vs $" ~ monthly_goal ~ " goal — bars match the dashed goal line when fully funded.") }}
+  {% if chart.have_data %}
+    <div class="pp-support-chart-wrap">
+      <svg class="pp-support-chart-svg"
+           viewBox="0 0 {{ chart.vb_width|int }} {{ chart.vb_height|int }}"
+           preserveAspectRatio="none"
+           aria-label="Funding history">
+        {# Gridlines #}
+        {% for gy in chart.grid_ys %}
+          <line class="pp-support-chart-grid"
+                x1="{{ chart.left_pad }}" x2="{{ chart.vb_width|int }}"
+                y1="{{ gy }}" y2="{{ gy }}"
+                vector-effect="non-scaling-stroke"/>
+        {% endfor %}
+        {# Y-axis labels #}
+        {% for yl in chart.y_labels %}
+          <text class="pp-support-chart-ylabel"
+                x="{{ chart.left_pad - 8 }}" y="{{ yl.y + 4 }}"
+                text-anchor="end">{{ yl.label }}</text>
+        {% endfor %}
+        {# Goal line — dashed #}
+        <line class="pp-support-chart-goal-line"
+              x1="{{ chart.left_pad }}" x2="{{ chart.vb_width|int }}"
+              y1="{{ chart.goal_y }}" y2="{{ chart.goal_y }}"
+              vector-effect="non-scaling-stroke"/>
+        <text class="pp-support-chart-goal-text"
+              x="{{ chart.vb_width|int - 12 }}" y="{{ chart.goal_y - 6 }}"
+              text-anchor="end">Goal: ${{ chart.goal }}</text>
+        {# Bars + value labels + month labels #}
+        {% for b in chart.bars %}
+          <rect class="pp-support-chart-bar {% if b.is_funded %}is-funded{% else %}is-subsidized{% endif %}"
+                x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"/>
+          <text class="pp-support-chart-bar-value"
+                x="{{ b.label_x }}" y="{{ b.y - 6 }}"
+                text-anchor="middle">{{ b.value_str }}</text>
+          <text class="pp-support-chart-bar-label"
+                x="{{ b.label_x }}" y="{{ chart.vb_height|int - 10 }}"
+                text-anchor="middle">{{ b.label }}</text>
+        {% endfor %}
+      </svg>
+    </div>
+    <div class="pp-support-chart-legend">
+      <span class="pp-mono"><span class="pp-support-chart-swatch is-funded"></span>Fully funded</span>
+      <span class="pp-mono"><span class="pp-support-chart-swatch is-subsidized"></span>Subsidized (out of pocket)</span>
+    </div>
+  {% else %}
+    <div class="pp-page-placeholder">
+      <div class="pp-page-placeholder-sub">Funding history will appear once the first donations land.</div>
+    </div>
+  {% endif %}
+{% endcall %}
+
+{# ━━━━━━━━━━ WHAT'S NEXT ━━━━━━━━━━ #}
+{% call panel(cls="pp-support-section-panel") %}
+  {{ panel_head("What's next",
+                sub="These are features on the drawing board. What actually ships depends on whether PaperPanda can sustain itself long enough to build them — your support directly decides that.") }}
+  <div class="pp-support-cost-grid">
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">SIGNALS</span>
+      <span class="pp-support-cost-name">Alternative Data</span>
+      <span class="pp-support-cost-desc">Google Trends + SimilarWeb traffic for retail sentiment</span>
+    </div>
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">ALERTS</span>
+      <span class="pp-support-cost-name">Filing Alerts</span>
+      <span class="pp-support-cost-desc">Get notified when funds you follow make new moves</span>
+    </div>
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">SCREEN</span>
+      <span class="pp-support-cost-name">Advanced Screener</span>
+      <span class="pp-support-cost-desc">Filter holdings by sector, size, conviction &amp; more</span>
+    </div>
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">TRACK</span>
+      <span class="pp-support-cost-name">Portfolio Tracking</span>
+      <span class="pp-support-cost-desc">Build &amp; track a watchlist mirroring top fund positions</span>
+    </div>
+    <div class="pp-support-cost-tile">
+      <span class="pp-support-cost-kicker">EARNINGS</span>
+      <span class="pp-support-cost-name">Earnings Transcripts</span>
+      <span class="pp-support-cost-desc">AI-summarized call highlights alongside holdings data</span>
+    </div>
+  </div>
+{% endcall %}
+
+{# ━━━━━━━━━━ FOOTER CTAs ━━━━━━━━━━ #}
+<div class="pp-support-foot-row">
+  {% call panel(cls="pp-support-foot-panel") %}
+    <h3 class="pp-support-foot-title">Another way to support</h3>
+    <p class="pp-support-foot-text">
+      PaperPanda was built with love by <strong>Tevis</strong>. If you can't contribute financially,
+      consider subscribing for financial content — it means just as much.
+    </p>
+    <a class="pp-support-yt-link" href="https://youtube.com/@funofinvesting" target="_blank" rel="noopener">
+      <svg class="pp-support-yt-icon" viewBox="0 0 24 17" aria-hidden="true">
+        <path fill="#ff0000" d="M23.5 2.5A3 3 0 0 0 21.4.4C19.5 0 12 0 12 0S4.5 0 2.6.4A3 3 0 0 0 .5 2.5 31.5 31.5 0 0 0 0 8.5a31.5 31.5 0 0 0 .5 6A3 3 0 0 0 2.6 16.6C4.5 17 12 17 12 17s7.5 0 9.4-.4a3 3 0 0 0 2.1-2.1 31.5 31.5 0 0 0 .5-6 31.5 31.5 0 0 0-.5-6zM9.6 12.1V4.9l6.3 3.6-6.3 3.6z"/>
+      </svg>
+      <span class="pp-mono">@funofinvesting</span>
+    </a>
+  {% endcall %}
+
+  {% call panel(cls="pp-support-foot-panel") %}
+    <h3 class="pp-support-foot-title">Help shape PaperPanda</h3>
+    <p class="pp-support-foot-text">
+      What features do you want to see next? Found a bug? Your feedback drives what gets built.
+    </p>
+    {{ btn("Share Feedback", kind="ghost",
+           attrs="type='button' id='pp-support-feedback-btn'") }}
+  {% endcall %}
+</div>
+
+{# ━━━━━━━━━━ FEEDBACK MODAL ━━━━━━━━━━ #}
+<div class="pp-support-feedback-overlay" id="pp-support-feedback-overlay" hidden>
+  <div class="pp-support-feedback-card">
+    <div class="pp-support-feedback-head">
+      <h3 class="pp-support-feedback-title">Share Feedback</h3>
+      <button type="button" class="pp-support-feedback-close" aria-label="Close"
+              id="pp-support-feedback-close">×</button>
+    </div>
+    <div class="pp-support-feedback-body" id="pp-support-feedback-body">
+      <div class="pp-support-feedback-loading">Loading form…</div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(function () {
+  /* ── Donate-toggle (Monthly ↔ One-time) — purely visual, server already
+     emits both panes; we just toggle is-active + hidden. */
+  var toggle = document.getElementById('pp-support-donate-toggle');
+  if (toggle) {
+    var panes = document.querySelectorAll('.pp-support-donate-pane');
+    toggle.addEventListener('click', function (ev) {
+      var btn = ev.target.closest('.pp-segment-opt');
+      if (!btn) return;
+      var name = btn.getAttribute('data-pane');
+      toggle.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+        var match = o.getAttribute('data-pane') === name;
+        o.classList.toggle('is-active', match);
+        o.setAttribute('aria-selected', match ? 'true' : 'false');
+      });
+      panes.forEach(function (p) {
+        var match = p.getAttribute('data-pane') === name;
+        p.classList.toggle('is-active', match);
+        p.hidden = !match;
+      });
+    });
+    // Auto-switch to monthly when linked from elsewhere with #monthly.
+    if (window.location.hash === '#monthly') {
+      toggle.querySelector('[data-pane="monthly"]')?.click();
+    }
+  }
+})();
+
+(function () {
+  /* ── Stripe Embedded Checkout overlay.  Re-uses the existing v1 endpoints
+        — /api/create-checkout-session + /api/session-status — so all the
+        Stripe wiring lives in web.py, not here. */
+  var publishableKey = "{{ stripe_publishable_key|safe }}";
+  var stripeInstance = null;
+  var checkoutInstance = null;
+  var overlay  = document.getElementById('pp-support-checkout');
+  var mountEl  = document.getElementById('pp-support-checkout-mount');
+  var loadEl   = document.getElementById('pp-support-checkout-loading');
+  var closeEl  = document.getElementById('pp-support-checkout-close');
+  if (!overlay || !mountEl) return;
+
+  function close() {
+    overlay.hidden = true;
+    document.body.style.overflow = '';
+    if (checkoutInstance) {
+      try { checkoutInstance.destroy(); } catch (e) {}
+      checkoutInstance = null;
+    }
+  }
+
+  function open(priceId, mode) {
+    if (!priceId || !publishableKey) return;
+    mountEl.innerHTML = '';
+    loadEl.textContent = 'Loading checkout…';
+    loadEl.style.display = '';
+    overlay.hidden = false;
+    document.body.style.overflow = 'hidden';
+    if (checkoutInstance) {
+      try { checkoutInstance.destroy(); } catch (e) {}
+      checkoutInstance = null;
+    }
+    if (!stripeInstance) {
+      stripeInstance = window.Stripe ? Stripe(publishableKey) : null;
+      if (!stripeInstance) {
+        loadEl.textContent = 'Stripe failed to load. Please try again.';
+        return;
+      }
+    }
+    fetch('/api/create-checkout-session', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify({price_id: priceId, mode: mode})
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data.error) {
+        loadEl.textContent = 'Error: ' + data.error;
+        return null;
+      }
+      return stripeInstance.initEmbeddedCheckout({clientSecret: data.clientSecret});
+    })
+    .then(function (checkout) {
+      if (!checkout) return;
+      checkoutInstance = checkout;
+      loadEl.style.display = 'none';
+      checkout.mount('#pp-support-checkout-mount');
+    })
+    .catch(function () {
+      loadEl.textContent = 'Something went wrong. Please try again.';
+    });
+  }
+
+  document.querySelectorAll('.pp-support-tier').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      open(btn.getAttribute('data-price'), btn.getAttribute('data-mode'));
+    });
+  });
+  if (closeEl) closeEl.addEventListener('click', close);
+  overlay.addEventListener('click', function (ev) {
+    if (ev.target === overlay) close();
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && !overlay.hidden) close();
+  });
+})();
+
+(function () {
+  /* ── Feedback modal — embeds a Tally.so iframe (or whatever URL is
+        configured server-side via FEEDBACK_LINK). */
+  var openBtn  = document.getElementById('pp-support-feedback-btn');
+  var overlay  = document.getElementById('pp-support-feedback-overlay');
+  var closeBtn = document.getElementById('pp-support-feedback-close');
+  var body     = document.getElementById('pp-support-feedback-body');
+  if (!openBtn || !overlay || !body) return;
+  var url = "{{ feedback_link|safe }}";
+  var loaded = false;
+
+  function close() {
+    overlay.hidden = true;
+    document.body.style.overflow = '';
+  }
+  function open() {
+    overlay.hidden = false;
+    document.body.style.overflow = 'hidden';
+    if (!loaded) {
+      if (url && url.indexOf('placeholder') === -1) {
+        var iframe = document.createElement('iframe');
+        iframe.src = url;
+        iframe.title = 'Feedback Form';
+        iframe.onload = function () {
+          var l = body.querySelector('.pp-support-feedback-loading');
+          if (l) l.style.display = 'none';
+        };
+        body.appendChild(iframe);
+      } else {
+        body.querySelector('.pp-support-feedback-loading').textContent = 'Feedback form coming soon!';
+      }
+      loaded = true;
+    }
+  }
+
+  openBtn.addEventListener('click', open);
+  if (closeBtn) closeBtn.addEventListener('click', close);
+  overlay.addEventListener('click', function (ev) {
+    if (ev.target === overlay) close();
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && !overlay.hidden) close();
+  });
+  if (window.location.hash === '#feedback') open();
+})();
+</script>
+{% endblock %}

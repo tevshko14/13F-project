@@ -192,6 +192,7 @@ async def _shell_context(request: Request, active: str) -> dict:
         "user_initials":  user_initials,
         "notif_unread":   notif_unread,
         "asset_version":  _ASSET_VERSION,
+        "is_authed":      isinstance(profile, dict) and bool(profile),
     }
 
 
@@ -9981,3 +9982,108 @@ async def warm_l2_caches() -> dict:
         else:
             succeeded += 1
     return {"warmed": succeeded, "failed": failed, "total": len(targets)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SUPPORT — Panda Fund landing page.  Reuses the existing v1 helpers in
+# `web.py` (Stripe price IDs, monthly fund stats, funding history) so we
+# don't fork the Stripe wiring; only the markup + CSS gets a v2 redesign.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _support_history_chart(months: list[str], raised: list[int], goal: int) -> dict:
+    """Server-render bar-chart geometry for the funding history panel.
+
+    Avoids the ECharts dependency the v1 page leaned on — every other v2
+    chart uses inline SVG with `vector-effect="non-scaling-stroke"` and
+    HTML axis labels, so this matches the established pattern.
+    """
+    n = max(len(months), 1)
+    vb_w, vb_h = 1500.0, 320.0
+    pad_top, pad_bot, pad_left = 18.0, 36.0, 64.0
+    plot_w = vb_w - pad_left - 24
+    plot_h = vb_h - pad_top - pad_bot
+
+    if not months:
+        return {"have_data": False, "bars": [], "y_labels": [], "grid_ys": [],
+                "vb_width": vb_w, "vb_height": vb_h}
+
+    # Y axis: nice round step up to (and beyond) the goal so the dashed
+    # goal line always lands on a labelled tick.
+    y_top = max(goal, max(raised) if raised else 1)
+    step = _nice_axis_step(y_top, target_steps=4)
+    import math
+    y_top = math.ceil(y_top / step) * step
+
+    def _y_for(v: float) -> float:
+        return pad_top + (1.0 - v / y_top) * plot_h
+
+    bar_gap = 14.0
+    bar_w = max(40.0, (plot_w - bar_gap * (n + 1)) / n)
+
+    bars: list[dict] = []
+    for i, (label, v) in enumerate(zip(months, raised)):
+        x = pad_left + bar_gap + i * (bar_w + bar_gap)
+        y = _y_for(v)
+        bars.append({
+            "label":  label,
+            "value":  v,
+            "x":      round(x, 1),
+            "y":      round(y, 1),
+            "w":      round(bar_w, 1),
+            "h":      round(_y_for(0) - y, 1),
+            "label_x": round(x + bar_w / 2, 1),
+            "is_funded": v >= goal,
+            "value_str": f"${v}",
+        })
+
+    y_labels = []
+    grid_ys = []
+    v = 0.0
+    while v <= y_top + step / 2:
+        y_pos = round(_y_for(v), 1)
+        y_labels.append({"label": f"${int(v)}", "y": y_pos})
+        grid_ys.append(y_pos)
+        v += step
+
+    return {
+        "have_data": True,
+        "bars":      bars,
+        "y_labels":  y_labels,
+        "grid_ys":   grid_ys,
+        "goal_y":    round(_y_for(goal), 1),
+        "goal":      goal,
+        "vb_width":  vb_w,
+        "vb_height": vb_h,
+        "left_pad":  pad_left,
+    }
+
+
+@router.get("/support", response_class=HTMLResponse)
+async def preview_support(request: Request):
+    """Support page — Panda Fund + Stripe checkout, v2 design."""
+    from filings.web import _support_page_context  # reuse v1 helper
+
+    base = await _support_page_context(request)
+    base["chart"] = _support_history_chart(
+        base.get("funding_history_months") or [],
+        base.get("funding_history_raised") or [],
+        base.get("monthly_goal") or 200,
+    )
+    base.update(await _shell_context(request, "Support"))
+    return templates.TemplateResponse("_redesign/support.html", base)
+
+
+@router.get("/support/thank-you", response_class=HTMLResponse)
+async def preview_support_thank_you(request: Request):
+    """Post-Stripe-checkout return — same template with thank-you flag."""
+    from filings.web import _support_page_context
+
+    base = await _support_page_context(request, extra={"show_thank_you": True})
+    base["chart"] = _support_history_chart(
+        base.get("funding_history_months") or [],
+        base.get("funding_history_raised") or [],
+        base.get("monthly_goal") or 200,
+    )
+    base.update(await _shell_context(request, "Support"))
+    return templates.TemplateResponse("_redesign/support.html", base)

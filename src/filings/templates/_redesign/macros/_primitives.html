@@ -237,7 +237,56 @@
   initials: 2-3 character string.
   accent: True → coral background; False → ink (default).
 -#}
-{%- macro avatar(initials, accent=False, cls="") -%}
-<div class="pp-avatar{{ ' pp-avatar-accent' if accent else '' }}{{ ' ' ~ cls if cls else '' }}"
-     aria-label="{{ initials }}">{{ initials }}</div>
+{# Sign-in gate dialog — single instance lives in base.html.  Triggered by
+   any element with `data-auth-required="…"` when no Clerk session exists.
+   The data-auth-feature attribute drives the headline/description swap so
+   one DOM dialog covers Alerts / Watchlist / future gated features. #}
+{%- macro auth_gate() -%}
+<div class="pp-gate-overlay" id="pp-gate-overlay" hidden>
+  <div class="pp-gate-card" role="dialog" aria-modal="true" aria-labelledby="pp-gate-title">
+    <div class="pp-gate-icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="36" height="36" fill="none"
+           stroke="currentColor" stroke-width="1.6"
+           stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    </div>
+    <h2 class="pp-gate-title" id="pp-gate-title">Sign in to unlock <span class="pp-gate-feature">PaperPanda</span></h2>
+    <p class="pp-gate-desc"></p>
+    <div class="pp-gate-actions">
+      <button type="button" class="pp-gate-btn pp-gate-btn-primary" onclick="ppOpenSignIn()">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none"
+             stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+          <polyline points="10 17 15 12 10 7"/>
+          <line x1="15" y1="12" x2="3" y2="12"/>
+        </svg>
+        Sign In
+      </button>
+      <button type="button" class="pp-gate-btn pp-gate-btn-secondary" onclick="ppOpenSignUp()">
+        Create Free Account
+      </button>
+    </div>
+    <p class="pp-gate-note">Free forever — no credit card required.</p>
+    <button type="button" class="pp-gate-close" aria-label="Close">×</button>
+  </div>
+</div>
+{%- endmacro -%}
+
+{%- macro avatar(initials, accent=False, cls="", guest=False) -%}
+<div class="pp-avatar{{ ' pp-avatar-accent' if accent else '' }}{{ ' pp-avatar-guest' if guest else '' }}{{ ' ' ~ cls if cls else '' }}"
+     aria-label="{{ 'Guest' if guest else initials }}">
+  {%- if guest -%}
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+         stroke="currentColor" stroke-width="1.8"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+      <circle cx="12" cy="7" r="4"/>
+    </svg>
+  {%- else -%}
+    {{ initials }}
+  {%- endif -%}
+</div>
 {%- endmacro -%}
