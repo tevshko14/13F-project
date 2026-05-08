@@ -666,7 +666,7 @@
              data-heatmap-pane="Companies">
           {% for c in heatmap_companies %}
             <a class="pp-home-heatmap-tile{% if c.is_large %} is-large{% endif %}{% if c.tile_dark %} is-dark{% endif %}"
-               href="/_v2/stock/{{ c.ticker }}"
+               href="/stock/{{ c.ticker }}"
                style="background: {{ c.tile_bg }};
                       grid-column: span {{ c.span_col }};
                       grid-row: span {{ c.span_row }};">

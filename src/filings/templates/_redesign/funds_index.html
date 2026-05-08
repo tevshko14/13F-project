@@ -5,7 +5,7 @@
   Activity · Capital Deployed) under the v2 design system.  Lands here
   when a user clicks "Funds" in the side nav (the previous default
   landed straight on Berkshire's detail page).  Every row in the Funds
-  pane deep-links into `/_v2/funds/{cik}` for the full detail view.
+  pane deep-links into `/funds/{cik}` for the full detail view.
 
   Data source: in-process `app.state.fund_cache` + `deployment_cache`
   (populated at app startup); no upstream fetches on this route.
@@ -92,7 +92,7 @@
                   <td>
                     <div class="pp-funds-index-tickers">
                       {% for tk in f.top_tickers %}
-                        <a class="pp-mono pp-funds-index-tk" href="/_v2/stock/{{ tk }}">{{ tk }}</a>
+                        <a class="pp-mono pp-funds-index-tk" href="/stock/{{ tk }}">{{ tk }}</a>
                       {% endfor %}
                     </div>
                   </td>
@@ -249,7 +249,7 @@
                 <tr>
                   <td class="pp-num pp-mono pp-dim2">{{ "%02d"|format(h.rank) }}</td>
                   <td>
-                    <a class="pp-mono pp-ink-strong pp-funds-allhold-tk" href="/_v2/stock/{{ h.ticker }}">{{ h.ticker }}</a>
+                    <a class="pp-mono pp-ink-strong pp-funds-allhold-tk" href="/stock/{{ h.ticker }}">{{ h.ticker }}</a>
                   </td>
                   <td class="pp-funds-allhold-name">{{ h.name }}</td>
                   <td class="pp-num pp-mono pp-ink-strong"
@@ -352,7 +352,7 @@
                     {% for tr in m.trades %}
                       <tr>
                         <td>
-                          <a class="pp-funds-act-detail-fund" href="/_v2/funds/{{ tr.cik }}">{{ tr.fund_name }}</a>
+                          <a class="pp-funds-act-detail-fund" href="/funds/{{ tr.cik }}">{{ tr.fund_name }}</a>
                         </td>
                         <td>
                           <span class="pp-mono pp-tag {% if tr.is_buy %}pp-funds-act-tag-buy{% else %}pp-funds-act-tag-sell{% endif %}">
@@ -414,7 +414,7 @@
                 <tr>
                   <td class="pp-num pp-mono pp-dim2">{{ "%02d"|format(r.rank) }}</td>
                   <td>
-                    <a class="pp-funds-cap-mgr" href="/_v2/funds/{{ r.cik }}">
+                    <a class="pp-funds-cap-mgr" href="/funds/{{ r.cik }}">
                       <span class="pp-funds-cap-mgr-name">{{ r.manager }}</span>
                       <span class="pp-funds-cap-fund-name">{{ r.fund_name }}</span>
                     </a>

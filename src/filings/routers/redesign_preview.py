@@ -53,7 +53,30 @@ def is_enabled() -> bool:
     return os.environ.get("PP_REDESIGN_PREVIEW", "").lower() in ("1", "true", "yes")
 
 
-router = APIRouter(prefix="/_v2", tags=["redesign-preview"])
+def is_placeholders_enabled() -> bool:
+    """Whether placeholder pages (screener, options) are mounted.
+
+    Set ``PP_PLACEHOLDERS=1`` in local dev to browse them; leave unset
+    in production so the v2 placeholder routes are NEVER registered and
+    the v1 handlers (real features) serve those URLs instead.
+    """
+    return os.environ.get("PP_PLACEHOLDERS", "").lower() in ("1", "true", "yes")
+
+
+def _placeholder_route(path: str, **kwargs):
+    """Decorator that registers a route only when placeholders are enabled.
+
+    Used for screener / options pages which still ship visual-only / mock
+    content; they should be browsable locally but absent in production.
+    """
+    def wrap(fn):
+        if is_placeholders_enabled():
+            return router.get(path, **kwargs)(fn)
+        return fn
+    return wrap
+
+
+router = APIRouter(prefix="", tags=["redesign"])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -194,6 +217,10 @@ async def _shell_context(request: Request, active: str) -> dict:
         "notif_unread":   notif_unread,
         "asset_version":  _ASSET_VERSION,
         "is_authed":      isinstance(profile, dict) and bool(profile),
+        # Local-only flag: drives whether placeholder pages (Screener,
+        # Options) show up in the sidenav.  Set ``PP_PLACEHOLDERS=1`` in
+        # local dev; unset in production.
+        "show_placeholder_nav": is_placeholders_enabled(),
     }
 
 
@@ -230,20 +257,20 @@ def _short_date(iso: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@router.get("", response_class=HTMLResponse)
+@router.get("/_pages", response_class=HTMLResponse)
 async def preview_index(request: Request):
-    """Preview index — lists every redesign route."""
+    """Dev-only page index — lists every redesign route."""
     pages = [
-        ("Home",      "/_v2/home"),
-        ("Stock",     "/_v2/stock/AAPL"),
-        ("Funds",     "/_v2/funds"),
-        ("Screener",  "/_v2/screener"),
-        ("Insiders",  "/_v2/insiders"),
-        ("Congress",  "/_v2/congress"),
-        ("Macro",     "/_v2/macro"),
-        ("Retail",    "/_v2/retail"),
-        ("Options",   "/_v2/options"),
-        ("Profile",   "/_v2/profile"),
+        ("Home",      "/"),
+        ("Stock",     "/stock/AAPL"),
+        ("Funds",     "/funds"),
+        ("Screener",  "/screener"),
+        ("Insiders",  "/insiders"),
+        ("Congress",  "/congress"),
+        ("Macro",     "/macro"),
+        ("Retail",    "/retail"),
+        ("Options",   "/options"),
+        ("Profile",   "/profile"),
     ]
     return templates.TemplateResponse(
         "_redesign/_preview_index.html",
@@ -943,13 +970,13 @@ def _heatmap_sectors_with_color() -> list[dict]:
 #    data sourced from supabase notifications (same table production v1
 #    reads from).  cat drives both the dot color + the type-tag color.
 _HOME_ACTIVITY_FEED = [
-    {"ago": "3m",  "src": "REDDIT",   "ticker": "LLY",   "text": "Eli Lilly — mentions +100% in 24h (4 total)",        "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/_v2/stock/LLY"},
-    {"ago": "3m",  "src": "REDDIT",   "ticker": "ANY",   "text": "Sphere 3D — mentions +200% in 24h (3 total)",        "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/_v2/stock/ANY"},
-    {"ago": "3m",  "src": "REDDIT",   "ticker": "XBI",   "text": "SPDR S&P Biotech — mentions +100% in 24h (2 total)", "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/_v2/stock/XBI"},
-    {"ago": "12m", "src": "13F",      "ticker": "AAPL",  "text": "Berkshire Hathaway reduced position by $5.2B",       "cat": "13f",      "pill": "13F FILING",      "href": "/_v2/stock/AAPL"},
-    {"ago": "23m", "src": "CONGRESS", "ticker": "NVDA",  "text": "Rep. Pelosi disclosed buy — $1M-$5M call options",   "cat": "congress", "pill": "CONGRESS",        "href": "/_v2/stock/NVDA"},
-    {"ago": "37m", "src": "INSIDER",  "ticker": "AAPL",  "text": "Tim Cook (CEO) sold 240,000 shares — $52.1M",        "cat": "insider",  "pill": "INSIDER",         "href": "/_v2/stock/AAPL"},
-    {"ago": "42m", "src": "YOUTUBE",  "ticker": "BRK.B", "text": "CNBC: Berkshire AGM 2026 highlights",                "cat": "youtube",  "pill": "YOUTUBE",         "href": "/_v2/stock/BRK.B"},
+    {"ago": "3m",  "src": "REDDIT",   "ticker": "LLY",   "text": "Eli Lilly — mentions +100% in 24h (4 total)",        "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/stock/LLY"},
+    {"ago": "3m",  "src": "REDDIT",   "ticker": "ANY",   "text": "Sphere 3D — mentions +200% in 24h (3 total)",        "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/stock/ANY"},
+    {"ago": "3m",  "src": "REDDIT",   "ticker": "XBI",   "text": "SPDR S&P Biotech — mentions +100% in 24h (2 total)", "cat": "reddit",   "pill": "REDDIT VELOCITY", "href": "/stock/XBI"},
+    {"ago": "12m", "src": "13F",      "ticker": "AAPL",  "text": "Berkshire Hathaway reduced position by $5.2B",       "cat": "13f",      "pill": "13F FILING",      "href": "/stock/AAPL"},
+    {"ago": "23m", "src": "CONGRESS", "ticker": "NVDA",  "text": "Rep. Pelosi disclosed buy — $1M-$5M call options",   "cat": "congress", "pill": "CONGRESS",        "href": "/stock/NVDA"},
+    {"ago": "37m", "src": "INSIDER",  "ticker": "AAPL",  "text": "Tim Cook (CEO) sold 240,000 shares — $52.1M",        "cat": "insider",  "pill": "INSIDER",         "href": "/stock/AAPL"},
+    {"ago": "42m", "src": "YOUTUBE",  "ticker": "BRK.B", "text": "CNBC: Berkshire AGM 2026 highlights",                "cat": "youtube",  "pill": "YOUTUBE",         "href": "/stock/BRK.B"},
 ]
 
 # ── News subtab.  Categories: Markets / Macro / Earnings / Funds /
@@ -2325,7 +2352,7 @@ async def _fetch_home_activity(limit: int = 12) -> list[dict]:
         # to the notifications feed where they can dive into the stream.
         href = (n.get("link") or "").strip()
         if not href:
-            href = f"/_v2/stock/{ticker}" if ticker else "/_v2/notifications"
+            href = f"/stock/{ticker}" if ticker else "/notifications"
         rows.append({
             "ago":    _activity_iso_time_ago(n.get("created_at") or ""),
             "src":    src_label,
@@ -2489,7 +2516,7 @@ async def _fetch_home_cal_macro(limit: int = 6) -> list[dict]:
     return rows or _HOME_CAL_MACRO
 
 
-@router.get("/home", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
 async def preview_home(request: Request):
     """Home page — live KPI strip + hero chart + 8 fully-wired Overview sections."""
     # Fetch every Overview section in parallel.  Each fetcher returns mock
@@ -3776,7 +3803,7 @@ def _funds_index_rows(request: Request) -> list[dict]:
             "filing_date":    cached.get("filing_date", ""),
             "report_period":  cached.get("report_period", ""),
             "icon":           _icon_from_fund_name(cached.get("name") or info.fund_name or ""),
-            "href":           f"/_v2/funds/{cik}",
+            "href":           f"/funds/{cik}",
         })
     rows.sort(key=lambda r: r["value"], reverse=True)
     return rows
@@ -4050,8 +4077,14 @@ async def preview_funds_index(request: Request, view: str = "Funds"):
     on this route, so warm hits are sub-200 ms across all sub-tabs.
     """
     valid_views = {"Funds", "Holdings", "Activity", "Capital Deployed"}
+    # Accept legacy lowercase v1 view values so old bookmarks land on the
+    # right tab (e.g. /funds?view=holdings → Holdings).
+    legacy_alias = {
+        "funds": "Funds", "holdings": "Holdings",
+        "activity": "Activity", "deployment": "Capital Deployed",
+    }
     if view not in valid_views:
-        view = "Funds"
+        view = legacy_alias.get(view.lower(), "Funds")
 
     rows = _funds_index_rows(request)
     fund_cache       = getattr(request.app.state, "fund_cache", {}) or {}
@@ -4276,7 +4309,7 @@ _OPTIONS_FLOW_MOCK = [
 ]
 
 
-@router.get("/options", response_class=HTMLResponse)
+@_placeholder_route("/options", response_class=HTMLResponse)
 async def preview_options(request: Request):
     """Options page — Unusual flow (default).  Mock data; needs OPRA vendor."""
     kpi = [
@@ -7085,7 +7118,7 @@ _SCREENER_FILTER_GROUPS_FALLBACK = [
 ]
 
 
-@router.get("/screener", response_class=HTMLResponse)
+@_placeholder_route("/screener", response_class=HTMLResponse)
 async def preview_screener(
     request: Request,
     preset: str = "All",

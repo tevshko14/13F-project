@@ -308,7 +308,7 @@
       {# ── Top movers table ── #}
       {% call panel() %}
         {% call panel_head("Top movers", sub="by volume") %}
-          <a class="pp-link-coral" href="/_v2/screener">View all →</a>
+          <a class="pp-link-coral" href="/screener">View all →</a>
         {% endcall %}
         <table class="pp-table pp-home-movers-table pp-row-link-table">
           <thead>
@@ -322,7 +322,7 @@
           </thead>
           <tbody>
             {% for r in top_movers %}
-              <tr data-row-href="/_v2/stock/{{ r.ticker }}" tabindex="0" role="link"
+              <tr data-row-href="/stock/{{ r.ticker }}" tabindex="0" role="link"
                   aria-label="Open {{ r.ticker }} stock page">
                 <td>
                   <span style="font-weight:700; color: var(--pp-ink);">{{ r.ticker }}</span>
@@ -350,11 +350,11 @@
       {# ── 13F flow list ── #}
       {% call panel() %}
         {% call panel_head("13F flow", sub="this week") %}
-          <a class="pp-link-coral" href="/_v2/funds">All funds →</a>
+          <a class="pp-link-coral" href="/funds">All funds →</a>
         {% endcall %}
         {% for f in fund_flows %}
           <div class="pp-home-list-row"
-               {% if f.cik %}data-row-href="/_v2/funds/{{ f.cik }}"
+               {% if f.cik %}data-row-href="/funds/{{ f.cik }}"
                             tabindex="0" role="link"
                             aria-label="Open {{ f.manager }} portfolio"{% endif %}>
             <div>
@@ -453,7 +453,7 @@
         </div>
         {% for r in flow_trending %}
           <div class="pp-home-flow-row"
-               data-row-href="/_v2/stock/{{ r.tk }}"
+               data-row-href="/stock/{{ r.tk }}"
                tabindex="0" role="link"
                aria-label="Open {{ r.tk }} stock page"
                data-tk="{{ r.tk }}"
@@ -523,7 +523,7 @@
         {{ panel_head("Top fund buys", sub="this week") }}
         {% for f in flow_fund_buys %}
           <div class="pp-home-list-row"
-               {% if f.cik %}data-row-href="/_v2/funds/{{ f.cik }}"
+               {% if f.cik %}data-row-href="/funds/{{ f.cik }}"
                             tabindex="0" role="link"
                             aria-label="Open {{ f.manager }} portfolio"{% endif %}>
             <div>
@@ -633,7 +633,7 @@
           {{ tag("notif-" + f.cat, text=f.pill) }}
         </div>
       {% endfor %}
-      <a class="pp-home-activity-footer" href="/_v2/notifications">View all activity →</a>
+      <a class="pp-home-activity-footer" href="/notifications">View all activity →</a>
     {% endcall %}
   </section>{# end Activity pane #}
 
@@ -687,7 +687,7 @@
               {% if n.tickers %}
                 <div class="pp-news-sub-tickers">
                   {% for tk in n.tickers[:3] %}
-                    <a class="pp-mono pp-news-ticker-inline" href="/_v2/stock/{{ tk }}"
+                    <a class="pp-mono pp-news-ticker-inline" href="/stock/{{ tk }}"
                        onclick="event.stopPropagation()">${{ tk }}</a>
                   {% endfor %}
                 </div>
@@ -1372,7 +1372,7 @@
     (article.tickers || []).forEach(function (tk) {
       var a = document.createElement('a');
       a.className = 'pp-mono pp-news-ticker';
-      a.href = '/_v2/stock/' + encodeURIComponent(tk);
+      a.href = '/stock/' + encodeURIComponent(tk);
       a.textContent = '$' + tk;
       tickersE.appendChild(a);
     });
