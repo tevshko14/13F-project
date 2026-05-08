@@ -755,6 +755,11 @@
                 <div class="pp-stock-own-ins-person-date pp-mono pp-dim">
                   Last: {{ p.last_trade_date|format_pretty_date }}
                 </div>
+                {% if p.holds_position and p.card_avg_price_fmt %}
+                  <div class="pp-stock-own-ins-person-hold pp-mono pp-dim">
+                    Holds {{ p.current_position_fmt }} · avg {{ p.card_avg_price_fmt }}
+                  </div>
+                {% endif %}
               </div>
             {% endfor %}
           </div>
