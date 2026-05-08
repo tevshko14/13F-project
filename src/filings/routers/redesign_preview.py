@@ -4065,44 +4065,28 @@ async def preview_funds_index(request: Request, view: str = "Funds"):
         except Exception:
             cache_age = ""
 
-    # Per-view gating: only run the aggregations the active sub-tab actually
-    # needs.  Holdings → grand_portfolio + most_added.  Activity → consensus
-    # moves.  Funds + Capital Deployed read the in-process caches directly
-    # and skip both.  Saves ~300-700ms on the cheap tabs (3× wasted CPU
-    # before this gate) without changing what the user sees.
+    # Sub-tab switching is CSS-toggle via `ppBindActivator` — it doesn't
+    # refetch — so all three aggregations must render server-side or the
+    # Holdings/Activity panes show empty on the default Funds landing.
+    # All three aggregations memoize on ``id(fund_cache)`` so warm hits
+    # are basically free.
     grand_portfolio: list = []
     most_added:      list = []
     activity_payload: dict = {"moves": [], "summary": {}}
 
-    needs_holdings = (view == "Holdings")
-    needs_activity = (view == "Activity")
-
-    aggregations: list = []
     if fund_cache:
         try:
             from filings import client, market_data
             from filings.superinvestors import SUPERINVESTORS_BY_CIK
 
-            if needs_holdings:
-                aggregations += [
-                    asyncio.to_thread(client.build_grand_portfolio,
-                                      fund_cache, SUPERINVESTORS_BY_CIK),
-                    asyncio.to_thread(market_data.build_most_added_table,
-                                      fund_cache, SUPERINVESTORS_BY_CIK),
-                ]
-            if needs_activity:
-                aggregations.append(
-                    asyncio.to_thread(_funds_activity_consensus_sync,
-                                      request, fund_cache, SUPERINVESTORS_BY_CIK),
-                )
-
-            results = await asyncio.gather(*aggregations) if aggregations else []
-            i = 0
-            if needs_holdings:
-                grand_portfolio = results[i]; i += 1
-                most_added      = results[i]; i += 1
-            if needs_activity:
-                activity_payload = results[i]; i += 1
+            grand_portfolio, most_added, activity_payload = await asyncio.gather(
+                asyncio.to_thread(client.build_grand_portfolio,
+                                  fund_cache, SUPERINVESTORS_BY_CIK),
+                asyncio.to_thread(market_data.build_most_added_table,
+                                  fund_cache, SUPERINVESTORS_BY_CIK),
+                asyncio.to_thread(_funds_activity_consensus_sync,
+                                  request, fund_cache, SUPERINVESTORS_BY_CIK),
+            )
         except Exception as exc:
             logger.warning("Funds index aggregation failed: %s", exc)
 
@@ -4130,16 +4114,25 @@ async def preview_funds_index(request: Request, view: str = "Funds"):
     return templates.TemplateResponse("_redesign/funds_index.html", ctx)
 
 
+_funds_activity_consensus_memo: tuple[int, dict] | None = None
+
+
 def _funds_activity_consensus_sync(request: Request,
                                     fund_cache: dict,
                                     superinvestors_by_cik: dict) -> dict:
     """Sync wrapper around `_funds_activity_consensus` for ``to_thread``.
 
-    Uses the request-scoped CUSIP→ticker map cached on
-    ``app.state._pp_redesign_cusip_ticker`` (also populated by the home
-    fund-flow helper) instead of rebuilding the map from scratch — saves
-    ~50-150ms on every Activity-tab hit.
+    Memoized on ``id(fund_cache)`` — the fund cache is rebuilt as a new
+    dict object on each sweep, so identity is a reliable invalidation
+    key and matches the pattern used by `build_grand_portfolio` and
+    `build_most_added_table`.  Uses the request-scoped CUSIP→ticker map
+    cached on ``app.state._pp_redesign_cusip_ticker``.
     """
+    global _funds_activity_consensus_memo
+    cache_id = id(fund_cache)
+    if _funds_activity_consensus_memo and _funds_activity_consensus_memo[0] == cache_id:
+        return _funds_activity_consensus_memo[1]
+
     cmap = getattr(request.app.state, "_pp_redesign_cusip_ticker", None)
     if cmap is None:
         cmap = _build_cusip_ticker_map(fund_cache)
@@ -4147,7 +4140,9 @@ def _funds_activity_consensus_sync(request: Request,
             request.app.state._pp_redesign_cusip_ticker = cmap
         except Exception:
             pass
-    return _funds_activity_consensus(fund_cache, superinvestors_by_cik, cusip_to_ticker=cmap)
+    result = _funds_activity_consensus(fund_cache, superinvestors_by_cik, cusip_to_ticker=cmap)
+    _funds_activity_consensus_memo = (cache_id, result)
+    return result
 
 
 @router.get("/funds/detail", response_class=HTMLResponse)

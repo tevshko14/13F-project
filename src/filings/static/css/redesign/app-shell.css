@@ -49,7 +49,7 @@ html, body { height: 100%; }
   overflow-y: auto;
 }
 
-/* Brand mark — "P" tile + "PaperPanda" wordmark */
+/* Brand mark — panda head logo + "PaperPanda" wordmark */
 .pp-brand {
   display: flex;
   align-items: center;
@@ -58,19 +58,12 @@ html, body { height: 100%; }
   text-decoration: none;
 }
 .pp-brand-tile {
-  width: 26px;
-  height: 26px;
-  background: var(--pp-ink);
-  color: var(--pp-bg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 13px;
-  letter-spacing: -0.05em;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
+  object-fit: contain;
+  display: block;
 }
-.pp-brand-tile .pp-dot { color: var(--pp-accent); }
 .pp-brand-name {
   font-weight: 700;
   font-size: 14px;

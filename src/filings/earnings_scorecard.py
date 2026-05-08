@@ -58,16 +58,68 @@ CALENDAR_PERIODS = {
 
 _HOUR_LABELS = {"bmo": "Before Open", "amc": "After Close", "dmh": "During Market"}
 
+# Wide calendar-window bounds, indexed by (q-1), covering the full span
+# in which any company's Q1/Q2/Q3/Q4 fiscal report could plausibly land
+# (offset fiscal years stretch the reporting season to ~10 months).
+# Used only by the FMP fallback path; the DB path filters on the
+# `fiscal_quarter` column directly.
+_FQ_REPORT_START = ("07-01", "10-01", "01-01", "04-01")
+_FQ_REPORT_END   = ("06-30", "09-30", "12-31", "03-31")
+
 
 # ── Helpers ──────────────────────────────────────────────────────
 
-def get_available_quarters() -> list[str]:
-    """Return the last 8 fiscal quarters as ``'Q1 2024'`` strings."""
+def _format_quarter(year: int, q: int) -> str:
+    """Canonical fiscal-quarter label, e.g. ``"Q1 FY2026"``."""
+    return f"Q{q} FY{year}"
+
+
+def _parse_quarter(label: str) -> tuple[int, int] | None:
+    """Parse ``'Q1 FY2024'`` (or legacy ``'Q1 2024'``) → ``(2024, 1)``."""
+    try:
+        parts = label.strip().split()
+        q = int(parts[0].replace("Q", ""))
+        y = int(parts[1].replace("FY", ""))
+        return y, q
+    except Exception:
+        return None
+
+
+def _most_recently_completed_quarter() -> tuple[int, int]:
+    """Return ``(year, q)`` for the most recently completed fiscal quarter.
+
+    During May, this is Q1 — the quarter whose results companies are
+    currently reporting on (not Q2, which nobody has reported yet).
+    """
     now = datetime.now()
-    y, q = now.year, (now.month - 1) // 3 + 1
+    cur_q = (now.month - 1) // 3 + 1
+    if cur_q == 1:
+        return now.year - 1, 4
+    return now.year, cur_q - 1
+
+
+def _fiscal_report_window(year: int, q: int) -> tuple[str, str]:
+    """Wide ``(start_date, end_date)`` window covering all plausible
+    report dates for fiscal quarter ``Q{q} FY{year}``.
+
+    Used by the FMP fallback path only.
+    """
+    return (
+        f"{year - 1}-{_FQ_REPORT_START[q - 1]}",
+        f"{year + 1}-{_FQ_REPORT_END[q - 1]}",
+    )
+
+
+def get_available_quarters() -> list[str]:
+    """Return the last 8 fiscal quarters as ``'Q1 FY2026'`` strings.
+
+    The first label is the most recently completed fiscal quarter — see
+    `_most_recently_completed_quarter` for why we walk back one quarter.
+    """
+    y, q = _most_recently_completed_quarter()
     quarters: list[str] = []
     for _ in range(8):
-        quarters.append(f"Q{q} {y}")
+        quarters.append(_format_quarter(y, q))
         q -= 1
         if q == 0:
             q, y = 4, y - 1
@@ -76,22 +128,6 @@ def get_available_quarters() -> list[str]:
 
 def _api_key() -> str:
     return os.environ.get("FMP_API_KEY", "")
-
-
-
-def _parse_quarter(label: str) -> tuple[int, int] | None:
-    """Parse ``'Q1 2024'`` → ``(2024, 1)``."""
-    try:
-        parts = label.strip().split()
-        return int(parts[1]), int(parts[0].replace("Q", ""))
-    except Exception:
-        return None
-
-
-def _quarter_dates(year: int, q: int) -> tuple[str, str]:
-    starts = {1: "01-01", 2: "04-01", 3: "07-01", 4: "10-01"}
-    ends = {1: "03-31", 2: "06-30", 3: "09-30", 4: "12-31"}
-    return f"{year}-{starts[q]}", f"{year}-{ends[q]}"
 
 
 # ── Core data fetchers ───────────────────────────────────────────
@@ -110,7 +146,10 @@ def fetch_earnings_data(
       L4  FMP earning_calendar API (fallback)
       L5  deterministic mock data (dev-only, when no API key)
     """
-    cache_key = f"{index}:{quarter or 'latest'}:{sector or 'all'}"
+    # Cache key includes a schema version — bump when result shape or
+    # filter semantics change (here: switched from calendar-quarter
+    # report_date filter to fiscal_quarter column filter).
+    cache_key = f"{index}:{quarter or 'latest'}:{sector or 'all'}:fq2"
 
     # L1: in-memory
     cached = _cache.get(cache_key)
@@ -174,18 +213,15 @@ def build_company_lookup(index: str) -> dict[str, dict]:
 
 
 def _resolve_quarter(quarter: str | None) -> tuple[str, str, str]:
-    """Return ``(quarter_label, start_date, end_date)``."""
-    if quarter:
-        parsed = _parse_quarter(quarter)
-        if parsed:
-            y, q = parsed
-            start, end = _quarter_dates(y, q)
-            return quarter, start, end
+    """Return ``(fiscal_quarter_label, start_date, end_date)``.
 
-    now = datetime.now()
-    q = (now.month - 1) // 3 + 1
-    start, end = _quarter_dates(now.year, q)
-    return f"Q{q} {now.year}", start, end
+    The dates bound the FMP fallback path's calendar query; the DB path
+    filters on the `fiscal_quarter` column directly and ignores them.
+    """
+    parsed = _parse_quarter(quarter) if quarter else None
+    y, q = parsed if parsed else _most_recently_completed_quarter()
+    start, end = _fiscal_report_window(y, q)
+    return _format_quarter(y, q), start, end
 
 
 def _fetch_eod_around_date(
@@ -301,11 +337,15 @@ def _fetch_scorecard(
     tickers = None if index == "all" else (set(company_info.keys()) or None)
 
     # ── L3: earnings_history table (primary source) ──────────
-    results = _fetch_from_earnings_history(start, end, company_info, tickers, sector)
+    # Filter by `fiscal_quarter` so companies on offset fiscal years
+    # group with everyone else's "Q1 FY2026" reports.
+    results = _fetch_from_earnings_history(quarter, company_info, tickers, sector)
 
     # ── L4: FMP earning_calendar (fallback) ──────────────────
+    # FMP has no fiscal_quarter filter; query the broad date window and
+    # narrow in Python.
     if results is None:
-        results = _fetch_from_fmp(start, end, company_info, sector)
+        results = _fetch_from_fmp(quarter, start, end, company_info, sector)
 
     # ── L5: mock data (dev only) ─────────────────────────────
     if results is None:
@@ -330,7 +370,7 @@ def _fetch_scorecard(
 
 
 def _fetch_from_earnings_history(
-    start: str, end: str,
+    fiscal_quarter: str,
     company_info: dict[str, dict],
     tickers: set[str] | None,
     sector: str | None,
@@ -342,7 +382,7 @@ def _fetch_from_earnings_history(
     try:
         from filings import supabase_cache
 
-        rows = supabase_cache.query_earnings_history(start, end)
+        rows = supabase_cache.query_earnings_history(fiscal_quarter=fiscal_quarter)
         if rows is None:
             return None  # Supabase not configured or query failed
         results: list[dict] = []
@@ -385,7 +425,7 @@ def _fetch_from_earnings_history(
                 "price_change": _safe_float(row.get("price_change")),
             })
 
-        logger.info("earnings_history returned %d rows for %s–%s", len(results), start, end)
+        logger.info("earnings_history returned %d rows for %s", len(results), fiscal_quarter)
         return results
     except Exception:
         logger.exception("_fetch_from_earnings_history failed")
@@ -393,21 +433,38 @@ def _fetch_from_earnings_history(
 
 
 def _fetch_from_fmp(
+    fiscal_quarter: str,
     start: str, end: str,
     company_info: dict[str, dict],
     sector: str | None,
 ) -> list[dict] | None:
-    """Fallback: FMP earnings-calendar via shared bulk cache."""
+    """Fallback: FMP earnings-calendar via shared bulk cache.
+
+    FMP entries carry ``quarter`` + ``year`` fields — we filter to the
+    requested fiscal quarter in Python so the result matches what the
+    DB primary path would return.
+    """
     from filings.fmp_cache import get_earnings_in_range, actual_eps as _aeps, actual_rev as _arev
 
     calendar = get_earnings_in_range(start, end)
     if not calendar:
         return None
 
+    parsed = _parse_quarter(fiscal_quarter)
+    target_year, target_q = parsed if parsed else (None, None)
+
     tickers = set(company_info.keys()) if company_info else None
     results: list[dict] = []
 
     for item in calendar:
+        if target_q is not None:
+            try:
+                if int(item.get("quarter") or 0) != target_q:
+                    continue
+                if int(item.get("year") or 0) != target_year:
+                    continue
+            except (TypeError, ValueError):
+                continue
         symbol = item.get("symbol", "")
         if tickers and symbol not in tickers:
             continue
@@ -518,11 +575,11 @@ def _compute_metrics(results: list[dict]) -> dict:
 # ── Historical trend helpers ─────────────────────────────────────
 
 def _trend_from_db(
-    start: str, end: str, tickers: set[str] | None, supabase_cache,
+    fiscal_quarter: str, tickers: set[str] | None, supabase_cache,
 ) -> list[dict] | None:
     """Build per-quarter metric rows from earnings_history."""
     try:
-        rows = supabase_cache.query_earnings_history(start, end)
+        rows = supabase_cache.query_earnings_history(fiscal_quarter=fiscal_quarter)
         if rows is None:
             return None
 
@@ -547,7 +604,7 @@ def _trend_from_db(
         return None
 
 
-def _trend_from_fmp(start: str, end: str) -> list[dict] | None:
+def _trend_from_fmp(fiscal_quarter: str, start: str, end: str) -> list[dict] | None:
     """Build per-quarter metric rows from FMP earnings-calendar (fallback)."""
     from filings.fmp_cache import get_earnings_in_range, actual_eps as _aeps, actual_rev as _arev
 
@@ -555,8 +612,19 @@ def _trend_from_fmp(start: str, end: str) -> list[dict] | None:
     if not calendar:
         return None
 
+    parsed = _parse_quarter(fiscal_quarter)
+    target_year, target_q = parsed if parsed else (None, None)
+
     rows = []
     for s in calendar:
+        if target_q is not None:
+            try:
+                if int(s.get("quarter") or 0) != target_q:
+                    continue
+                if int(s.get("year") or 0) != target_year:
+                    continue
+            except (TypeError, ValueError):
+                continue
         eps = _aeps(s)
         if eps is None:
             continue
@@ -588,7 +656,7 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
     Cache tiers mirror ``fetch_earnings_data``:
       L1 in-memory → L2 scorecard_cache → L3 earnings_history → L4 FMP.
     """
-    cache_key = f"history:{index}"
+    cache_key = f"history:{index}:fq2"
 
     # L1: in-memory
     cached = _cache.get(cache_key)
@@ -617,14 +685,14 @@ def fetch_historical_beat_rates(index: str = "sp500") -> list[dict]:
         if not parsed:
             continue
         y, q = parsed
-        start, end = _quarter_dates(y, q)
+        start, end = _fiscal_report_window(y, q)
 
         # Try earnings_history first
-        q_rows = _trend_from_db(start, end, tickers, supabase_cache)
+        q_rows = _trend_from_db(q_label, tickers, supabase_cache)
 
         # Fallback to FMP
         if q_rows is None:
-            q_rows = _trend_from_fmp(start, end)
+            q_rows = _trend_from_fmp(q_label, start, end)
 
         if q_rows is not None:
             has_real_data = True

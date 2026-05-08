@@ -3682,36 +3682,37 @@ def upsert_scorecard_cache(
 
 
 def query_earnings_history(
-    start_date: str,
-    end_date: str,
+    *,
+    fiscal_quarter: str,
 ) -> list[dict] | None:
-    """Query ``earnings_history`` rows for a calendar-date range.
+    """Query ``earnings_history`` rows for a fiscal quarter (e.g.
+    ``"Q1 FY2026"``).
 
-    Returns a list of dicts with ticker, report_date, eps/revenue fields,
-    or *None* on failure.  Used by the scorecard module to avoid FMP
-    dependency.
+    The fiscal filter matches what users mean when they pick a quarter:
+    companies on offset fiscal years still group correctly.  Returns a
+    list of dicts with ticker, report_date, eps/revenue fields, or
+    ``None`` on failure.
     """
     client = _get_client()
     if client is None:
         return None
 
+    cols = (
+        "ticker,report_date,fiscal_quarter,"
+        "eps_estimate,eps_actual,eps_surprise_pct,"
+        "revenue_estimate,revenue_actual,revenue_surprise_pct,"
+        "beat_eps,beat_revenue,price_change"
+    )
     try:
-        # Supabase client caps at 1000 rows.  Paginate to get all.
+        # Supabase client caps at 1000 rows; paginate to get all.
         all_rows: list[dict] = []
         page_size = 1000
         offset = 0
-        cols = (
-            "ticker,report_date,fiscal_quarter,"
-            "eps_estimate,eps_actual,eps_surprise_pct,"
-            "revenue_estimate,revenue_actual,revenue_surprise_pct,"
-            "beat_eps,beat_revenue,price_change"
-        )
         while True:
             resp = (
                 client.table("earnings_history")
                 .select(cols)
-                .gte("report_date", start_date)
-                .lte("report_date", end_date)
+                .eq("fiscal_quarter", fiscal_quarter)
                 .order("report_date", desc=True)
                 .range(offset, offset + page_size - 1)
                 .execute()
@@ -3722,13 +3723,10 @@ def query_earnings_history(
                 break
             offset += page_size
 
-        logger.info(
-            "query_earnings_history(%s–%s): %d rows fetched",
-            start_date, end_date, len(all_rows),
-        )
+        logger.info("query_earnings_history(%s): %d rows fetched", fiscal_quarter, len(all_rows))
         return all_rows
     except Exception as exc:
-        logger.warning("query_earnings_history(%s–%s) failed: %s", start_date, end_date, exc)
+        logger.warning("query_earnings_history(%s) failed: %s", fiscal_quarter, exc)
         return None
 
 
