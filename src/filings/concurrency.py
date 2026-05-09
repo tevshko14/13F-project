@@ -55,6 +55,21 @@ _DEFAULT_HEAVY_THREADS = 12
 _DEFAULT_HEAVY_CONCURRENCY = 8
 
 
+# Per-call timeout ceilings.  Sized generously so legitimate slow upstream
+# calls (yfinance .info, SEC EDGAR XBRL parses, Finnhub/FRED rate-limited
+# retries) succeed -- but bounded so a hung TCP socket on the upstream
+# side can't pin a coroutine forever.  CPython can't kill threads, so
+# each timeout still leaks the underlying pool slot until process
+# recycle; what we save is the *semaphore* and the awaiting coroutine
+# (and all the closures it carries).  Without this wrap a single hung
+# upstream cascades: 8 hangs -> heavy_sem exhausted -> every subsequent
+# request queues on the sem holding closures alive -> ~14 cells/sec of
+# leak observed in prod.  Override per call via the ``timeout`` kwarg
+# on ``to_heavy`` / ``to_light`` for the rare bulk path that needs more.
+_DEFAULT_HEAVY_TIMEOUT = 30.0
+_DEFAULT_LIGHT_TIMEOUT = 15.0
+
+
 def init_pools() -> None:
     """Create the default + heavy pools and the heavy-pool semaphore.
 
@@ -112,7 +127,12 @@ def shutdown_pools() -> None:
     _heavy_sem = None
 
 
-async def to_heavy(fn, *args):
+def _fn_label(fn) -> str:
+    """``module.qualname`` for log lines; falls back gracefully."""
+    return f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', repr(fn))}"
+
+
+async def to_heavy(fn, *args, timeout: float = _DEFAULT_HEAVY_TIMEOUT):
     """Run a slow blocking call on the heavy pool, gated by the semaphore.
 
     Use for yfinance / Finnhub / SEC EDGAR / ApeWisdom / FRED — anything
@@ -120,26 +140,61 @@ async def to_heavy(fn, *args):
     fan-out protection: even if one handler fires 50 ``to_heavy`` calls,
     only N run at once.
 
+    Bounded by ``timeout`` (default ``_DEFAULT_HEAVY_TIMEOUT``) so a
+    hung upstream can't pin the coroutine forever.  On timeout we raise
+    ``asyncio.TimeoutError``; the underlying thread is leaked (CPython
+    can't kill threads) but the semaphore + closures held by the
+    awaiting coroutine are released.  Pass ``timeout=N`` for paths
+    that legitimately take longer (e.g. bulk SEC sync).
+
     Falls back to ``asyncio.to_thread`` when pools aren't initialised so
     unit tests + ad-hoc scripts work without lifespan setup.
     """
     pool = _heavy_pool
     sem = _heavy_sem
     if pool is None or sem is None:
-        return await asyncio.to_thread(fn, *args)
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "to_heavy: upstream timeout after %.1fs in %s (no pool)",
+                timeout, _fn_label(fn),
+            )
+            raise
     async with sem:
-        return await asyncio.get_running_loop().run_in_executor(pool, fn, *args)
+        loop = asyncio.get_running_loop()
+        fut = loop.run_in_executor(pool, fn, *args)
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "to_heavy: upstream timeout after %.1fs in %s -- "
+                "thread slot leaked, semaphore released",
+                timeout, _fn_label(fn),
+            )
+            raise
 
 
-async def to_light(fn, *args):
+async def to_light(fn, *args, timeout: float = _DEFAULT_LIGHT_TIMEOUT):
     """Run a fast blocking call on the default pool — no semaphore gate.
 
     Use for Supabase reads/writes, in-memory cache lookups that need a
     thread for thread-safe library reasons, small JSON parses.  These
     don't deserve a heavy-pool slot and shouldn't throttle other heavy
     work, so they bypass the semaphore.
+
+    Bounded by ``timeout`` (default ``_DEFAULT_LIGHT_TIMEOUT``).  Same
+    semantics as ``to_heavy`` on timeout: the thread leaks, the
+    coroutine releases.
     """
-    return await asyncio.to_thread(fn, *args)
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "to_light: upstream timeout after %.1fs in %s",
+            timeout, _fn_label(fn),
+        )
+        raise
 
 
 def heavy_pool_status() -> dict:
