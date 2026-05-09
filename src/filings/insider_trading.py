@@ -250,6 +250,15 @@ _GLOBAL_TTL = 300  # 5 min for global screener
 _TICKER_TTL = 600  # 10 min for per-ticker
 _MAX_CACHE = 50  # ~150 MB worst-case at 300; keep at 50 to stay well under Railway RAM
 
+# Cap the trades-per-entry held in L1.  Per-ticker fetches combine
+# hot (Supabase 30-day window) + OpenInsider scrape (up to 300 trades)
+# + cold purchase history -- can balloon past 500 entries for active
+# tickers.  Capping the cached list at 200 most-recent (sorted by
+# filing_date desc) covers the last ~2-3 years of activity, which is
+# what the per-quarter chart visualises.  Cold storage in Supabase
+# still has the full history -- this only affects the in-memory L1.
+_MAX_TRADES_PER_ENTRY = 200
+
 # TTLCache stores with ttl=_TICKER_TTL (the larger of the two TTLs) so stale
 # fallback semantics still work for both global (300s) and per-ticker (600s)
 # reads. The TTL comparison is done per-call in the helpers below.
@@ -282,79 +291,105 @@ def _get_cached_with_stale(
 
 
 def _set_cached(key: str, data: list[InsiderTrade]) -> None:
+    """Cache ``data`` under ``key``, capping the list at ``_MAX_TRADES_PER_ENTRY``.
+
+    For lists over the cap, keep the most-recent entries (sorted by
+    ``filing_date`` then ``trade_date`` descending).  The full set is
+    already persisted to Supabase by callers — this only bounds L1.
+    """
+    if len(data) > _MAX_TRADES_PER_ENTRY:
+        data = sorted(
+            data,
+            key=lambda t: (t.filing_date, t.trade_date),
+            reverse=True,
+        )[:_MAX_TRADES_PER_ENTRY]
     _cache.set(key, data)
 
 
 def _parse_table(html: str, *, has_company_col: bool) -> list[InsiderTrade]:
-    """Parse an OpenInsider HTML table into InsiderTrade objects."""
+    """Parse an OpenInsider HTML table into InsiderTrade objects.
+
+    The BeautifulSoup tree is explicitly torn down via ``decompose()``
+    before returning so its internal parent/sibling cycles are broken
+    immediately rather than waiting on a generational GC pass — keeps
+    `Tag` / `NavigableString` counts low on workers that scrape often.
+    """
     soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table", class_="tinytable")
-    if not table:
-        return []
+    try:
+        table = soup.find("table", class_="tinytable")
+        if not table:
+            return []
 
-    trades: list[InsiderTrade] = []
-    for row in table.find_all("tr")[1:]:  # skip header
-        cells = row.find_all("td")
-        texts = [td.get_text(strip=True) for td in cells]
+        trades: list[InsiderTrade] = []
+        for row in table.find_all("tr")[1:]:  # skip header
+            cells = row.find_all("td")
+            texts = [td.get_text(strip=True) for td in cells]
 
-        if has_company_col and len(texts) < 17:
-            continue
-        if not has_company_col and len(texts) < 16:
-            continue
+            if has_company_col and len(texts) < 17:
+                continue
+            if not has_company_col and len(texts) < 16:
+                continue
 
-        # Extract SEC filing link (check first 2 cells -- cell 0 may be
-        # empty; the link is typically in cell 1, the filing date cell)
-        sec_url = ""
-        for cell_idx in range(min(2, len(cells))):
-            for a_tag in cells[cell_idx].find_all("a"):
-                href = a_tag.get("href", "")
-                if "sec.gov" in href:
-                    sec_url = href
+            # Extract SEC filing link (check first 2 cells -- cell 0 may be
+            # empty; the link is typically in cell 1, the filing date cell)
+            sec_url = ""
+            for cell_idx in range(min(2, len(cells))):
+                for a_tag in cells[cell_idx].find_all("a"):
+                    href = a_tag.get("href", "")
+                    if "sec.gov" in href:
+                        sec_url = href
+                        break
+                    if href.startswith("/") and "edgar" in href.lower():
+                        sec_url = f"https://www.sec.gov{href}"
+                        break
+                if sec_url:
                     break
-                if href.startswith("/") and "edgar" in href.lower():
-                    sec_url = f"https://www.sec.gov{href}"
-                    break
-            if sec_url:
-                break
 
-        if has_company_col:
-            # Global: X Filing Trade Ticker Company Insider Title Type Price Qty Owned dOwn Value 1d 1w 1m 6m
-            trade = InsiderTrade(
-                filing_date=texts[1].split(" ")[0] if " " in texts[1] else texts[1],
-                trade_date=texts[2],
-                ticker=texts[3],
-                company_name=texts[4],
-                insider_name=texts[5],
-                title=texts[6],
-                trade_type=_clean_trade_type(texts[7]),
-                price=texts[8],
-                qty=texts[9],
-                owned=texts[10],
-                delta_own=texts[11],
-                value=texts[12],
-                sec_url=sec_url,
-            )
-        else:
-            # Per-ticker: X Filing Trade Ticker Insider Title Type Price Qty Owned dOwn Value 1d 1w 1m 6m
-            trade = InsiderTrade(
-                filing_date=texts[1].split(" ")[0] if " " in texts[1] else texts[1],
-                trade_date=texts[2],
-                ticker=texts[3],
-                company_name="",
-                insider_name=texts[4],
-                title=texts[5],
-                trade_type=_clean_trade_type(texts[6]),
-                price=texts[7],
-                qty=texts[8],
-                owned=texts[9],
-                delta_own=texts[10],
-                value=texts[11],
-                sec_url=sec_url,
-            )
+            if has_company_col:
+                # Global: X Filing Trade Ticker Company Insider Title Type Price Qty Owned dOwn Value 1d 1w 1m 6m
+                trade = InsiderTrade(
+                    filing_date=texts[1].split(" ")[0] if " " in texts[1] else texts[1],
+                    trade_date=texts[2],
+                    ticker=texts[3],
+                    company_name=texts[4],
+                    insider_name=texts[5],
+                    title=texts[6],
+                    trade_type=_clean_trade_type(texts[7]),
+                    price=texts[8],
+                    qty=texts[9],
+                    owned=texts[10],
+                    delta_own=texts[11],
+                    value=texts[12],
+                    sec_url=sec_url,
+                )
+            else:
+                # Per-ticker: X Filing Trade Ticker Insider Title Type Price Qty Owned dOwn Value 1d 1w 1m 6m
+                trade = InsiderTrade(
+                    filing_date=texts[1].split(" ")[0] if " " in texts[1] else texts[1],
+                    trade_date=texts[2],
+                    ticker=texts[3],
+                    company_name="",
+                    insider_name=texts[4],
+                    title=texts[5],
+                    trade_type=_clean_trade_type(texts[6]),
+                    price=texts[7],
+                    qty=texts[8],
+                    owned=texts[9],
+                    delta_own=texts[10],
+                    value=texts[11],
+                    sec_url=sec_url,
+                )
 
-        trades.append(trade)
+            trades.append(trade)
 
-    return trades
+        return trades
+    finally:
+        # Break BS4 tree cycles immediately; without this the parent/
+        # sibling backrefs stay alive until generational gc catches them.
+        try:
+            soup.decompose()
+        except Exception:
+            pass
 
 
 def _clean_trade_type(raw: str) -> str:

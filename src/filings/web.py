@@ -1696,10 +1696,13 @@ async def _run_memprof_log() -> None:
 # ── Periodic GC + glibc heap trim ────────────────────────────────────
 # Python's pymalloc + glibc allocator both keep fragments around after
 # a burst (request fan-out, cache warm).  Forcing a `gc.collect()` and
-# then `malloc_trim(0)` every 5 min asks the kernel to take back free
-# arenas, dropping RSS without affecting correctness.
+# then `malloc_trim(0)` every 2 min asks the kernel to take back free
+# arenas, dropping RSS without affecting correctness.  Earlier prod
+# logs showed a single cycle reclaiming ~1.2GB on a fragmented worker;
+# running it 2.5x more often keeps less time at peak RSS between bursts.
+# Cost: ~50ms wall-time per cycle on the heavy pool.
 
-_GC_TRIM_INTERVAL = 5 * 60
+_GC_TRIM_INTERVAL = 2 * 60
 
 
 async def _run_gc_trim() -> None:
