@@ -1226,41 +1226,23 @@ def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
                 "sells": 0,
                 "total_buy_value": 0.0,
                 "total_sell_value": 0.0,
-                "total_buy_qty":   0,
-                "total_sell_qty":  0,
                 "last_trade_date": t.trade_date,
-                # `current_position` tracks the `owned` value from the
-                # insider's most recent trade so we can surface "still
-                # holds N shares · avg $X" on the per-insider card.
-                "current_position": 0,
-                "_latest_for_owned": "",
             }
         rec = insider_map[name]
         val = abs(parse_dollar_value(t.value))
         is_buy = "Purchase" in t.trade_type
         is_sell = "Sale" in t.trade_type
-        qty = _parse_qty(t.qty)
-        qty_abs = abs(qty) if qty is not None else 0
 
         if is_buy:
             rec["buys"] += 1
             rec["total_buy_value"] += val
-            rec["total_buy_qty"] += qty_abs
         elif is_sell:
             rec["sells"] += 1
             rec["total_sell_value"] += val
-            rec["total_sell_qty"] += qty_abs
 
         # Keep the most recent trade date
         if t.trade_date > rec["last_trade_date"]:
             rec["last_trade_date"] = t.trade_date
-
-        # Latest `owned` snapshot is whichever trade has the most recent
-        # date (ties broken by first-seen since they're equally fresh).
-        owned_parsed = _parse_owned(t.owned)
-        if owned_parsed is not None and t.trade_date >= rec["_latest_for_owned"]:
-            rec["current_position"] = owned_parsed
-            rec["_latest_for_owned"] = t.trade_date
 
         # Track per-insider per-quarter data for tooltip breakdown
         if name not in iqdata:
@@ -1294,29 +1276,6 @@ def prepare_ticker_display(trades: list[InsiderTrade]) -> dict:
     for ins in insiders:
         ins["buy_value_fmt"] = _format_compact_value(ins["total_buy_value"])
         ins["sell_value_fmt"] = _format_compact_value(ins["total_sell_value"])
-
-        # Volume-weighted avg trade price across the insider's buys / sells
-        # respectively.  Falls back to None when no qty parsed (private
-        # transactions, awards, derivatives — where qty is reported but
-        # value isn't a meaningful $/share).
-        avg_buy = (ins["total_buy_value"] / ins["total_buy_qty"]
-                   if ins["total_buy_qty"] > 0 else None)
-        avg_sell = (ins["total_sell_value"] / ins["total_sell_qty"]
-                    if ins["total_sell_qty"] > 0 else None)
-        ins["avg_buy_price"]      = avg_buy
-        ins["avg_sell_price"]     = avg_sell
-        ins["avg_buy_price_fmt"]  = f"${avg_buy:,.2f}" if avg_buy else ""
-        ins["avg_sell_price_fmt"] = f"${avg_sell:,.2f}" if avg_sell else ""
-
-        # Current position formatting + the single "avg" we surface on the
-        # card: prefer the buy-side avg (matches a holder's cost basis);
-        # fall back to sell-side avg if they only sold but still hold.
-        pos = int(ins.get("current_position") or 0)
-        ins["current_position_fmt"] = f"{pos:,}" if pos > 0 else ""
-        ins["holds_position"]       = pos > 0
-        ins["card_avg_price_fmt"]   = ins["avg_buy_price_fmt"] or ins["avg_sell_price_fmt"]
-        # Internal helper key — drop before serialising to template ctx.
-        ins.pop("_latest_for_owned", None)
 
         # Build quarterly breakdown for hover tooltip
         name = ins["name"]
