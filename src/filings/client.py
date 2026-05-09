@@ -1452,8 +1452,60 @@ import time as _time
 from filings.caching import TTLCache as _TTLCache
 
 _YF_INFO_TTL = 3600  # 1 hour
-# Bounded per-ticker info cache; ~5000 tickers × ~2KB each cap ≈ 10MB.
-_yf_info_cache = _TTLCache(ttl=_YF_INFO_TTL, max_size=5_000)
+# Bounded per-ticker info cache.  Each slimmed entry is ~2-5KB; with the
+# cap at 500 that's ~2.5MB even at full saturation.  yfinance's raw .info
+# is 50-200KB per ticker because of `companyOfficers`, sector summaries,
+# and a long tail of unused fields — slimming via _slim_yf_info() drops
+# entries to just the keys the app actually reads.  Bumped down from
+# 5000 (the old cap could leak ~500MB of cold-ticker info under load).
+_yf_info_cache = _TTLCache(ttl=_YF_INFO_TTL, max_size=500)
+
+# Fields the rest of the codebase reads from yfinance .info.  Re-grep
+# `info.get("...")` across `src/filings/` to keep this in sync.  Anything
+# not listed here is dropped before caching to keep memory bounded.
+_YF_INFO_KEEP_FIELDS = frozenset({
+    # Identity / display
+    "shortName", "longName", "name", "exchange", "website",
+    "city", "state", "country", "longBusinessSummary",
+    "sector", "industry", "fullTimeEmployees", "companyOfficers",
+    # Quote / price
+    "currentPrice", "regularMarketPrice", "previousClose",
+    "regularMarketOpen", "dayHigh", "dayLow", "volume",
+    "fiftyTwoWeekHigh", "fiftyTwoWeekLow", "fiftyTwoWeekChange",
+    # Cap / fundamentals
+    "marketCap", "enterpriseToEbitda", "trailingPE", "forwardPE",
+    "trailingEps", "forwardEps", "dividendYield", "beta",
+    "totalRevenue", "revenue",
+    # Ownership
+    "heldPercentInsiders", "heldPercentInstitutions",
+    # Short interest
+    "sharesShort", "sharesShortPriorMonth", "sharesShortPreviousMonthDate",
+    "shortRatio", "shortPercentOfFloat", "dateShortInterest",
+    "floatShares", "sharesOutstanding",
+    # Splits / dates
+    "lastSplitDate", "lastSplitFactor",
+    "firstTradeDateEpochUtc", "firstTradeDateMilliseconds",
+    # Analyst
+    "recommendationKey",
+})
+
+
+def _slim_yf_info(info: dict) -> dict:
+    """Return only the keys the app actually reads, with `companyOfficers`
+    pruned to {name, title} per officer (drops photos, totalPay, age, etc.).
+
+    Keeps cached entries ~2-5KB instead of yfinance's raw 50-200KB.
+    """
+    if not info:
+        return info
+    out = {k: info[k] for k in _YF_INFO_KEEP_FIELDS if k in info}
+    officers = out.get("companyOfficers")
+    if isinstance(officers, list):
+        out["companyOfficers"] = [
+            {"name": o.get("name"), "title": o.get("title")}
+            for o in officers if isinstance(o, dict)
+        ]
+    return out
 
 
 def get_yfinance_info(ticker: str) -> dict:
@@ -1462,6 +1514,9 @@ def get_yfinance_info(ticker: str) -> dict:
     This is the **canonical** cached accessor for ``yf.Ticker(ticker).info``.
     All modules should import this instead of making independent yfinance calls
     to avoid redundant HTTP requests for the same ticker.
+
+    Cached entries are slimmed to only the fields the app reads (see
+    `_YF_INFO_KEEP_FIELDS`) so each entry is ~2-5KB instead of ~100KB.
     """
     cached = _yf_info_cache.get(ticker)
     if cached is not None:
@@ -1472,7 +1527,7 @@ def get_yfinance_info(ticker: str) -> dict:
         from filings.market_data import _yf_session
 
         tk = yf.Ticker(ticker, session=_yf_session)
-        info = tk.info or {}
+        info = _slim_yf_info(tk.info or {})
     except Exception:
         info = {}
 
