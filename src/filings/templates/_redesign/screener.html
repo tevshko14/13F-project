@@ -44,7 +44,7 @@
   {% for p in screener_presets %}
     {%- set _q = "?preset=" ~ p|urlencode ~ "&sort=" ~ screener_active_sort|urlencode -%}
     <a class="pp-screener-preset{% if p == screener_active_preset %} is-active{% endif %}"
-       href="/_v2/screener{{ _q }}">{{ p }}</a>
+       href="/screener{{ _q }}">{{ p }}</a>
   {% endfor %}
 </div>
 
@@ -83,7 +83,7 @@
           {% for s in screener_sorts %}
             {%- set _q = "?preset=" ~ screener_active_preset|urlencode ~ "&sort=" ~ s|urlencode -%}
             <a class="pp-segment-opt{% if s == screener_active_sort %} is-active{% endif %}"
-               href="/_v2/screener{{ _q }}"
+               href="/screener{{ _q }}"
                data-value="{{ s }}"
                role="tab"
                aria-selected="{{ 'true' if s == screener_active_sort else 'false' }}">{{ s }}</a>
@@ -110,7 +110,7 @@
           {% for r in screener_results %}
             <tr>
               <td>
-                <a class="pp-mono pp-screener-tkr" href="/_v2/stock/{{ r.tk }}">{{ r.tk }}</a>
+                <a class="pp-mono pp-screener-tkr" href="/stock/{{ r.tk }}">{{ r.tk }}</a>
               </td>
               <td class="pp-text">{{ r.name }}</td>
               <td class="pp-dim">{{ r.sec }}</td>
