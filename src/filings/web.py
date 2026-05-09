@@ -2196,7 +2196,7 @@ async def admin_memprof(request: Request):
                           "traceback": _tb.format_exc().splitlines()[-6:]}
 
     def _collect():
-        out: dict = {"ts": time.time(), "errors": []}
+        out: dict = {"ts": time_module.time(), "errors": []}
         proc, err = _safe("process", _memprof.process_metrics)
         if err: out["errors"].append(err)
         else:   out["process"] = proc
