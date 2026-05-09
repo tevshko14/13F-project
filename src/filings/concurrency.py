@@ -61,19 +61,30 @@ _DEFAULT_HEAVY_THREADS = 20
 _DEFAULT_HEAVY_CONCURRENCY = 8
 
 
-# Per-call timeout ceilings.  Sized generously so legitimate slow upstream
-# calls (yfinance .info, SEC EDGAR XBRL parses, Finnhub/FRED rate-limited
-# retries) succeed -- but bounded so a hung TCP socket on the upstream
-# side can't pin a coroutine forever.  CPython can't kill threads, so
-# each timeout still leaks the underlying pool slot until process
-# recycle; what we save is the *semaphore* and the awaiting coroutine
-# (and all the closures it carries).  Without this wrap a single hung
-# upstream cascades: 8 hangs -> heavy_sem exhausted -> every subsequent
-# request queues on the sem holding closures alive -> ~14 cells/sec of
-# leak observed in prod.  Override per call via the ``timeout`` kwarg
-# on ``to_heavy`` / ``to_light`` for the rare bulk path that needs more.
-_DEFAULT_HEAVY_TIMEOUT = 30.0
-_DEFAULT_LIGHT_TIMEOUT = 15.0
+# Per-call timeout ceilings.  Sized to be SHORTER than the longest
+# expected upstream HTTP timeout so the underlying pool thread reliably
+# returns *before* the awaiting coroutine gives up.  This is the
+# structural fix for the thread-leak deadlock we observed in prod:
+# CPython can't kill threads, so a coroutine timeout that fires before
+# the underlying HTTP call returns leaks the pool slot until the call
+# eventually completes.  After enough such leaks (HEAVY_THREADS), the
+# pool is empty and every new request queues forever -- the worker
+# silently deadlocks.  Observed twice (uptime 53min, 62min) before
+# this tightening.
+#
+# Pairing requirements:
+#   - Every reachable upstream HTTP timeout must be <= these values.
+#     yfinance per-request is capped at 4s in market_data.py so a
+#     4-call .info sequence fits inside 15s.  External httpx.get()
+#     calls in request-path code are at <= 10s.
+#   - Page-handler-level `bounded()` wrappers stay below these
+#     (typically 4-12s) so users see fallback data on slow paths
+#     before the thread-leak protection layer fires.
+#
+# Memory note: shorter timeouts mean coroutines + their closures
+# release faster -- strictly memory-positive.
+_DEFAULT_HEAVY_TIMEOUT = 15.0
+_DEFAULT_LIGHT_TIMEOUT = 8.0
 
 
 def init_pools() -> None:

@@ -350,7 +350,7 @@ def fetch_finnhub_calendar_raw(start: str, end: str) -> list[dict]:
         r = httpx.get(
             "https://finnhub.io/api/v1/calendar/earnings",
             params={"from": start, "to": end, "token": key},
-            timeout=20,
+            timeout=10,  # under heavy-pool 15s ceiling
         )
         r.raise_for_status()
         entries = r.json().get("earningsCalendar", [])

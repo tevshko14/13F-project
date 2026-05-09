@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 # ── API config ───────────────────────────────────────────────────
 _FRED_BASE = "https://api.stlouisfed.org/fred"
-_TIMEOUT = 20
+_TIMEOUT = 10  # under heavy-pool 15s ceiling so threads return in time
 
 
 def _fred_key() -> str:

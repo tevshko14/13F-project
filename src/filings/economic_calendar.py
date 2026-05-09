@@ -74,7 +74,7 @@ _RESULT_TTL = 1800                    # 30 min
 # 4 periods × 5 countries × 3 impact filters = ~60 keys; 200 cap is generous.
 _result_cache = _TTLCache(ttl=_RESULT_TTL, max_size=200)
 
-_TIMEOUT = 15
+_TIMEOUT = 10  # under heavy-pool 15s ceiling so threads return in time
 
 
 # ── Helpers ──────────────────────────────────────────────────────

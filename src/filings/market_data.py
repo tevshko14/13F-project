@@ -26,22 +26,22 @@ logger = logging.getLogger(__name__)
 #
 # Why this matters for thread-pool health: yfinance's `Ticker.info`
 # makes MULTIPLE HTTP calls internally (and silently retries on 429s).
-# A single `.info` access can fan out to 4-5 internal HTTP requests --
-# at 15s each the worst-case wall-time is ~75s.  That blows past our
-# `to_heavy` circuit-breaker timeout (30s), which means the awaiting
-# coroutine gives up but the thread keeps running for another ~45s.
-# After 12 such leaks (HEAVY_THREADS), the heavy pool runs out of
-# threads and every new request queues forever -- the deadlock we
-# observed at uptime ~53min on PID 37.
+# A single `.info` access can fan out to 4-5 internal HTTP requests.
+# Each one must complete fast enough that the *whole sequence* stays
+# below the heavy-pool circuit-breaker (now 15s).  CPython can't kill
+# threads, so any sequence that overruns the circuit breaker leaks the
+# pool slot until the upstream finally returns -- after enough leaks
+# the heavy pool is empty and the worker silently deadlocks (observed
+# twice, uptime ~53min and ~62min, before this tightening).
 #
-# 6s per-request × ~4 internal calls = ~24s worst case, which is
-# under the 30s circuit-breaker ceiling.  Threads now reliably return
-# *before* the coroutine gives up, so pool slots actually get freed.
-# Tradeoff: yfinance is more aggressive about giving up on slow
-# legitimate requests -- but the stale-fallback in `client.get_yfinance_info`
-# already converts those into stale-cache hits, so users see the
-# previous good data instead of em-dashes.
-_YF_TIMEOUT = 6  # seconds
+# 4s per-request × ~4 internal calls = ~16s worst case.  That sits
+# right at the 15s heavy-pool ceiling, which is acceptable because
+# yfinance also short-circuits its retry chain on 429 well before
+# the full 4-call sequence; and the stale-fallback in
+# `client.get_yfinance_info` already converts empty results into
+# stale-cache hits so users see the previous good data instead of
+# em-dashes.
+_YF_TIMEOUT = 4  # seconds
 
 
 def _make_yf_session():

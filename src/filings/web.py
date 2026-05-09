@@ -679,6 +679,14 @@ async def lifespan(app: FastAPI):
         interval=_GC_TRIM_INTERVAL, body=_run_gc_trim,
     ), "gc_trim")
 
+    # Stuck-thread watchdog — recycles the worker before a slow-leak
+    # path silently deadlocks the heavy pool.  See _run_thread_watchdog
+    # docstring above for the failure mode this protects against.
+    _track(_periodic_task(
+        name="thread watchdog", startup_delay=60,
+        interval=_WATCHDOG_INTERVAL_S, body=_run_thread_watchdog,
+    ), "thread_watchdog")
+
     yield
 
     # ── Shutdown cleanup ──────────────────────────────────────────────
@@ -1743,6 +1751,81 @@ async def _run_gc_trim() -> None:
         "gc_trim collected=%d malloc_trim=%d rss=%dMB->%dMB",
         collected, trimmed, rss_before, rss_after,
     )
+
+
+# ── Stuck-thread watchdog ───────────────────────────────────────────
+# CPython can't kill threads.  When a sync upstream call inside `to_heavy`
+# overruns the heavy-pool circuit-breaker (15s), the awaiting coroutine
+# gives up but the thread keeps running.  After enough such leaks the
+# heavy pool is empty and every request queues forever -- the silent
+# deadlock we observed twice (uptime 53min, then 62min).
+#
+# This watchdog is the safety net.  Every 30s it samples the live
+# Python thread count.  Steady-state we expect:
+#   default pool (16) + heavy pool (20) + framework (~10) ≈ 46.
+# If the count climbs past `_DANGER_THREADS` and stays there for
+# `_SUSTAIN_CHECKS` consecutive samples (default 3 min), threads are
+# leaking faster than they recover; we trigger SIGTERM so gunicorn
+# recycles the worker before it fully deadlocks.
+#
+# Reads `threading.active_count()` -- a free, sync, microsecond call,
+# so the watchdog itself can't get stuck on a slow upstream.
+
+_WATCHDOG_INTERVAL_S = 30
+_DANGER_THREADS = 65         # ~14 over the ~46 baseline; leaves headroom
+_SUSTAIN_CHECKS = 6          # 6 × 30s = 3 min of sustained danger
+
+
+async def _run_thread_watchdog() -> None:
+    """One iteration of the stuck-thread watchdog.
+
+    Increments a module-level counter when active thread count is over
+    the danger threshold.  Resets to 0 when count drops back.  Triggers
+    a graceful SIGTERM (gunicorn restarts the worker) once the danger
+    state is sustained for `_SUSTAIN_CHECKS` consecutive intervals.
+    """
+    global _watchdog_over_count
+    import threading as _threading
+
+    try:
+        active = _threading.active_count()
+    except Exception:
+        return
+
+    if active >= _DANGER_THREADS:
+        _watchdog_over_count += 1
+        logger.warning(
+            "watchdog: active_threads=%d >= %d (sustained %d/%d)",
+            active, _DANGER_THREADS,
+            _watchdog_over_count, _SUSTAIN_CHECKS,
+        )
+    else:
+        if _watchdog_over_count > 0:
+            logger.info(
+                "watchdog: active_threads=%d back below danger (was %d cycles)",
+                active, _watchdog_over_count,
+            )
+        _watchdog_over_count = 0
+        return
+
+    if _watchdog_over_count >= _SUSTAIN_CHECKS:
+        logger.error(
+            "watchdog: active_threads=%d sustained > %d for %d min — "
+            "forcing graceful exit so gunicorn recycles this worker",
+            active, _DANGER_THREADS,
+            _SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60,
+        )
+        try:
+            import os as _os
+            import signal as _signal
+            _os.kill(_os.getpid(), _signal.SIGTERM)
+        except Exception as exc:
+            logger.error("watchdog: SIGTERM failed: %s", exc)
+        # Reset so we don't re-fire immediately if SIGTERM was ignored.
+        _watchdog_over_count = 0
+
+
+_watchdog_over_count = 0
 
 
 # ── /_v2/home L2 cache warmer ────────────────────────────────────────

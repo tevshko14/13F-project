@@ -581,8 +581,10 @@ def _scrape_openinsider_global(
         "page": "1",
     }
     try:
+        # 10s caps each HTTP attempt -- well under the 15s heavy-pool
+        # circuit-breaker so threads return before the coroutine gives up.
         resp = httpx.get(
-            url, params=params, headers=_HEADERS, timeout=15, follow_redirects=True
+            url, params=params, headers=_HEADERS, timeout=10, follow_redirects=True
         )
         resp.raise_for_status()
         return _parse_table(resp.text, has_company_col=True)
@@ -627,7 +629,7 @@ def _scrape_openinsider_ticker(ticker: str, max_pages: int = 3) -> list[InsiderT
                     "page": str(page),
                 },
                 headers=_HEADERS,
-                timeout=20,
+                timeout=10,  # under heavy-pool 15s ceiling so thread frees in time
                 follow_redirects=True,
             )
             resp.raise_for_status()
@@ -878,7 +880,7 @@ def _fetch_historical_from_efts(
     }
 
     try:
-        resp = httpx.get(url, params=params, headers=headers, timeout=15)
+        resp = httpx.get(url, params=params, headers=headers, timeout=10)
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:

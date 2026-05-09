@@ -262,7 +262,8 @@ def fetch_tipranks_analysts(ticker: str) -> list[dict]:
     url = _TR_ANALYSIS_URL.format(ticker=ticker.upper())
     try:
         session = cffi_requests.Session(impersonate="chrome124")
-        resp = session.get(url, timeout=20)
+        # 10s under the 15s heavy-pool ceiling so threads return in time.
+        resp = session.get(url, timeout=10)
         if resp.status_code != 200:
             logger.info(
                 "TipRanks returned %d for %s (Cloudflare or auth required)",
@@ -396,7 +397,7 @@ def fetch_finviz_targets(ticker: str) -> list[dict]:
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5",
             },
-            timeout=15,
+            timeout=10,  # under heavy-pool 15s ceiling
             follow_redirects=True,
         )
         if resp.status_code != 200:

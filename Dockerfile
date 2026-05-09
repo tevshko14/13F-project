@@ -36,4 +36,4 @@ EXPOSE 8000
 # own caches + heap, multiplying RSS by the worker count.  At our
 # traffic level one worker w/ async event loop has plenty of headroom;
 # bump WEB_WORKERS env var if any specific deploy needs redundancy.
-CMD ["sh", "-c", "if [ -n \"$START_COMMAND\" ]; then echo \"Running: $START_COMMAND\" && exec $START_COMMAND; else exec gunicorn filings.web:app --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_WORKERS:-1} --worker-class uvicorn.workers.UvicornWorker --timeout 120 --graceful-timeout 30 --max-requests 1000 --max-requests-jitter 50 --preload --access-logfile -; fi"]
+CMD ["sh", "-c", "if [ -n \"$START_COMMAND\" ]; then echo \"Running: $START_COMMAND\" && exec $START_COMMAND; else exec gunicorn filings.web:app --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_WORKERS:-1} --worker-class uvicorn.workers.UvicornWorker --timeout 120 --graceful-timeout 30 --max-requests 500 --max-requests-jitter 50 --preload --access-logfile -; fi"]

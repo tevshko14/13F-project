@@ -1010,10 +1010,12 @@ def _load_finnhub_symbol_names() -> dict[str, str]:
         return {}
 
     try:
+        # Cached call (results survive worker recycle via TTL); 10s under
+        # the 15s heavy-pool ceiling so the thread frees in time.
         r = httpx.get(
             "https://finnhub.io/api/v1/stock/symbol",
             params={"exchange": "US", "token": key},
-            timeout=30,
+            timeout=10,
             follow_redirects=True,
         )
         r.raise_for_status()
@@ -1081,7 +1083,7 @@ def _load_finnhub_earnings_calendar() -> list[dict] | None:
             r = httpx.get(
                 "https://finnhub.io/api/v1/calendar/earnings",
                 params={"from": w_start, "to": w_end, "token": key},
-                timeout=15,
+                timeout=10,  # under heavy-pool 15s ceiling
             )
             r.raise_for_status()
             entries = r.json().get("earningsCalendar") or []
