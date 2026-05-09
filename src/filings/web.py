@@ -2106,6 +2106,50 @@ async def _populate_logos_task(limit: int = 200):
 _MEMPROF_TOKEN = os.environ.get("MEMPROF_TOKEN", "").strip()
 
 
+@app.get("/admin/memprof-diag")
+async def admin_memprof_diag(request: Request):
+    """Diagnostic memprof — non-/api/ path so the global HTMX retry
+    shim doesn't intercept errors.  Plain-text response, every step
+    wrapped, returns whatever it got plus exception text per failure.
+    """
+    if not _MEMPROF_TOKEN:
+        return PlainTextResponse("Not Found", status_code=404)
+    if (request.query_params.get("token") or "").strip() != _MEMPROF_TOKEN:
+        return PlainTextResponse("Not Found", status_code=404)
+
+    import traceback as _tb
+    lines: list[str] = ["=== memprof diagnostic ==="]
+
+    def step(label, fn):
+        try:
+            r = fn()
+            lines.append(f"[OK]   {label}: {repr(r)[:300]}")
+        except Exception as exc:
+            lines.append(f"[FAIL] {label}: {repr(exc)}")
+            lines.append(_tb.format_exc())
+
+    def _import_memprof():
+        from filings import memprof as _m
+        return _m
+
+    step("import memprof", _import_memprof)
+    try:
+        from filings import memprof as _m
+        step("process_metrics()", lambda: _m.process_metrics())
+        step("type_counts(top_n=5)", lambda: _m.type_counts(5)[:3])
+        step("cache_metrics() len", lambda: len(_m.cache_metrics()))
+        step("app.state attributes", lambda: [k for k in _m._STATE_KEYS if hasattr(app.state, k)])
+        step("fund_cache len", lambda: len(getattr(app.state, "fund_cache", {})))
+        step("_approx_size(fund_cache)", lambda: _m._approx_size(getattr(app.state, "fund_cache", {})))
+        step("snapshot(with_types=False, with_state_sizes=False)",
+             lambda: list(_m.snapshot(app.state, with_types=False, with_state_sizes=False).keys()))
+    except Exception as exc:
+        lines.append(f"[FATAL] {repr(exc)}")
+        lines.append(_tb.format_exc())
+
+    return PlainTextResponse("\n".join(lines))
+
+
 @app.get("/api/admin/memprof")
 async def admin_memprof(request: Request):
     """JSON memory snapshot -- process / cache / app.state / type histogram.
