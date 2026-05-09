@@ -22,10 +22,26 @@ logger = logging.getLogger(__name__)
 # ── Global yfinance timeout ──────────────────────────────────────────
 # yfinance uses curl_cffi internally and defaults to NO timeout,
 # meaning a hung Yahoo Finance server can permanently block a thread.
-# We enforce a hard timeout on every yfinance request:
-#   - yf.download() → use the built-in `timeout=` parameter
-#   - yf.Ticker()   → pass a curl_cffi Session with default timeout
-_YF_TIMEOUT = 15  # seconds
+# Per-request HTTP timeout for every yfinance call.
+#
+# Why this matters for thread-pool health: yfinance's `Ticker.info`
+# makes MULTIPLE HTTP calls internally (and silently retries on 429s).
+# A single `.info` access can fan out to 4-5 internal HTTP requests --
+# at 15s each the worst-case wall-time is ~75s.  That blows past our
+# `to_heavy` circuit-breaker timeout (30s), which means the awaiting
+# coroutine gives up but the thread keeps running for another ~45s.
+# After 12 such leaks (HEAVY_THREADS), the heavy pool runs out of
+# threads and every new request queues forever -- the deadlock we
+# observed at uptime ~53min on PID 37.
+#
+# 6s per-request × ~4 internal calls = ~24s worst case, which is
+# under the 30s circuit-breaker ceiling.  Threads now reliably return
+# *before* the coroutine gives up, so pool slots actually get freed.
+# Tradeoff: yfinance is more aggressive about giving up on slow
+# legitimate requests -- but the stale-fallback in `client.get_yfinance_info`
+# already converts those into stale-cache hits, so users see the
+# previous good data instead of em-dashes.
+_YF_TIMEOUT = 6  # seconds
 
 
 def _make_yf_session():

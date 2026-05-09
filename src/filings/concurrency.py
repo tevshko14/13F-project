@@ -46,12 +46,18 @@ _heavy_concurrency_cfg = 0
 
 
 # Defaults sized for a Railway container with ~1-2 vCPU and ~512MB-2GB RAM.
-# Each thread carries a stack (web.py sets it to 2MB) so over-sizing the
-# pools translates directly into RSS.  16 / 12 / 8 is plenty for the
-# fan-out patterns observed in production; bump via env vars if any
-# specific page handler queues consistently on the default pool.
+# Each thread carries a 2MB stack (web.py sets it via threading.stack_size)
+# so over-sizing the pools translates directly into RSS.
+#
+# HEAVY_THREADS = 20: bumped from 12 to give headroom against thread-leak
+# pressure when an upstream times out.  CPython can't kill threads, so
+# each `to_heavy` timeout leaves the underlying thread running until the
+# upstream finally returns.  With aggressive yfinance per-request timeouts
+# (`_YF_TIMEOUT=6` in market_data.py) threads typically free within ~24s
+# even on rate-limited paths; +8 thread headroom (~16MB extra RSS) is
+# the cheap belt-and-suspenders.
 _DEFAULT_WORKER_THREADS = 16
-_DEFAULT_HEAVY_THREADS = 12
+_DEFAULT_HEAVY_THREADS = 20
 _DEFAULT_HEAVY_CONCURRENCY = 8
 
 
