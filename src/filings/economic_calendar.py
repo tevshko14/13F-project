@@ -65,12 +65,14 @@ _TRACKED_CATEGORIES: dict[str, list[str]] = {
 }
 
 # ── Cache ────────────────────────────────────────────────────────
-_lock = threading.Lock()
+from filings.caching import TTLCache as _TTLCache
+_lock = threading.Lock()              # only guards _raw_cache (single-entry)
 _raw_cache: dict | None = None       # {"events": [...], "fetched_at": float}
 _RAW_TTL = 3600                       # 1 hour
 
-_result_cache: dict[str, tuple[float, dict]] = {}
 _RESULT_TTL = 1800                    # 30 min
+# 4 periods × 5 countries × 3 impact filters = ~60 keys; 200 cap is generous.
+_result_cache = _TTLCache(ttl=_RESULT_TTL, max_size=200)
 
 _TIMEOUT = 15
 
@@ -312,11 +314,9 @@ def fetch_economic_events(
 
     # ── L1 result cache ──────────────────────────────────────────
     cache_key = f"econ:{period}:{country}:{impact_filter}"
-    now = time.time()
-    with _lock:
-        cached = _result_cache.get(cache_key)
-        if cached and (now - cached[0]) < _RESULT_TTL:
-            return cached[1]
+    cached = _result_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     # ── Load raw data ────────────────────────────────────────────
     raw_events, is_mock = _load_raw_events()
@@ -449,8 +449,7 @@ def fetch_economic_events(
     }
 
     # Cache result
-    with _lock:
-        _result_cache[cache_key] = (time.time(), result)
+    _result_cache.set(cache_key, result)
 
     return result
 

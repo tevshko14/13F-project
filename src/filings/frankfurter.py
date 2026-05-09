@@ -11,17 +11,18 @@ Provides:
 
 import json
 import logging
-import threading
 import time
 import urllib.request
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+from filings.caching import TTLCache as _TTLCache
+
 _BASE_URL = "https://api.frankfurter.app"
-_lock = threading.Lock()
-_cache: dict[str, tuple[float, any]] = {}
 _TTL = 3600 * 2  # 2 hours
+# ~12 currency pairs × a handful of historical windows = small fixed set.
+_cache = _TTLCache(ttl=_TTL, max_size=200)
 
 # Major pairs we track (vs USD)
 MAJOR_CURRENCIES = {
@@ -42,17 +43,15 @@ MAJOR_CURRENCIES = {
 
 def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
     """Generic L1 → L2 → fetcher pattern."""
-    with _lock:
-        cached = _cache.get(cache_key)
-        if cached and time.time() - cached[0] < ttl:
-            return cached[1]
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     try:
         from filings import supabase_cache
         l2 = supabase_cache.get_cached(cache_key)
         if l2:
-            with _lock:
-                _cache[cache_key] = (time.time(), l2)
+            _cache.set(cache_key, l2)
             return l2
     except Exception:
         pass
@@ -65,8 +64,7 @@ def _cached_or_fetch(cache_key: str, fetcher, ttl: int = _TTL):
                 supabase_cache.set_cached(cache_key, "frankfurter", result, 3600 * 6)
             except Exception:
                 pass
-            with _lock:
-                _cache[cache_key] = (time.time(), result)
+            _cache.set(cache_key, result)
         return result
     except Exception as exc:
         logger.warning("Frankfurter fetch failed for %s: %s", cache_key, exc)

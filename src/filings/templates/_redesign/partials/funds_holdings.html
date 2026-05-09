@@ -1,0 +1,163 @@
+{#-
+  Funds-index Holdings pane partial — fetched lazily on tab click.
+  See `preview_funds_holdings_partial` in redesign_preview.py.
+-#}
+{% from "_redesign/macros/_primitives.html" import label, panel, panel_head %}
+
+{# Consensus Leaders + Recent Momentum side by side. #}
+<div class="pp-row pp-row-2">
+  {# ── Consensus Leaders — top 10 stocks by holder count ── #}
+  {% call panel() %}
+    {{ panel_head("Consensus Leaders",
+                  sub="Top 10 stocks by total superinvestor ownership · hover for details") }}
+    {% if funds_consensus %}
+      <div class="pp-funds-consensus-rows">
+        {% for c in funds_consensus %}
+          <div class="pp-funds-consensus-row" tabindex="0">
+            <span class="pp-mono pp-funds-consensus-tk">{{ c.ticker }}</span>
+            <div class="pp-funds-consensus-bar">
+              <span class="pp-funds-consensus-bar-fill"
+                    style="width: {{ c.bar_pct }}%;"></span>
+            </div>
+            <span class="pp-mono pp-funds-consensus-n">{{ c.num_holders }}</span>
+
+            {# Hover tooltip — full breakdown for this stock. #}
+            <div class="pp-funds-consensus-tip" aria-hidden="true">
+              <div class="pp-funds-consensus-tip-head">
+                <span class="pp-mono pp-ink-strong pp-funds-consensus-tip-tk">{{ c.ticker }}</span>
+                <span class="pp-funds-consensus-tip-name">{{ c.name }}</span>
+              </div>
+              <div class="pp-funds-consensus-tip-stats">
+                <div class="pp-funds-consensus-tip-stat">
+                  {{ label("HOLDERS") }}
+                  <span class="pp-mono pp-ink-strong">{{ c.num_holders }} superinvestors</span>
+                </div>
+                <div class="pp-funds-consensus-tip-stat">
+                  {{ label("AVG WEIGHT") }}
+                  <span class="pp-mono pp-ink-strong">{{ c.avg_weight }}%</span>
+                </div>
+                <div class="pp-funds-consensus-tip-stat">
+                  {{ label("COMBINED VALUE") }}
+                  <span class="pp-mono pp-ink-strong">{{ c.combined_value_str }}</span>
+                </div>
+              </div>
+              {% if c.top_holders %}
+                <div class="pp-funds-consensus-tip-holders">
+                  {{ label("TOP HOLDERS") }}
+                  <ul class="pp-funds-consensus-tip-holder-list">
+                    {% for h in c.top_holders %}
+                      <li>{{ h }}</li>
+                    {% endfor %}
+                  </ul>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-sub">No aggregated holdings available.</div>
+      </div>
+    {% endif %}
+  {% endcall %}
+
+  {# ── Recent Momentum — top stocks added this quarter ── #}
+  {% call panel() %}
+    {{ panel_head("Recent Momentum",
+                  sub="Top stocks added this quarter · hover bars for buyer concentration") }}
+    {% if funds_momentum %}
+      <div class="pp-funds-momentum-bars">
+        {% for m in funds_momentum %}
+          <div class="pp-funds-momentum-bar" tabindex="0">
+            <div class="pp-funds-momentum-bar-track">
+              <span class="pp-funds-momentum-bar-fill"
+                    style="height: {{ m.bar_pct }}%;"></span>
+            </div>
+            <span class="pp-mono pp-funds-momentum-tk">{{ m.ticker }}</span>
+            <span class="pp-mono pp-funds-momentum-n">{{ m.add_count }}</span>
+            <div class="pp-funds-momentum-tip" aria-hidden="true">
+              <div class="pp-funds-momentum-tip-head">
+                <span class="pp-mono pp-ink-strong">{{ m.ticker }}</span>
+                <span class="pp-funds-momentum-tip-name">{{ m.name }}</span>
+              </div>
+              <div class="pp-funds-momentum-tip-stat">
+                {{ label("ADDS") }}
+                <span class="pp-mono pp-ink-strong">{{ m.add_count }} funds added</span>
+              </div>
+              <div class="pp-funds-momentum-tip-stat">
+                {{ label("COMBINED ADD VALUE") }}
+                <span class="pp-mono pp-ink-strong">{{ m.value_str }}</span>
+              </div>
+              {% if m.adders %}
+                <div class="pp-funds-momentum-tip-adders">
+                  {{ label("LATEST BUYERS") }}
+                  <ul class="pp-funds-momentum-tip-adder-list">
+                    {% for a in m.adders %}<li>{{ a }}</li>{% endfor %}
+                  </ul>
+                </div>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-sub">No quarterly momentum data available.</div>
+      </div>
+    {% endif %}
+  {% endcall %}
+</div>
+
+{# ── All Holdings table — top 100 stocks sorted by holder count ── #}
+{% if funds_holdings_all %}
+  {% call panel(cls="pp-funds-allhold-panel") %}
+    {% call panel_head("All Holdings",
+                       sub="Top 100 stocks sorted by holder count") %}
+    {% endcall %}
+    <div class="pp-funds-allhold-wrap">
+      <table class="pp-table pp-sortable pp-funds-allhold-table">
+        <thead>
+          <tr>
+            <th class="pp-num">#</th>
+            <th>Ticker</th>
+            <th>Stock</th>
+            <th class="pp-num">Holders</th>
+            <th class="pp-num">Combined value</th>
+            <th class="pp-num">% of aggregate</th>
+            <th>Held by</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in funds_holdings_all %}
+            <tr>
+              <td class="pp-num pp-mono pp-dim2">{{ "%02d"|format(h.rank) }}</td>
+              <td>
+                <a class="pp-mono pp-ink-strong pp-funds-allhold-tk" href="/_v2/stock/{{ h.ticker }}">{{ h.ticker }}</a>
+              </td>
+              <td class="pp-funds-allhold-name">{{ h.name }}</td>
+              <td class="pp-num pp-mono pp-ink-strong"
+                  data-sort="{{ h.num_holders }}">{{ h.num_holders }}</td>
+              <td class="pp-num pp-mono"
+                  data-sort="{{ h.combined_value }}">{{ h.combined_value_str }}</td>
+              <td class="pp-num pp-mono pp-dim"
+                  data-sort="{{ h.pct_of_aggregate }}">{{ h.pct_of_aggregate }}%</td>
+              <td>
+                <div class="pp-funds-allhold-holders">
+                  {% for nm in h.top_holders %}
+                    <span class="pp-mono pp-funds-allhold-holder">{{ nm }}</span>
+                  {% endfor %}
+                  {% if h.more_holders %}
+                    <span class="pp-mono pp-dim2 pp-funds-allhold-more">
+                      +{{ h.more_holders }} more
+                    </span>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endcall %}
+{% endif %}

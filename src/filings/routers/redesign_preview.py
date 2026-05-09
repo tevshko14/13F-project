@@ -2516,15 +2516,16 @@ async def preview_home(request: Request):
     # Fund flows + congress are fetched ONCE at the larger limit (8) and
     # sliced for the 6-row Overview panels — saves duplicate upstream
     # round trips and two heavy-pool slots. ──
+    # Heatmap, Activity, Calendar panes are lazy-loaded on tab click via
+    # `/api/home/{heatmap,activity,calendar}` (see partial handlers
+    # below).  Skipping their 5 fetchers here saves ~5 thread slots and
+    # ~95KB of HTML on the default Overview landing.
     (
         kpi_items, hero,
         top_movers_rows, fund_flows_full, insider_rows, congress_full,
         macro_rows, retail_payload, feargreed_payload, ticker_tape_rows,
         flow_trending_payload,
-        heatmap_companies_rows, heatmap_sectors_rows,
-        activity_rows,
         news_payload,
-        cal_earnings_rows, cal_macro_rows,
     ) = await asyncio.gather(
         _fetch_kpi_strip(),
         _fetch_hero_chart(),
@@ -2537,13 +2538,15 @@ async def preview_home(request: Request):
         _fetch_home_feargreed(),
         _fetch_home_ticker_tape(idx_data=idx_market_map, sp_data=sp_1d_map),
         _fetch_home_flow_trending(request, limit=12),
-        _fetch_home_heatmap_companies(mkt=sp_1d_map),
-        _fetch_home_heatmap_sectors(),
-        _fetch_home_activity(limit=12),
         _fetch_home_news(idx_data=idx_market_map, sp_data=sp_1d_map),
-        _fetch_home_cal_earnings(limit=6),
-        _fetch_home_cal_macro(limit=6),
     )
+    # Lazy-loaded panes get empty defaults; the partial endpoints render
+    # the real content into the page on first tab activation.
+    heatmap_companies_rows: list = []
+    heatmap_sectors_rows:   list = []
+    activity_rows:          list = []
+    cal_earnings_rows:      list = []
+    cal_macro_rows:         list = []
     # Slice the 8-row results for the 6-row Overview panels.
     fund_flow_rows = fund_flows_full[:6]
     congress_rows = congress_full[:6]
@@ -2641,6 +2644,59 @@ async def preview_home(request: Request):
         "cal_macro":    cal_macro_rows,
     }
     return templates.TemplateResponse("_redesign/home.html", ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Home page LAZY-LOADED PANE PARTIALS
+# Each route renders just one subtab's HTML, fetched on first tab click.
+# Saves ~5 thread slots and ~95KB on the default Overview landing.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@router.get("/api/home/heatmap", response_class=HTMLResponse)
+async def preview_home_heatmap_partial(request: Request):
+    """Lazy-loaded Heatmap pane — companies + sectors grids."""
+    from filings import market_data as _md
+    sp_1d_map = await to_heavy(_md.get_sp500_market_data, "1D")
+    companies, sectors = await asyncio.gather(
+        _fetch_home_heatmap_companies(mkt=sp_1d_map),
+        _fetch_home_heatmap_sectors(),
+    )
+    return templates.TemplateResponse(
+        "_redesign/partials/home_heatmap.html",
+        {
+            "request": request,
+            "heatmap_companies": companies,
+            "heatmap_sectors":   sectors,
+        },
+    )
+
+
+@router.get("/api/home/activity", response_class=HTMLResponse)
+async def preview_home_activity_partial(request: Request):
+    """Lazy-loaded Activity pane — live activity feed."""
+    activity_rows = await _fetch_home_activity(limit=12)
+    return templates.TemplateResponse(
+        "_redesign/partials/home_activity.html",
+        {"request": request, "activity_feed": activity_rows},
+    )
+
+
+@router.get("/api/home/calendar", response_class=HTMLResponse)
+async def preview_home_calendar_partial(request: Request):
+    """Lazy-loaded Calendar pane — earnings + macro events."""
+    cal_earnings, cal_macro = await asyncio.gather(
+        _fetch_home_cal_earnings(limit=6),
+        _fetch_home_cal_macro(limit=6),
+    )
+    return templates.TemplateResponse(
+        "_redesign/partials/home_calendar.html",
+        {
+            "request": request,
+            "cal_earnings": cal_earnings,
+            "cal_macro":    cal_macro,
+        },
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4065,28 +4121,25 @@ async def preview_funds_index(request: Request, view: str = "Funds"):
         except Exception:
             cache_age = ""
 
-    # Sub-tab switching is CSS-toggle via `ppBindActivator` — it doesn't
-    # refetch — so all three aggregations must render server-side or the
-    # Holdings/Activity panes show empty on the default Funds landing.
-    # All three aggregations memoize on ``id(fund_cache)`` so warm hits
-    # are basically free.
+    # Holdings + Activity panes are now lazy-loaded on tab click via
+    # `/api/funds-index/holdings` and `/api/funds-index/activity` (see
+    # partial handlers below).  We only fetch their data here when the
+    # user lands directly on `?view=Holdings` or `?view=Activity` — that
+    # way the default Funds landing skips ~890ms of aggregation work and
+    # ~750KB of HTML render.
     grand_portfolio: list = []
     most_added:      list = []
     activity_payload: dict = {"moves": [], "summary": {}}
 
-    if fund_cache:
+    if fund_cache and view in ("Holdings", "Activity"):
         try:
-            from filings import client, market_data
-            from filings.superinvestors import SUPERINVESTORS_BY_CIK
-
-            grand_portfolio, most_added, activity_payload = await asyncio.gather(
-                asyncio.to_thread(client.build_grand_portfolio,
-                                  fund_cache, SUPERINVESTORS_BY_CIK),
-                asyncio.to_thread(market_data.build_most_added_table,
-                                  fund_cache, SUPERINVESTORS_BY_CIK),
-                asyncio.to_thread(_funds_activity_consensus_sync,
-                                  request, fund_cache, SUPERINVESTORS_BY_CIK),
+            holdings_data, activity_data = await _fetch_funds_panes(
+                request, fund_cache,
+                need_holdings=(view == "Holdings"),
+                need_activity=(view == "Activity"),
             )
+            grand_portfolio, most_added = holdings_data
+            activity_payload = activity_data or activity_payload
         except Exception as exc:
             logger.warning("Funds index aggregation failed: %s", exc)
 
@@ -4101,17 +4154,107 @@ async def preview_funds_index(request: Request, view: str = "Funds"):
         "funds_index":   rows,
         "funds_count":   len(rows),
         "funds_cache_age": cache_age,
-        # Holdings pane (empty unless gated above)
+        # Holdings pane — only populated on direct ?view=Holdings link.
         "funds_consensus":    _funds_holdings_consensus(grand_portfolio, n=10),
         "funds_momentum":     _funds_holdings_momentum(most_added, n=15),
         "funds_holdings_all": _funds_index_holdings_table(grand_portfolio, top_n=100),
-        # Activity pane (empty unless gated above)
+        # Activity pane — only populated on direct ?view=Activity link.
         "funds_activity_moves":   activity_payload.get("moves", []),
         "funds_activity_summary": activity_payload.get("summary", {}),
         # Capital Deployed pane (cheap — reads cached deployment_cache directly)
         "funds_capital_rows": _funds_capital_deployed_rows(deployment_cache),
     }
     return templates.TemplateResponse("_redesign/funds_index.html", ctx)
+
+
+async def _fetch_funds_panes(
+    request: Request,
+    fund_cache: dict,
+    *,
+    need_holdings: bool,
+    need_activity: bool,
+) -> tuple[tuple[list, list], dict | None]:
+    """Run only the aggregations needed for the requested panes.
+
+    Returns ``((grand_portfolio, most_added), activity_payload_or_None)``.
+    `build_grand_portfolio` and `build_most_added_table` are memoized on
+    ``id(fund_cache)``; `_funds_activity_consensus_sync` likewise after
+    the Wave 1 memoization pass.  So sequential `view=Holdings` then
+    `view=Activity` requests share their respective memoized results.
+    """
+    from filings import client, market_data
+    from filings.superinvestors import SUPERINVESTORS_BY_CIK
+
+    tasks = []
+    if need_holdings:
+        tasks.append(asyncio.to_thread(client.build_grand_portfolio,
+                                       fund_cache, SUPERINVESTORS_BY_CIK))
+        tasks.append(asyncio.to_thread(market_data.build_most_added_table,
+                                       fund_cache, SUPERINVESTORS_BY_CIK))
+    if need_activity:
+        tasks.append(asyncio.to_thread(_funds_activity_consensus_sync,
+                                       request, fund_cache, SUPERINVESTORS_BY_CIK))
+
+    results = await asyncio.gather(*tasks) if tasks else []
+    i = 0
+    grand_portfolio: list = []
+    most_added:      list = []
+    activity_payload: dict | None = None
+    if need_holdings:
+        grand_portfolio = results[i]; i += 1
+        most_added      = results[i]; i += 1
+    if need_activity:
+        activity_payload = results[i]
+    return (grand_portfolio, most_added), activity_payload
+
+
+@router.get("/api/funds-index/holdings", response_class=HTMLResponse)
+async def preview_funds_holdings_partial(request: Request):
+    """Lazy-loaded Holdings pane — fetched by the funds-index page on
+    first activation of the Holdings tab.  Renders just the partial
+    template (no app shell)."""
+    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    grand_portfolio: list = []
+    most_added:      list = []
+    if fund_cache:
+        try:
+            (grand_portfolio, most_added), _ = await _fetch_funds_panes(
+                request, fund_cache, need_holdings=True, need_activity=False,
+            )
+        except Exception as exc:
+            logger.warning("Funds holdings partial failed: %s", exc)
+    return templates.TemplateResponse(
+        "_redesign/partials/funds_holdings.html",
+        {
+            "request": request,
+            "funds_consensus":    _funds_holdings_consensus(grand_portfolio, n=10),
+            "funds_momentum":     _funds_holdings_momentum(most_added, n=15),
+            "funds_holdings_all": _funds_index_holdings_table(grand_portfolio, top_n=100),
+        },
+    )
+
+
+@router.get("/api/funds-index/activity", response_class=HTMLResponse)
+async def preview_funds_activity_partial(request: Request):
+    """Lazy-loaded Activity pane — fetched on first Activity-tab click."""
+    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    activity_payload: dict = {"moves": [], "summary": {}}
+    if fund_cache:
+        try:
+            _, activity_payload = await _fetch_funds_panes(
+                request, fund_cache, need_holdings=False, need_activity=True,
+            )
+            activity_payload = activity_payload or {"moves": [], "summary": {}}
+        except Exception as exc:
+            logger.warning("Funds activity partial failed: %s", exc)
+    return templates.TemplateResponse(
+        "_redesign/partials/funds_activity.html",
+        {
+            "request": request,
+            "funds_activity_moves":   activity_payload.get("moves", []),
+            "funds_activity_summary": activity_payload.get("summary", {}),
+        },
+    )
 
 
 _funds_activity_consensus_memo: tuple[int, dict] | None = None

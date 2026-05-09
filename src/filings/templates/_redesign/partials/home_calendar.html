@@ -1,0 +1,36 @@
+{#-
+  Home Calendar pane partial — fetched on first Calendar-tab activation.
+  See `preview_home_calendar_partial` in redesign_preview.py.
+-#}
+{% from "_redesign/macros/_primitives.html" import panel, panel_head %}
+
+<div class="pp-home-cal-grid">
+  {% call panel() %}
+    {{ panel_head("Earnings", sub="next 30d · watchlist") }}
+    {% for e in cal_earnings %}
+      <div class="pp-home-cal-earn-row">
+        <span class="pp-mono pp-home-cal-date">{{ e.date | dt_long }}</span>
+        <span class="pp-mono pp-home-cal-tkr">${{ e.ticker }}</span>
+        <span class="pp-mono pp-home-cal-when">{{ e.when }}</span>
+        <span class="pp-mono pp-home-cal-eps">{{ e.eps }}</span>
+        <span class="pp-mono pp-home-cal-iv">{{ e.iv }}</span>
+      </div>
+    {% endfor %}
+  {% endcall %}
+
+  {% call panel() %}
+    {{ panel_head("Macro", sub="next 60d") }}
+    {% for m in cal_macro %}
+      <div class="pp-home-cal-macro-row">
+        <span class="pp-mono pp-home-cal-date">{{ m.date | dt_long }}</span>
+        <span class="pp-home-cal-impact-dot pp-home-cal-impact-{{ m.impact }}"></span>
+        <div class="pp-home-cal-macro-cell">
+          <div class="pp-home-cal-macro-label">{{ m.label }}</div>
+          <span class="pp-mono pp-home-cal-macro-time">{{ m.time }}</span>
+        </div>
+        <span class="pp-mono pp-home-cal-macro-val">{{ m.val }}</span>
+        <span class="pp-mono pp-home-cal-impact-tag">{{ m.impact }}</span>
+      </div>
+    {% endfor %}
+  {% endcall %}
+</div>

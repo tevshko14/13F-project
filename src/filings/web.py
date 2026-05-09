@@ -4079,24 +4079,20 @@ def _time_ago(iso_str: str) -> str:
 
 
 # ── In-memory cache for bell state (global notifications, short TTL) ──
-_bell_cache: dict[str, tuple[float, int, dict | None]] = {}
+from filings.caching import TTLCache as _TTLCache
 _BELL_CACHE_TTL = 15  # seconds — collapses identical polls across users
+_bell_cache = _TTLCache(ttl=_BELL_CACHE_TTL, max_size=200)
 
 
 def _get_cached_bell_state(since: str) -> tuple[int, dict | None]:
     """Return (count, latest) from cache or DB.  15-second TTL."""
-    now = time_module.monotonic()
     cached = _bell_cache.get(since)
-    if cached and (now - cached[0]) < _BELL_CACHE_TTL:
-        return cached[1], cached[2]
+    if cached is not None:
+        return cached
     count, latest = supabase_cache.get_bell_state(since)
-    _bell_cache[since] = (now, count, latest)
-    # Evict stale keys (keep cache dict small)
-    if len(_bell_cache) > 50:
-        stale = [k for k, v in _bell_cache.items() if (now - v[0]) > _BELL_CACHE_TTL]
-        for k in stale:
-            _bell_cache.pop(k, None)
-    return count, latest
+    result = (count, latest)
+    _bell_cache.set(since, result)
+    return result
 
 
 @app.get("/api/notifications/bell", response_class=HTMLResponse)

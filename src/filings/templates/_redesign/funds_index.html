@@ -117,9 +117,29 @@
   </section>
 
   {# ────────── HOLDINGS PANE — consensus + momentum + all-holdings ────────── #}
+  {# ────────── HOLDINGS PANE — lazy-loaded on tab click ──────────
+       SSR'd inline only when the user lands on `/funds?view=Holdings`
+       directly; otherwise the pane fetches its content via
+       `/api/funds-index/holdings` on first activation.  Keeps the
+       initial Funds-tab landing payload to ~300KB (down from ~900KB)
+       and skips the `build_grand_portfolio` + `build_most_added_table`
+       work for users who never open the tab. #}
   <section class="pp-page-pane{% if funds_index_view == 'Holdings' %} is-active{% endif %}"
-           data-tab-pane="Holdings">
+           data-tab-pane="Holdings"
+           data-pane-fetch="/_v2/api/funds-index/holdings">
+    {% if funds_index_view == 'Holdings' %}
+      {% include "_redesign/partials/funds_holdings.html" %}
+    {% else %}
+      <div class="pp-page-placeholder pp-funds-lazy-stub" data-pane-stub>
+        <div class="pp-page-placeholder-sub">Loading holdings…</div>
+      </div>
+    {% endif %}
+  </section>
 
+  {# ────────── ORIGINAL INLINE CONTENT — moved to partial; kept here
+       behind `{% if false %}` for one cycle so reviewers can diff against
+       the partial.  Safe to delete in a follow-up commit. ────────── #}
+  {% if false %}
     {# Consensus Leaders + Recent Momentum side by side. #}
     <div class="pp-row pp-row-2">
       {# ── Consensus Leaders — top 10 stocks by holder count ── #}
@@ -277,11 +297,27 @@
         </div>
       {% endcall %}
     {% endif %}
+  {% endif %}{# end if false #}
+
+  {# ────────── ACTIVITY PANE — lazy-loaded on tab click ──────────
+       Same pattern as Holdings: SSR inline only on direct
+       /funds?view=Activity link, otherwise fetched on first tab click
+       via `/api/funds-index/activity`.  Activity is the heaviest pane
+       (~590KB HTML) so deferring it gives the largest payload win. #}
+  <section class="pp-page-pane{% if funds_index_view == 'Activity' %} is-active{% endif %}"
+           data-tab-pane="Activity"
+           data-pane-fetch="/_v2/api/funds-index/activity">
+    {% if funds_index_view == 'Activity' %}
+      {% include "_redesign/partials/funds_activity.html" %}
+    {% else %}
+      <div class="pp-page-placeholder pp-funds-lazy-stub" data-pane-stub>
+        <div class="pp-page-placeholder-sub">Loading activity…</div>
+      </div>
+    {% endif %}
   </section>
 
-  {# ────────── ACTIVITY PANE — consensus moves with expand-row ────────── #}
-  <section class="pp-page-pane{% if funds_index_view == 'Activity' %} is-active{% endif %}"
-           data-tab-pane="Activity">
+  {# ────────── ORIGINAL INLINE ACTIVITY CONTENT — moved to partial ── #}
+  {% if false %}
 
     {# KPI summary strip — sentiment + flow + counts. #}
     {% if funds_activity_summary %}
@@ -386,7 +422,7 @@
         </div>
       {% endcall %}
     {% endif %}
-  </section>
+  {% endif %}{# end if false #}
 
   {# ────────── CAPITAL DEPLOYED PANE ────────── #}
   <section class="pp-page-pane{% if funds_index_view == 'Capital Deployed' %} is-active{% endif %}"
@@ -474,22 +510,65 @@ ppBindActivator({
   paneAttr: 'data-tab-pane',
 });
 
-/* Activity expand-row — Congress page pattern.  Click summary to toggle
-   detail visibility; chev rotates via CSS. */
+/* Lazy-load Holdings + Activity panes on first tab activation.  Each
+   pane carries `data-pane-fetch="/api/funds-index/X"`; we replace the
+   placeholder stub with the fetched HTML once and bind the activity
+   expand-row handler to any newly-injected rows. */
 (function () {
-  var rows = document.querySelectorAll('.pp-funds-act-summary');
-  rows.forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var key = btn.getAttribute('data-act-row');
-      var detail = document.querySelector('[data-act-row-detail="' + key + '"]');
-      var open = btn.getAttribute('aria-expanded') === 'true';
-      btn.setAttribute('aria-expanded', open ? 'false' : 'true');
-      btn.classList.toggle('is-open', !open);
-      if (detail) {
-        if (open) detail.setAttribute('hidden', '');
-        else      detail.removeAttribute('hidden');
-      }
+  var seg = document.getElementById('pp-funds-index-tabs');
+  if (!seg) return;
+
+  function bindActivityRows(scope) {
+    var rows = (scope || document).querySelectorAll('.pp-funds-act-summary');
+    rows.forEach(function (btn) {
+      if (btn.dataset.activityBound) return;
+      btn.dataset.activityBound = '1';
+      btn.addEventListener('click', function () {
+        var key = btn.getAttribute('data-act-row');
+        var detail = document.querySelector('[data-act-row-detail="' + key + '"]');
+        var open = btn.getAttribute('aria-expanded') === 'true';
+        btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+        btn.classList.toggle('is-open', !open);
+        if (detail) {
+          if (open) detail.setAttribute('hidden', '');
+          else      detail.removeAttribute('hidden');
+        }
+      });
     });
+  }
+
+  function loadPane(pane) {
+    var url = pane.getAttribute('data-pane-fetch');
+    if (!url || pane.dataset.loaded) return;
+    pane.dataset.loaded = '1';
+    fetch(url, {credentials: 'same-origin'})
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+      .then(function (html) {
+        pane.innerHTML = html;
+        bindActivityRows(pane);
+      })
+      .catch(function () {
+        pane.dataset.loaded = '';
+        var stub = pane.querySelector('[data-pane-stub]');
+        if (stub) stub.querySelector('.pp-page-placeholder-sub').textContent =
+          'Failed to load — click the tab again to retry.';
+      });
+  }
+
+  /* If the user lands on /funds?view=Holdings or ?view=Activity, the
+     server SSR'd the partial inline so we skip the fetch and just bind
+     row handlers in case the active pane is Activity. */
+  document.querySelectorAll('.pp-page-pane.is-active').forEach(function (p) {
+    if (p.getAttribute('data-tab-pane') === 'Activity') bindActivityRows(p);
+    if (p.querySelector('[data-pane-stub]')) loadPane(p);
+  });
+
+  seg.addEventListener('click', function (ev) {
+    var opt = ev.target.closest('.pp-segment-opt');
+    if (!opt) return;
+    var name = opt.getAttribute('data-value');
+    var pane = document.querySelector('[data-tab-pane="' + name + '"]');
+    if (pane && pane.querySelector('[data-pane-stub]')) loadPane(pane);
   });
 })();
 </script>

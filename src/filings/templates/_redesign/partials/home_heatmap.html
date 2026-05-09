@@ -1,0 +1,51 @@
+{#-
+  Home Heatmap pane partial — fetched on first Heatmap-tab activation.
+  See `preview_home_heatmap_partial` in redesign_preview.py.
+-#}
+{% from "_redesign/macros/_primitives.html" import panel, panel_head %}
+
+{% call panel() %}
+  {% call panel_head("Market heatmap", sub="today") %}
+    <div class="pp-segment pp-segment-mono" id="pp-heatmap-mode" role="tablist">
+      <span class="pp-segment-opt is-active" data-heatmap-mode="Companies" role="tab">Companies</span>
+      <span class="pp-segment-opt"             data-heatmap-mode="Sectors"   role="tab">Sectors</span>
+    </div>
+  {% endcall %}
+  <div class="pp-home-heatmap-body">
+    {# ── Companies grid (default visible) ── #}
+    <div class="pp-home-heatmap-grid pp-home-heatmap-grid-companies is-active"
+         data-heatmap-pane="Companies">
+      {% for c in heatmap_companies %}
+        <div class="pp-home-heatmap-tile{% if c.is_large %} is-large{% endif %}{% if c.tile_dark %} is-dark{% endif %}"
+             style="background: {{ c.tile_bg }};
+                    grid-column: span {{ c.span_col }};
+                    grid-row: span {{ c.span_row }};">
+          <span class="pp-mono pp-home-heatmap-tk">{{ c.ticker }}</span>
+          <div>
+            <span class="pp-mono pp-home-heatmap-pct">
+              {%- if c.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(c.pct * 100) }}%
+            </span>
+            {% if c.show_mcap %}
+              <span class="pp-mono pp-home-heatmap-mcap">{{ c.mcap }}</span>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    {# ── Sectors grid ── #}
+    <div class="pp-home-heatmap-grid pp-home-heatmap-grid-sectors"
+         data-heatmap-pane="Sectors">
+      {% for s in heatmap_sectors %}
+        <div class="pp-home-heatmap-tile pp-home-heatmap-sector{% if s.tile_dark %} is-dark{% endif %}"
+             style="background: {{ s.tile_bg }};
+                    grid-column: span {{ s.span_col }};">
+          <div class="pp-home-heatmap-sector-name">{{ s.name }}</div>
+          <span class="pp-mono pp-home-heatmap-sector-pct">
+            {%- if s.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(s.pct * 100) }}%
+          </span>
+          <span class="pp-mono pp-home-heatmap-sector-mcap">Mkt cap {{ s.mcap }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+{% endcall %}

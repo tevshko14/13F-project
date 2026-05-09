@@ -1,0 +1,109 @@
+{#-
+  Funds-index Activity pane partial — fetched lazily on tab click.
+  See `preview_funds_activity_partial` in redesign_preview.py.
+-#}
+{% from "_redesign/macros/_primitives.html" import panel, panel_head %}
+
+{# KPI summary strip — sentiment + flow + counts. #}
+{% if funds_activity_summary %}
+  {% set _s = funds_activity_summary %}
+  <div class="pp-page-section pp-page-section-kpi">
+    <div class="pp-kpi-strip" style="grid-template-columns:repeat(5,1fr);">
+      <div class="pp-kpi-cell">
+        <div class="pp-label">$Value sentiment</div>
+        <div class="pp-kpi-value pp-funds-act-sent pp-funds-act-sent-{{ _s.value_tone }}">{{ _s.value_sentiment }}</div>
+      </div>
+      <div class="pp-kpi-cell">
+        <div class="pp-label">Net dollar flow</div>
+        <div class="pp-kpi-value {% if _s.net_flow > 0 %}pp-up{% elif _s.net_flow < 0 %}pp-down{% endif %}">{{ _s.net_flow_str }}</div>
+      </div>
+      <div class="pp-kpi-cell">
+        <div class="pp-label">Buying</div>
+        <div class="pp-kpi-value pp-up">{{ _s.buying_str }}</div>
+      </div>
+      <div class="pp-kpi-cell">
+        <div class="pp-label">Selling</div>
+        <div class="pp-kpi-value pp-down">{{ _s.selling_str }}</div>
+      </div>
+      <div class="pp-kpi-cell">
+        <div class="pp-label">Total activities</div>
+        <div class="pp-kpi-value">{{ _s.total_activities }}</div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% if funds_activity_moves %}
+  {% call panel(cls="pp-funds-act-panel") %}
+    {% call panel_head("Consensus moves",
+                       sub=(funds_activity_summary.consensus_count|default(funds_activity_moves|length) ~ " tickers traded across the 85 superinvestors · click to expand each ticker's per-fund detail")) %}
+    {% endcall %}
+    <div class="pp-funds-act-list">
+      {% for m in funds_activity_moves %}
+        {%- set _key = "fa-" ~ loop.index0 -%}
+        <div class="pp-funds-act-row">
+          <button class="pp-funds-act-summary"
+                  type="button"
+                  data-act-row="{{ _key }}"
+                  aria-expanded="false">
+            <span class="pp-mono pp-ink-strong pp-funds-act-tkr">{{ m.ticker }}</span>
+            <span class="pp-funds-act-issuer">{{ m.issuer }}</span>
+            <span class="pp-mono pp-tag pp-funds-act-sent-{{ m.sentiment_tone }}">
+              {{ m.sentiment_label }}
+            </span>
+            <span class="pp-mono pp-funds-act-counts">
+              {{ m.buy_count }} Buying · {{ m.sell_count }} Selling
+            </span>
+            <span class="pp-mono pp-funds-act-net {% if m.net_flow >= 0 %}pp-up{% else %}pp-down{% endif %}">
+              {{ m.net_flow_str }}
+            </span>
+            <span class="pp-funds-act-chev" aria-hidden="true">▶</span>
+          </button>
+          <div class="pp-funds-act-detail" data-act-row-detail="{{ _key }}" hidden>
+            <table class="pp-table pp-funds-act-detail-table">
+              <thead>
+                <tr>
+                  <th>Fund</th>
+                  <th>Action</th>
+                  <th class="pp-num">Share Δ</th>
+                  <th class="pp-num">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for tr in m.trades %}
+                  <tr>
+                    <td>
+                      <a class="pp-funds-act-detail-fund" href="/_v2/funds/{{ tr.cik }}">{{ tr.fund_name }}</a>
+                    </td>
+                    <td>
+                      <span class="pp-mono pp-tag {% if tr.is_buy %}pp-funds-act-tag-buy{% else %}pp-funds-act-tag-sell{% endif %}">
+                        {{ tr.action }}
+                      </span>
+                    </td>
+                    <td class="pp-num pp-mono {% if tr.is_buy %}pp-up{% else %}pp-down{% endif %}">{{ tr.share_change_str }}</td>
+                    <td class="pp-num pp-mono pp-ink-strong">{{ tr.value_str }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    {% if funds_activity_summary.consensus_count and funds_activity_summary.consensus_count > funds_activity_moves|length %}
+      <div class="pp-funds-act-foot">
+        <span class="pp-mono pp-dim">
+          Showing top {{ funds_activity_moves|length }} of
+          {{ funds_activity_summary.consensus_count }} consensus moves.
+        </span>
+      </div>
+    {% endif %}
+  {% endcall %}
+{% else %}
+  {% call panel() %}
+    <div class="pp-page-placeholder">
+      <div class="pp-page-placeholder-title">No activity recorded</div>
+      <div class="pp-page-placeholder-sub">No 13F changes detected this quarter.</div>
+    </div>
+  {% endcall %}
+{% endif %}

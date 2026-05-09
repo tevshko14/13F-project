@@ -56,8 +56,9 @@ _interest_cache = TTLCache(ttl=_INTEREST_TTL, max_size=200)
 _trending_cache: tuple[float, list] | None = None
 _TRENDING_TTL = 3_600  # 1 h — trending searches change fast
 
-_macro_cache: dict[str, tuple[float, dict]] = {}
 _MACRO_TTL = 86_400  # 24 h
+# ~10 macro categories × 4 timeframes = ~40 keys; 200 cap is generous.
+_macro_cache = TTLCache(ttl=_MACRO_TTL, max_size=200)
 
 _SECTOR_TTL = 604_800  # 7 days
 _sector_cache = TTLCache(ttl=_SECTOR_TTL, max_size=200)
@@ -553,16 +554,14 @@ def fetch_macro_trends(
         keywords = [kws[0] for kws in list(MACRO_CATEGORIES.values())[:5]]
 
     cache_key = f"macro:{category or 'overview'}:{timeframe}"
-    with _lock:
-        cached = _macro_cache.get(cache_key)
-        if cached and time.time() - cached[0] < _MACRO_TTL:
-            return cached[1]
+    cached = _macro_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     result = fetch_interest_over_time(keywords, timeframe=timeframe)
     if result:
         result["category"] = category or "overview"
-        with _lock:
-            _macro_cache[cache_key] = (time.time(), result)
+        _macro_cache.set(cache_key, result)
 
     return result
 

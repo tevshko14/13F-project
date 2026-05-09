@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import os
-import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -40,8 +39,9 @@ _XBRL_BASE = "https://data.sec.gov/api/xbrl/companyfacts"
 # ── Cache config ─────────────────────────────────────────────────────
 _L2_TTL = 24 * 3_600             # 24 hours in Supabase
 _mem_cache = TTLCache(ttl=3_600, max_size=200)   # 1h in-memory, ticker → usgaap (or None for cached 404)
-_lock = threading.Lock()                         # guards _cik_cache
-_cik_cache: dict[str, str | None] = {}           # ticker → CIK
+# Bounded ticker→CIK cache; CIK assignments are stable so 24h TTL is fine.
+# `MISS` distinguishes "never asked" from "cached as None" (no CIK).
+_cik_cache = TTLCache(ttl=24 * 3_600, max_size=5_000)
 
 # Number of historical periods to keep per statement
 _MAX_PERIODS = 5
@@ -223,9 +223,9 @@ _CIK_TIMEOUT = 15  # seconds — prevent indefinite blocking
 def _resolve_cik(ticker: str) -> str | None:
     """Map ticker → CIK string, cached in memory."""
     key = ticker.upper()
-    with _lock:
-        if key in _cik_cache:
-            return _cik_cache[key]
+    cached = _cik_cache.get(key, MISS)
+    if cached is not MISS:
+        return cached
 
     try:
         from edgar import Company
@@ -238,8 +238,7 @@ def _resolve_cik(ticker: str) -> str | None:
         logger.debug("CIK resolution failed for %s: %s", key, exc)
         cik = None
 
-    with _lock:
-        _cik_cache[key] = cik
+    _cik_cache.set(key, cik)
     return cik
 
 

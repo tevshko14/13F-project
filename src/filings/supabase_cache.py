@@ -746,13 +746,43 @@ def get_cached_with_stale(cache_key: str) -> tuple[dict | list | None, bool]:
         return None, False
 
 
+# Keys whose value changes every fetch (timestamps, freshness markers)
+# but whose presence does NOT mean the underlying data changed.  Stripped
+# from `_compute_hash` so re-fetching identical upstream data doesn't
+# trigger a full L2 row rewrite — saves significant disk-IO churn.
+_VOLATILE_HASH_KEYS = frozenset({
+    "fetched_at", "updated_at", "last_updated", "as_of",
+    "timestamp", "ts", "fetched_ts", "generated_at",
+})
+
+
+def _strip_volatile_for_hash(obj):
+    """Return a copy of *obj* with well-known volatile timestamp keys
+    omitted at every nesting level.  Used only by `_compute_hash` so the
+    full payload (including timestamps) is still stored on disk; only
+    the change-detection hash ignores them.
+    """
+    if isinstance(obj, dict):
+        return {
+            k: _strip_volatile_for_hash(v)
+            for k, v in obj.items()
+            if k not in _VOLATILE_HASH_KEYS
+        }
+    if isinstance(obj, list):
+        return [_strip_volatile_for_hash(v) for v in obj]
+    return obj
+
+
 def _compute_hash(data: dict | list) -> str:
     """Compute a stable SHA-256 hash of a JSON-serialisable payload.
 
     Used for change detection: skip Supabase upserts when the data
-    hasn't actually changed (saves egress on both write and subsequent reads).
+    hasn't actually changed (saves egress on both write and subsequent
+    reads).  Volatile timestamp fields are stripped before hashing so
+    a refresh-with-identical-data is a no-op.
     """
-    raw = _json.dumps(data, sort_keys=True, separators=(",", ":"))
+    stable = _strip_volatile_for_hash(data)
+    raw = _json.dumps(stable, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
@@ -807,9 +837,13 @@ def get_all_content_hashes(category: str) -> dict[str, str]:
 
 
 # L1 hash cache: avoids a Supabase SELECT on every set_cached() call.
-# Maps cache_key → content_hash. Bounded to prevent unbounded growth.
-_hash_cache: dict[str, str] = {}
-_HASH_CACHE_MAX = 2000
+# Maps cache_key → content_hash.  Larger cap (5000) to keep the working
+# set in memory and avoid round-trips when many cache_keys are touched
+# in a short window.  Long TTL (24h) since hashes are stable until the
+# row content changes.
+from filings.caching import TTLCache as _TTLCache
+_HASH_CACHE_MAX = 5000
+_hash_cache = _TTLCache(ttl=86_400, max_size=_HASH_CACHE_MAX)
 
 
 def set_cached(
@@ -843,6 +877,10 @@ def set_cached(
 
     # Check L1 hash cache first, fall back to Supabase SELECT
     existing_hash = _hash_cache.get(cache_key) or get_content_hash(cache_key)
+    # Cache the hash we just fetched from Supabase so subsequent writes
+    # for the same key don't pay the round-trip again.
+    if existing_hash and _hash_cache.get(cache_key) is None:
+        _hash_cache.set(cache_key, existing_hash)
     if existing_hash and existing_hash == new_hash:
         # Data unchanged — just bump the TTL and sync timestamp
         expires_at = None
@@ -876,13 +914,9 @@ def set_cached(
 
     try:
         client.table(_TABLE).upsert(row, on_conflict="cache_key").execute()
-        # Update L1 hash cache (avoid Supabase SELECT on next write)
-        _hash_cache[cache_key] = new_hash
-        if len(_hash_cache) > _HASH_CACHE_MAX:
-            # Evict oldest half to avoid repeated eviction overhead
-            keys = list(_hash_cache.keys())
-            for k in keys[: len(keys) // 2]:
-                del _hash_cache[k]
+        # Update L1 hash cache (avoid Supabase SELECT on next write).
+        # TTLCache handles bounded growth + oldest-first eviction.
+        _hash_cache.set(cache_key, new_hash)
         logger.debug("Cache updated for %s (new hash=%s)", cache_key, new_hash)
         return True
     except Exception as exc:

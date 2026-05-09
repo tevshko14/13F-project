@@ -33,21 +33,23 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# ── Thread lock for cache ────────────────────────────────────────────
+from filings.caching import TTLCache, MISS
+
+# ── Thread lock — only guards the single-entry _tranco_cache below ────
 _lock = threading.Lock()
 
 # ── In-memory caches ─────────────────────────────────────────────────
-_radar_cache: dict[str, tuple[float, dict]] = {}
 _RADAR_TTL = 86_400  # 24 hours — Cloudflare Radar domain rank
+_radar_cache = TTLCache(ttl=_RADAR_TTL, max_size=5_000)
 
 _tranco_cache: tuple[float, dict[str, int]] | None = None
 _TRANCO_TTL = 86_400  # 24 hours — Tranco list (daily CSV)
 
-_wiki_cache: dict[str, tuple[float, dict]] = {}
 _WIKI_TTL = 86_400  # 24 hours
+_wiki_cache = TTLCache(ttl=_WIKI_TTL, max_size=5_000)
 
-_sector_cache: dict[str, tuple[float, dict | None]] = {}
 _SECTOR_TTL = 604_800  # 7 days — sectors don't change
+_sector_cache = TTLCache(ttl=_SECTOR_TTL, max_size=5_000)
 
 # ── Sector-based relevance classification ────────────────────────────
 # GICS sectors/sub-industries where web traffic is a strong revenue proxy.
@@ -211,10 +213,9 @@ _TICKER_TO_WIKI: dict[str, str] = {
 
 def _get_yf_sector(ticker: str) -> dict | None:
     """Fetch sector/industry from yfinance (cached 7 days locally, 1h in central cache)."""
-    with _lock:
-        cached = _sector_cache.get(ticker)
-        if cached and time.time() - cached[0] < _SECTOR_TTL:
-            return cached[1]
+    cached = _sector_cache.get(ticker, MISS)
+    if cached is not MISS:
+        return cached
 
     try:
         from filings.client import get_yfinance_info
@@ -228,8 +229,7 @@ def _get_yf_sector(ticker: str) -> dict | None:
         logger.debug("yfinance sector lookup failed for %s: %s", ticker, e)
         result = None
 
-    with _lock:
-        _sector_cache[ticker] = (time.time(), result)
+    _sector_cache.set(ticker, result)
     return result
 
 
@@ -309,10 +309,9 @@ def fetch_cloudflare_rank(ticker: str) -> dict | None:
     ticker = ticker.upper()
 
     # Check cache
-    with _lock:
-        cached = _radar_cache.get(ticker)
-        if cached and time.time() - cached[0] < _RADAR_TTL:
-            return cached[1]
+    cached = _radar_cache.get(ticker, MISS)
+    if cached is not MISS:
+        return cached
 
     domain = _get_domain_for_ticker(ticker)
     if not domain:
@@ -336,8 +335,7 @@ def fetch_cloudflare_rank(ticker: str) -> dict | None:
         raw = resp.json()
         result = _parse_cloudflare_rank(raw, domain)
 
-        with _lock:
-            _radar_cache[ticker] = (time.time(), result)
+        _radar_cache.set(ticker, result)
         return result
 
     except Exception as e:
@@ -471,10 +469,9 @@ def fetch_wikipedia_views(ticker: str, days: int = 90) -> dict | None:
     ticker = ticker.upper()
 
     # Check cache
-    with _lock:
-        cached = _wiki_cache.get(ticker)
-        if cached and time.time() - cached[0] < _WIKI_TTL:
-            return cached[1]
+    cached = _wiki_cache.get(ticker, MISS)
+    if cached is not MISS:
+        return cached
 
     article = _TICKER_TO_WIKI.get(ticker)
     if not article:
@@ -519,8 +516,7 @@ def fetch_wikipedia_views(ticker: str, days: int = 90) -> dict | None:
             "fetched_at": datetime.utcnow().isoformat(),
         }
 
-        with _lock:
-            _wiki_cache[ticker] = (time.time(), result)
+        _wiki_cache.set(ticker, result)
         return result
 
     except Exception as e:

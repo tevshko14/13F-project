@@ -1,0 +1,29 @@
+{#-
+  Home Activity pane partial — fetched on first Activity-tab activation.
+  See `preview_home_activity_partial` in redesign_preview.py.
+-#}
+{% from "_redesign/macros/_primitives.html" import panel, panel_head, tag %}
+
+{% call panel() %}
+  {% call panel_head("Live activity", sub="real-time · last 60 minutes") %}
+    <span class="pp-mono pp-home-activity-live">● LIVE</span>
+  {% endcall %}
+  {% for f in activity_feed %}
+    <div class="pp-home-activity-row pp-home-activity-cat-{{ f.cat }}"
+         {% if f.href %}data-row-href="{{ f.href }}"
+                      tabindex="0" role="link"
+                      aria-label="{{ f.text }}"{% endif %}>
+      <span class="pp-mono pp-home-activity-ago">{{ f.ago }} ago</span>
+      <span class="pp-mono pp-home-activity-src">{{ f.src }}</span>
+      <span class="pp-home-activity-dot"></span>
+      <div class="pp-home-activity-text">
+        {%- if f.ticker -%}
+          <span class="pp-mono pp-home-activity-tkr">${{ f.ticker }}</span>
+        {%- endif %}
+        {{ f.text }}
+      </div>
+      {{ tag("notif-" + f.cat, text=f.pill) }}
+    </div>
+  {% endfor %}
+  <a class="pp-home-activity-footer" href="/_v2/notifications">View all activity →</a>
+{% endcall %}

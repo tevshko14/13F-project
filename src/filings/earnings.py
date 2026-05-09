@@ -31,9 +31,10 @@ EST_EPS = "eps"
 EST_REVENUE = "revenue"
 
 # ── In-memory L1 caches ─────────────────────────────────────────
-_history_cache: dict[str, tuple[float, list[dict]]] = {}
-_fwd_cache: dict[str, tuple[float, dict]] = {}
+from filings.caching import TTLCache as _TTLCache
 _MAX_CACHE = 500
+_history_cache = _TTLCache(ttl=_EARNINGS_TTL, max_size=_MAX_CACHE)
+_fwd_cache = _TTLCache(ttl=_FWD_TTL, max_size=_MAX_CACHE)
 
 
 # ── Public API ───────────────────────────────────────────────────
@@ -54,15 +55,13 @@ def get_earnings_data(ticker: str) -> dict:
     ticker = ticker.upper().strip()
 
     # ── L1: in-memory history cache ──────────────────────────────
-    now = time.time()
-    cached = _history_cache.get(ticker)
-    if cached and (now - cached[0]) < _EARNINGS_TTL:
-        history = cached[1]
+    cached_history = _history_cache.get(ticker)
+    if cached_history is not None:
         fwd = get_forward_estimates(ticker)
         return {
-            "history": history,
+            "history": cached_history,
             "forward_estimates": fwd,
-            "streak": _compute_streak(history),
+            "streak": _compute_streak(cached_history),
             "source": "cached",
         }
 
@@ -138,10 +137,9 @@ def get_forward_estimates(ticker: str) -> dict | None:
     ticker = ticker.upper().strip()
 
     # ── L1: in-memory ──────────────────────────────────────────
-    now = time.time()
     cached = _fwd_cache.get(ticker)
-    if cached and (now - cached[0]) < _FWD_TTL:
-        return cached[1]
+    if cached is not None:
+        return cached
 
     # ── L2: Supabase cold storage ──────────────────────────────
     from filings import supabase_cache
@@ -235,19 +233,13 @@ def _db_rows_to_estimates(db_rows: list[dict]) -> dict:
 
 
 def _update_l1(ticker: str, rows: list[dict]) -> None:
-    """Update L1 in-memory history cache, evicting oldest if full."""
-    if len(_history_cache) >= _MAX_CACHE:
-        oldest = min(_history_cache, key=lambda k: _history_cache[k][0])
-        _history_cache.pop(oldest, None)
-    _history_cache[ticker] = (time.time(), rows)
+    """Update L1 in-memory history cache."""
+    _history_cache.set(ticker, rows)
 
 
 def _update_fwd_l1(ticker: str, data: dict) -> None:
-    """Update L1 in-memory forward-estimates cache, evicting oldest if full."""
-    if len(_fwd_cache) >= _MAX_CACHE:
-        oldest = min(_fwd_cache, key=lambda k: _fwd_cache[k][0])
-        _fwd_cache.pop(oldest, None)
-    _fwd_cache[ticker] = (time.time(), data)
+    """Update L1 in-memory forward-estimates cache."""
+    _fwd_cache.set(ticker, data)
 
 
 def _is_db_fresh(row: dict, field: str, ttl: float) -> bool:
@@ -334,9 +326,9 @@ _finnhub_cal_cache: dict[str, dict[str, dict]] | None = None
 _finnhub_cal_ts: float = 0
 _FINNHUB_CAL_TTL = 21_600  # 6 hours
 
-_finnhub_raw_cache: dict[str, tuple[float, list[dict]]] = {}
 _FINNHUB_RAW_TTL = 3600  # 1 hour
 _FINNHUB_RAW_MAX_CACHE = 50
+_finnhub_raw_cache = _TTLCache(ttl=_FINNHUB_RAW_TTL, max_size=_FINNHUB_RAW_MAX_CACHE)
 
 
 def fetch_finnhub_calendar_raw(start: str, end: str) -> list[dict]:
@@ -347,8 +339,8 @@ def fetch_finnhub_calendar_raw(start: str, end: str) -> list[dict]:
     """
     cache_key = f"{start}:{end}"
     cached = _finnhub_raw_cache.get(cache_key)
-    if cached and (time.time() - cached[0]) < _FINNHUB_RAW_TTL:
-        return cached[1]
+    if cached is not None:
+        return cached
 
     key = os.environ.get("FINNHUB_API_KEY", "").strip()
     if not key:
@@ -363,10 +355,7 @@ def fetch_finnhub_calendar_raw(start: str, end: str) -> list[dict]:
         r.raise_for_status()
         entries = r.json().get("earningsCalendar", [])
 
-        if len(_finnhub_raw_cache) >= _FINNHUB_RAW_MAX_CACHE:
-            oldest = min(_finnhub_raw_cache, key=lambda k: _finnhub_raw_cache[k][0])
-            _finnhub_raw_cache.pop(oldest, None)
-        _finnhub_raw_cache[cache_key] = (time.time(), entries)
+        _finnhub_raw_cache.set(cache_key, entries)
 
         logger.info(
             "Finnhub calendar raw: %d entries for %s to %s",

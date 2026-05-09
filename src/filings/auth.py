@@ -41,10 +41,9 @@ _jwks_fetched_at: float = 0
 _JWKS_TTL = 3600  # 1 hour
 
 # ── Profile cache (avoid Supabase HTTP round-trip on every request) ──
-_profile_lock = threading.Lock()
-_profile_cache: dict[str, tuple[float, dict | None]] = {}
+from filings.caching import TTLCache as _TTLCache, MISS as _MISS
 _PROFILE_TTL = 60  # seconds
-_MAX_PROFILE_CACHE = 200  # LRU eviction threshold
+_profile_cache = _TTLCache(ttl=_PROFILE_TTL, max_size=200)
 
 
 # ── JWKS helpers ────────────────────────────────────────────────────
@@ -142,14 +141,10 @@ def get_profile(user_id: str) -> dict | None:
     Returns ``None`` when Supabase is unavailable or the profile
     doesn't exist.
     """
-    now = time.time()
-
     # ── L1: check in-memory cache ──
-    with _profile_lock:
-        if user_id in _profile_cache:
-            ts, data = _profile_cache[user_id]
-            if now - ts < _PROFILE_TTL:
-                return data
+    cached = _profile_cache.get(user_id, _MISS)
+    if cached is not _MISS:
+        return cached  # may be None — negative-cached profile
 
     # ── Cache miss: query Supabase ──
     try:
@@ -170,17 +165,7 @@ def get_profile(user_id: str) -> dict | None:
         logger.debug("Profile fetch failed for %s: %s", user_id, exc)
         profile = None
 
-    # ── Store in cache (with LRU eviction) ──
-    with _profile_lock:
-        _profile_cache[user_id] = (now, profile)
-        if len(_profile_cache) > _MAX_PROFILE_CACHE:
-            sorted_keys = sorted(
-                _profile_cache,
-                key=lambda k: _profile_cache[k][0],
-            )
-            for k in sorted_keys[: len(_profile_cache) - _MAX_PROFILE_CACHE]:
-                del _profile_cache[k]
-
+    _profile_cache.set(user_id, profile)
     return profile
 
 

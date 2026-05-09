@@ -1449,11 +1449,11 @@ def build_stock_history(
 
 # ── yfinance info cache (single fetch per ticker, 1-hour TTL) ──
 import time as _time
-import threading as _threading
+from filings.caching import TTLCache as _TTLCache
 
-_yf_info_cache: dict[str, tuple[float, dict]] = {}
-_yf_info_lock = _threading.Lock()
 _YF_INFO_TTL = 3600  # 1 hour
+# Bounded per-ticker info cache; ~5000 tickers × ~2KB each cap ≈ 10MB.
+_yf_info_cache = _TTLCache(ttl=_YF_INFO_TTL, max_size=5_000)
 
 
 def get_yfinance_info(ticker: str) -> dict:
@@ -1463,11 +1463,9 @@ def get_yfinance_info(ticker: str) -> dict:
     All modules should import this instead of making independent yfinance calls
     to avoid redundant HTTP requests for the same ticker.
     """
-    now = _time.monotonic()
-    with _yf_info_lock:
-        cached = _yf_info_cache.get(ticker)
-        if cached and now - cached[0] < _YF_INFO_TTL:
-            return cached[1]
+    cached = _yf_info_cache.get(ticker)
+    if cached is not None:
+        return cached
 
     try:
         import yfinance as yf
@@ -1500,11 +1498,12 @@ def get_yfinance_info(ticker: str) -> dict:
     except Exception:
         pass  # Tiingo overlay is best-effort
 
-    with _yf_info_lock:
-        # Only cache successful results for the full TTL;
-        # cache empty/failed results for just 60s to allow quick retry.
-        ttl_offset = 0 if info else (_YF_INFO_TTL - 60)
-        _yf_info_cache[ticker] = (now - ttl_offset, info)
+    # Only cache successful results for the full TTL; failures get a 60s
+    # short-circuit by seeding the timestamp near expiry.
+    if info:
+        _yf_info_cache.set(ticker, info)
+    else:
+        _yf_info_cache.seed(ticker, info, _time.time() - (_YF_INFO_TTL - 60))
     return info
 
 

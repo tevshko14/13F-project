@@ -558,83 +558,23 @@
   </section>{# end Flow pane #}
 
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  {# ━━━━━━━━━━━━━━━━━━━━━ HEATMAP SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━ HEATMAP SUBTAB (lazy-loaded) ━━━━━━━━━━━━━━━━━━━ #}
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <section class="pp-home-tab-pane" data-tab-pane="Heatmap">
-    {% call panel() %}
-      {% call panel_head("Market heatmap", sub="today") %}
-        <div class="pp-segment pp-segment-mono" id="pp-heatmap-mode" role="tablist">
-          <span class="pp-segment-opt is-active" data-heatmap-mode="Companies" role="tab">Companies</span>
-          <span class="pp-segment-opt"             data-heatmap-mode="Sectors"   role="tab">Sectors</span>
-        </div>
-      {% endcall %}
-      <div class="pp-home-heatmap-body">
-        {# ── Companies grid (default visible) ── #}
-        <div class="pp-home-heatmap-grid pp-home-heatmap-grid-companies is-active"
-             data-heatmap-pane="Companies">
-          {% for c in heatmap_companies %}
-            <div class="pp-home-heatmap-tile{% if c.is_large %} is-large{% endif %}{% if c.tile_dark %} is-dark{% endif %}"
-                 style="background: {{ c.tile_bg }};
-                        grid-column: span {{ c.span_col }};
-                        grid-row: span {{ c.span_row }};">
-              <span class="pp-mono pp-home-heatmap-tk">{{ c.ticker }}</span>
-              <div>
-                <span class="pp-mono pp-home-heatmap-pct">
-                  {%- if c.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(c.pct * 100) }}%
-                </span>
-                {% if c.show_mcap %}
-                  <span class="pp-mono pp-home-heatmap-mcap">{{ c.mcap }}</span>
-                {% endif %}
-              </div>
-            </div>
-          {% endfor %}
-        </div>
-        {# ── Sectors grid ── #}
-        <div class="pp-home-heatmap-grid pp-home-heatmap-grid-sectors"
-             data-heatmap-pane="Sectors">
-          {% for s in heatmap_sectors %}
-            <div class="pp-home-heatmap-tile pp-home-heatmap-sector{% if s.tile_dark %} is-dark{% endif %}"
-                 style="background: {{ s.tile_bg }};
-                        grid-column: span {{ s.span_col }};">
-              <div class="pp-home-heatmap-sector-name">{{ s.name }}</div>
-              <span class="pp-mono pp-home-heatmap-sector-pct">
-                {%- if s.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(s.pct * 100) }}%
-              </span>
-              <span class="pp-mono pp-home-heatmap-sector-mcap">Mkt cap {{ s.mcap }}</span>
-            </div>
-          {% endfor %}
-        </div>
-      </div>
-    {% endcall %}
+  <section class="pp-home-tab-pane" data-tab-pane="Heatmap"
+           data-pane-fetch="/_v2/api/home/heatmap">
+    <div class="pp-page-placeholder pp-home-lazy-stub" data-pane-stub>
+      <div class="pp-page-placeholder-sub">Loading heatmap…</div>
+    </div>
   </section>{# end Heatmap pane #}
 
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  {# ━━━━━━━━━━━━━━━━━━━━━ ACTIVITY SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━━ ACTIVITY SUBTAB (lazy-loaded) ━━━━━━━━━━━━━━━━━━ #}
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <section class="pp-home-tab-pane" data-tab-pane="Activity">
-    {% call panel() %}
-      {% call panel_head("Live activity", sub="real-time · last 60 minutes") %}
-        <span class="pp-mono pp-home-activity-live">● LIVE</span>
-      {% endcall %}
-      {% for f in activity_feed %}
-        <div class="pp-home-activity-row pp-home-activity-cat-{{ f.cat }}"
-             {% if f.href %}data-row-href="{{ f.href }}"
-                          tabindex="0" role="link"
-                          aria-label="{{ f.text }}"{% endif %}>
-          <span class="pp-mono pp-home-activity-ago">{{ f.ago }} ago</span>
-          <span class="pp-mono pp-home-activity-src">{{ f.src }}</span>
-          <span class="pp-home-activity-dot"></span>
-          <div class="pp-home-activity-text">
-            {%- if f.ticker -%}
-              <span class="pp-mono pp-home-activity-tkr">${{ f.ticker }}</span>
-            {%- endif %}
-            {{ f.text }}
-          </div>
-          {{ tag("notif-" + f.cat, text=f.pill) }}
-        </div>
-      {% endfor %}
-      <a class="pp-home-activity-footer" href="/_v2/notifications">View all activity →</a>
-    {% endcall %}
+  <section class="pp-home-tab-pane" data-tab-pane="Activity"
+           data-pane-fetch="/_v2/api/home/activity">
+    <div class="pp-page-placeholder pp-home-lazy-stub" data-pane-stub>
+      <div class="pp-page-placeholder-sub">Loading activity…</div>
+    </div>
   </section>{# end Activity pane #}
 
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
@@ -784,38 +724,12 @@
   </section>{# end News pane #}
 
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  {# ━━━━━━━━━━━━━━━━━━━━━━ CALENDAR SUBTAB ━━━━━━━━━━━━━━━━━━━━━━━━━ #}
+  {# ━━━━━━━━━━━━━━ CALENDAR SUBTAB (lazy-loaded) ━━━━━━━━━━━━━━━━━━━ #}
   {# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ #}
-  <section class="pp-home-tab-pane" data-tab-pane="Calendar">
-    <div class="pp-home-cal-grid">
-      {% call panel() %}
-        {{ panel_head("Earnings", sub="next 30d · watchlist") }}
-        {% for e in cal_earnings %}
-          <div class="pp-home-cal-earn-row">
-            <span class="pp-mono pp-home-cal-date">{{ e.date | dt_long }}</span>
-            <span class="pp-mono pp-home-cal-tkr">${{ e.ticker }}</span>
-            <span class="pp-mono pp-home-cal-when">{{ e.when }}</span>
-            <span class="pp-mono pp-home-cal-eps">{{ e.eps }}</span>
-            <span class="pp-mono pp-home-cal-iv">{{ e.iv }}</span>
-          </div>
-        {% endfor %}
-      {% endcall %}
-
-      {% call panel() %}
-        {{ panel_head("Macro", sub="next 60d") }}
-        {% for m in cal_macro %}
-          <div class="pp-home-cal-macro-row">
-            <span class="pp-mono pp-home-cal-date">{{ m.date | dt_long }}</span>
-            <span class="pp-home-cal-impact-dot pp-home-cal-impact-{{ m.impact }}"></span>
-            <div class="pp-home-cal-macro-cell">
-              <div class="pp-home-cal-macro-label">{{ m.label }}</div>
-              <span class="pp-mono pp-home-cal-macro-time">{{ m.time }}</span>
-            </div>
-            <span class="pp-mono pp-home-cal-macro-val">{{ m.val }}</span>
-            <span class="pp-mono pp-home-cal-impact-tag">{{ m.impact }}</span>
-          </div>
-        {% endfor %}
-      {% endcall %}
+  <section class="pp-home-tab-pane" data-tab-pane="Calendar"
+           data-pane-fetch="/_v2/api/home/calendar">
+    <div class="pp-page-placeholder pp-home-lazy-stub" data-pane-stub>
+      <div class="pp-page-placeholder-sub">Loading calendar…</div>
     </div>
   </section>{# end Calendar pane #}
 
@@ -839,6 +753,29 @@
   var panes = document.querySelectorAll('.pp-home-tab-pane');
   if (!panes.length) return;
 
+  /* Lazy-load any pane that carries `data-pane-fetch="..."`.  The pane
+     ships an empty stub server-side; first activation fetches the
+     partial HTML once and replaces the stub.  Saves ~5 thread slots
+     and ~95KB of HTML render off the initial home-page response. */
+  function loadPane(pane) {
+    var url = pane.getAttribute('data-pane-fetch');
+    if (!url || pane.dataset.loaded) return;
+    pane.dataset.loaded = '1';
+    fetch(url, {credentials: 'same-origin'})
+      .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+      .then(function (html) {
+        pane.innerHTML = html;
+        // Re-bind heatmap mode toggle if this is the heatmap pane.
+        if (pane.getAttribute('data-tab-pane') === 'Heatmap' &&
+            window.ppRebindHeatmapMode) window.ppRebindHeatmapMode();
+      })
+      .catch(function () {
+        pane.dataset.loaded = '';
+        var stub = pane.querySelector('[data-pane-stub] .pp-page-placeholder-sub');
+        if (stub) stub.textContent = 'Failed to load — click the tab again to retry.';
+      });
+  }
+
   function activate(name) {
     seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
       var match = o.getAttribute('data-value') === name;
@@ -846,7 +783,9 @@
       o.setAttribute('aria-selected', match ? 'true' : 'false');
     });
     panes.forEach(function (p) {
-      p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
+      var active = p.getAttribute('data-tab-pane') === name;
+      p.classList.toggle('is-active', active);
+      if (active && p.querySelector('[data-pane-stub]')) loadPane(p);
     });
   }
 
@@ -861,23 +800,29 @@
 
 {# ━━━━━━━━━━ HEATMAP MODE TOGGLE ━━━━━━━━━━
    Same pattern as the subtab switcher but scoped to the Companies / Sectors
-   pair inside the Heatmap pane. #}
+   pair inside the Heatmap pane.  Heatmap is lazy-loaded, so the binding
+   is wrapped in a re-binder fn the lazy-load callback can invoke. #}
 <script>
 (function () {
-  var seg = document.getElementById('pp-heatmap-mode');
-  if (!seg) return;
-  var grids = document.querySelectorAll('[data-heatmap-pane]');
-  seg.addEventListener('click', function (ev) {
-    var opt = ev.target.closest('.pp-segment-opt');
-    if (!opt) return;
-    var mode = opt.getAttribute('data-heatmap-mode');
-    seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
-      o.classList.toggle('is-active', o === opt);
+  function bind() {
+    var seg = document.getElementById('pp-heatmap-mode');
+    if (!seg || seg.dataset.heatmapBound) return;
+    seg.dataset.heatmapBound = '1';
+    var grids = document.querySelectorAll('[data-heatmap-pane]');
+    seg.addEventListener('click', function (ev) {
+      var opt = ev.target.closest('.pp-segment-opt');
+      if (!opt) return;
+      var mode = opt.getAttribute('data-heatmap-mode');
+      seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
+        o.classList.toggle('is-active', o === opt);
+      });
+      grids.forEach(function (g) {
+        g.classList.toggle('is-active', g.getAttribute('data-heatmap-pane') === mode);
+      });
     });
-    grids.forEach(function (g) {
-      g.classList.toggle('is-active', g.getAttribute('data-heatmap-pane') === mode);
-    });
-  });
+  }
+  window.ppRebindHeatmapMode = bind;
+  bind();  // No-op if heatmap isn't in the DOM yet (lazy-loaded).
 })();
 </script>
 

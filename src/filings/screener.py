@@ -167,9 +167,9 @@ def _suggest_peers(
 
 
 # ── Peer valuation L1 cache (avoids re-fetching on every Compare click) ──
-_peer_lock = threading.Lock()
-_peer_cache: dict[str, tuple[float, dict]] = {}
+from filings.caching import TTLCache as _TTLCache
 _PEER_TTL = 3600  # 1 hour
+_peer_cache = _TTLCache(ttl=_PEER_TTL, max_size=2_000)
 
 
 def _yf_info_direct(ticker: str) -> dict:
@@ -215,10 +215,9 @@ def get_peer_valuation(ticker: str) -> dict | None:
     ticker = ticker.upper()
 
     # ── L1 cache check ───────────────────────────────────────────────
-    with _peer_lock:
-        cached = _peer_cache.get(ticker)
-        if cached and time.time() - cached[0] < _PEER_TTL:
-            return cached[1]
+    cached = _peer_cache.get(ticker)
+    if cached is not None:
+        return cached
 
     # --- 1. Direct yfinance with fresh session (avoids shared rate-limit)
     try:
@@ -303,8 +302,7 @@ def get_peer_valuation(ticker: str) -> dict | None:
 
     # Only cache if we got meaningful data (at least a price)
     if current_price:
-        with _peer_lock:
-            _peer_cache[ticker] = (time.time(), result)
+        _peer_cache.set(ticker, result)
 
     return result
 
