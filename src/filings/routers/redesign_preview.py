@@ -3844,8 +3844,10 @@ def _funds_index_rows(request: Request) -> list[dict]:
         cached = fund_cache.get(cik)
         if not cached:
             continue
+        # `top_holdings` was dropped from the in-memory cache slim; read
+        # the same prefix off `all_holdings` (value-sorted desc).
         top_tickers = [
-            h.get("ticker") for h in (cached.get("top_holdings") or [])[:5]
+            h.get("ticker") for h in (cached.get("all_holdings") or [])[:5]
             if h.get("ticker")
         ]
         rows.append({

@@ -31,6 +31,23 @@ _CLERK_JWKS_URL: str = (
     f"https://{CLERK_DOMAIN}/.well-known/jwks.json" if CLERK_DOMAIN else ""
 )
 
+# Local dev bypass -- when set, mock user/profile is injected on every
+# request that has no real Clerk session.  Lets you work on
+# auth-gated pages without signing in.  NEVER set in production.
+LOCAL_DEV_USER: str = os.environ.get("LOCAL_DEV_USER", "").strip()
+
+_DEV_USER_CLAIMS = {
+    "sub": "dev_user_local",
+    "email": "dev@localhost",
+    "name": "Dev User",
+}
+_DEV_USER_PROFILE = {
+    "id": "dev_user_local",
+    "email": "dev@localhost",
+    "display_name": "Dev User",
+    "user_role": "admin",
+}
+
 # Paths where we skip JWT decoding entirely (performance)
 _SKIP_PREFIXES = ("/health", "/static", "/favicon.ico")
 
@@ -202,13 +219,20 @@ def _build_auth_middleware():
                     request.cookies.get("__session")
                     or _extract_bearer(request)
                 )
-                if token:
+                if token and CLERK_DOMAIN:
                     claims = decode_clerk_token(token)
                     if claims:
                         request.state.user = claims
                         request.state.profile = await asyncio.to_thread(
                             get_profile, claims.get("sub", "")
                         )
+
+                # Local dev bypass -- inject mock user when no real
+                # session resolved AND the env var is set.  NEVER on
+                # in prod (env var is unset there).
+                if request.state.user is None and LOCAL_DEV_USER:
+                    request.state.user = _DEV_USER_CLAIMS
+                    request.state.profile = _DEV_USER_PROFILE
 
             return await call_next(request)
 

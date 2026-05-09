@@ -949,8 +949,12 @@ templates.env.filters["fmt_num"] = _fmt_num
 
 
 def _top_tickers(cached: dict, n: int = 5) -> list[str]:
-    """Extract up to *n* valid ticker symbols from a fund's cached top holdings."""
-    return [h["ticker"] for h in cached.get("top_holdings", [])[:n] if h.get("ticker")]
+    """Extract up to *n* valid ticker symbols from a fund's cached top holdings.
+
+    Reads the first *n* entries of ``all_holdings`` (already value-sorted
+    desc, identical to the dropped ``top_holdings`` prefix).
+    """
+    return [h["ticker"] for h in cached.get("all_holdings", [])[:n] if h.get("ticker")]
 
 # Attach rate limiter
 if _has_limiter:
@@ -1224,11 +1228,18 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(TrailingSlashMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
-# Auth middleware (Clerk JWKS)
-if auth.CLERK_DOMAIN:
+# Auth middleware (Clerk JWKS) -- also runs when LOCAL_DEV_USER is set
+# so the mock user can be injected for local dev without Clerk config.
+if auth.CLERK_DOMAIN or auth.LOCAL_DEV_USER:
     AuthMiddleware = auth._build_auth_middleware()
     app.add_middleware(AuthMiddleware)
-    logger.info("Auth middleware enabled (Clerk JWKS: %s)", auth.CLERK_DOMAIN)
+    if auth.CLERK_DOMAIN:
+        logger.info("Auth middleware enabled (Clerk JWKS: %s)", auth.CLERK_DOMAIN)
+    if auth.LOCAL_DEV_USER:
+        logger.warning(
+            "⚠️  LOCAL_DEV_USER active -- mock user injected for local dev. "
+            "DO NOT SET IN PRODUCTION."
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -17,12 +17,134 @@ timestamp, allowing selective refresh of only stale funds.
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from filings import supabase_cache
 
 logger = logging.getLogger(__name__)
+
+
+# ── In-memory slimming for app.state.fund_cache ──────────────────────
+# Each cached fund holds an `all_holdings` list (50-2000+ items, each a
+# dict with ~6 fields) plus a `quarterly_changes` history.  At 85 funds
+# the in-memory cache approaches ~15-20 MB.  Two cheap reductions:
+#
+#   1. Drop the redundant `top_holdings` field — it's literally the
+#      first 10 entries of `all_holdings` (which is value-sorted desc).
+#      Saves ~10 dicts × 250B/dict × 85 funds ≈ ~200 KB.
+#
+#   2. ``sys.intern`` recurring strings (issuer / ticker / cusip /
+#      status).  The same issuer string repeats across 50+ funds
+#      (Apple, Microsoft, Berkshire holdings, etc).  Interning makes
+#      every duplicate share one Python str object — biggest win since
+#      strings dominate the per-holding footprint.
+#
+# Slimming runs only at the load/refresh boundary so the on-disk +
+# Supabase representations are unchanged.  Consumers of `top_holdings`
+# read `all_holdings[:N]` instead.
+
+# Status strings are a closed set across the change pipeline; pre-intern
+# so every reference is a single Python object.
+_INTERNED_STATUSES: dict[str, str] = {
+    s: sys.intern(s) for s in ("NEW BUY", "ADD", "REDUCE", "SOLD", "UNCHANGED")
+}
+
+
+def _intern_str(value):
+    """``sys.intern`` if value is str; otherwise pass through."""
+    if isinstance(value, str):
+        return sys.intern(value)
+    return value
+
+
+def _slim_holding(h: dict) -> dict:
+    """Rebuild a single holding dict with only the fields downstream uses.
+
+    Interns ``issuer`` / ``ticker`` / ``cusip`` -- repeated heavily across
+    funds (same companies appear in many portfolios).
+    """
+    return {
+        "issuer": _intern_str(h.get("issuer", "")),
+        "ticker": _intern_str(h.get("ticker", "")),
+        "cusip":  _intern_str(h.get("cusip", "")),
+        "value":  h.get("value", 0),
+        "shares": h.get("shares", 0),
+        "pct":    h.get("pct", 0),
+    }
+
+
+def _slim_change(c: dict) -> dict:
+    """Rebuild a single quarterly change dict (full schema with shares)."""
+    return {
+        "issuer":          _intern_str(c.get("issuer", "")),
+        "cusip":           _intern_str(c.get("cusip", "")),
+        "status":          _INTERNED_STATUSES.get(c.get("status"), c.get("status")),
+        "share_change":    c.get("share_change", 0),
+        "current_value":   c.get("current_value", 0),
+        "current_shares":  c.get("current_shares", 0),
+        "previous_shares": c.get("previous_shares", 0),
+    }
+
+
+def _slim_flat_change(c: dict) -> dict:
+    """Rebuild a flat ``changes`` dict (no current/previous shares fields)."""
+    return {
+        "issuer":        _intern_str(c.get("issuer", "")),
+        "cusip":         _intern_str(c.get("cusip", "")),
+        "status":        _INTERNED_STATUSES.get(c.get("status"), c.get("status")),
+        "share_change":  c.get("share_change", 0),
+        "current_value": c.get("current_value", 0),
+    }
+
+
+def _slim_fund_data(fd: dict) -> dict:
+    """Return a memory-slim copy of one fund cache entry.
+
+    See module docstring above for rationale.  Drops the redundant
+    ``top_holdings`` field; interns recurring strings; rebuilds nested
+    dicts with minimal key sets.  Pass-through if input isn't a dict.
+    """
+    if not isinstance(fd, dict):
+        return fd
+
+    slim: dict = {
+        "name":            _intern_str(fd.get("name", "")),
+        "cik":             _intern_str(fd.get("cik", "")),
+        "report_period":   _intern_str(fd.get("report_period", "")),
+        "filing_date":     _intern_str(fd.get("filing_date", "")),
+        "total_value":     fd.get("total_value", 0),
+        "total_holdings":  fd.get("total_holdings", 0),
+        "all_holdings":    [_slim_holding(h) for h in (fd.get("all_holdings") or [])],
+        "changes":         [_slim_flat_change(c) for c in (fd.get("changes") or [])],
+    }
+
+    qchanges = fd.get("quarterly_changes") or []
+    slim["quarterly_changes"] = [
+        {
+            "period":        _intern_str(q.get("period", "")),
+            "report_period": _intern_str(q.get("report_period", "")),
+            "filing_date":   _intern_str(q.get("filing_date", "")),
+            "changes":       [_slim_change(c) for c in (q.get("changes") or [])],
+        }
+        for q in qchanges
+        if isinstance(q, dict)
+    ]
+
+    if "_last_refreshed" in fd:
+        slim["_last_refreshed"] = fd["_last_refreshed"]
+
+    # NOTE: `top_holdings` intentionally dropped -- callers read
+    # `all_holdings[:N]` (already value-sorted desc, identical prefix).
+    return slim
+
+
+def _slim_fund_cache(cache: dict) -> dict:
+    """Slim every entry in a ``{cik: fund_data}`` dict.  Idempotent."""
+    if not isinstance(cache, dict):
+        return cache
+    return {cik: _slim_fund_data(fd) for cik, fd in cache.items()}
 
 CACHE_DIR = Path(os.environ.get("CACHE_DIR", Path.home() / ".13f-cache"))
 CACHE_FILE = CACHE_DIR / "fund_data.json"
@@ -62,13 +184,16 @@ def load_cache() -> dict:
 
     The cache is a JSON dict keyed by CIK. Each value contains the fund's
     data plus a `_last_refreshed` ISO timestamp for per-fund staleness.
+
+    Entries are slimmed at hydration time (interns recurring strings,
+    drops redundant ``top_holdings``); see ``_slim_fund_data`` above.
     """
     if not CACHE_FILE.exists():
         return {}
     try:
         data = json.loads(CACHE_FILE.read_text())
         logger.info("Loaded cache with %d funds from %s", len(data), CACHE_FILE)
-        return data
+        return _slim_fund_cache(data)
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Cache load failed: %s — starting fresh", e)
         return {}
@@ -161,7 +286,7 @@ def load_cache_from_supabase() -> dict:
             continue
         data, _is_fresh = supabase_cache.get_cached_with_stale(key)
         if isinstance(data, dict):
-            result[cik] = data
+            result[cik] = _slim_fund_data(data)
 
     logger.info(
         "Loaded %d funds (%d from Supabase, %d from local cache)",
@@ -202,7 +327,7 @@ def _load_cache_from_supabase_full() -> dict:
         if not isinstance(data, dict):
             continue
 
-        result[cik] = data
+        result[cik] = _slim_fund_data(data)
 
         # Determine freshness from created_at (approximates expires_at)
         created_at = row.get("created_at")
@@ -538,6 +663,9 @@ def refresh_single_fund(cik: str) -> dict | None:
                 )
 
         # ── Persist to Supabase L2 (non-fatal) ──
+        # Persist the *full* stamped payload to Supabase (preserves
+        # `top_holdings` etc. on the L2 side); slim only the in-memory
+        # copy that the caller installs into ``app.state.fund_cache``.
         try:
             supabase_cache.set_cached(
                 cache_key=f"13f:{cik}",
@@ -548,7 +676,7 @@ def refresh_single_fund(cik: str) -> dict | None:
         except Exception as sb_exc:
             logger.debug("Supabase write-through failed for CIK %s: %s", cik, sb_exc)
 
-        return stamped
+        return _slim_fund_data(stamped)
     except Exception as e:
         logger.warning("Failed to refresh CIK %s: %s — keeping stale data", cik, e)
         return None

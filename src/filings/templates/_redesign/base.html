@@ -24,6 +24,10 @@
   <meta name="robots" content="noindex,nofollow">
   <title>{% block title %}PaperPanda{% endblock %}</title>
 
+  {#- Favicon -- same set as v1 base.html. -#}
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+
   {#- Anti-FOUC: set theme before any CSS paints.
       Default is dark — only respect localStorage if the user has
       explicitly toggled to light.  System prefers-color-scheme is
