@@ -1517,6 +1517,14 @@ def get_yfinance_info(ticker: str) -> dict:
 
     Cached entries are slimmed to only the fields the app reads (see
     `_YF_INFO_KEEP_FIELDS`) so each entry is ~2-5KB instead of ~100KB.
+
+    Stale-fallback semantics: when yfinance returns nothing (rate-limited,
+    network blip, transient YFRateLimitError) we prefer a previously-cached
+    stale entry over an empty dict.  A 2h-old mcap / sector / employees blob
+    is vastly more useful to a stock-page render than em-dashes everywhere.
+    The Tiingo price overlay below keeps the price field current regardless
+    of the underlying source's age.  Stale fallbacks get a 60s short-circuit
+    (not the full TTL) so we re-attempt yfinance promptly once it recovers.
     """
     cached = _yf_info_cache.get(ticker)
     if cached is not None:
@@ -1530,6 +1538,16 @@ def get_yfinance_info(ticker: str) -> dict:
         info = _slim_yf_info(tk.info or {})
     except Exception:
         info = {}
+
+    # If yfinance came back empty, fall back to the stale cached entry
+    # (TTL expired but data still present in the LRU).  Copy so the Tiingo
+    # overlay below doesn't mutate the cached object in-place.
+    used_stale = False
+    if not info:
+        stale = _yf_info_cache.get_stale(ticker)
+        if stale:
+            info = dict(stale)
+            used_stale = True
 
     # Overlay Tiingo real-time price if available (more reliable than yfinance)
     try:
@@ -1553,9 +1571,13 @@ def get_yfinance_info(ticker: str) -> dict:
     except Exception:
         pass  # Tiingo overlay is best-effort
 
-    # Only cache successful results for the full TTL; failures get a 60s
-    # short-circuit by seeding the timestamp near expiry.
-    if info:
+    # Caching policy:
+    # - Fresh yfinance success → full TTL (1h).
+    # - Stale fallback → 60s short-circuit so we don't extend the
+    #   stale entry's life and so we re-try yfinance soon when it recovers.
+    # - Truly empty (no yfinance, no stale, no Tiingo) → 60s short-circuit
+    #   to avoid hammering yfinance for tickers it definitively lacks data for.
+    if info and not used_stale:
         _yf_info_cache.set(ticker, info)
     else:
         _yf_info_cache.seed(ticker, info, _time.time() - (_YF_INFO_TTL - 60))
