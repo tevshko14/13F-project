@@ -686,6 +686,10 @@ async def lifespan(app: FastAPI):
         name="thread watchdog", startup_delay=60,
         interval=_WATCHDOG_INTERVAL_S, body=_run_thread_watchdog,
     ), "thread_watchdog")
+    if WATCHDOG_ALERT_URL:
+        logger.info("watchdog: alert webhook configured (will POST on SIGTERM)")
+    else:
+        logger.info("watchdog: no alert webhook (set WATCHDOG_ALERT_URL to enable)")
 
     yield
 
@@ -1775,6 +1779,48 @@ _WATCHDOG_INTERVAL_S = 30
 _DANGER_THREADS = 65         # ~14 over the ~46 baseline; leaves headroom
 _SUSTAIN_CHECKS = 6          # 6 × 30s = 3 min of sustained danger
 
+# Optional webhook fired right before the watchdog SIGTERMs the worker.
+# Discord webhook URLs (https://discord.com/api/webhooks/...) and Slack
+# incoming-webhook URLs (https://hooks.slack.com/services/...) both work;
+# the payload includes ``content`` (Discord) and ``text`` (Slack) so it
+# renders on either.  When unset, alerting is silent (logs still fire).
+WATCHDOG_ALERT_URL = os.environ.get("WATCHDOG_ALERT_URL", "").strip()
+
+
+async def _send_watchdog_alert(active: int) -> None:
+    """Best-effort POST to the alert webhook before forcing exit.
+
+    Async so the event loop isn't blocked.  Hard 5s timeout so a slow
+    webhook can't delay our SIGTERM (recovery is more important than
+    the alert landing).  Failures are logged and swallowed.
+    """
+    if not WATCHDOG_ALERT_URL:
+        return
+    try:
+        import psutil
+        proc = psutil.Process()
+        rss_mb = proc.memory_info().rss // (1024 * 1024)
+        uptime_min = (time_module.time() - proc.create_time()) / 60
+    except Exception:
+        rss_mb = -1
+        uptime_min = -1.0
+    msg = (
+        ":rotating_light: **paperpanda.io watchdog: thread leak detected**\n"
+        f"• active threads: **{active}** (danger >= {_DANGER_THREADS})\n"
+        f"• sustained: {_SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60} min\n"
+        f"• rss: {rss_mb} MB, uptime: {uptime_min:.1f} min, pid: {os.getpid()}\n"
+        f"• action: SIGTERM imminent — gunicorn will recycle this worker\n"
+        f"• log search: `watchdog: active_threads=`"
+    )
+    payload = {"content": msg, "text": msg}
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(WATCHDOG_ALERT_URL, json=payload)
+        logger.info("watchdog: alert sent to webhook")
+    except Exception as exc:
+        logger.warning("watchdog: alert POST failed: %s", exc)
+
 
 async def _run_thread_watchdog() -> None:
     """One iteration of the stuck-thread watchdog.
@@ -1815,6 +1861,12 @@ async def _run_thread_watchdog() -> None:
             active, _DANGER_THREADS,
             _SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60,
         )
+        # Fire-and-forget alert before SIGTERM.  Capped at 5s so a slow
+        # webhook can't delay recovery; if it fails we still SIGTERM.
+        try:
+            await _send_watchdog_alert(active)
+        except Exception as exc:
+            logger.warning("watchdog: alert path threw: %s", exc)
         try:
             import os as _os
             import signal as _signal
