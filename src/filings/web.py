@@ -2138,18 +2138,66 @@ async def admin_memprof(request: Request):
     with_types = (qp.get("types") or "1").strip() != "0" and not lite
     with_state_sizes = (qp.get("sizes") or "1").strip() != "0" and not lite
 
+    # Try each component in isolation so a single broken piece can't
+    # blow up the whole snapshot.  Returns whatever it could collect
+    # plus an "errors" dict naming the components that failed.
+    import traceback as _tb
     from filings import memprof as _memprof
+
+    def _safe(name, fn, *args, **kwargs):
+        try:
+            return fn(*args, **kwargs), None
+        except Exception as exc:
+            return None, {"name": name, "error": repr(exc),
+                          "traceback": _tb.format_exc().splitlines()[-6:]}
+
+    def _collect():
+        out: dict = {"ts": time.time(), "errors": []}
+        proc, err = _safe("process", _memprof.process_metrics)
+        if err: out["errors"].append(err)
+        else:   out["process"] = proc
+        caches, err = _safe("caches", _memprof.cache_metrics)
+        if err: out["errors"].append(err)
+        else:   out["caches"] = caches
+        if with_state_sizes:
+            state, err = _safe("app_state", _memprof.app_state_metrics, app.state)
+            if err: out["errors"].append(err)
+            else:   out["app_state"] = state
+        else:
+            # Cheap variant — already inlined in memprof.snapshot but
+            # duplicated here for full isolation.
+            rows = []
+            try:
+                for key in _memprof._STATE_KEYS:
+                    if not hasattr(app.state, key):
+                        continue
+                    val = getattr(app.state, key)
+                    entry: dict = {"name": f"app.state.{key}"}
+                    if isinstance(val, dict):
+                        entry["dict_len"] = len(val)
+                    elif isinstance(val, (list, tuple)):
+                        entry["seq_len"] = len(val)
+                    rows.append(entry)
+            except Exception as exc:
+                out["errors"].append({"name": "app_state_lite", "error": repr(exc)})
+            out["app_state"] = rows
+        if with_types:
+            tc, err = _safe("type_counts", _memprof.type_counts, 30)
+            if err: out["errors"].append(err)
+            else:   out["type_counts"] = tc
+        return out
+
     try:
-        # Run in a thread so gc.get_objects() / _approx_size walks
-        # don't block the asyncio event loop.
-        payload = await asyncio.to_thread(
-            _memprof.snapshot,
-            app.state,
-            with_types=with_types,
-            with_state_sizes=with_state_sizes,
-        )
+        payload = await asyncio.to_thread(_collect)
     except Exception as exc:
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        # Last-resort: return JSON directly so the global /api/* HTML
+        # error handler doesn't replace our error message.
+        return Response(
+            content=json_module.dumps({"error": repr(exc),
+                                       "traceback": _tb.format_exc().splitlines()[-10:]}),
+            media_type="application/json",
+            status_code=500,
+        )
     return JSONResponse(payload)
 
 
