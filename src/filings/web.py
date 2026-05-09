@@ -11,6 +11,19 @@ import os as _os
 # Default is 9 req/sec; 5 is conservative and avoids 429 errors.
 _os.environ.setdefault("EDGAR_RATE_LIMIT_PER_SEC", "5")
 
+# ── Smaller thread stacks (must run before any thread is spawned) ──
+# Default is 8MB per thread on Linux glibc.  With ~70-100 worker +
+# ad-hoc threads in flight, that's ~600-800MB of RSS just in stacks.
+# Most of our threads do shallow I/O wait (httpx, supabase, yfinance);
+# 2MB is plenty.  Saves ~70 * 6MB ≈ 420MB at steady state.
+import threading as _threading
+try:
+    _threading.stack_size(2 * 1024 * 1024)  # 2 MB
+except (ValueError, RuntimeError) as _exc:
+    # Some platforms reject sub-default stack sizes; fall through with
+    # the platform default rather than failing startup.
+    pass
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import functools
@@ -657,6 +670,14 @@ async def lifespan(app: FastAPI):
         name="memprof poller", startup_delay=20,
         interval=_MEMPROF_POLL_INTERVAL, body=_run_memprof_log,
     ), "memprof_poller")
+
+    # gc.collect + glibc malloc_trim — every 5 min, force release of
+    # fragmented heap memory back to the OS.  Counters Python's habit
+    # of holding free arenas after request bursts.
+    _track(_periodic_task(
+        name="gc trim", startup_delay=120,
+        interval=_GC_TRIM_INTERVAL, body=_run_gc_trim,
+    ), "gc_trim")
 
     yield
 
@@ -1670,6 +1691,44 @@ async def _run_memprof_log() -> None:
         logger.info(_memprof.log_line(state))
     except Exception as exc:
         logger.debug("memprof poller failed: %s", exc)
+
+
+# ── Periodic GC + glibc heap trim ────────────────────────────────────
+# Python's pymalloc + glibc allocator both keep fragments around after
+# a burst (request fan-out, cache warm).  Forcing a `gc.collect()` and
+# then `malloc_trim(0)` every 5 min asks the kernel to take back free
+# arenas, dropping RSS without affecting correctness.
+
+_GC_TRIM_INTERVAL = 5 * 60
+
+
+async def _run_gc_trim() -> None:
+    """One iteration of the gc/malloc_trim task."""
+    import gc
+    rss_before = -1
+    rss_after = -1
+    try:
+        import psutil
+        rss_before = psutil.Process().memory_info().rss // (1024 * 1024)
+    except Exception:
+        pass
+    collected = await asyncio.to_thread(gc.collect)
+    trimmed = -1
+    try:
+        import ctypes
+        libc = ctypes.CDLL("libc.so.6")
+        trimmed = libc.malloc_trim(0)
+    except (OSError, AttributeError, FileNotFoundError):
+        pass  # non-glibc platform (macOS, alpine musl, etc.)
+    try:
+        import psutil
+        rss_after = psutil.Process().memory_info().rss // (1024 * 1024)
+    except Exception:
+        pass
+    logger.info(
+        "gc_trim collected=%d malloc_trim=%d rss=%dMB->%dMB",
+        collected, trimmed, rss_before, rss_after,
+    )
 
 
 # ── /_v2/home L2 cache warmer ────────────────────────────────────────

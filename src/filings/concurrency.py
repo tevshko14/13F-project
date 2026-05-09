@@ -46,12 +46,13 @@ _heavy_concurrency_cfg = 0
 
 
 # Defaults sized for a Railway container with ~1-2 vCPU and ~512MB-2GB RAM.
-# Bump WORKER_THREADS if the default pool queues on lightweight work.
-# Bump HEAVY_THREADS for more parallel slow-API throughput.  Bump
-# HEAVY_CONCURRENCY only if upstreams can take the additional pressure.
-_DEFAULT_WORKER_THREADS = 32
-_DEFAULT_HEAVY_THREADS = 16
-_DEFAULT_HEAVY_CONCURRENCY = 12
+# Each thread carries a stack (web.py sets it to 2MB) so over-sizing the
+# pools translates directly into RSS.  16 / 12 / 8 is plenty for the
+# fan-out patterns observed in production; bump via env vars if any
+# specific page handler queues consistently on the default pool.
+_DEFAULT_WORKER_THREADS = 16
+_DEFAULT_HEAVY_THREADS = 12
+_DEFAULT_HEAVY_CONCURRENCY = 8
 
 
 def init_pools() -> None:
