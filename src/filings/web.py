@@ -1848,16 +1848,33 @@ async def _send_watchdog_alert(active: int) -> None:
         f"• action: <i>SIGTERM imminent — gunicorn will recycle this worker</i>\n"
         f"• log search: <code>watchdog: active_threads=</code>"
     )
-    # Discord/Slack — both consume plain markdown; their renderers
-    # ignore the field they don't support.
-    md_text = (
-        "🚨 **paperpanda.io watchdog: thread leak detected**\n"
-        f"• active threads: **{active}** (danger ≥ {_DANGER_THREADS})\n"
-        f"• sustained: {sustained_min} min\n"
-        f"• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {os.getpid()}\n"
-        f"• action: SIGTERM imminent — gunicorn will recycle this worker\n"
-        f"• log search: `watchdog: active_threads=`"
-    )
+
+    # Discord uses standard markdown (`**bold**`, `*italic*`).
+    # Slack uses its own "mrkdwn" (`*bold*`, `_italic_`).  They're
+    # incompatible: Slack renders `**bold**` as literal asterisks.
+    # Detect the destination and pick the right syntax.
+    is_slack = "hooks.slack.com" in WATCHDOG_ALERT_URL.lower()
+    if is_slack:
+        md_text = (
+            "🚨 *paperpanda.io watchdog: thread leak detected*\n"
+            f"• active threads: *{active}* (danger ≥ {_DANGER_THREADS})\n"
+            f"• sustained: {sustained_min} min\n"
+            f"• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {os.getpid()}\n"
+            f"• action: _SIGTERM imminent — gunicorn will recycle this worker_\n"
+            f"• log search: `watchdog: active_threads=`"
+        )
+        webhook_payload = {"text": md_text}
+    else:
+        md_text = (
+            "🚨 **paperpanda.io watchdog: thread leak detected**\n"
+            f"• active threads: **{active}** (danger ≥ {_DANGER_THREADS})\n"
+            f"• sustained: {sustained_min} min\n"
+            f"• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {os.getpid()}\n"
+            f"• action: *SIGTERM imminent — gunicorn will recycle this worker*\n"
+            f"• log search: `watchdog: active_threads=`"
+        )
+        # Discord webhooks read `content`; generic webhooks may read `text`.
+        webhook_payload = {"content": md_text, "text": md_text}
 
     import httpx
     tasks = []
@@ -1871,8 +1888,7 @@ async def _send_watchdog_alert(active: int) -> None:
         }
         tasks.append(("telegram", tg_url, tg_payload))
     if WATCHDOG_ALERT_URL:
-        tasks.append(("webhook", WATCHDOG_ALERT_URL,
-                      {"content": md_text, "text": md_text}))
+        tasks.append(("webhook", WATCHDOG_ALERT_URL, webhook_payload))
 
     async def _post(name: str, url: str, payload: dict) -> None:
         try:
