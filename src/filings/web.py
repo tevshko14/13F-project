@@ -650,6 +650,14 @@ async def lifespan(app: FastAPI):
             interval=_REDESIGN_L2_WARMER_INTERVAL, body=_run_redesign_l2_warm,
         ), "redesign_l2_warmer")
 
+    # Memory profile poller — logs RSS / threads / cache sizes every 5 min
+    # to stdout so Railway log search can chart leaks over time.  Zero
+    # external deps; on-demand deep dive via /api/admin/memprof.
+    _track(_periodic_task(
+        name="memprof poller", startup_delay=20,
+        interval=_MEMPROF_POLL_INTERVAL, body=_run_memprof_log,
+    ), "memprof_poller")
+
     yield
 
     # ── Shutdown cleanup ──────────────────────────────────────────────
@@ -1646,6 +1654,24 @@ async def _run_feature_announcement_scan() -> None:
             logger.info("Synced %d feature release notifications", n)
 
 
+# ── Memory profile background poller ─────────────────────────────────
+
+_MEMPROF_POLL_INTERVAL = 5 * 60  # 5 minutes — cheap enough; won't churn logs
+
+
+async def _run_memprof_log() -> None:
+    """One iteration of the memory poller.  Logs a single grep-friendly
+    line per interval so Railway log search can chart RSS over time
+    without us standing up a separate metrics pipeline.
+    """
+    from filings import memprof as _memprof
+    state = getattr(app, "state", None)
+    try:
+        logger.info(_memprof.log_line(state))
+    except Exception as exc:
+        logger.debug("memprof poller failed: %s", exc)
+
+
 # ── /_v2/home L2 cache warmer ────────────────────────────────────────
 
 _REDESIGN_L2_WARMER_INTERVAL = 4 * 60  # 4 min — refreshes before any 5-min TTL expires
@@ -2075,6 +2101,36 @@ async def _populate_logos_task(limit: int = 200):
     except Exception as exc:
         status.update({"phase": "error", "error": str(exc)})
         logger.error("Logo populate failed: %s", exc)
+
+
+_MEMPROF_TOKEN = os.environ.get("MEMPROF_TOKEN", "").strip()
+
+
+@app.get("/api/admin/memprof")
+async def admin_memprof(request: Request):
+    """JSON memory snapshot — process / cache / app.state / type histogram.
+
+    Token-gated via the ``MEMPROF_TOKEN`` env var.  Endpoint returns 404
+    when the token is unset (so an unconfigured prod is hidden) or when
+    the supplied token doesn't match.
+
+    Pass ``?types=0`` to skip the (slightly expensive) ``gc.get_objects``
+    walk for top-N type counts.  Snapshot a baseline + later diff in your
+    head — or pipe into a script — to spot what's growing.
+    """
+    if not _MEMPROF_TOKEN:
+        return PlainTextResponse("Not Found", status_code=404)
+    supplied = (request.query_params.get("token") or "").strip()
+    if supplied != _MEMPROF_TOKEN:
+        return PlainTextResponse("Not Found", status_code=404)
+
+    from filings import memprof as _memprof
+    with_types = (request.query_params.get("types") or "1").strip() != "0"
+    try:
+        payload = _memprof.snapshot(app.state, with_types=with_types)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    return JSONResponse(payload)
 
 
 @app.get("/api/admin/populate-logos")

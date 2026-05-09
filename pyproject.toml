@@ -23,6 +23,7 @@ dependencies = [
     "pytrends>=4.9",
     "brotli>=1.1",
     "resend>=1.0",
+    "psutil>=5.9",
 ]
 
 [project.optional-dependencies]
