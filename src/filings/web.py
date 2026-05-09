@@ -2384,6 +2384,49 @@ async def _populate_logos_task(limit: int = 200):
 _MEMPROF_TOKEN = os.environ.get("MEMPROF_TOKEN", "").strip()
 
 
+@app.get("/admin/watchdog-test")
+async def admin_watchdog_test(request: Request):
+    """Token-gated end-to-end test of the watchdog alert pipeline.
+
+    Calls ``_send_watchdog_alert`` with a synthetic ``active`` value so
+    the configured destinations (Telegram / Slack / Discord webhook)
+    actually receive a message -- without triggering the SIGTERM that
+    real watchdog firing does.  Use this to verify the alert chain
+    (env vars set, webhook URL valid, app reachable from prod, etc.).
+    """
+    if not _MEMPROF_TOKEN:
+        return PlainTextResponse("Not Found", status_code=404)
+    if (request.query_params.get("token") or "").strip() != _MEMPROF_TOKEN:
+        return PlainTextResponse("Not Found", status_code=404)
+
+    import threading as _threading
+    real_active = _threading.active_count()
+    # Use a synthetic "active" that's clearly above threshold so the
+    # alert payload doesn't read as a true incident.
+    await _send_watchdog_alert(active=real_active + 1000)
+
+    dests = []
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        dests.append("telegram")
+    if WATCHDOG_ALERT_URL:
+        dests.append("webhook")
+    if not dests:
+        return PlainTextResponse(
+            "No alert destinations configured.  Set TELEGRAM_BOT_TOKEN+"
+            "TELEGRAM_CHAT_ID and/or WATCHDOG_ALERT_URL.",
+            status_code=500,
+        )
+    return PlainTextResponse(
+        f"Alert dispatched to: {', '.join(dests)}.\n"
+        f"(real active_threads={real_active}; payload reports +1000 "
+        "as a synthetic test marker).\n"
+        "Check the destination channel — message should land within "
+        "a few seconds.\n"
+        "If nothing arrives: check Railway logs for 'watchdog: ... "
+        "alert POST failed' or 'returned 4xx/5xx'."
+    )
+
+
 @app.get("/admin/memprof-diag")
 async def admin_memprof_diag(request: Request):
     """Diagnostic memprof — non-/api/ path so the global HTMX retry
