@@ -172,6 +172,8 @@ propcache==0.4.1
     # via yarl
 protobuf==6.33.5
     # via yfinance
+psutil==7.2.2
+    # via 13f-project
 psycopg2-binary==2.9.11
     # via 13f-project
 pyarrow==23.0.0
