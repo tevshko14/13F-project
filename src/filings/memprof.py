@@ -179,14 +179,48 @@ def type_counts(top_n: int = 30) -> list[dict]:
 # ── Composite payloads ───────────────────────────────────────────────
 
 
-def snapshot(app_state: Any | None = None, *, with_types: bool = True) -> dict:
-    """Full memory snapshot for the admin endpoint."""
+def snapshot(
+    app_state: Any | None = None,
+    *,
+    with_types: bool = True,
+    with_state_sizes: bool = True,
+) -> dict:
+    """Full memory snapshot for the admin endpoint.
+
+    `with_types`  -- include `gc.get_objects()` type histogram (slow on
+                     large processes; ~hundreds of ms to seconds).
+    `with_state_sizes` -- include recursive `_approx_size` walks on
+                          `app.state` objects.  `fund_cache` can take a
+                          few hundred ms to size; pass False for a
+                          guaranteed-fast snapshot.
+    """
     payload = {
         "ts":      time.time(),
         "process": process_metrics(),
         "caches":  cache_metrics(),
-        "app_state": app_state_metrics(app_state) if app_state is not None else [],
     }
+    if app_state is not None:
+        if with_state_sizes:
+            payload["app_state"] = app_state_metrics(app_state)
+        else:
+            # Cheap variant: dict_len / seq_len only, no byte estimate.
+            rows = []
+            for key in _STATE_KEYS:
+                if not hasattr(app_state, key):
+                    continue
+                val = getattr(app_state, key)
+                entry: dict[str, Any] = {"name": f"app.state.{key}"}
+                try:
+                    if isinstance(val, dict):
+                        entry["dict_len"] = len(val)
+                    elif isinstance(val, (list, tuple)):
+                        entry["seq_len"] = len(val)
+                except Exception:
+                    pass
+                rows.append(entry)
+            payload["app_state"] = rows
+    else:
+        payload["app_state"] = []
     if with_types:
         payload["type_counts"] = type_counts(30)
     return payload

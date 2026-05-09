@@ -2108,15 +2108,24 @@ _MEMPROF_TOKEN = os.environ.get("MEMPROF_TOKEN", "").strip()
 
 @app.get("/api/admin/memprof")
 async def admin_memprof(request: Request):
-    """JSON memory snapshot — process / cache / app.state / type histogram.
+    """JSON memory snapshot -- process / cache / app.state / type histogram.
 
     Token-gated via the ``MEMPROF_TOKEN`` env var.  Endpoint returns 404
-    when the token is unset (so an unconfigured prod is hidden) or when
-    the supplied token doesn't match.
+    when the token is unset or doesn't match.
 
-    Pass ``?types=0`` to skip the (slightly expensive) ``gc.get_objects``
-    walk for top-N type counts.  Snapshot a baseline + later diff in your
-    head — or pipe into a script — to spot what's growing.
+    Query knobs (all default to "include"):
+      ``types=0``  -- skip the ``gc.get_objects()`` type histogram
+                     (fastest savings; that walk dominates on large
+                     processes)
+      ``sizes=0``  -- skip the recursive ``_approx_size`` walks on
+                     ``app.state`` objects (still report dict / seq
+                     lengths)
+      ``lite=1``   -- shorthand for ``types=0&sizes=0`` -- returns
+                     process metrics + cache stats + app.state lengths
+                     in <50ms
+
+    Snapshot work runs in a thread so the event loop stays free for
+    other requests.
     """
     if not _MEMPROF_TOKEN:
         return PlainTextResponse("Not Found", status_code=404)
@@ -2124,10 +2133,21 @@ async def admin_memprof(request: Request):
     if supplied != _MEMPROF_TOKEN:
         return PlainTextResponse("Not Found", status_code=404)
 
+    qp = request.query_params
+    lite = (qp.get("lite") or "0").strip() == "1"
+    with_types = (qp.get("types") or "1").strip() != "0" and not lite
+    with_state_sizes = (qp.get("sizes") or "1").strip() != "0" and not lite
+
     from filings import memprof as _memprof
-    with_types = (request.query_params.get("types") or "1").strip() != "0"
     try:
-        payload = _memprof.snapshot(app.state, with_types=with_types)
+        # Run in a thread so gc.get_objects() / _approx_size walks
+        # don't block the asyncio event loop.
+        payload = await asyncio.to_thread(
+            _memprof.snapshot,
+            app.state,
+            with_types=with_types,
+            with_state_sizes=with_state_sizes,
+        )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
     return JSONResponse(payload)
