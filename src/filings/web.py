@@ -686,10 +686,19 @@ async def lifespan(app: FastAPI):
         name="thread watchdog", startup_delay=60,
         interval=_WATCHDOG_INTERVAL_S, body=_run_thread_watchdog,
     ), "thread_watchdog")
+    _alert_dests = []
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        _alert_dests.append("telegram")
     if WATCHDOG_ALERT_URL:
-        logger.info("watchdog: alert webhook configured (will POST on SIGTERM)")
+        _alert_dests.append("webhook")
+    if _alert_dests:
+        logger.info("watchdog: alert destinations active = %s",
+                    ", ".join(_alert_dests))
     else:
-        logger.info("watchdog: no alert webhook (set WATCHDOG_ALERT_URL to enable)")
+        logger.info(
+            "watchdog: no alert destinations (set TELEGRAM_BOT_TOKEN+"
+            "TELEGRAM_CHAT_ID and/or WATCHDOG_ALERT_URL to enable)"
+        )
 
     yield
 
@@ -1779,23 +1788,45 @@ _WATCHDOG_INTERVAL_S = 30
 _DANGER_THREADS = 65         # ~14 over the ~46 baseline; leaves headroom
 _SUSTAIN_CHECKS = 6          # 6 × 30s = 3 min of sustained danger
 
-# Optional webhook fired right before the watchdog SIGTERMs the worker.
-# Discord webhook URLs (https://discord.com/api/webhooks/...) and Slack
-# incoming-webhook URLs (https://hooks.slack.com/services/...) both work;
-# the payload includes ``content`` (Discord) and ``text`` (Slack) so it
-# renders on either.  When unset, alerting is silent (logs still fire).
+# Optional alert destinations fired right before the watchdog SIGTERMs.
+# Both are independent -- you can set either, both, or neither:
+#
+# (a) Telegram bot (best for phone push notifications):
+#       TELEGRAM_BOT_TOKEN  — from @BotFather (/newbot)
+#       TELEGRAM_CHAT_ID    — your numeric chat id (see _send_watchdog_alert
+#                             docstring for the lookup recipe)
+#
+# (b) Discord/Slack webhook URL:
+#       WATCHDOG_ALERT_URL  — Discord (https://discord.com/api/webhooks/...)
+#                             or Slack  (https://hooks.slack.com/services/...)
+#
+# When all are unset, alerting is silent (logs still fire normally).
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 WATCHDOG_ALERT_URL = os.environ.get("WATCHDOG_ALERT_URL", "").strip()
 
 
 async def _send_watchdog_alert(active: int) -> None:
-    """Best-effort POST to the alert webhook before forcing exit.
+    """Best-effort POST to alert destinations before forcing exit.
 
-    Async so the event loop isn't blocked.  Hard 5s timeout so a slow
-    webhook can't delay our SIGTERM (recovery is more important than
-    the alert landing).  Failures are logged and swallowed.
+    Both destinations (Telegram + generic webhook) fire in parallel
+    when configured.  Each has a hard 5s timeout so a slow service
+    can't delay SIGTERM (recovery > alert delivery).  Failures are
+    logged and swallowed.
+
+    To set up Telegram:
+      1. In Telegram, open @BotFather and send /newbot.  Follow prompts;
+         BotFather returns a token like "1234567:ABC-...".  Set this as
+         TELEGRAM_BOT_TOKEN.
+      2. Open a chat with your new bot and send any message.
+      3. Visit https://api.telegram.org/bot<TOKEN>/getUpdates -- find
+         "chat":{"id": <NNNN>} in the response.  Set <NNNN> as
+         TELEGRAM_CHAT_ID.  (Use a negative id for a group chat.)
+      4. Both env vars set on Railway -> alerts go to your phone.
     """
-    if not WATCHDOG_ALERT_URL:
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID) and not WATCHDOG_ALERT_URL:
         return
+
     try:
         import psutil
         proc = psutil.Process()
@@ -1804,22 +1835,61 @@ async def _send_watchdog_alert(active: int) -> None:
     except Exception:
         rss_mb = -1
         uptime_min = -1.0
-    msg = (
-        ":rotating_light: **paperpanda.io watchdog: thread leak detected**\n"
-        f"• active threads: **{active}** (danger >= {_DANGER_THREADS})\n"
-        f"• sustained: {_SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60} min\n"
-        f"• rss: {rss_mb} MB, uptime: {uptime_min:.1f} min, pid: {os.getpid()}\n"
+
+    sustained_min = _SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60
+
+    # Telegram HTML formatting (cleaner than MarkdownV2, which would
+    # require escaping every . _ * [ ] ( ) etc.).
+    tg_text = (
+        "🚨 <b>paperpanda.io watchdog: thread leak detected</b>\n"
+        f"• active threads: <b>{active}</b> (danger ≥ {_DANGER_THREADS})\n"
+        f"• sustained: {sustained_min} min\n"
+        f"• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {os.getpid()}\n"
+        f"• action: <i>SIGTERM imminent — gunicorn will recycle this worker</i>\n"
+        f"• log search: <code>watchdog: active_threads=</code>"
+    )
+    # Discord/Slack — both consume plain markdown; their renderers
+    # ignore the field they don't support.
+    md_text = (
+        "🚨 **paperpanda.io watchdog: thread leak detected**\n"
+        f"• active threads: **{active}** (danger ≥ {_DANGER_THREADS})\n"
+        f"• sustained: {sustained_min} min\n"
+        f"• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {os.getpid()}\n"
         f"• action: SIGTERM imminent — gunicorn will recycle this worker\n"
         f"• log search: `watchdog: active_threads=`"
     )
-    payload = {"content": msg, "text": msg}
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(WATCHDOG_ALERT_URL, json=payload)
-        logger.info("watchdog: alert sent to webhook")
-    except Exception as exc:
-        logger.warning("watchdog: alert POST failed: %s", exc)
+
+    import httpx
+    tasks = []
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        tg_payload = {
+            "chat_id":    TELEGRAM_CHAT_ID,
+            "text":       tg_text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        tasks.append(("telegram", tg_url, tg_payload))
+    if WATCHDOG_ALERT_URL:
+        tasks.append(("webhook", WATCHDOG_ALERT_URL,
+                      {"content": md_text, "text": md_text}))
+
+    async def _post(name: str, url: str, payload: dict) -> None:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.post(url, json=payload)
+                if resp.status_code >= 400:
+                    logger.warning("watchdog: %s alert returned %d: %s",
+                                   name, resp.status_code, resp.text[:200])
+                else:
+                    logger.info("watchdog: %s alert delivered", name)
+        except Exception as exc:
+            logger.warning("watchdog: %s alert POST failed: %s", name, exc)
+
+    await asyncio.gather(
+        *(_post(n, u, p) for n, u, p in tasks),
+        return_exceptions=True,
+    )
 
 
 async def _run_thread_watchdog() -> None:
