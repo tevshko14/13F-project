@@ -177,9 +177,12 @@
           <script type="application/json" class="pp-stock-chart-bars-data">
             {{ stock_chart.bars|tojson if stock_chart else '[]' }}
           </script>
+          {# X-axis labels — period-aware (computed in router from bar
+             timestamps).  The range-chip swap removes + replaces this
+             div alongside the SVG so the axis stays in sync. #}
           <div class="pp-stock-chart-axis">
-            {% for d in ["Apr '25","Jun","Aug","Oct","Dec","Feb '26","Apr"] %}
-              <span class="pp-mono pp-stock-chart-tick">{{ d }}</span>
+            {% for label in (stock_chart.axis_labels if stock_chart and stock_chart.axis_labels else []) %}
+              <span class="pp-mono pp-stock-chart-tick">{{ label }}</span>
             {% endfor %}
           </div>
         </div>
@@ -755,10 +758,15 @@
                 <div class="pp-stock-own-ins-person-date pp-mono pp-dim">
                   Last: {{ p.last_trade_date|format_pretty_date }}
                 </div>
-                {% if p.holds_position and p.card_avg_price_fmt %}
+                {% if p.holds_position %}
                   <div class="pp-stock-own-ins-person-hold pp-mono pp-dim">
-                    Holds {{ p.current_position_fmt }} · avg {{ p.card_avg_price_fmt }}
+                    Holds {{ p.current_position_fmt }}
                   </div>
+                  {% if p.card_avg_price_fmt %}
+                    <div class="pp-stock-own-ins-person-avg pp-mono pp-dim">
+                      Avg {{ p.card_avg_price_fmt }}
+                    </div>
+                  {% endif %}
                 {% endif %}
               </div>
             {% endfor %}
@@ -2078,11 +2086,14 @@
     fetch('/stock/' + encodeURIComponent(ticker) + '/chart/' + encodeURIComponent(name))
       .then(function (r) { return r.text(); })
       .then(function (html) {
-        /* Replace SVG + bars JSON together — partial returns both. */
-        var existingSvg = body.querySelector('.pp-stock-chart-svg');
+        /* Replace SVG + bars JSON + axis together — partial returns
+           all three so the X-axis stays in sync with the candle data. */
+        var existingSvg  = body.querySelector('.pp-stock-chart-svg');
         var existingData = body.querySelector('.pp-stock-chart-bars-data');
+        var existingAxis = body.querySelector('.pp-stock-chart-axis');
         if (existingSvg)  existingSvg.remove();
         if (existingData) existingData.remove();
+        if (existingAxis) existingAxis.remove();
         var tooltip = body.querySelector('.pp-stock-chart-tooltip');
         body.insertAdjacentHTML(
           tooltip ? 'afterbegin' : 'beforeend', html.trim()
@@ -2524,15 +2535,48 @@
     /* Filter table rows (compose both filters). */
     document.querySelectorAll('.pp-stock-own-ins-quarter').forEach(function (det) {
       var visible = 0;
+      var visibleBuys = 0;
+      var visibleSells = 0;
       det.querySelectorAll('tbody tr').forEach(function (tr) {
         var kindOk   = typeFilter === 'all' || tr.dataset.insiderKind === typeFilter;
         var personOk = personFilter === '__all__' || tr.dataset.insiderName === personFilter;
         var show = kindOk && personOk;
         tr.style.display = show ? '' : 'none';
-        if (show) visible++;
+        if (show) {
+          visible++;
+          if (tr.dataset.insiderKind === 'buy')  visibleBuys++;
+          else if (tr.dataset.insiderKind === 'sell') visibleSells++;
+        }
       });
       var countEl = det.querySelector('.pp-stock-own-ins-quarter-count');
       if (countEl) countEl.textContent = visible;
+
+      /* Tags for each quarter were rendered server-side from the
+         unfiltered totals; recompute against visible rows so a
+         per-insider filter (e.g. an insider who only ever bought)
+         correctly shows just one tag with the right count. */
+      var summary = det.querySelector('summary');
+      if (summary) {
+        var buyTag  = summary.querySelector('.pp-tag-added');
+        var sellTag = summary.querySelector('.pp-tag-reduced');
+        if (buyTag) {
+          if (visibleBuys > 0) {
+            buyTag.textContent = visibleBuys + ' buy' + (visibleBuys !== 1 ? 's' : '');
+            buyTag.style.display = '';
+          } else {
+            buyTag.style.display = 'none';
+          }
+        }
+        if (sellTag) {
+          if (visibleSells > 0) {
+            sellTag.textContent = visibleSells + ' sell' + (visibleSells !== 1 ? 's' : '');
+            sellTag.style.display = '';
+          } else {
+            sellTag.style.display = 'none';
+          }
+        }
+      }
+
       det.style.display = visible > 0 ? '' : 'none';
     });
 

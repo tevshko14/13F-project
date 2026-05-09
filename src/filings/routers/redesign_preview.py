@@ -6537,18 +6537,77 @@ def _stock_kpi_strip(ctx: dict) -> list[dict]:
     ]
 
 
-def _stock_candlestick_paths(candles: list, vb_w: int = 800, vb_h: int = 280) -> dict:
+def _stock_chart_axis_labels(bars: list, period: str, n_ticks: int = 7) -> list:
+    """Pick ``n_ticks`` evenly-spaced bars and format their timestamps.
+
+    Format depends on the chart period so the axis reads correctly at
+    every zoom level:
+
+      1D → ``HH:MM`` (intraday minute markers, UTC for now)
+      1W → ``%a %d`` (e.g. ``Mon 5``)
+      1M → ``%b %d`` (e.g. ``Apr 5``)
+      3M → ``%b %d`` (e.g. ``May 12``)
+      1Y → ``%b`` w/ ``'YY`` suffix on first tick + any year crossover
+      5Y → ``%Y`` (year only)
+
+    Parent template / partial uses CSS flexbox (``justify-content:
+    space-between``) to space the resulting strings evenly across the
+    chart width -- matches the SVG's ``preserveAspectRatio="none"``
+    stretch model so we don't have to compute pixel-perfect x positions.
+    """
+    if not bars:
+        return []
+    n = len(bars)
+    n_ticks = min(max(2, n_ticks), n)
+    if n == 1:
+        indices = [0]
+    else:
+        indices = [round(i * (n - 1) / (n_ticks - 1)) for i in range(n_ticks)]
+
+    labels: list[str] = []
+    last_year: int | None = None
+    for idx in indices:
+        ts_ms = bars[idx].get("t", 0)
+        if not ts_ms:
+            labels.append("")
+            continue
+        dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+        if period == "1D":
+            label = dt.strftime("%H:%M")
+        elif period == "1W":
+            label = dt.strftime("%a %d").lstrip("0")
+        elif period in ("1M", "3M"):
+            label = f"{dt.strftime('%b')} {dt.day}"
+        elif period == "5Y":
+            label = str(dt.year)
+        else:  # 1Y default
+            label = dt.strftime("%b")
+            # Year tag on first tick AND every year change so a chart
+            # spanning a year boundary still reads unambiguously.
+            if last_year is None or dt.year != last_year:
+                label = f"{label} '{dt.year % 100:02d}"
+        last_year = dt.year
+        labels.append(label)
+    return labels
+
+
+def _stock_candlestick_paths(candles: list, period: str = "1Y",
+                             vb_w: int = 800, vb_h: int = 280) -> dict:
     """Build SVG geometry for a candlestick + volume strip.
 
     Default viewBox is 800×280 (~2.86:1) — matches the stock-page hero's
     2-column container ratio (chart sits next to the news panel) so
     `preserveAspectRatio="none"` doesn't squish or stretch the candles.
 
-    Returns dict with `bars` (list of per-candle drawing data) and meta.
-    Each bar entry: {x, wick_y1, wick_y2, body_y, body_h, up, vol_h}.
+    Returns dict with `bars` (per-candle drawing data), `axis_labels`
+    (period-aware X-axis tick strings), and meta.  Each bar entry:
+    {x, wick_y1, wick_y2, body_y, body_h, up, vol_h, t, o, h, l, c, v}.
+
+    ``period`` (``1D``/``1W``/``1M``/``3M``/``1Y``/``5Y``) drives axis
+    formatting -- bar geometry is period-agnostic.
     """
     if not candles or len(candles) < 5:
-        return {"bars": [], "n": 0}
+        return {"bars": [], "n": 0, "axis_labels": []}
 
     n = len(candles)
     # Sample down to ~60 bars for visual density.
@@ -6556,12 +6615,12 @@ def _stock_candlestick_paths(candles: list, vb_w: int = 800, vb_h: int = 280) ->
     sampled = candles[::step][:60]
     n_s = len(sampled)
     if n_s == 0:
-        return {"bars": [], "n": 0}
+        return {"bars": [], "n": 0, "axis_labels": []}
 
     highs = [r[2] for r in sampled if r[2] is not None]
     lows  = [r[3] for r in sampled if r[3] is not None]
     if not highs or not lows:
-        return {"bars": [], "n": 0}
+        return {"bars": [], "n": 0, "axis_labels": []}
     p_min = min(lows) - 2
     p_max = max(highs) + 2
     span = p_max - p_min
@@ -6621,7 +6680,12 @@ def _stock_candlestick_paths(candles: list, vb_w: int = 800, vb_h: int = 280) ->
             "v":       int(v) if v is not None else 0,
         })
 
-    return {"bars": bars, "n": n_s, "vb_w": vb_w}
+    return {
+        "bars":        bars,
+        "n":           n_s,
+        "vb_w":        vb_w,
+        "axis_labels": _stock_chart_axis_labels(bars, period),
+    }
 
 
 @router.get("/stock/{ticker}", response_class=HTMLResponse)
@@ -6752,7 +6816,9 @@ async def preview_stock(request: Request, ticker: str):
         payload["exchange"] = meta["exchange"]
     if meta["cusip"] != "—":
         payload["cusip"] = meta["cusip"]
-    chart = _stock_candlestick_paths(payload.get("candles") or [])
+    # Initial page render uses 1M (matches the default range_chip selection
+    # in stock.html); range-chip clicks swap via /stock/{ticker}/chart/{p}.
+    chart = _stock_candlestick_paths(payload.get("candles") or [], period="1M")
     kpis = _stock_kpi_strip(payload)
 
     # Format news for the right-rail panel.  _fetch_company_news_async
@@ -6902,7 +6968,7 @@ async def preview_stock_chart(request: Request, ticker: str, period: str):
         ohlcv = None
 
     candles = (ohlcv or {}).get("ohlcv") or []
-    chart = _stock_candlestick_paths(candles)
+    chart = _stock_candlestick_paths(candles, period=period_norm)
     return templates.TemplateResponse(
         "_redesign/partials/stock_chart.html",
         {"request": request, "stock_chart": chart, "period": period_norm,

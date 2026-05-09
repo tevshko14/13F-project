@@ -1090,8 +1090,19 @@ _ohlcv_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _OHLCV_TTL = 1_800   # 30 min
 _OHLCV_MAX = 100      # max entries
 
+# Tuples of (yfinance period string, yfinance interval string).  Intraday
+# intervals (5m, 30m) are used for short ranges so the chart actually has
+# enough bars to read; daily/weekly otherwise to keep the bar count sane.
+# Without 1D/1W keys the previous code fell through to "1Y" -- which is why
+# selecting 1W still drew a year of candles.
 _OHLCV_YF_PERIODS = {
-    "1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "5Y": "5y",
+    "1D": ("1d",  "5m"),
+    "1W": ("5d",  "30m"),
+    "1M": ("1mo", "1d"),
+    "3M": ("3mo", "1d"),
+    "6M": ("6mo", "1d"),
+    "1Y": ("1y",  "1d"),
+    "5Y": ("5y",  "1wk"),
 }
 
 
@@ -1117,9 +1128,9 @@ def get_stock_ohlcv(ticker: str, period: str = "1Y") -> dict | None:
     try:
         import yfinance as yf
 
-        yf_period = _OHLCV_YF_PERIODS[period]
+        yf_period, yf_interval = _OHLCV_YF_PERIODS[period]
         dl = yf.download(
-            [ticker], period=yf_period,
+            [ticker], period=yf_period, interval=yf_interval,
             threads=False, progress=False, timeout=_YF_TIMEOUT,
         )
         if dl.empty:

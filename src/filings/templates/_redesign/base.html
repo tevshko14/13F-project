@@ -61,6 +61,7 @@
   <link rel="stylesheet" href="/static/css/redesign/tokens.css?v={{ _v }}">
   <link rel="stylesheet" href="/static/css/redesign/primitives.css?v={{ _v }}">
   <link rel="stylesheet" href="/static/css/redesign/app-shell.css?v={{ _v }}">
+  <link rel="stylesheet" href="/static/css/redesign/cmd-palette.css?v={{ _v }}">
   {% block extra_css %}{% endblock %}
 
   {#- HTMX + Fuse.js — same versions / integrity as production base.html. -#}
@@ -458,6 +459,110 @@
       if (value) activate(value);
     });
   }
+  </script>
+
+  {# ━━━━━━━━━━ ⌘K command-palette modal ━━━━━━━━━━
+
+       Wires the sidenav search button (and Cmd+K / Ctrl+K) to the
+       global fuzzy search engine loaded by global-search.js.  v1 had
+       this; the redesign cutover dropped it.  Markup + open/close
+       handlers live here so the feature is self-contained -- the
+       search engine itself (ppGlobalSearch / ppSearchKeydown /
+       tickerSearchGo) is already loaded in <head>.
+  -#}
+  <div id="pp-cmd-backdrop" class="pp-cmd-backdrop" style="display:none;"
+       onclick="ppCloseSearchPalette()" aria-hidden="true"></div>
+  <div id="pp-cmd-modal" class="pp-cmd-modal" style="display:none;"
+       role="dialog" aria-modal="true" aria-labelledby="pp-cmd-input-label">
+    <div class="pp-cmd-input-wrap">
+      <svg class="pp-cmd-input-icon" xmlns="http://www.w3.org/2000/svg"
+           width="18" height="18" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round"
+           stroke-linejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="8"/>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <label id="pp-cmd-input-label" for="pp-cmd-input" class="pp-sr-only">
+        Search tickers, companies, or investors
+      </label>
+      <input type="search"
+             id="pp-cmd-input"
+             class="pp-cmd-input"
+             placeholder="Search tickers, companies, or investors..."
+             autocomplete="off"
+             aria-controls="pp-cmd-results"
+             aria-autocomplete="list"
+             oninput="ppGlobalSearch(this.value, 'pp-cmd-results')"
+             onkeydown="ppCmdKeydown(event)">
+      <kbd class="pp-cmd-esc" onclick="ppCloseSearchPalette()"
+           role="button" tabindex="0"
+           aria-label="Close search">Esc</kbd>
+    </div>
+    <div id="pp-cmd-results" class="pp-cmd-results" role="listbox"></div>
+  </div>
+
+  <script>
+  /* ── ⌘K command palette: open/close + global keyboard shortcut.
+        The search engine itself (ppGlobalSearch / ppSearchKeydown /
+        tickerSearchGo) is already on window from global-search.js;
+        this just exposes the open/close lifecycle and binds Cmd+K. ── */
+  (function () {
+    if (window._ppCmdPaletteBound) return;
+    window._ppCmdPaletteBound = true;
+
+    window.ppOpenSearchPalette = function () {
+      var backdrop = document.getElementById('pp-cmd-backdrop');
+      var modal    = document.getElementById('pp-cmd-modal');
+      var input    = document.getElementById('pp-cmd-input');
+      if (!backdrop || !modal) return;
+      document.body.classList.add('pp-search-palette-open');
+      backdrop.style.display = 'block';
+      modal.style.display    = 'flex';
+      if (input) {
+        input.value = '';
+        requestAnimationFrame(function () { input.focus(); });
+      }
+      var results = document.getElementById('pp-cmd-results');
+      if (results) results.innerHTML = '';
+    };
+
+    window.ppCloseSearchPalette = function () {
+      var backdrop = document.getElementById('pp-cmd-backdrop');
+      var modal    = document.getElementById('pp-cmd-modal');
+      if (backdrop) backdrop.style.display = 'none';
+      if (modal)    modal.style.display    = 'none';
+      var results = document.getElementById('pp-cmd-results');
+      if (results) results.innerHTML = '';  /* Free DOM references. */
+      document.body.classList.remove('pp-search-palette-open');
+    };
+
+    window.ppCmdKeydown = function (e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        window.ppCloseSearchPalette();
+        return;
+      }
+      /* Delegate arrow-nav + enter to the shared search engine. */
+      if (typeof window.ppSearchKeydown === 'function') {
+        window.ppSearchKeydown(e, 'pp-cmd-results');
+      }
+    };
+
+    /* Cmd+K / Ctrl+K opens the palette from anywhere except inside
+       form fields where ⌘K might mean something to the user. */
+    document.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+        var t = e.target;
+        var inField = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
+                            || (t.isContentEditable === true));
+        /* Allow ⌘K to open from inside the palette's own input too --
+           re-opening just re-focuses it, harmless. */
+        if (inField && t.id !== 'pp-cmd-input') return;
+        e.preventDefault();
+        window.ppOpenSearchPalette();
+      }
+    });
+  })();
   </script>
 
   {% block extra_scripts %}{% endblock %}

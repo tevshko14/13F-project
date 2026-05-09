@@ -40,3 +40,11 @@
 <script type="application/json" class="pp-stock-chart-bars-data">
   {{ stock_chart.bars|tojson if stock_chart else '[]' }}
 </script>
+{# X-axis labels — period-aware.  CSS flexbox spaces them across the
+   chart width; no per-tick x positioning needed.  Same markup as the
+   one in stock.html so the JS swap can drop this in cleanly. #}
+<div class="pp-stock-chart-axis">
+  {% for label in (stock_chart.axis_labels if stock_chart and stock_chart.axis_labels else []) %}
+    <span class="pp-mono pp-stock-chart-tick">{{ label }}</span>
+  {% endfor %}
+</div>
