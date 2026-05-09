@@ -686,6 +686,20 @@ async def lifespan(app: FastAPI):
         name="thread watchdog", startup_delay=60,
         interval=_WATCHDOG_INTERVAL_S, body=_run_thread_watchdog,
     ), "thread_watchdog")
+
+    # Stock-bundle warmer — maintains the stock_overview_cache table so
+    # the /stock/{ticker} request path can serve from a single Supabase
+    # read instead of fanning out 10+ sync upstream calls.
+    _track(_periodic_task(
+        name="stock warmer", startup_delay=180,
+        interval=_STOCK_WARMER_INTERVAL_S, body=_run_stock_warmer,
+    ), "stock_warmer")
+
+    # Seed the stock_overview_cache hot/warm tiers from the just-loaded
+    # fund_cache.  Idempotent (no-op when rows already exist), so it's
+    # safe to run on every worker startup.  Delay 60s so fund_cache is
+    # populated first (it loads in another startup task).
+    _track(_run_initial_tier_seed(), "stock_tier_seeder")
     _alert_dests = []
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         _alert_dests.append("telegram")
@@ -1987,6 +2001,170 @@ async def _run_redesign_l2_warm() -> None:
     )
 
 
+# ── Stock-page bundle warmer ─────────────────────────────────────────
+# Walks tickers in hot+warm tiers, calls the bundle builder, writes
+# the result to ``stock_overview_cache``.  Page handler reads from
+# that table on the request path so popular tickers don't fan out 10+
+# parallel sync upstream calls per render.
+
+_STOCK_WARMER_INTERVAL_S = 10 * 60   # 10 min — matches BUNDLE_TTL_HOT_S
+# Per-tier batch size.  Sized so the hot tier (~50 tickers in steady
+# state) refreshes fully in one cycle; otherwise stragglers drift to
+# 2× the TTL window before the next cycle picks them up.  Confirmed
+# empirically via /admin/stock-cache-status -- max_s started exceeding
+# the 600s hot TTL when batch=30 and hot_count=36.
+_STOCK_WARMER_BATCH_PER_TIER = 60
+_STOCK_WARMER_CONCURRENCY = 3        # parallel ticker fetches per cycle
+
+_STOCK_SEED_STARTUP_DELAY_S = 60     # let fund_cache finish loading first
+
+
+# Telemetry of the most recent warmer cycle, exposed via
+# /admin/stock-cache-status so we can spot when the warmer falls
+# behind without needing Railway log access.  Updated atomically at
+# end of each cycle from a single coroutine, so no lock needed.
+_LAST_WARMER_CYCLE: dict = {
+    "ts":          None,    # ISO timestamp of last cycle completion
+    "duration_s":  0.0,
+    "batch":       0,
+    "refreshed":   0,       # successful upserts
+    "failed":      0,       # build or write failures
+    "by_tier":     {},      # {"hot": {"refreshed": N, "failed": M}, ...}
+}
+
+
+def get_last_warmer_cycle() -> dict:
+    """Return a copy of the most-recent cycle's telemetry."""
+    return dict(_LAST_WARMER_CYCLE)
+
+
+async def _run_initial_tier_seed() -> None:
+    """One-shot startup seeder for ``stock_overview_cache`` tiers.
+
+    Reads ``app.state.fund_cache`` and assigns a hot/warm tier to the
+    most-held tickers across all 13F filings.  Idempotent -- existing
+    rows are not re-seeded, so this can run on every worker startup
+    without overwriting tier promotions/demotions.
+
+    Wrapped in a delay so the cache hydration on startup completes
+    first; without that the seeder would no-op on an empty fund_cache.
+    """
+    await asyncio.sleep(_STOCK_SEED_STARTUP_DELAY_S)
+    from filings import stock_bundle as _bundle
+
+    fund_cache = getattr(app.state, "fund_cache", {}) or {}
+    if not fund_cache:
+        logger.info("stock seed: skipping (fund_cache empty after %ds)",
+                    _STOCK_SEED_STARTUP_DELAY_S)
+        return
+    try:
+        await asyncio.to_thread(_bundle.populate_initial_tiers, fund_cache)
+    except Exception as exc:
+        logger.warning("stock seed: failed: %s", exc)
+
+
+async def _run_stock_warmer() -> None:
+    """One iteration of the stock-bundle warmer.
+
+    Pulls the oldest-stale batch from every warmable tier, then
+    refreshes them all in a single bounded-concurrency gather.
+    Combining tiers (rather than processing hot then warm
+    sequentially) keeps the cycle inside the 10-min interval --
+    sequential would have run hot's batch fully before warm started,
+    risking budget overrun under slow upstreams.
+
+    Each ticker fans out ~10 heavy calls against the HEAVY_CONCURRENCY
+    semaphore.  Concurrency=3 lets one ticker's post-fetch work
+    (JSON-build + Supabase upsert) pipeline against the next ticker's
+    fetches without piling extra contention onto the semaphore.
+
+    Recently-failed tickers are excluded by ``get_stale_tickers``'s
+    failure-backoff filter -- a broken upstream can't drive a retry
+    loop here.
+    """
+    from filings import stock_bundle as _bundle
+    from filings.routers.redesign_preview import build_stock_data_bundle
+
+    fund_cache = getattr(app.state, "fund_cache", {}) or {}
+    cycle_started = time_module.monotonic()
+
+    targets: list[tuple[str, str]] = []
+    for tier in _bundle.WARMABLE_TIERS:
+        stale = await asyncio.to_thread(
+            _bundle.get_stale_tickers, tier, _STOCK_WARMER_BATCH_PER_TIER,
+        )
+        targets.extend((t, tier) for t in stale)
+
+    if not targets:
+        _LAST_WARMER_CYCLE.update({
+            "ts":         datetime.now(timezone.utc).isoformat(),
+            "duration_s": round(time_module.monotonic() - cycle_started, 2),
+            "batch":      0, "refreshed": 0, "failed": 0, "by_tier": {},
+        })
+        logger.info("stock warmer: cycle done batch=0 refreshed=0 failed=0")
+        return
+
+    sem = asyncio.Semaphore(_STOCK_WARMER_CONCURRENCY)
+
+    async def _refresh_one(t: str, tier_local: str) -> bool:
+        async with sem:
+            try:
+                bundle, source_status = await build_stock_data_bundle(
+                    fund_cache, t,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "stock warmer: build %s (%s) failed: %s",
+                    t, tier_local, exc,
+                )
+                await asyncio.to_thread(
+                    _bundle.record_attempt, t, status=_bundle.STATUS_FAILED,
+                )
+                return False
+            return await asyncio.to_thread(
+                _bundle.set_bundle,
+                t, bundle,
+                tier=tier_local,
+                source_status=source_status,
+            )
+
+    results = await asyncio.gather(
+        *(_refresh_one(t, tier) for t, tier in targets),
+        return_exceptions=True,
+    )
+
+    # Per-tier breakdown for the telemetry + log line.
+    by_tier: dict[str, dict[str, int]] = {}
+    for (_t, tier), result in zip(targets, results):
+        bucket = by_tier.setdefault(tier, {"refreshed": 0, "failed": 0})
+        if result is True:
+            bucket["refreshed"] += 1
+        else:
+            bucket["failed"] += 1
+
+    refreshed_total = sum(b["refreshed"] for b in by_tier.values())
+    failed_total    = sum(b["failed"]    for b in by_tier.values())
+    duration_s = round(time_module.monotonic() - cycle_started, 2)
+
+    _LAST_WARMER_CYCLE.update({
+        "ts":         datetime.now(timezone.utc).isoformat(),
+        "duration_s": duration_s,
+        "batch":      len(targets),
+        "refreshed":  refreshed_total,
+        "failed":     failed_total,
+        "by_tier":    by_tier,
+    })
+
+    tier_summary = " ".join(
+        f"{tier}={b['refreshed']}/{b['refreshed'] + b['failed']}"
+        for tier, b in sorted(by_tier.items())
+    )
+    logger.info(
+        "stock warmer: cycle done batch=%d refreshed=%d failed=%d duration=%.1fs (%s)",
+        len(targets), refreshed_total, failed_total, duration_s, tier_summary,
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Pages
 # ═══════════════════════════════════════════════════════════════════════
@@ -2400,6 +2578,102 @@ async def _populate_logos_task(limit: int = 200):
 _MEMPROF_TOKEN = os.environ.get("MEMPROF_TOKEN", "").strip()
 
 
+def _require_admin_token(request: Request) -> Response | None:
+    """Token-gate an /admin/* endpoint.
+
+    Returns a 404 Response when the token is unset or doesn't match,
+    or ``None`` when the request is authorised (caller proceeds).
+    Centralises the gate so the same env-var + query-param check
+    isn't repeated across every admin endpoint.
+    """
+    if not _MEMPROF_TOKEN:
+        return PlainTextResponse("Not Found", status_code=404)
+    supplied = (request.query_params.get("token") or "").strip()
+    if supplied != _MEMPROF_TOKEN:
+        return PlainTextResponse("Not Found", status_code=404)
+    return None
+
+
+@app.get("/admin/stock-cache-status")
+async def admin_stock_cache_status(request: Request):
+    """Aggregated health view of the stock_overview_cache pipeline.
+
+    Returns request-path hit/miss counters, tier distribution,
+    bundle-age stats per tier (spots warmer-falling-behind), the
+    most recent warmer cycle's telemetry, and any tickers whose
+    last warmer attempt failed.
+
+    Token-gated -- safe to expose because it leaks only counts and
+    aggregates, no payload data.
+    """
+    if (gate := _require_admin_token(request)) is not None:
+        return gate
+
+    from filings import stock_bundle as _bundle
+
+    # Each helper hits Supabase; run them in parallel rather than
+    # serially -- the sequential version was ~250-750ms wall time
+    # for the admin endpoint (5 round-trips back-to-back).
+    distribution, age_hot, age_warm, age_cold, failures = await asyncio.gather(
+        asyncio.to_thread(_bundle.get_tier_distribution),
+        asyncio.to_thread(_bundle.get_tier_age_stats, _bundle.HOT_TIER),
+        asyncio.to_thread(_bundle.get_tier_age_stats, _bundle.WARM_TIER),
+        asyncio.to_thread(_bundle.get_tier_age_stats, _bundle.COLD_TIER),
+        asyncio.to_thread(_bundle.get_recently_failed, 20),
+    )
+
+    return JSONResponse({
+        "request_metrics":    _bundle.get_request_metrics(),
+        "tier_distribution":  distribution,
+        "tier_age_stats": {
+            _bundle.HOT_TIER:  age_hot,
+            _bundle.WARM_TIER: age_warm,
+            _bundle.COLD_TIER: age_cold,
+        },
+        "last_warmer_cycle":  get_last_warmer_cycle(),
+        "recently_failed":    failures,
+    })
+
+
+@app.get("/admin/tier-seed")
+async def admin_tier_seed(
+    request: Request,
+    hot: int = Query(50, ge=1, le=500),
+    warm: int = Query(200, ge=0, le=2000),
+):
+    """Manually re-run the stock-bundle tier seeder.
+
+    Token-gated; reads ``app.state.fund_cache`` and assigns hot/warm
+    tier classifications to the most-held tickers.  Idempotent --
+    existing rows are not overwritten, so promotion/demotion done by
+    other paths (warmer, future tier-promoter) is preserved.
+
+    Useful for tweaking the size of each tier without restarting the
+    worker, e.g. ``?hot=100&warm=400`` to widen coverage.
+    """
+    if (gate := _require_admin_token(request)) is not None:
+        return gate
+
+    from filings import stock_bundle as _bundle
+    fund_cache = getattr(app.state, "fund_cache", {}) or {}
+    if not fund_cache:
+        return PlainTextResponse(
+            "fund_cache empty -- can't seed.  Wait for startup hydration.",
+            status_code=503,
+        )
+    result = await asyncio.to_thread(
+        _bundle.populate_initial_tiers, fund_cache,
+        hot_count=hot, warm_count=warm,
+    )
+    return JSONResponse({
+        "hot_seeded":  len(result.get("hot_seeded", [])),
+        "warm_seeded": len(result.get("warm_seeded", [])),
+        "skipped":     result.get("skipped", 0),
+        "hot_sample":  result.get("hot_seeded", [])[:10],
+        "warm_sample": result.get("warm_seeded", [])[:10],
+    })
+
+
 @app.get("/admin/watchdog-test")
 async def admin_watchdog_test(request: Request):
     """Token-gated end-to-end test of the watchdog alert pipeline.
@@ -2410,10 +2684,8 @@ async def admin_watchdog_test(request: Request):
     real watchdog firing does.  Use this to verify the alert chain
     (env vars set, webhook URL valid, app reachable from prod, etc.).
     """
-    if not _MEMPROF_TOKEN:
-        return PlainTextResponse("Not Found", status_code=404)
-    if (request.query_params.get("token") or "").strip() != _MEMPROF_TOKEN:
-        return PlainTextResponse("Not Found", status_code=404)
+    if (gate := _require_admin_token(request)) is not None:
+        return gate
 
     import threading as _threading
     real_active = _threading.active_count()
@@ -2449,10 +2721,8 @@ async def admin_memprof_diag(request: Request):
     shim doesn't intercept errors.  Plain-text response, every step
     wrapped, returns whatever it got plus exception text per failure.
     """
-    if not _MEMPROF_TOKEN:
-        return PlainTextResponse("Not Found", status_code=404)
-    if (request.query_params.get("token") or "").strip() != _MEMPROF_TOKEN:
-        return PlainTextResponse("Not Found", status_code=404)
+    if (gate := _require_admin_token(request)) is not None:
+        return gate
 
     import traceback as _tb
     lines: list[str] = ["=== memprof diagnostic ==="]
@@ -2508,11 +2778,8 @@ async def admin_memprof(request: Request):
     Snapshot work runs in a thread so the event loop stays free for
     other requests.
     """
-    if not _MEMPROF_TOKEN:
-        return PlainTextResponse("Not Found", status_code=404)
-    supplied = (request.query_params.get("token") or "").strip()
-    if supplied != _MEMPROF_TOKEN:
-        return PlainTextResponse("Not Found", status_code=404)
+    if (gate := _require_admin_token(request)) is not None:
+        return gate
 
     qp = request.query_params
     lite = (qp.get("lite") or "0").strip() == "1"

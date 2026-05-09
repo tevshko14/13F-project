@@ -36,6 +36,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from filings import supabase_cache
+from filings import stock_bundle
 from filings.app_state import templates
 from filings.cache_l2 import l2_cached as _l2_cached
 from filings.concurrency import to_heavy, to_light
@@ -77,6 +78,38 @@ def _placeholder_route(path: str, **kwargs):
 
 
 router = APIRouter(prefix="", tags=["redesign"])
+
+
+def _request_fund_cache(request: Request) -> dict:
+    """Read ``app.state.fund_cache``, defaulting to an empty dict.
+
+    Centralised so the same ``getattr(request.app.state, ...) or {}``
+    dance isn't repeated across handlers (it appears 7+ times in this
+    file pre-helper).  Returns the live cache dict by reference --
+    callers must not mutate.
+    """
+    return getattr(request.app.state, "fund_cache", {}) or {}
+
+
+# Strong-reference set for fire-and-forget background tasks owned by
+# this router.  Tasks add themselves via :func:`_track_bg` and remove
+# themselves on completion; without this they'd be GC'd mid-flight by
+# asyncio (which only weakly tracks pending tasks).
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _track_bg(coro, *, name: str) -> asyncio.Task:
+    """Spawn *coro* as a fire-and-forget task with a strong reference.
+
+    Used for "do this side-effect, don't make the user wait" work --
+    e.g. populating the stock-bundle cache after a request-path miss.
+    Exceptions are logged via the coroutine itself; this wrapper just
+    keeps the task alive until completion.
+    """
+    task = asyncio.create_task(coro, name=name)
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5578,8 +5611,14 @@ def _stock_financials_fallback() -> dict:
     }
 
 
-def _stock_build_ownership_funds(request: Request, ticker: str) -> dict:
-    """Real 13F ownership data for *ticker* from ``app.state.fund_cache``.
+def _stock_build_ownership_funds(fund_cache: dict, ticker: str) -> dict:
+    """Real 13F ownership data for *ticker* from the in-memory fund cache.
+
+    ``fund_cache`` is the live ``app.state.fund_cache`` dict; pass
+    ``{}`` if unavailable.  Plumbed explicitly (rather than via
+    ``request.app.state``) so non-request contexts -- the warmer
+    cron, admin scripts -- can call this without fabricating a
+    Starlette Request.
 
     Returns:
       - ``rows`` — top-10 holders with fund/manager/shares/value/port%/QoQΔ
@@ -5589,13 +5628,9 @@ def _stock_build_ownership_funds(request: Request, ticker: str) -> dict:
       - ``quarters`` — per-quarter activity history (newest first), each
         with ``label`` / ``key`` / ``entries`` (fund / activity / share
         change / pct change), used by the Quarterly Activity History pills.
-
-    Both new fields come from a single walk of ``client.build_stock_history``
-    so we don't double-iterate the cache.
     """
     from filings.superinvestors import SUPERINVESTORS_BY_CIK
 
-    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
     if not fund_cache:
         return {"rows": [], "total_count": 0, "total_value": "—",
                 "activity_chart": {"labels": [], "adds": [], "reduces": [],
@@ -6279,8 +6314,12 @@ async def _fetch_finnhub_profile(ticker: str) -> dict:
     return {"profile": profile, "metric": metric}
 
 
-async def _fetch_stock_meta(request: Request, ticker: str) -> dict:
+async def _fetch_stock_meta(fund_cache: dict, ticker: str) -> dict:
     """Resolve hero/KPI metadata + About-panel fields for *ticker*.
+
+    ``fund_cache`` is the live ``app.state.fund_cache`` dict (CUSIP
+    + holders count are derived from a one-pass walk over it).  Pass
+    ``{}`` from non-request contexts.
 
     Read order:
       1. ``company_about`` Supabase row (filled by ``scripts/backfill_about.py``
@@ -6292,12 +6331,13 @@ async def _fetch_stock_meta(request: Request, ticker: str) -> dict:
          On miss we kick off an async writeback so the next visitor reads
          from Supabase instead.
 
-    CUSIP + holders count come from a one-pass walk over
-    ``app.state.fund_cache`` (zero network).
+    CUSIP + holders count come from a one-pass walk over the passed
+    fund cache (zero network).
     """
     from filings import client, company_about as ca
 
-    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    if fund_cache is None:
+        fund_cache = {}
     t_up = ticker.upper()
 
     async def _about_row() -> dict | None:
@@ -6688,23 +6728,49 @@ def _stock_candlestick_paths(candles: list, period: str = "1Y",
     }
 
 
-@router.get("/stock/{ticker}", response_class=HTMLResponse)
-async def preview_stock(request: Request, ticker: str):
-    """Stock detail — wires real data into every tab with hard per-source
-    timeouts so a single slow upstream (yfinance rate-limit, OpenInsider
-    scrape) can't stall the whole page."""
+async def build_stock_data_bundle(fund_cache: dict, ticker: str) -> tuple[dict, dict]:
+    """Build the cacheable stock-page bundle for *ticker*.
+
+    ``fund_cache`` is the in-memory 13F dict (typically
+    ``app.state.fund_cache``); used by the meta + ownership-funds
+    fetchers.  Plumbing it explicitly (rather than via Request)
+    keeps this callable from any context -- request handler, cron,
+    admin endpoint.
+
+    Returns ``(bundle, source_status)``:
+      * ``bundle`` -- dict with keys ``overview``, ``meta``,
+        ``sentiment``, ``ownership_funds``, ``ownership_insiders``,
+        ``ownership_congress``, ``ownership_filings``, ``financials``,
+        ``forecasts``, ``signals_aux``, ``signals_data`` (derived),
+        ``kpis`` (derived).  Excluded: candlestick chart geometry
+        (recomputed per-period from ``overview.candles``), watchlist
+        state (per-user), shell context (per-request).
+      * ``source_status`` -- per-source result map
+        (``{"overview": "ok", "financials": "timeout", ...}``) for
+        partial-data diagnostics.
+
+    The canonical fanout for stock-page data: ``preview_stock`` calls
+    this on cache miss; the warmer calls this for hot/warm tiers.
+    """
+    source_status: dict[str, str] = {}
 
     async def _bounded(coro, *, timeout: float, fallback, name: str):
-        """Race *coro* against *timeout*; on miss, log + return *fallback*."""
         try:
-            return await asyncio.wait_for(coro, timeout=timeout)
+            result = await asyncio.wait_for(coro, timeout=timeout)
+            source_status[name] = "ok"
+            return result
         except asyncio.TimeoutError:
-            logger.warning("Stock %s: %s timed out after %.1fs", ticker, name, timeout)
+            logger.warning("Stock %s bundle: %s timed out after %.1fs",
+                           ticker, name, timeout)
+            source_status[name] = "timeout"
         except Exception as exc:
-            logger.warning("Stock %s: %s failed: %s", ticker, name, exc)
+            logger.warning("Stock %s bundle: %s failed: %s", ticker, name, exc)
+            source_status[name] = f"error:{type(exc).__name__}"
         return fallback
 
-    payload, meta, sentiment_data, ownership_funds, ownership_insiders, ownership_congress, ownership_filings, financials, forecasts, signals_aux = await asyncio.gather(
+    payload, meta, sentiment_data, ownership_funds, ownership_insiders, \
+        ownership_congress, ownership_filings, financials, forecasts, \
+        signals_aux = await asyncio.gather(
         _bounded(_fetch_stock_overview(ticker),                      timeout=8.0,
                  fallback={"ticker": ticker.upper(), "name": ticker.upper(),
                            "exchange": "—", "cusip": "—", "price": None,
@@ -6714,7 +6780,7 @@ async def preview_stock(request: Request, ticker: str):
                            "high_52": "—", "low_52": "—", "candles": [],
                            "news": [], "is_mock": True},
                  name="overview"),
-        _bounded(_fetch_stock_meta(request, ticker),                 timeout=6.0,
+        _bounded(_fetch_stock_meta(fund_cache, ticker),              timeout=6.0,
                  fallback={"sector": "—", "industry": "—", "exchange": "—",
                            "cusip": "—", "mcap": "—", "pe": "—", "holders": 0,
                            "about_blurb": "", "about_ceo": "—",
@@ -6727,7 +6793,7 @@ async def preview_stock(request: Request, ticker: str):
                            "score_class": "", "mentions": "—", "rank_str": "",
                            "cohort": [], "note": "", "fill_pct": 0, "fill_left": 50},
                  name="sentiment"),
-        _bounded(to_light(_stock_build_ownership_funds, request, ticker), timeout=2.0,
+        _bounded(to_light(_stock_build_ownership_funds, fund_cache, ticker), timeout=2.0,
                  fallback={"rows": [], "total_count": 0, "total_value": "—",
                            "activity_chart": {"labels": [], "adds": [], "reduces": [],
                                               "adds_count": [], "reduces_count": []},
@@ -6770,6 +6836,7 @@ async def preview_stock(request: Request, ticker: str):
                            "short_interest_history": []},
                  name="signals_aux"),
     )
+
     # Re-anchor the price tick on the analyst target distribution once the
     # live quote has landed (forecasts ran in parallel without it).
     cur_price = payload.get("price")
@@ -6781,170 +6848,272 @@ async def preview_stock(request: Request, ticker: str):
         forecasts["now_pct"] = max(0.0, min(100.0,
             round((cur_price - band["low"]) / span * 100, 1)))
 
-    # News — runs serially after meta so the brand-name filter has access
-    # to the resolved company name, dropping articles where the ticker is
-    # only a Finnhub-related tag (Broadcom-vs-Nvidia comparisons etc.).
+    # News -- runs serially after meta so the brand-name filter has access
+    # to the resolved company name (drops Finnhub-related-tag noise).
     payload["news"] = await _bounded(
         _fetch_stock_news(ticker, payload.get("name") or meta.get("name") or ticker),
         timeout=8.0, fallback=[], name="news",
     )
 
-    # Watchlist state — used by the hero "★ Watch" button toggle.
-    stock_watching = False
-    user = getattr(request.state, "user", None)
-    user_id = (user or {}).get("sub") if user else None
-    if user_id:
-        try:
-            from filings import supabase_cache
-            stock_watching = await asyncio.to_thread(
-                supabase_cache.is_ticker_watched, user_id, ticker.upper()
-            )
-        except Exception as exc:
-            logger.debug("is_ticker_watched(%s) failed: %s", ticker, exc)
-
-    signals_data = _stock_compute_signals(
-        sentiment=sentiment_data, ownership_funds=ownership_funds,
-        ownership_insiders=ownership_insiders, ownership_congress=ownership_congress,
-        forecasts=forecasts, payload=payload, meta=meta,
-        short_interest=signals_aux.get("short_interest"),
-    )
-    # Overlay real metadata (mcap, P/E, exchange, CUSIP) onto the payload so
-    # the KPI strip + hero pills render live values instead of em-dashes.
+    # Overlay real metadata onto payload so KPI strip + hero pills render
+    # live values instead of em-dashes.
     payload["mcap"]     = meta["mcap"]
     payload["pe"]       = meta["pe"]
     if meta["exchange"] != "—":
         payload["exchange"] = meta["exchange"]
     if meta["cusip"] != "—":
         payload["cusip"] = meta["cusip"]
-    # Initial page render uses 1M (matches the default range_chip selection
-    # in stock.html); range-chip clicks swap via /stock/{ticker}/chart/{p}.
-    chart = _stock_candlestick_paths(payload.get("candles") or [], period="1M")
+
+    # Derived: signals + KPIs.  Pure dict reductions; cheap but cached
+    # so the page handler doesn't redo them on every render.
+    signals_data = _stock_compute_signals(
+        sentiment=sentiment_data, ownership_funds=ownership_funds,
+        ownership_insiders=ownership_insiders, ownership_congress=ownership_congress,
+        forecasts=forecasts, payload=payload, meta=meta,
+        short_interest=signals_aux.get("short_interest"),
+    )
     kpis = _stock_kpi_strip(payload)
 
-    # Format news for the right-rail panel.  _fetch_company_news_async
-    # already returns ``{src, ago, title, url}``; the alternate keys cover
-    # the legacy market_data fallback shape used in demo mode.
-    news_items = []
-    for n in payload.get("news") or []:
-        news_items.append({
+    bundle = {
+        "overview":           payload,
+        "meta":               meta,
+        "sentiment":          sentiment_data,
+        "ownership_funds":    ownership_funds,
+        "ownership_insiders": ownership_insiders,
+        "ownership_congress": ownership_congress,
+        "ownership_filings":  ownership_filings,
+        "financials":         financials,
+        "forecasts":          forecasts,
+        "signals_aux":        signals_aux,
+        "signals_data":       signals_data,
+        "kpis":               kpis,
+    }
+    return bundle, source_status
+
+
+def _format_news_items(raw_news: list) -> list[dict]:
+    """Normalise news-payload field names for the right-rail panel.
+
+    Sources (Finnhub vs market_data demo fallback) emit different
+    keys; pick whichever's present, default to em-dash.
+    """
+    out = []
+    for n in raw_news or []:
+        out.append({
             "src":   n.get("src") or n.get("source") or n.get("publisher") or "—",
             "ago":   n.get("ago") or n.get("relative_time") or n.get("time_ago") or "",
             "title": n.get("title") or n.get("headline") or "",
             "url":   n.get("url") or "",
         })
+    return out
 
-    # Forecasts EPS chart still uses server-rendered SVG (one-off line).
-    eps_series = forecasts["eps"]
+
+def _build_stock_template_ctx(
+    request: Request,
+    bundle: dict,
+    *,
+    stock_watching: bool,
+    signed_in: bool,
+    shell_ctx: dict,
+) -> dict:
+    """Flatten the bundle into the wide ctx the stock template expects.
+
+    Pure data transform from the stored bundle shape into the ~60 ctx
+    keys the template consumes.  Includes per-render derivations
+    (chart geometry from candles, SVG paths for the EPS chart,
+    analyst-tick percentages relative to the target band).
+    """
+    payload  = bundle.get("overview")           or {}
+    meta     = bundle.get("meta")               or {}
+    sentiment_data    = bundle.get("sentiment")          or {}
+    ownership_funds   = bundle.get("ownership_funds")    or {}
+    ownership_insiders = bundle.get("ownership_insiders") or {}
+    ownership_congress = bundle.get("ownership_congress") or {}
+    ownership_filings  = bundle.get("ownership_filings")  or {}
+    financials = bundle.get("financials")        or {}
+    forecasts  = bundle.get("forecasts")         or {}
+    signals_aux  = bundle.get("signals_aux")     or {}
+    signals_data = bundle.get("signals_data")    or {}
+    kpis         = bundle.get("kpis")            or []
+
+    # Initial page render uses 1M (default range_chip selection);
+    # range-chip clicks swap via /stock/{ticker}/chart/{p}.
+    chart = _stock_candlestick_paths(payload.get("candles") or [], period="1M")
+    news_items = _format_news_items(payload.get("news"))[:6]
+
+    # Forecasts EPS chart geometry (server-rendered SVG line).
+    eps_series = forecasts.get("eps") or _STOCK_FCT_EPS_REVISIONS
     eps_min = min(eps_series) - 1
     eps_max = max(eps_series) + 1
     eps_path = _stock_line_path(eps_series, eps_min, eps_max)
-    eps_pts = _stock_chart_points(eps_series, eps_min, eps_max)
-    # Analyst price-target ticks for the number-line in Forecasts.
-    band = forecasts["target_band"]
+    eps_pts  = _stock_chart_points(eps_series, eps_min, eps_max)
+
+    # Analyst price-target ticks for the Forecasts number-line.
+    band = forecasts.get("target_band") or _STOCK_FCT_TARGET_BAND
     span = (band["high"] - band["low"]) or 1
     analyst_ticks = [
-        {**a, "pct": max(0.0, min(100.0,
+        {**a, "pct":  max(0.0, min(100.0,
                           round((a["target"] - band["low"]) / span * 100, 1))),
-         "delta": round(a["target"] - a["prev"], 2)}
-        for a in forecasts["analysts"]
+              "delta": round(a["target"] - a["prev"], 2)}
+        for a in (forecasts.get("analysts") or [])
     ]
 
-    ctx = {
+    return {
         "request":      request,
-        **(await _shell_context(request, "")),  # Stock page doesn't highlight a sidebar item
-        # Header — design adds sector / industry / "held by N superinvestors"
-        # below the title; mock until fundamentals + holders join lands.
-        "stock_ticker":   payload["ticker"],
-        "stock_name":     payload["name"],
-        "stock_exchange": payload["exchange"],
-        "stock_cusip":    payload["cusip"],
-        "stock_sector":   meta["sector"],
-        "stock_industry": meta["industry"],
-        "stock_mcap":     meta["mcap"],
-        "stock_holders":  meta["holders"],
-        "stock_logo":     meta["logo_url"],
+        **shell_ctx,    # Stock page doesn't highlight a sidebar item
+        # Header
+        "stock_ticker":   payload.get("ticker"),
+        "stock_name":     payload.get("name"),
+        "stock_exchange": payload.get("exchange"),
+        "stock_cusip":    payload.get("cusip"),
+        "stock_sector":   meta.get("sector"),
+        "stock_industry": meta.get("industry"),
+        "stock_mcap":     meta.get("mcap"),
+        "stock_holders":  meta.get("holders"),
+        "stock_logo":     meta.get("logo_url"),
         # About panel
-        "about_blurb":     meta["about_blurb"],
-        "about_ceo":       meta["about_ceo"],
-        "about_employees": meta["about_employees"],
-        "about_hq":        meta["about_hq"],
-        "about_ipo":       meta["about_ipo"],
-        "about_website":   meta["about_website"],
+        "about_blurb":     meta.get("about_blurb"),
+        "about_ceo":       meta.get("about_ceo"),
+        "about_employees": meta.get("about_employees"),
+        "about_hq":        meta.get("about_hq"),
+        "about_ipo":       meta.get("about_ipo"),
+        "about_website":   meta.get("about_website"),
         # Retail sentiment panel (ApeWisdom-backed)
         "sentiment":      sentiment_data,
-        "stock_price":    _stock_format_price(payload["price"]),
-        "stock_chg_pct":  payload["chg_pct"],
-        "stock_chg_abs":  payload["chg_abs"],
+        "stock_price":    _stock_format_price(payload.get("price")),
+        "stock_chg_pct":  payload.get("chg_pct"),
+        "stock_chg_abs":  payload.get("chg_abs"),
         "stock_chg_up":   (payload.get("chg_pct") or 0) >= 0,
-        "stock_close":    payload["close"],
+        "stock_close":    payload.get("close"),
         # Overview body
         "stock_kpi":      kpis,
         "stock_chart":    chart,
-        "stock_news":     news_items[:6],
+        "stock_news":     news_items,
         "stock_is_mock":  payload.get("is_mock", False),
         "stock_tab":      "Overview",
-        # Financials tab — full v1-shaped data (annual + quarterly statements
-        # + a flat chart_data blob the ECharts builders consume on-demand).
-        "fin_kpis":        financials["kpis"],
+        # Financials tab
+        "fin_kpis":        financials.get("kpis") or _STOCK_MOCK_FIN_KPIS,
         "fin_annual":      financials.get("annual"),
         "fin_quarterly":   financials.get("quarterly"),
         "fin_chart_data":  financials.get("chart_data") or {},
         "fin_has_data":    financials.get("has_data", False),
         # Ownership tab
-        "own_funds":             ownership_funds["rows"],
-        "own_funds_count":       ownership_funds["total_count"],
-        "own_funds_value":       ownership_funds["total_value"],
+        "own_funds":             ownership_funds.get("rows") or [],
+        "own_funds_count":       ownership_funds.get("total_count", 0),
+        "own_funds_value":       ownership_funds.get("total_value", "—"),
         "own_funds_chart":       ownership_funds.get("activity_chart") or {},
         "own_funds_quarters":    ownership_funds.get("quarters") or [],
         "own_insiders":             ownership_insiders.get("insiders") or [],
-        "own_insiders_count":       ownership_insiders["total_count"],
+        "own_insiders_count":       ownership_insiders.get("total_count", 0),
         "own_insiders_quarters":    ownership_insiders.get("quarters") or [],
         "own_insiders_chart":       ownership_insiders.get("chart"),
         "own_insiders_per_chart":   ownership_insiders.get("per_insider_chart") or {},
         "own_insiders_insights":    ownership_insiders.get("insights"),
-        "own_congress":          ownership_congress["rows"],
-        "own_congress_count":    ownership_congress["total_count"],
+        "own_congress":          ownership_congress.get("rows") or [],
+        "own_congress_count":    ownership_congress.get("total_count", 0),
         "own_congress_pols":     ownership_congress.get("politicians") or [],
         "own_congress_party":    ownership_congress.get("party_breakdown"),
         "own_congress_n_pols":   ownership_congress.get("total_politicians", 0),
         "own_congress_n_trades": ownership_congress.get("total_trades", 0),
-        "own_filings":        ownership_filings["rows"],
+        "own_filings":           ownership_filings.get("rows") or [],
         # Forecasts tab
-        "fct_ratings":      forecasts["ratings"],
-        "fct_ratings_total": forecasts["ratings_total"],
-        "fct_analysts":     analyst_ticks,
-        "fct_rev_est":      forecasts["rev_est"],
-        "fct_eps_path":     eps_path,
-        "fct_eps_pts":      eps_pts,
-        "fct_target_low":   band["low"],
-        "fct_target_high":  band["high"],
-        "fct_now_pct":      forecasts["now_pct"],
-        "fct_consensus":    forecasts["consensus"],
-        # 3-pane redesign — Analysts firm groups, Earnings history, Estimates.
+        "fct_ratings":       forecasts.get("ratings") or _STOCK_FCT_RATINGS,
+        "fct_ratings_total": forecasts.get("ratings_total", sum(r[1] for r in _STOCK_FCT_RATINGS)),
+        "fct_analysts":      analyst_ticks,
+        "fct_rev_est":       forecasts.get("rev_est") or _STOCK_FCT_REV_EST,
+        "fct_eps_path":      eps_path,
+        "fct_eps_pts":       eps_pts,
+        "fct_target_low":    band["low"],
+        "fct_target_high":   band["high"],
+        "fct_now_pct":       forecasts.get("now_pct", _STOCK_FCT_PRICE_PCT),
+        "fct_consensus":     forecasts.get("consensus", "BUY"),
         "fct_grouped":       forecasts.get("grouped") or [],
         "fct_current_price": forecasts.get("current_price"),
         "fct_earnings":      forecasts.get("earnings") or {},
         "fct_est_eps":       forecasts.get("est_eps") or [],
         "fct_est_revenue":   forecasts.get("est_revenue") or [],
         # Signals tab
-        "sig_signals":    signals_data["signals"],
-        "sig_composite":  signals_data["composite"],
-        "sig_composite_score": signals_data["composite_score"],
-        # New for the 2-pill Signals tab.
-        "sig_cnn":        signals_aux.get("cnn"),
-        "sig_finnhub":    signals_aux.get("finnhub"),
-        "sig_apewisdom":  signals_aux.get("apewisdom"),
+        "sig_signals":         signals_data.get("signals") or [],
+        "sig_composite":       signals_data.get("composite"),
+        "sig_composite_score": signals_data.get("composite_score"),
+        "sig_cnn":          signals_aux.get("cnn"),
+        "sig_finnhub":      signals_aux.get("finnhub"),
+        "sig_apewisdom":    signals_aux.get("apewisdom"),
         "sig_alphavantage": signals_aux.get("alphavantage"),
-        "sig_gt_keywords": signals_aux.get("gt_keywords"),
-        "sig_gt_trend":   signals_aux.get("gt_trend"),
-        "sig_wt_tranco":  signals_aux.get("wt_tranco"),
+        "sig_gt_keywords":  signals_aux.get("gt_keywords"),
+        "sig_gt_trend":     signals_aux.get("gt_trend"),
+        "sig_wt_tranco":    signals_aux.get("wt_tranco"),
         "sig_wt_wikipedia": signals_aux.get("wt_wikipedia"),
         "sig_short_interest":         signals_aux.get("short_interest"),
         "sig_short_interest_history": signals_aux.get("short_interest_history") or [],
         # Watchlist state
-        "stock_watching": stock_watching,
-        "stock_user_signed_in": bool(user_id),
+        "stock_watching":       stock_watching,
+        "stock_user_signed_in": signed_in,
     }
+
+
+@router.get("/stock/{ticker}", response_class=HTMLResponse)
+async def preview_stock(request: Request, ticker: str):
+    """Stock detail.
+
+    Reads the pre-aggregated bundle from ``stock_overview_cache`` if
+    fresh; otherwise builds it live via :func:`build_stock_data_bundle`
+    and schedules a cold-tier write back so the next request hits the
+    cache.  Per-user state (watchlist) and per-render derivations
+    (chart geometry, EPS SVG path, analyst ticks) are computed off
+    the bundle at render time.
+    """
+    fund_cache = _request_fund_cache(request)
+
+    user = getattr(request.state, "user", None)
+    user_id = (user or {}).get("sub") if user else None
+
+    async def _watching() -> bool:
+        if not user_id:
+            return False
+        try:
+            from filings import supabase_cache
+            return await asyncio.to_thread(
+                supabase_cache.is_ticker_watched, user_id, ticker.upper(),
+            )
+        except Exception as exc:
+            logger.debug("is_ticker_watched(%s) failed: %s", ticker, exc)
+            return False
+
+    async def _bundle_or_fresh() -> dict:
+        cached = await asyncio.to_thread(stock_bundle.get_bundle, ticker)
+        if cached and stock_bundle.is_fresh(cached["refreshed_at"], cached["tier"]):
+            stock_bundle.record_hit()
+            return cached["bundle"]
+        stock_bundle.record_miss(had_cached=cached is not None)
+        bundle, source_status = await build_stock_data_bundle(fund_cache, ticker)
+        # Preserve an existing tier classification when refreshing a
+        # seeded row (hot/warm); default to cold for ad-hoc misses.
+        # Without this, the request path would clobber a hot ticker
+        # back to cold and the warmer would stop refreshing it.
+        write_tier = cached["tier"] if cached else stock_bundle.COLD_TIER
+        # Fire-and-forget the cache write so we don't pay the Supabase
+        # round-trip on the user's response after they already paid for
+        # the live fanout.  Failures inside `set_bundle` are logged and
+        # swallowed; lifespan tracks the task so it isn't GC'd mid-flight.
+        _track_bg(asyncio.to_thread(
+            stock_bundle.set_bundle, ticker, bundle,
+            tier=write_tier, source_status=source_status,
+        ), name=f"stock-bundle-write:{ticker}")
+        return bundle
+
+    bundle, stock_watching, shell_ctx = await asyncio.gather(
+        _bundle_or_fresh(),
+        _watching(),
+        _shell_context(request, ""),
+    )
+
+    ctx = _build_stock_template_ctx(
+        request, bundle,
+        stock_watching=stock_watching,
+        signed_in=bool(user_id),
+        shell_ctx=shell_ctx,
+    )
     return templates.TemplateResponse("_redesign/stock.html", ctx)
 
 
