@@ -261,26 +261,22 @@
       </button>
 
       {%- set nav_active = nav_active|default("Home") -%}
-      {# Markets group: Screener / Options are placeholder-only and hide
-         from the sidenav unless ``show_placeholder_nav`` is true (set
-         locally via PP_PLACEHOLDERS=1).  Production never surfaces them. #}
-      {%- set _markets_items = [{"name": "Funds", "href": "/funds", "badge": ""}] -%}
-      {%- if show_placeholder_nav -%}
-        {%- set _ = _markets_items.append({"name": "Screener", "href": "/screener", "badge": ""}) -%}
-        {%- set _ = _markets_items.append({"name": "Options",  "href": "/options",  "badge": ""}) -%}
-      {%- endif -%}
       {%- set nav_groups = [
         {"hd": "Overview", "items": [
-          {"name": "Home",          "href": "/",                      "badge": ""},
-          {"name": "Watchlist",     "href": "/profile?tab=Watchlist", "badge": "", "auth": "watchlist"},
-          {"name": "Notifications", "href": "/notifications",         "badge": notif_unread|default("")},
+          {"name": "Home",          "href": "/_v2/home",                  "badge": ""},
+          {"name": "Watchlist",     "href": "/_v2/profile?tab=Watchlist", "badge": "", "auth": "watchlist"},
+          {"name": "Notifications", "href": "/_v2/notifications",         "badge": notif_unread|default("")},
         ]},
-        {"hd": "Markets", "items": _markets_items},
+        {"hd": "Markets", "items": [
+          {"name": "Funds",    "href": "/_v2/funds",    "badge": ""},
+          {"name": "Screener", "href": "/_v2/screener", "badge": ""},
+          {"name": "Options",  "href": "/_v2/options",  "badge": ""},
+        ]},
         {"hd": "Signals", "items": [
-          {"name": "Insiders", "href": "/insiders", "badge": ""},
-          {"name": "Congress", "href": "/congress", "badge": ""},
-          {"name": "Retail",   "href": "/retail",   "badge": ""},
-          {"name": "Macro",    "href": "/macro",    "badge": ""},
+          {"name": "Insiders", "href": "/_v2/insiders", "badge": ""},
+          {"name": "Congress", "href": "/_v2/congress", "badge": ""},
+          {"name": "Retail",   "href": "/_v2/retail",   "badge": ""},
+          {"name": "Macro",    "href": "/_v2/macro",    "badge": ""},
         ]},
       ] -%}
 
@@ -313,9 +309,9 @@
         <button type="button" class="pp-side-auth-secondary" onclick="ppSignOut()">Sign out</button>
       </div>
 
-      {# Panda Fund support card — links to /support; same Stripe-backed
+      {# Panda Fund support card — links to /_v2/support; same Stripe-backed
          data feed as the v1 widget. #}
-      <a class="pp-side-support" href="/support">
+      <a class="pp-side-support" href="/_v2/support">
         <div class="pp-side-support-kicker">SUPPORT</div>
         <div class="pp-side-support-title">Feed the panda</div>
         <div class="pp-side-support-bar">
@@ -352,10 +348,10 @@
 
       {% from "_redesign/macros/_primitives.html" import btn, avatar %}
       {{ btn("+ Alert", kind="accent",
-             attrs='data-auth-required="alerts" data-auth-href="/profile?tab=Alerts"') }}
-      <a href="{{ '/profile' if is_authed else '#' }}"
+             attrs='data-auth-required="alerts" data-auth-href="/_v2/profile?tab=Alerts"') }}
+      <a href="{{ '/_v2/profile' if is_authed else '#' }}"
          aria-label="{{ 'Profile' if is_authed else 'Sign in' }}"
-         {% if not is_authed %}data-auth-required="profile" data-auth-href="/profile"{% endif %}
+         {% if not is_authed %}data-auth-required="profile" data-auth-href="/_v2/profile"{% endif %}
          style="text-decoration:none;">
         {{ avatar(user_initials|default(""), accent=True, guest=(not is_authed)) }}
       </a>

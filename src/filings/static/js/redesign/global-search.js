@@ -304,12 +304,12 @@
     }
     if (type === 'investor' && cik) {
       // v2 funds page reads ?cik=…; falls back to Berkshire if omitted.
-      window.location.href = '/funds/' + encodeURIComponent(cik);
+      window.location.href = '/_v2/funds/' + encodeURIComponent(cik);
     } else if (type === 'politician' && memberId) {
       // No v2 politician profile yet — keep v1 destination for now.
       window.location.href = '/politician/' + encodeURIComponent(memberId);
     } else {
-      window.location.href = '/stock/' + encodeURIComponent(ticker);
+      window.location.href = '/_v2/stock/' + encodeURIComponent(ticker);
     }
   };
 

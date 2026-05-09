@@ -435,7 +435,7 @@
         {% call panel_head("Top institutional holders", sub="Q1 2026 13F") %}
           <div class="pp-stock-own-head-right">
             {{ segment(["All","Adds","Cuts","New","Exits"], value="All", mono=True) }}
-            <a class="pp-link-coral" href="/funds">View all {{ own_funds_count }} →</a>
+            <a class="pp-link-coral" href="/_v2/funds">View all {{ own_funds_count }} →</a>
           </div>
         {% endcall %}
         <table class="pp-stock-own-table">
@@ -2070,7 +2070,7 @@
     seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
       o.classList.toggle('is-active', o.getAttribute('data-value') === name);
     });
-    fetch('/stock/' + encodeURIComponent(ticker) + '/chart/' + encodeURIComponent(name))
+    fetch('/_v2/stock/' + encodeURIComponent(ticker) + '/chart/' + encodeURIComponent(name))
       .then(function (r) { return r.text(); })
       .then(function (html) {
         /* Replace SVG + bars JSON together — partial returns both. */

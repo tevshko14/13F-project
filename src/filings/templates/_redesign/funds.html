@@ -133,7 +133,7 @@
                 <span class="pp-mono pp-dim2">{{ "%02d"|format(r.rank) }}</span>
               </td>
               <td>
-                <a class="pp-funds-tkr" href="/stock/{{ r.ticker }}">{{ r.ticker }}</a>
+                <a class="pp-funds-tkr" href="/_v2/stock/{{ r.ticker }}">{{ r.ticker }}</a>
                 <span class="pp-funds-name">{{ r.name }}</span>
               </td>
               <td class="pp-num pp-mono">{{ r.shares }}</td>
@@ -287,7 +287,7 @@
                         <span class="pp-mono pp-dim2">{{ "%02d"|format(loop.index) }}</span>
                       </td>
                       <td>
-                        <a class="pp-funds-tkr" href="/stock/{{ r.ticker }}">{{ r.ticker }}</a>
+                        <a class="pp-funds-tkr" href="/_v2/stock/{{ r.ticker }}">{{ r.ticker }}</a>
                       </td>
                       <td class="pp-funds-name pp-text">{{ r.name }}</td>
                       <td>{{ tag(r.action) }}</td>

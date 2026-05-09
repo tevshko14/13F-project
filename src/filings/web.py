@@ -2559,10 +2559,6 @@ async def _get_panda_fund_stats() -> dict:
     return result
 
 
-# Legacy v1 home — UNREACHABLE in production.  The redesign router is
-# registered before this handler (see `app.include_router` above), so
-# v2's `preview_home` wins the `/` path conflict.  Kept in the repo for
-# historical reference only; can be removed once v1 cleanup lands.
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def homepage(request: Request):
     pf = await _get_panda_fund_stats()
@@ -2586,40 +2582,19 @@ async def homepage(request: Request):
 # --- Superinvestors: portfolio list ---
 
 
-_LEGACY_VIEW_ALIAS = {
-    "funds":      "Funds",
-    "holdings":   "Holdings",
-    "activity":   "Activity",
-    "deployment": "Capital Deployed",
-}
-
-
-@app.get("/_v2/{path:path}")
-async def legacy_v2_prefix_redirect(request: Request, path: str):
-    """Backward-compat: /_v2/X → /X (the redesign is now mounted at root)."""
-    suffix = "?" + str(request.url.query) if request.url.query else ""
-    target = f"/{path}{suffix}" if path else f"/{suffix}".rstrip("/") or "/"
-    return RedirectResponse(url=target, status_code=301)
-
-
-@app.get("/home")
-async def home_redirect(request: Request):
-    """Backward-compat: /home → / (v2 home is mounted at root)."""
-    return RedirectResponse(url="/", status_code=301)
-
-
 @app.get("/superinvestors", response_class=HTMLResponse)
 async def superinvestors_page(request: Request):
     """Backward-compat redirect to /funds."""
-    return RedirectResponse(url="/funds", status_code=301)
+    return RedirectResponse(url="/funds?view=funds", status_code=301)
 
 
 @app.get("/grand-portfolio", response_class=HTMLResponse)
 async def grand_portfolio_redirect(request: Request):
     """Backward-compat redirect: /grand-portfolio → /funds."""
-    view = _LEGACY_VIEW_ALIAS.get(request.query_params.get("view", "").lower(), "Funds")
-    from urllib.parse import quote
-    return RedirectResponse(url=f"/funds?view={quote(view)}", status_code=301)
+    view = request.query_params.get("view", "funds")
+    if view not in ("funds", "holdings", "activity", "deployment"):
+        view = "funds"
+    return RedirectResponse(url=f"/funds?view={view}", status_code=301)
 
 
 # --- Lazy-load a single fund row (HTMX) ---
@@ -2669,14 +2644,7 @@ async def fund_row(request: Request, cik: str):
 
 
 @app.get("/holdings/{cik}", response_class=HTMLResponse)
-async def holdings_redirect(request: Request, cik: str):
-    """Backward-compat redirect: /holdings/{cik} → /funds/{cik}."""
-    return RedirectResponse(url=f"/funds/{cik}", status_code=301)
-
-
-# Legacy v1 holdings handler — UNREACHABLE after the redirect above.
-# Kept for historical reference only.
-async def _legacy_v1_holdings_unused(request: Request, cik: str, top_n: int = Query(25, ge=1, le=200)):
+async def holdings(request: Request, cik: str, top_n: int = Query(25, ge=1, le=200)):
     if not _valid_cik(cik):
         return PlainTextResponse("Invalid CIK", status_code=400)
     si = SUPERINVESTORS_BY_CIK.get(cik)
@@ -2918,8 +2886,8 @@ async def portfolio_chart_data(request: Request, cik: str):
 
 @app.get("/activity", response_class=HTMLResponse)
 async def activity_feed(request: Request):
-    """Backward-compat redirect: /activity → /funds?view=Activity."""
-    return RedirectResponse(url="/funds?view=Activity", status_code=301)
+    """Redirect to grand portfolio with activity tab active."""
+    return RedirectResponse(url="/funds?view=activity", status_code=301)
 
 
 # --- Top Funds (formerly Grand Portfolio) ---
@@ -3660,13 +3628,7 @@ async def stock_options_api(request: Request, ticker: str):
 
 
 @app.get("/insider-trading", response_class=HTMLResponse)
-async def insider_trading_redirect(request: Request):
-    """Backward-compat redirect: /insider-trading → /insiders."""
-    return RedirectResponse(url="/insiders", status_code=301)
-
-
-# Legacy v1 insider-trading handler — UNREACHABLE after the redirect above.
-async def _legacy_v1_insider_trading_unused(request: Request):
+async def insider_trading_page(request: Request):
     # Pre-fetch initial trade data so Googlebot sees real content (not just a loading spinner).
     # The JS client will still fetch via /api/insider-trades for tab switching & caching.
     trades: list = []
@@ -3987,13 +3949,7 @@ def _deployment_cache() -> dict:
 
 
 @app.get("/deployment", response_class=HTMLResponse)
-async def deployment_redirect(request: Request):
-    """Backward-compat redirect: /deployment → /funds?view=Capital%20Deployed."""
-    return RedirectResponse(url="/funds?view=Capital%20Deployed", status_code=301)
-
-
-# Legacy v1 deployment handler — UNREACHABLE after the redirect above.
-async def _legacy_v1_deployment_unused(request: Request):
+async def deployment_page(request: Request):
     """Deployment leaderboard — ranks funds by equity deployment ratio."""
     deploy_data = _deployment_cache()
     leaderboard = aum_data.build_deployment_leaderboard(deploy_data)
@@ -4909,13 +4865,7 @@ async def stock_wsb_api(request: Request, ticker: str):
 
 # ─── Earnings Calendar (standalone page) ──────────────────────────────
 @app.get("/earnings-calendar", response_class=HTMLResponse)
-async def earnings_calendar_redirect(request: Request):
-    """Backward-compat redirect: /earnings-calendar → /macro?tab=earnings."""
-    return RedirectResponse(url="/macro?tab=earnings", status_code=301)
-
-
-# Legacy v1 earnings-calendar handler — UNREACHABLE after the redirect above.
-async def _legacy_v1_earnings_calendar_unused(request: Request):
+async def earnings_calendar_page(request: Request):
     """Earnings Calendar page — interactive visual calendar of upcoming earnings."""
     from filings import earnings_calendar
 
@@ -6773,15 +6723,13 @@ async def api_screener_data(request: Request, ticker: str):
 # ═══════════════════════════════════════════════════════════════════════
 
 if _has_limiter:
-    # Page routes — generous limits; these are full-page renders cached at L1/L2.
-    # NOTE: v1 page handlers below (homepage, funds_page, stock_detail, etc.)
-    # are unreachable in production — the redesign router is registered
-    # before them and wins matching paths.  Decorating them is harmless;
-    # these lines can be removed alongside the v1 handlers in a future cleanup.
+    # Page routes — generous limits; these are full-page renders cached at L1/L2
     homepage = limiter.limit("60/minute")(homepage)
     funds_page = limiter.limit("30/minute")(funds_page)
+    holdings = limiter.limit("30/minute")(holdings)
     stock_detail = limiter.limit("60/minute")(stock_detail)
     stock_detail_by_cusip = limiter.limit("60/minute")(stock_detail_by_cusip)
+    insider_trading_page = limiter.limit("30/minute")(insider_trading_page)
     # Per-ticker API endpoints (stock page tabs — L2 cached, serve fast)
     fund_row = limiter.limit("30/minute")(fund_row)
     analyst_ratings = limiter.limit("60/minute")(analyst_ratings)

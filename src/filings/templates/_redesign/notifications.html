@@ -32,17 +32,17 @@
     </div>
   </div>
   {{ btn("Settings", kind="ghost",
-         attrs='onclick="window.location.href=\'/profile?tab=Alerts\'"') }}
+         attrs='onclick="window.location.href=\'/_v2/profile?tab=Alerts\'"') }}
 </header>
 
 {# ━━━━━━━━━━ TYPE FILTER CHIPS ━━━━━━━━━━ #}
 <div class="pp-notif-filters">
-  <a href="/notifications"
+  <a href="/_v2/notifications"
      class="pp-notif-chip {% if not notif_active_types %}is-active{% endif %}">
     All
   </a>
   {% for t in notif_types %}
-    <a href="/notifications?types={{ t.key }}"
+    <a href="/_v2/notifications?types={{ t.key }}"
        class="pp-notif-chip {% if t.key in notif_active_types %}is-active{% endif %}"
        style="--chip-color: {{ t.color }};">
       {{ t.label }}
@@ -107,13 +107,13 @@
     {%- set _q = "&types=" ~ (notif_active_types|join(",")) if notif_active_types else "" -%}
     <div class="pp-notif-pagination">
       {% if notif_has_prev %}
-        <a href="/notifications?page={{ notif_page - 1 }}{{ _q }}" class="pp-btn pp-btn-ghost">← Previous</a>
+        <a href="/_v2/notifications?page={{ notif_page - 1 }}{{ _q }}" class="pp-btn pp-btn-ghost">← Previous</a>
       {% else %}
         <span class="pp-btn pp-btn-ghost pp-btn-disabled">← Previous</span>
       {% endif %}
       <span class="pp-mono pp-notif-page-marker">Page {{ notif_page }}</span>
       {% if notif_has_next %}
-        <a href="/notifications?page={{ notif_page + 1 }}{{ _q }}" class="pp-btn pp-btn-accent">Next →</a>
+        <a href="/_v2/notifications?page={{ notif_page + 1 }}{{ _q }}" class="pp-btn pp-btn-accent">Next →</a>
       {% else %}
         <span class="pp-btn pp-btn-ghost pp-btn-disabled">Next →</span>
       {% endif %}
