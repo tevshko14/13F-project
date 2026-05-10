@@ -10,7 +10,11 @@ Architecture
 ------------
 * Web tier: HTTP routes only.  Set ``WORKER_MODE=web`` to skip the
   periodic tasks this worker owns.
-* Worker tier: this process.  No HTTP server, no port binding.
+* Worker tier: this process.  Real work happens via the asyncio
+  task loop; a tiny stdlib HTTP server runs in a daemon thread on
+  ``$PORT`` solely so Railway's healthcheck (which is set globally
+  in ``railway.toml`` and can't be overridden per-service in the
+  dashboard) can probe ``/health`` and see the worker is alive.
   Communicates with web via Supabase (caches + L2 + the
   ``stock_overview_cache`` table all act as the data plane).
 * Both processes share the same code/repo.  Differ only in entry
@@ -18,23 +22,81 @@ Architecture
 
 Started via:
     uv run filings-worker
-
-Or via Railway with start command ``uv run filings-worker`` and
-``WORKER_MODE=worker`` (informational only -- this entry point doesn't
-read it but other modules might).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import signal
 import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from types import SimpleNamespace
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_started_at = time.time()
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    """Minimal HTTP handler -- only responds to ``/health``.
+
+    Returns 200 + a small JSON payload so Railway's healthcheck
+    passes; everything else 404s.  Intentionally stdlib-only so we
+    don't pull in aiohttp / FastAPI just for one endpoint.
+    """
+
+    def do_GET(self):  # noqa: N802 (stdlib API)
+        if self.path == "/health":
+            body = json.dumps({
+                "status": "ok",
+                "service": "worker",
+                "uptime_s": int(time.time() - _started_at),
+            }).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, format, *args):  # noqa: A002 (stdlib API)
+        # Silence the default per-request stderr line; the healthcheck
+        # fires every few seconds and would dominate the log.
+        return
+
+
+def _start_health_server(port: int) -> None:
+    """Spin up the healthcheck HTTP server in a daemon thread.
+
+    Daemon thread = process exits when the main asyncio loop exits,
+    no separate shutdown bookkeeping needed.  Single-threaded
+    HTTPServer is fine: Railway's healthcheck hits us at most once
+    every few seconds and one handler handles it in microseconds.
+    """
+    try:
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+    except OSError as exc:
+        logger.warning(
+            "worker: failed to bind health server on port %d: %s "
+            "(continuing without healthcheck endpoint -- Railway "
+            "may restart us)",
+            port, exc,
+        )
+        return
+    thread = threading.Thread(
+        target=server.serve_forever, name="health", daemon=True,
+    )
+    thread.start()
+    logger.info("worker: health server listening on 0.0.0.0:%d", port)
 
 
 def _configure_logging() -> None:
@@ -75,6 +137,18 @@ async def _run() -> None:
     _configure_logging()
     logger.info("worker: starting (WORKER_MODE=%s)",
                 os.environ.get("WORKER_MODE", "<unset>"))
+
+    # Bring up the healthcheck endpoint FIRST so Railway's probe
+    # passes during the (potentially slow) init that follows.  PORT
+    # is set by Railway; default to 8081 for local dev so we don't
+    # collide with a local web instance on 8000.
+    port_str = os.environ.get("PORT", "8081")
+    try:
+        port = int(port_str)
+    except ValueError:
+        logger.warning("worker: invalid PORT=%r, defaulting to 8081", port_str)
+        port = 8081
+    _start_health_server(port)
 
     # Initialize the same thread-pool topology as web -- some tasks
     # (e.g. fund-refresh) call to_heavy()/to_supabase() and need pools
