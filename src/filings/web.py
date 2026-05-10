@@ -1356,6 +1356,17 @@ def _try_l2_for_rate_limited(cache_key: str) -> str | None:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+# Pick the redesign error template when the v2 router is mounted (prod
+# default since the cutover); fall back to the v1 ``error.html`` only
+# for deploys that explicitly disable PP_REDESIGN_PREVIEW.  Both
+# templates share the same ctx contract (``message`` + ``status_code``).
+_ERROR_TEMPLATE = (
+    "_redesign/error.html"
+    if _redesign_preview_router.is_enabled()
+    else "error.html"
+)
+
+
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     # HTMX partial requests (api/ endpoints) get inline error fragments
@@ -1391,10 +1402,11 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         message = exc.detail or "An unexpected error occurred."
 
     return templates.TemplateResponse(
-        "error.html",
+        _ERROR_TEMPLATE,
         {
-            "request": request,
-            "message": message,
+            "request":     request,
+            "message":     message,
+            "status_code": exc.status_code,
         },
         status_code=exc.status_code,
     )
@@ -1428,10 +1440,11 @@ async def generic_exception_handler(request: Request, exc: Exception):
         )
 
     return templates.TemplateResponse(
-        "error.html",
+        _ERROR_TEMPLATE,
         {
-            "request": request,
-            "message": "Something went wrong on our end. Please try again later.",
+            "request":     request,
+            "message":     "Something went wrong on our end. Please try again later.",
+            "status_code": 500,
         },
         status_code=500,
     )

@@ -25,7 +25,12 @@ from filings.supabase_cache import _get_client
 logger = logging.getLogger(__name__)
 
 
-BUNDLE_TTL_HOT_S  = 10 * 60
+# Hot TTL deliberately tighter than the warmer's 5-min cycle interval
+# so users see at-most-5-min-old data on cache hits.  Combined with
+# the warmer's "always refresh oldest N" strategy below, hot tickers
+# spend most of their lifetime fresh, with a brief gap window each
+# cycle while the warmer is in-flight.
+BUNDLE_TTL_HOT_S  = 280
 BUNDLE_TTL_WARM_S = 30 * 60
 BUNDLE_TTL_COLD_S = 60 * 60
 
@@ -198,10 +203,15 @@ def get_bundle(ticker: str) -> dict | None:
 
 
 def get_stale_tickers(tier: str, limit: int = 50) -> list[str]:
-    """Tickers in *tier* whose bundle is past the tier's TTL.
+    """The next *limit* tickers in *tier* the warmer should refresh.
 
-    Ordered oldest-refresh-first so freshness drift is bounded under
-    burst-driven warmer schedules.
+    Returns the OLDEST tickers in the tier ordered ``refreshed_at ASC``
+    -- not just those past TTL.  Originally we filtered to "past TTL"
+    only, but that meant a cycle could skip the entire hot tier when
+    every hot ticker was just-under-TTL at scan time; users hitting
+    in the next 30-60s fell to the cold path until the next cycle
+    expired them.  Always picking the oldest keeps the tier in
+    perpetual refresh, which is what we actually want for hot/warm.
 
     Excludes tickers that just FAILED a warmer attempt within the
     last :data:`FAILURE_BACKOFF_S` so a permanently-broken upstream
@@ -214,12 +224,9 @@ def get_stale_tickers(tier: str, limit: int = 50) -> list[str]:
     if client is None:
         return []
 
-    now_ts = datetime.now(timezone.utc).timestamp()
-    cutoff_iso = datetime.fromtimestamp(
-        now_ts - _TTL_BY_TIER[tier], tz=timezone.utc,
-    ).isoformat()
     backoff_cutoff_iso = datetime.fromtimestamp(
-        now_ts - FAILURE_BACKOFF_S, tz=timezone.utc,
+        datetime.now(timezone.utc).timestamp() - FAILURE_BACKOFF_S,
+        tz=timezone.utc,
     ).isoformat()
 
     # Over-fetch so the post-filter on recent failures still yields
@@ -229,7 +236,6 @@ def get_stale_tickers(tier: str, limit: int = 50) -> list[str]:
             client.table("stock_overview_cache")
             .select("ticker, last_attempt_status, last_attempt_at")
             .eq("tier", tier)
-            .lt("refreshed_at", cutoff_iso)
             .order("refreshed_at", desc=False)
             .limit(limit * 2)
             .execute()
