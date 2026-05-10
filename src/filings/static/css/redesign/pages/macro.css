@@ -128,6 +128,119 @@
   line-height: 1.5;
 }
 
+/* CTA row under the placeholder copy -- ghost-style pills that send
+   the user to a related page so an empty state isn't a dead-end. */
+.pp-page-placeholder-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.pp-page-placeholder-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 12px;
+  font-family: var(--pp-font-mono);
+  letter-spacing: 0.03em;
+  color: var(--pp-accent);
+  border: var(--pp-border-w) solid var(--pp-line2);
+  background: var(--pp-panel);
+  text-decoration: none;
+  transition: border-color 0.08s ease, color 0.08s ease;
+}
+.pp-page-placeholder-cta:hover {
+  border-color: var(--pp-accent);
+  color: var(--pp-text);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * WATCHLIST — empty-state typography + popular-ticker quick-add row.
+ *
+ * The empty state is the page's primary canvas (most users land here
+ * with zero rows), so it gets larger type than the generic
+ * `.pp-page-placeholder-*` defaults.  Adding a ticker happens via
+ * either (a) one of the pill-style popular tickers here, or (b) the ★
+ * button on a stock page -- there is NO free-text add form on this
+ * page by design.
+ * ───────────────────────────────────────────────────────────────────*/
+
+.pp-watchlist-empty {
+  padding: 80px 24px 72px;
+}
+.pp-watchlist-empty .pp-page-placeholder-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+  color: var(--pp-accent);  /* coral, ties to the ★ on stock pages */
+}
+.pp-watchlist-empty .pp-page-placeholder-title {
+  font-size: 22px;
+  margin-bottom: 10px;
+}
+.pp-watchlist-empty .pp-page-placeholder-sub {
+  font-size: 15px;
+  max-width: 580px;
+  line-height: 1.55;
+  margin-bottom: 28px;
+}
+
+/* Popular-ticker quick-add tags -- single click POSTs to /api/watchlist
+   and reloads the page.  Visually heavier than the secondary CTA pills
+   below them because this is the primary action. */
+.pp-watchlist-quickadd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  max-width: 640px;
+  margin: 0 auto 28px;
+}
+.pp-watchlist-quickadd-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  font-family: var(--pp-font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--pp-text);
+  background: var(--pp-panel);
+  border: var(--pp-border-w) solid var(--pp-line2);
+  cursor: pointer;
+  transition: border-color 0.08s ease, color 0.08s ease, background 0.08s ease;
+}
+.pp-watchlist-quickadd-tag:hover {
+  border-color: var(--pp-accent);
+  color: var(--pp-accent);
+}
+.pp-watchlist-quickadd-tag:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pp-watchlist-quickadd-plus {
+  font-size: 16px;
+  color: var(--pp-accent);
+  font-weight: 700;
+  line-height: 1;
+}
+.pp-watchlist-quickadd-tkr {
+  letter-spacing: 0.06em;
+}
+
+/* Inline error text under the quick-add row -- only visible when an
+   add fails (duplicate, invalid, network error, etc.). */
+.pp-watchlist-addbar-err {
+  font-family: var(--pp-font-mono);
+  font-size: 12px;
+  color: var(--pp-coral, #ff6b6b);
+  text-align: center;
+  min-height: 16px;
+  margin-bottom: 12px;
+}
+
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * MACRO / INDICATORS — 2-col grid of panels (one per FRED group).

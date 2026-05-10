@@ -1,0 +1,220 @@
+{#-
+  PaperPanda Redesign — Watchlist (standalone page)
+
+  Broken out from the Profile page so Watchlist gets its own sidenav
+  entry + URL.  Renders the same watchlist data as the v2 profile's
+  Watchlist tab used to, plus the list-selector + add-ticker controls.
+
+  Data source: filings.watchlist.load_watchlist() (flat list, no
+  list_id).  Multi-list selector is mock for now -- single "Core" list
+  is the live one.
+
+  Auth-gated: unauthenticated visitors get redirected to /login by
+  the route handler.
+-#}
+{% extends "_redesign/base.html" %}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment, kpi_strip, spark %}
+
+{% block title %}Watchlist · PaperPanda{% endblock %}
+
+{% block extra_css %}
+  {# macro.css ships the `.pp-page-*` chrome (hero, panes, placeholders);
+     profile.css ships the watchlist-specific styles (table, list selector,
+     etc.) that we share with the Profile page. #}
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/macro.css?v={{ asset_version }}">
+  <link rel="stylesheet"
+        href="/static/css/redesign/pages/profile.css?v={{ asset_version }}">
+{% endblock %}
+
+{% block content %}
+
+{# ━━━━━━━━━━ PAGE HERO ━━━━━━━━━━
+   Star icon matches the watch button on stock pages (`★ Watch` /
+   `★ Watching`) so the metaphor is consistent across the app. #}
+<header class="pp-page-hero">
+  <div class="pp-page-hero-icon" aria-hidden="true">★</div>
+  <div class="pp-page-hero-text">
+    <span class="pp-mono pp-page-hero-crumb">Account <span class="pp-page-hero-crumb-sep">/</span> Watchlist</span>
+    <h1 class="pp-page-hero-title">My Watchlist</h1>
+    <div class="pp-page-hero-sub">
+      Your personalized signal feed — superinvestor moves, insider trades, and
+      congressional activity on stocks you care about.
+    </div>
+  </div>
+</header>
+
+{# ━━━━━━━━━━ KPI STRIP ━━━━━━━━━━
+   Shown only when the watchlist has rows.  All four metrics derive
+   from the same notifications + watchlist data that powers the row
+   enrichment, so they're real numbers (no mock backfill). #}
+{% if not watch_empty %}
+  <div class="pp-page-body pp-watchlist-body" style="padding-bottom:0;">
+    {{ kpi_strip([
+      {"label": "Tickers",        "value": watch_kpis.total},
+      {"label": "Signals (7d)",   "value": watch_kpis.signals},
+      {"label": "Insider moves",  "value": watch_kpis.with_insider},
+      {"label": "Super moves",    "value": watch_kpis.with_super},
+    ]) }}
+  </div>
+{% endif %}
+
+{# ━━━━━━━━━━ BODY ━━━━━━━━━━ #}
+<div class="pp-page-body pp-watchlist-body">
+
+  {% call panel(cls="pp-profile-watch-panel") %}
+    {% if watch_empty %}
+      <div class="pp-page-placeholder pp-watchlist-empty">
+        <div class="pp-page-placeholder-icon">★</div>
+        <div class="pp-page-placeholder-title">Your watchlist is empty</div>
+        <div class="pp-page-placeholder-sub">
+          Click the ★ button on any stock page to add it, or start with one
+          of these popular tickers.
+        </div>
+
+        {# Popular tickers -- one-click add via /api/watchlist POST.
+           Disabled state shows briefly while the request is in flight;
+           on success the page reloads with the new row in the table. #}
+        <div class="pp-watchlist-quickadd" aria-label="Popular tickers">
+          {% for t in popular_tickers %}
+            <button type="button"
+                    class="pp-watchlist-quickadd-tag"
+                    data-ticker="{{ t }}"
+                    onclick="ppWatchlistQuickAdd('{{ t }}', this)">
+              <span class="pp-watchlist-quickadd-plus" aria-hidden="true">+</span>
+              <span class="pp-watchlist-quickadd-tkr">{{ t }}</span>
+            </button>
+          {% endfor %}
+        </div>
+        <div id="pp-watchlist-add-err"
+             class="pp-watchlist-addbar-err"
+             aria-live="polite"></div>
+
+        <div class="pp-page-placeholder-actions">
+          <a class="pp-page-placeholder-cta" href="/funds">Superinvestors</a>
+          <a class="pp-page-placeholder-cta" href="/insiders">Insider Trading</a>
+          <a class="pp-page-placeholder-cta" href="/congress">Congress Trading</a>
+        </div>
+      </div>
+    {% else %}
+      <table class="pp-table pp-sortable pp-profile-watch-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Name</th>
+            <th data-sortable="false">1M</th>
+            <th class="pp-num">Price</th>
+            <th class="pp-num">Day</th>
+            <th class="pp-num">Signals</th>
+            <th class="pp-num">Earnings</th>
+            <th class="pp-num">Added</th>
+            <th class="pp-num pp-profile-watch-th-x" data-sortable="false"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in watch_rows %}
+            <tr data-watch-ticker="{{ r.ticker }}">
+              <td data-sort-value="{{ r.ticker }}">
+                <a href="/stock/{{ r.ticker }}" class="pp-mono pp-profile-watch-tkr">{{ r.ticker }}</a>
+              </td>
+              <td class="pp-profile-watch-name" data-sort-value="{{ r.name }}">{{ r.name }}</td>
+              <td class="pp-profile-watch-spark">
+                {% if r.spark_series %}
+                  {%- set _last = r.spark_series[-1] -%}
+                  {%- set _first = r.spark_series[0] -%}
+                  {{ spark(r.spark_series,
+                           color=("var(--pp-up)" if _last >= _first else "var(--pp-down)"),
+                           w=84, h=22) }}
+                {% else %}
+                  <span class="pp-dim2">—</span>
+                {% endif %}
+              </td>
+              <td class="pp-num pp-mono pp-profile-watch-price"
+                  data-sort-value="{{ r.price_raw if r.price_raw is not none else '' }}">
+                {{ r.price }}
+              </td>
+              <td class="pp-num pp-mono {% if r.chg_tone == 'up' %}pp-up{% elif r.chg_tone == 'down' %}pp-down{% else %}pp-dim{% endif %}"
+                  data-sort-value="{{ r.chg_raw if r.chg_raw is not none else '' }}">
+                {{ r.chg }}
+              </td>
+              <td class="pp-num"
+                  data-sort-value="{{ r.alerts_n }}">
+                <span class="pp-mono pp-profile-watch-alerts {% if r.alerts_n == 0 %}pp-dim2{% else %}pp-accent-color{% endif %}">
+                  {%- if r.alerts_n == 0 -%}—{%- else -%}{{ r.alerts_n }}{%- endif -%}
+                </span>
+              </td>
+              <td class="pp-num pp-mono pp-text"
+                  data-sort-value="{{ r.earnings }}">{{ r.earnings }}</td>
+              <td class="pp-num pp-mono pp-dim"
+                  data-sort-value="{{ r.added }}">{{ r.added }}</td>
+              <td class="pp-num">
+                <button type="button"
+                        class="pp-profile-watch-x"
+                        aria-label="Remove {{ r.ticker }}"
+                        onclick="ppWatchlistRemove('{{ r.ticker }}', this)">×</button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% endcall %}
+
+</div>
+
+<script>
+(function() {
+  /* One-click add from the empty-state popular-tickers row.  Disables
+     the clicked tag while the POST is in flight (so a double-click
+     doesn't fire twice) and reloads on success so the new row renders
+     with its server-shaped data. */
+  window.ppWatchlistQuickAdd = function(ticker, btn) {
+    var err = document.getElementById('pp-watchlist-add-err');
+    if (err) err.textContent = '';
+    if (btn) btn.disabled = true;
+    fetch('/api/watchlist', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ticker: ticker}),
+    }).then(function(r) {
+      if (r.ok) {
+        window.location.reload();
+        return;
+      }
+      return r.json().then(function(d) {
+        if (err) err.textContent = (d && d.error) ? d.error : ('HTTP ' + r.status);
+        if (btn) btn.disabled = false;
+      });
+    }).catch(function() {
+      if (err) err.textContent = 'Network error';
+      if (btn) btn.disabled = false;
+    });
+  };
+
+  /* Remove: DELETE /api/watchlist/{ticker}.  Animates the row out,
+     then either removes it from the DOM (when others remain) or
+     reloads to render the empty-state placeholder. */
+  window.ppWatchlistRemove = function(ticker, btn) {
+    var row = btn.closest('tr');
+    if (!row) return;
+    var orig = row.style.opacity;
+    row.style.opacity = '0.4';
+    fetch('/api/watchlist/' + encodeURIComponent(ticker), {method: 'DELETE'})
+      .then(function(r) {
+        if (!r.ok) throw new Error(r.status);
+        row.style.transition = 'opacity 0.2s ease';
+        row.style.opacity = '0';
+        setTimeout(function() {
+          row.remove();
+          var left = document.querySelectorAll('[data-watch-ticker]').length;
+          if (left === 0) window.location.reload();
+        }, 200);
+      })
+      .catch(function() {
+        row.style.opacity = orig;
+      });
+  };
+})();
+</script>
+{% endblock %}

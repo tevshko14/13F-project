@@ -176,9 +176,8 @@ async def api_watchlist_prefs_update(request: Request):
 
 
 # ── HTML page ────────────────────────────────────────────────────────
-
-
-@router.get("/watchlist", response_class=HTMLResponse)
-async def watchlist_page(request: Request):
-    """Watchlist dashboard page."""
-    return templates.TemplateResponse("watchlist.html", {"request": request})
+# `/watchlist` is owned by the v2 redesign router
+# (`filings.routers.redesign_preview.preview_watchlist`).  The v1
+# `watchlist.html` template is unreached in production; the API
+# endpoints above (POST/GET /api/watchlist) are still the live
+# backend that both v1 + v2 read from.

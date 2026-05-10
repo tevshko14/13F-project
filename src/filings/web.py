@@ -2925,8 +2925,13 @@ async def admin_pool_diag(request: Request):
 
     from filings import concurrency as _concurrency
     return JSONResponse({
-        "pool_status": _concurrency.heavy_pool_status(),
+        "pool_status":  _concurrency.heavy_pool_status(),
         "default_pool": _concurrency.default_pool_diagnostic(top_n=10),
+        # Per-source semaphore + circuit-breaker state for every
+        # external API.  ``circuit_open=True`` means we're returning
+        # `None` immediately for that source until ``circuit_reopens_in``
+        # hits zero.
+        "upstreams":    _concurrency.upstream_status(),
     })
 
 

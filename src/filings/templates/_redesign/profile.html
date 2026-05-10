@@ -41,92 +41,17 @@
   {{ btn("Sign out", kind="ghost") }}
 </header>
 
-{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━ #}
+{# ━━━━━━━━━━ TAB NAV ━━━━━━━━━━
+   Watchlist used to be the first tab here; it's now its own page at
+   /watchlist with a dedicated sidenav entry. #}
 <div class="pp-page-tabs">
-  {{ segment(["Watchlist","Alerts","Account","Subscription"],
-             value=profile_tab|default("Watchlist"),
+  {{ segment(["Account","Alerts","Subscription"],
+             value=profile_tab|default("Account"),
              id="pp-profile-tabs") }}
 </div>
 
 {# ━━━━━━━━━━ TAB CONTENT ━━━━━━━━━━ #}
 <div class="pp-page-body">
-
-  {# ── WATCHLIST (default — LIVE) ── #}
-  <section class="pp-page-pane{% if profile_tab == 'Watchlist' %} is-active{% endif %}"
-           data-tab-pane="Watchlist">
-
-    {# Top row: list selector + new-list / add-ticker actions.
-       Lists are mock for now — schema is flat (no list_id).  We render the
-       user's full watchlist under "Core" and stub out the others. #}
-    <div class="pp-profile-watch-controls">
-      <div class="pp-segment pp-segment-mono" id="pp-profile-lists" role="tablist">
-        {% for name, count in watch_lists %}
-          <span class="pp-segment-opt{% if loop.first %} is-active{% endif %}"
-                data-watch-list="{{ name }}" role="tab">
-            {{ name }} {% if count %}({{ count }}){% endif %}
-          </span>
-        {% endfor %}
-      </div>
-      <div style="flex:1"></div>
-      {{ btn("+ New list",  kind="ghost") }}
-      {{ btn("+ Add ticker", kind="accent") }}
-    </div>
-
-    {% call panel(cls="pp-profile-watch-panel") %}
-      {% if watch_empty %}
-        <div class="pp-page-placeholder">
-          <div class="pp-page-placeholder-icon">★</div>
-          <div class="pp-page-placeholder-title">Your watchlist is empty</div>
-          <div class="pp-page-placeholder-sub">
-            Add tickers from any stock page to start tracking signals,
-            earnings, insider activity, and price alerts here.
-          </div>
-        </div>
-      {% else %}
-        <table class="pp-table pp-profile-watch-table">
-          <thead>
-            <tr>
-              <th>Ticker</th>
-              <th>Name</th>
-              <th class="pp-num">Price</th>
-              <th class="pp-num">Day</th>
-              <th>1Y</th>
-              <th>Alerts</th>
-              <th class="pp-num">Earnings</th>
-              <th class="pp-num">Added</th>
-              <th class="pp-num pp-profile-watch-th-x"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in watch_rows %}
-              <tr>
-                <td><span class="pp-mono pp-profile-watch-tkr">{{ r.ticker }}</span></td>
-                <td class="pp-profile-watch-name">{{ r.name }}</td>
-                <td class="pp-num pp-mono pp-profile-watch-price">
-                  {{ r.price if r.price else '—' }}
-                </td>
-                <td class="pp-num pp-mono pp-dim">
-                  {{ r.chg if r.chg else '—' }}
-                </td>
-                <td class="pp-mono pp-dim">—</td>
-                <td>
-                  <span class="pp-mono pp-profile-watch-alerts {% if r.alerts == 'none' %}pp-dim2{% else %}pp-accent-color{% endif %}">
-                    {%- if r.alerts == "none" -%}—{% else %}🔔 {{ r.alerts }}{% endif -%}
-                  </span>
-                </td>
-                <td class="pp-num pp-mono pp-text">{{ r.earnings }}</td>
-                <td class="pp-num pp-mono pp-dim">{{ r.added }}</td>
-                <td class="pp-num">
-                  <span class="pp-profile-watch-x" role="button" aria-label="Remove">×</span>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% endif %}
-    {% endcall %}
-
-  </section>
 
   {# ━━━━━━━━━━ ALERTS ━━━━━━━━━━ #}
   <section class="pp-page-pane{% if profile_tab == 'Alerts' %} is-active{% endif %}"

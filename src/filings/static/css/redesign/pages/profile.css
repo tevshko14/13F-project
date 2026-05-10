@@ -75,7 +75,8 @@
   font-weight: 600;
 }
 
-/* Remove (×) button — dim by default, accent on hover. */
+/* Remove (×) button -- dim by default, accent on hover.  Works on
+   both <span role="button"> (legacy) and <button> (live watchlist). */
 .pp-profile-watch-x {
   display: inline-block;
   font-size: 14px;
@@ -83,6 +84,11 @@
   cursor: pointer;
   padding: 0 4px;
   user-select: none;
+  /* Browser defaults reset for the <button> case. */
+  background: transparent;
+  border: 0;
+  font-family: inherit;
+  line-height: 1;
 }
 .pp-profile-watch-x:hover { color: var(--pp-down); }
 

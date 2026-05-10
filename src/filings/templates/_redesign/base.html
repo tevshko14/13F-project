@@ -287,9 +287,16 @@
           {"name": "Macro",    "href": "/macro",    "badge": ""},
         ]},
         {"hd": "Watchlist", "items": [
-          {"name": "Watchlist", "href": "/profile?tab=Watchlist", "badge": "", "auth": "watchlist"},
+          {"name": "Watchlist", "href": "/watchlist", "badge": "", "auth": "watchlist"},
         ]},
       ] -%}
+      {%- if show_profile_nav -%}
+        {%- set _ = nav_groups.append({
+          "hd": "Profile", "items": [
+            {"name": "Profile", "href": "/profile", "badge": "", "auth": "profile"},
+          ],
+        }) -%}
+      {%- endif -%}
 
       {% for group in nav_groups %}
         <div class="pp-nav-group">

@@ -46,6 +46,7 @@ from filings.concurrency import (
     to_heavy,
     to_light,
     to_supabase,
+    to_upstream,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,19 @@ def is_placeholders_enabled() -> bool:
     the v1 handlers (real features) serve those URLs instead.
     """
     return os.environ.get("PP_PLACEHOLDERS", "").lower() in ("1", "true", "yes")
+
+
+def is_profile_preview_enabled() -> bool:
+    """Whether the v2 profile page is exposed.
+
+    The Account / Alerts / Subscription tabs still render mock data
+    (no real prefs / billing schema yet), so we gate the whole route
+    + sidenav item behind ``PP_PROFILE_PREVIEW=1`` -- set locally for
+    iteration, unset in production so v1 ``/profile`` (or a 302 home)
+    serves real users.  Watchlist is its own page (``/watchlist``)
+    and is unaffected by this flag.
+    """
+    return os.environ.get("PP_PROFILE_PREVIEW", "").lower() in ("1", "true", "yes")
 
 
 def _placeholder_route(path: str, **kwargs):
@@ -378,6 +392,10 @@ async def _shell_context(request: Request, active: str) -> dict:
         # Options) show up in the sidenav.  Set ``PP_PLACEHOLDERS=1`` in
         # local dev; unset in production.
         "show_placeholder_nav": is_placeholders_enabled(),
+        # Local-only flag: drives whether the Profile sidenav item +
+        # /profile route are exposed.  Gated because the Account /
+        # Alerts / Subscription tabs still render mock data.
+        "show_profile_nav":     is_profile_preview_enabled(),
     }
 
 
@@ -6885,6 +6903,14 @@ async def build_stock_data_bundle(fund_cache: dict, ticker: str) -> tuple[dict, 
     async def _bounded(coro, *, timeout: float, fallback, name: str):
         try:
             result = await asyncio.wait_for(coro, timeout=timeout)
+            # `to_upstream` returns None when the circuit breaker is
+            # open for a source -- treat that as "no data for now" and
+            # render the fallback (same shape as a timeout).  Without
+            # this guard the template would receive None where it
+            # expects a dict.
+            if result is None:
+                source_status[name] = "circuit_open"
+                return fallback
             source_status[name] = "ok"
             return result
         except asyncio.TimeoutError:
@@ -6916,7 +6942,12 @@ async def build_stock_data_bundle(fund_cache: dict, ticker: str) -> tuple[dict, 
                            "about_ipo": "—", "about_website": "—",
                            "logo_url": ""},
                  name="meta"),
-        _bounded(to_light(_stock_build_sentiment, ticker),           timeout=4.0,
+        # Sentiment fans out to ApeWisdom -- route through the
+        # per-source gate (2 concurrent calls + circuit breaker after
+        # 3 timeouts in 60s).  Previously on `to_light` which used
+        # the unbounded default pool and was the source of the
+        # 2026-05-10 / -11 prod saturations.
+        _bounded(to_upstream("apewisdom", _stock_build_sentiment, ticker), timeout=4.0,
                  fallback={"has_data": False, "score": 0, "score_str": "—",
                            "score_class": "", "mentions": "—", "rank_str": "",
                            "cohort": [], "note": "", "fill_pct": 0, "fill_left": 50},
@@ -9380,13 +9411,74 @@ async def preview_insiders(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-_PROFILE_USER = {
-    "initials": "TM",
-    "name":     "Tev McNeill",
-    "email":    "tev@paperpanda.io",
-    "plan":     "Pro plan",
-    "member_since": "Jan 2024",
-}
+def _resolve_profile_user(request: Request) -> dict | None:
+    """Build the page-hero user dict from real session state.
+
+    Reads ``request.state.profile`` (the Supabase ``profiles`` row,
+    loaded by the auth middleware) and ``request.state.user`` (the
+    Clerk JWT claims).  Returns ``None`` when neither is available --
+    the caller should redirect to /login.
+
+    Plan + member_since use sensible fallbacks today because the
+    underlying columns (``plan_tier``, reliable ``created_at``) don't
+    exist on the ``profiles`` table yet.  Once Stripe-backed
+    subscriptions land + the schema migration runs, this helper picks
+    them up automatically.
+    """
+    profile = getattr(request.state, "profile", None) if hasattr(request, "state") else None
+    user = getattr(request.state, "user", None) if hasattr(request, "state") else None
+    if not isinstance(profile, dict) and not isinstance(user, dict):
+        return None
+
+    profile = profile if isinstance(profile, dict) else {}
+    user = user if isinstance(user, dict) else {}
+
+    # Name: prefer Supabase display_name (set by the Clerk webhook
+    # from first+last name), fall back to JWT `name`, finally to the
+    # email local-part so we never show a literal blank.
+    name = (
+        (profile.get("display_name") or "").strip()
+        or (user.get("name") or "").strip()
+    )
+    email = (profile.get("email") or user.get("email") or "").strip()
+    if not name and email:
+        name = email.split("@", 1)[0]
+
+    initials = _initials_from_name(name)
+    if not initials and email:
+        initials = (email[:1] or "").upper()
+
+    # Plan: free-tier default until Stripe-subscription rows land.
+    # The profiles row may already carry a `plan_tier` in some envs --
+    # honour it when present so this helper survives the migration.
+    plan_raw = (profile.get("plan_tier") or "free").strip().lower()
+    plan = {"free": "Free plan", "pro": "Pro plan", "team": "Team plan"}.get(
+        plan_raw, plan_raw.title() + " plan",
+    )
+
+    # Member since: prefer `created_at` from the profiles row when the
+    # column exists (Supabase typically auto-adds it).  Fall back to
+    # a generic label so the page never shows "since None".
+    member_since = "—"
+    created_at = profile.get("created_at") or user.get("iat")
+    if created_at:
+        try:
+            # `created_at` is ISO 8601 string (Supabase) or epoch int (JWT iat)
+            if isinstance(created_at, (int, float)):
+                dt = datetime.fromtimestamp(created_at, tz=timezone.utc)
+            else:
+                dt = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+            member_since = dt.strftime("%b %Y")
+        except (ValueError, TypeError):
+            pass
+
+    return {
+        "initials":     initials or "PP",
+        "name":         name or "Account",
+        "email":        email or "",
+        "plan":         plan,
+        "member_since": member_since,
+    }
 
 
 # Mock watchlist collections (segment selector at top).  Real grouping needs
@@ -9411,33 +9503,161 @@ def _profile_format_added(iso_str: str) -> str:
         return iso_str[:10]
 
 
-async def _fetch_profile_watchlist() -> list[dict]:
-    """Read the local JSON watchlist and shape rows for the table.
+def _name_map_from_fund_cache(fund_cache: dict | None) -> dict[str, str]:
+    """Build a ticker -> issuer name lookup from in-memory 13F holdings.
 
-    Price / day-pct / 1Y spark / earnings date / alerts count would each
-    require per-ticker fetches (market_data, earnings_calendar, notifications).
-    We render those columns as `—` for now — wire in a follow-up batch
-    fetch once the row count starts mattering.
+    Walks every fund's ``all_holdings`` once and keeps the first
+    non-empty name seen per ticker.  The slim-holding shape stores the
+    issuer name under ``issuer`` (not ``issuer_name``) -- see
+    ``cache._slim_holding``.  Cheap because fund_cache lives in process;
+    covers the universe of tickers any superinvestor has held
+    (effectively the S&P + popular small/mid caps).  Tickers outside
+    this universe fall back to displaying the ticker itself.
     """
+    out: dict[str, str] = {}
+    if not fund_cache:
+        return out
+    for fund in fund_cache.values():
+        for h in fund.get("all_holdings") or []:
+            t = (h.get("ticker") or "").upper()
+            if t and t not in out:
+                name = (h.get("issuer") or h.get("issuer_name") or "").strip()
+                if name:
+                    out[t] = name
+    return out
+
+
+def _format_price(p) -> str:
+    if p is None:
+        return "—"
     try:
-        from filings import watchlist
-        entries = await to_heavy(watchlist.load_watchlist)
+        return f"${float(p):,.2f}"
+    except (TypeError, ValueError):
+        return "—"
+
+
+def _format_chg_pct(p) -> tuple[str, str]:
+    """Return (display_str, tone) where tone is 'up'/'down'/'flat'."""
+    if p is None:
+        return "—", "flat"
+    try:
+        val = float(p)
+    except (TypeError, ValueError):
+        return "—", "flat"
+    tone = "up" if val > 0 else "down" if val < 0 else "flat"
+    return f"{val:+.2f}%", tone
+
+
+async def _fetch_profile_watchlist(
+    user_id: str, fund_cache: dict | None = None,
+) -> tuple[list[dict], dict]:
+    """Read the user's Supabase-backed watchlist + enrich for the page.
+
+    Returns ``(rows, kpis)`` where:
+      * ``rows`` -- per-ticker dicts ready for the table.  Each row gets
+        a ``spark_series`` (1M, normalised 0-1, from the cached S&P
+        close DataFrame), a current ``price``, day ``chg_pct``, an
+        issuer ``name`` (resolved from fund_cache when possible), and
+        a ``signals`` count (recent notifications matching the ticker).
+        Tickers outside the S&P-covered universe show em-dashes for
+        spark/price/chg instead of broken/empty values.
+      * ``kpis`` -- aggregate counts for the KPI strip at the top
+        (total tickers, total signals (7d), insider notif tickers,
+        13F/super notif tickers).
+
+    Same Supabase source as the `/api/watchlist` JSON endpoint, so
+    the page and API stay consistent.  Notification + market-data
+    enrichment is best-effort -- failures degrade to em-dashes but
+    the table still renders.
+    """
+    empty_kpis = {"total": 0, "signals": 0, "with_insider": 0, "with_super": 0}
+    if not user_id:
+        return [], empty_kpis
+
+    try:
+        from filings import supabase_cache
+        entries = await to_supabase(supabase_cache.get_user_watchlist, user_id) or []
     except Exception as exc:
-        logger.warning("Watchlist load failed: %s", exc)
+        logger.warning("Watchlist load failed for %s: %s", user_id, exc)
         entries = []
+
+    if not entries:
+        return [], empty_kpis
+
+    tickers = [(e.get("ticker") or "").upper() for e in entries]
+    tickers = [t for t in tickers if t]
+
+    # Parallel enrichment: sparklines + day-period market data +
+    # recent notifications.  `get_sp500_market_data("1D")` yields
+    # {ticker: {"price": ..., "pct_change": ...}} for every S&P
+    # ticker in one cached call (30-min TTL), so we avoid per-ticker
+    # network calls in the request path.
+    from filings import market_data, supabase_cache
+    spark_task = to_heavy(market_data.get_sparkline_points, tickers, 20)
+    md_task    = to_heavy(market_data.get_sp500_market_data, "1D")
+    notif_task = to_supabase(supabase_cache.get_recent_notifications, 200)
+    try:
+        spark_map, md_map, notifs = await asyncio.gather(
+            spark_task, md_task, notif_task, return_exceptions=True,
+        )
+        if isinstance(spark_map, Exception): spark_map = {}
+        if isinstance(md_map, Exception):    md_map = {}
+        if isinstance(notifs, Exception):    notifs = []
+    except Exception as exc:
+        logger.debug("Watchlist enrichment failed for %s: %s", user_id, exc)
+        spark_map, md_map, notifs = {}, {}, []
+
+    # Bucket notifications by ticker (matches the /api/watchlist API
+    # enrichment so both surfaces see the same counts).
+    signals_by_ticker: dict[str, list[dict]] = {t: [] for t in tickers}
+    for n in notifs or []:
+        meta = n.get("metadata") or {}
+        nt = (meta.get("ticker") or "").upper()
+        if nt in signals_by_ticker:
+            signals_by_ticker[nt].append(n)
+
+    # Ticker -> issuer name lookup, built once from in-memory fund_cache.
+    name_map = _name_map_from_fund_cache(fund_cache)
+
+    kpis = {
+        "total":        len(tickers),
+        "signals":      sum(len(v) for v in signals_by_ticker.values()),
+        "with_insider": sum(
+            1 for sigs in signals_by_ticker.values()
+            if any((s.get("type") or "").lower().startswith("insider") for s in sigs)
+        ),
+        "with_super": sum(
+            1 for sigs in signals_by_ticker.values()
+            if any(((s.get("type") or "").lower().startswith(("13f", "fund", "super")))
+                   for s in sigs)
+        ),
+    }
 
     rows = []
     for e in entries:
+        ticker = (e.get("ticker") or "").upper()
+        sigs = signals_by_ticker.get(ticker, [])
+        md = md_map.get(ticker) if isinstance(md_map, dict) else None
+        price_raw = (md or {}).get("price")
+        chg_raw = (md or {}).get("pct_change")
+        chg_str, chg_tone = _format_chg_pct(chg_raw)
         rows.append({
-            "ticker":   e.get("ticker", ""),
-            "name":     e.get("issuer_name", "") or e.get("ticker", ""),
-            "price":    None,
-            "chg":      None,
-            "alerts":   "none",
-            "earnings": "—",
-            "added":    _profile_format_added(e.get("added_at", "")),
+            "ticker":       ticker,
+            "name":         (
+                e.get("issuer_name") or name_map.get(ticker) or ticker
+            ),
+            "price":        _format_price(price_raw),
+            "price_raw":    price_raw,           # for data-sort-value
+            "chg":          chg_str,
+            "chg_raw":      chg_raw,             # for data-sort-value
+            "chg_tone":     chg_tone,            # 'up' / 'down' / 'flat'
+            "alerts":       str(len(sigs)) if sigs else "none",
+            "alerts_n":     len(sigs),
+            "earnings":     "—",
+            "added":        _profile_format_added(e.get("added_at", "")),
+            "spark_series": spark_map.get(ticker, []) if isinstance(spark_map, dict) else [],
         })
-    return rows
+    return rows, kpis
 
 
 # Mock illustrative data for the still-unwired tabs.  These tabs need a
@@ -9512,36 +9732,86 @@ _PROFILE_INVOICES = [
 ]
 
 
-_PROFILE_TABS = ("Watchlist", "Alerts", "Account", "Subscription")
+_PROFILE_TABS = ("Account", "Alerts", "Subscription")
+
+# Quick-start picks shown on the empty Watchlist page -- mega-caps the
+# average user recognises, mixing tech / finance / consumer so the row
+# doesn't feel like a single sector.  Order roughly by household-name
+# recognition.
+_WATCHLIST_POPULAR_TICKERS = (
+    "NVDA", "AAPL", "MSFT", "GOOGL", "AMZN",
+    "TSLA", "META", "AMD",
+)
+
+
+@router.get("/watchlist", response_class=HTMLResponse)
+async def preview_watchlist(request: Request):
+    """Standalone watchlist page -- own URL + own sidenav entry.
+
+    Previously rendered as a tab inside /profile; broken out so it
+    gets first-class navigation alongside the section groups
+    (Markets / Signals / Watchlist / Profile).
+
+    Requires auth -- unauthenticated visitors bounce to /login.
+    """
+    user = _resolve_profile_user(request)
+    if user is None:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/login", status_code=302)
+
+    user_id = (
+        (getattr(request.state, "user", None) or {}).get("sub")
+        if hasattr(request, "state") else None
+    )
+    fund_cache = getattr(request.app.state, "fund_cache", None)
+    rows, kpis = await _fetch_profile_watchlist(user_id or "", fund_cache=fund_cache)
+    held = {r["ticker"] for r in rows}
+    # Filter popular tickers to those the user doesn't already track,
+    # so they can't double-add and the row stays useful on a non-empty
+    # watchlist.
+    popular = [t for t in _WATCHLIST_POPULAR_TICKERS if t not in held]
+
+    ctx = {
+        "request":         request,
+        **(await _shell_context(request, "Watchlist")),
+        "user":            user,
+        "watch_rows":      rows,
+        "watch_empty":     len(rows) == 0,
+        "watch_kpis":      kpis,
+        "popular_tickers": popular,
+    }
+    return templates.TemplateResponse("_redesign/watchlist.html", ctx)
 
 
 @router.get("/profile", response_class=HTMLResponse)
-async def preview_profile(request: Request, tab: str = "Watchlist"):
-    """Profile page — all 4 tabs render content on the initial load.
+async def preview_profile(request: Request, tab: str = "Account"):
+    """Profile page — Account / Alerts / Subscription tabs.
 
-    Watchlist is live; Alerts / Account / Subscription render design-faithful
-    illustrative data until the user-prefs / billing schemas are in place.
+    Watchlist used to be a tab here but is now its own page (/watchlist)
+    with a dedicated sidenav group.  ``?tab=`` deep-links one of the
+    three remaining tabs so the sidenav's Profile → Account|Alerts|
+    Subscription items land on the right pane.
 
-    ``?tab=`` deep-links the active tab so other pages (sidebar Watchlist,
-    topbar +Alert) can land on the right pane on load.
+    Gated behind ``PP_PROFILE_PREVIEW=1`` -- the tab bodies still
+    render mock data (no prefs/billing schema), so prod 302s home
+    until the wiring lands.  Local dev sets the env var to iterate.
+    Requires auth in addition to the gate -- unauthenticated visitors
+    bounce to /login.
     """
-    rows = await _fetch_profile_watchlist()
-    if tab not in _PROFILE_TABS:
-        tab = "Watchlist"
+    from fastapi.responses import RedirectResponse
+    if not is_profile_preview_enabled():
+        return RedirectResponse(url="/", status_code=302)
+    user = _resolve_profile_user(request)
+    if user is None:
+        return RedirectResponse(url="/login", status_code=302)
 
-    # No "Profile" sidebar item — Watchlist is the closest entry-point so
-    # highlight it whenever any Profile tab is in view.
+    if tab not in _PROFILE_TABS:
+        tab = "Account"
+
     ctx = {
         "request":    request,
-        **(await _shell_context(request, "Watchlist")),
-        "user":       _PROFILE_USER,
-        "watch_lists": [
-            (label, len(rows) if i == 0 else 0)
-            for i, label in enumerate(_PROFILE_LISTS_MOCK)
-        ],
-        "watch_active": _PROFILE_LISTS_MOCK[0],
-        "watch_rows": rows,
-        "watch_empty": len(rows) == 0,
+        **(await _shell_context(request, "Profile")),
+        "user":       user,
         "profile_tab": tab,
         # New tab payloads — illustrative content for now.
         "profile_alerts":           _PROFILE_ALERTS_MOCK,

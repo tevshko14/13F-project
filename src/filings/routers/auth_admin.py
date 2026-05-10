@@ -61,12 +61,12 @@ def _check_admin(user_id: str) -> bool:
 # ── Auth pages ────────────────────────────────────────────────────────
 
 
-@router.get("/profile", response_class=HTMLResponse)
-async def profile_page(request: Request):
-    """User profile page — account management."""
-    if not request.state.user:
-        return RedirectResponse(url="/login", status_code=302)
-    return templates.TemplateResponse("profile.html", {"request": request})
+# `/profile` is owned by the v2 redesign router
+# (`filings.routers.redesign_preview.preview_profile`) which renders
+# `_redesign/profile.html`.  The v1 `profile.html` template is
+# unreached in production -- left in the repo only for fallback /
+# rollback reference until the v2 page is fully fleshed out and we
+# can delete the v1 template.
 
 
 @router.get("/login", response_class=HTMLResponse)

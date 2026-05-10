@@ -182,11 +182,170 @@ def shutdown_pools() -> None:
             pass
     _heavy_sem = None
     _supabase_sem = None
+    # Drop per-source breakers/sems too -- they recreate lazily on the
+    # next call.  Matters for test reloads where lingering circuits
+    # could mask post-restart upstream issues.
+    _upstream_sems.clear()
+    _upstream_failures.clear()
+    _upstream_open_until.clear()
 
 
 def _fn_label(fn) -> str:
     """``module.qualname`` for log lines; falls back gracefully."""
     return f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', repr(fn))}"
+
+
+# ── Per-upstream concurrency + circuit breaker ────────────────────────
+#
+# Each external API (ApeWisdom, Finnhub, FRED, SEC, yfinance, …) gets
+# its own concurrency budget + failure tracker.  Why: ``to_heavy`` only
+# has a single shared semaphore (8 slots).  If ApeWisdom slows to a
+# crawl, the 8 slots fill with stuck ApeWisdom calls and every Finnhub
+# / SEC / yfinance call queues behind them.  One slow upstream =
+# everyone slow.  Per-source budgets make the budgets independent: a
+# stuck ApeWisdom can only consume its own 2 slots; Finnhub etc. keep
+# their own.
+#
+# Circuit breaker: rolling failure window per source.  If `threshold`
+# failures land within `window_s`, the circuit opens for `open_for_s`
+# -- subsequent calls return None immediately without touching the
+# upstream.  Restores the request-path to a fast path while the
+# upstream recovers.  Bundle-section fallback handles the None for
+# the user (graceful degradation).
+#
+# Sizes chosen so the sum of slots stays under heavy_pool capacity
+# (20) on the happy path; in practice not all sources max simultaneously.
+
+_UPSTREAM_CFG: dict[str, dict] = {
+    "apewisdom":     {"sem": 2, "threshold": 3, "window_s": 60, "open_for_s": 300},
+    "finnhub":       {"sem": 4, "threshold": 5, "window_s": 60, "open_for_s": 180},
+    "fred":          {"sem": 2, "threshold": 3, "window_s": 60, "open_for_s": 600},
+    "yfinance":      {"sem": 4, "threshold": 5, "window_s": 60, "open_for_s": 180},
+    "sec_edgar":     {"sem": 3, "threshold": 3, "window_s": 60, "open_for_s": 300},
+    "tiingo":        {"sem": 4, "threshold": 5, "window_s": 60, "open_for_s": 180},
+    "cboe":          {"sem": 2, "threshold": 3, "window_s": 60, "open_for_s": 300},
+    "google_trends": {"sem": 2, "threshold": 3, "window_s": 60, "open_for_s": 300},
+}
+_DEFAULT_UPSTREAM_CFG = {"sem": 3, "threshold": 3, "window_s": 60, "open_for_s": 180}
+
+_upstream_sems: dict[str, asyncio.Semaphore] = {}
+_upstream_failures: dict[str, list[float]] = {}
+_upstream_open_until: dict[str, float] = {}
+
+
+def _upstream_cfg(name: str) -> dict:
+    return _UPSTREAM_CFG.get(name, _DEFAULT_UPSTREAM_CFG)
+
+
+def _ensure_upstream_sem(name: str) -> asyncio.Semaphore:
+    sem = _upstream_sems.get(name)
+    if sem is None:
+        sem = asyncio.Semaphore(_upstream_cfg(name)["sem"])
+        _upstream_sems[name] = sem
+    return sem
+
+
+def is_circuit_open(name: str) -> bool:
+    """True when the circuit breaker for ``name`` is currently open."""
+    import time as _time
+    return _upstream_open_until.get(name, 0) > _time.time()
+
+
+def _record_upstream_failure(name: str) -> None:
+    """Record a failure; open the circuit if threshold reached in window."""
+    import time as _time
+    cfg = _upstream_cfg(name)
+    now = _time.time()
+    failures = _upstream_failures.setdefault(name, [])
+    failures.append(now)
+    # Drop entries outside the rolling window.
+    cutoff = now - cfg["window_s"]
+    while failures and failures[0] < cutoff:
+        failures.pop(0)
+    if len(failures) >= cfg["threshold"]:
+        _upstream_open_until[name] = now + cfg["open_for_s"]
+        logger.warning(
+            "upstream %s: circuit OPEN for %ds after %d failures in %ds",
+            name, cfg["open_for_s"], len(failures), cfg["window_s"],
+        )
+        failures.clear()  # avoid double-trigger right after reopen
+
+
+def _record_upstream_success(name: str) -> None:
+    """Reset the failure counter; a success closes the rolling window."""
+    if name in _upstream_failures:
+        _upstream_failures[name].clear()
+
+
+async def to_upstream(
+    source: str, fn, *args, timeout: float = _DEFAULT_HEAVY_TIMEOUT,
+):
+    """Run a slow external-API call gated by a per-source semaphore +
+    a per-source circuit breaker.
+
+    Three layers of protection:
+      1. **Per-source semaphore** -- bounded concurrent calls to this
+         source (e.g. 2 for ApeWisdom, 4 for Finnhub).  A slow source
+         can't starve calls to other sources.
+      2. **Circuit breaker** -- after N timeouts in a rolling window,
+         calls return None immediately without touching the upstream.
+         Page handlers see a fast "no data" instead of a 15s wait.
+      3. **Per-call timeout** -- existing ``asyncio.wait_for`` ceiling
+         (same shape as ``to_heavy``).
+
+    Returns the call's result, or ``None`` if the circuit is open.
+    Bundle-section ``_bounded`` fallbacks handle the None gracefully.
+
+    Use this for every slow external API.  Generic ``to_heavy`` stays
+    for sync work that isn't a single upstream (CPU-bound transforms,
+    in-process aggregation, etc.) -- those don't need the breaker.
+    """
+    if is_circuit_open(source):
+        logger.debug(
+            "upstream %s: circuit open, returning None for %s",
+            source, _fn_label(fn),
+        )
+        return None
+    sem = _ensure_upstream_sem(source)
+    async with sem:
+        loop = asyncio.get_running_loop()
+        pool = _heavy_pool  # may be None pre-init -- fall through to to_thread
+        fut = (
+            loop.run_in_executor(pool, fn, *args)
+            if pool is not None else asyncio.to_thread(fn, *args)
+        )
+        try:
+            result = await asyncio.wait_for(fut, timeout=timeout)
+            _record_upstream_success(source)
+            return result
+        except asyncio.TimeoutError:
+            _record_upstream_failure(source)
+            logger.warning(
+                "upstream %s: timeout after %.1fs in %s",
+                source, timeout, _fn_label(fn),
+            )
+            raise
+        except Exception:
+            _record_upstream_failure(source)
+            raise
+
+
+def upstream_status() -> dict:
+    """Snapshot of per-source circuit-breaker state for diagnostics."""
+    import time as _time
+    now = _time.time()
+    out: dict = {}
+    for name, cfg in _UPSTREAM_CFG.items():
+        open_until = _upstream_open_until.get(name, 0)
+        out[name] = {
+            "sem_size":        cfg["sem"],
+            "circuit_open":    open_until > now,
+            "circuit_reopens_in": max(0, int(open_until - now)),
+            "recent_failures": len(_upstream_failures.get(name, [])),
+            "threshold":       cfg["threshold"],
+            "window_s":        cfg["window_s"],
+        }
+    return out
 
 
 async def to_heavy(fn, *args, timeout: float = _DEFAULT_HEAVY_TIMEOUT):
