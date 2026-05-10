@@ -496,6 +496,16 @@ async def lifespan(app: FastAPI):
     from filings.concurrency import init_pools as _init_pools
     _init_pools()
 
+    # Eagerly construct the async Supabase client so the first request
+    # path doesn't pay the init latency.  Best-effort: failures are
+    # logged inside the helper and the caller falls back to a "miss"
+    # response identical to the sync path's behaviour.
+    try:
+        from filings import supabase_cache as _supabase_cache
+        await _supabase_cache.init_async_client()
+    except Exception as exc:
+        logger.warning("Async Supabase client eager-init failed: %s", exc)
+
     global _http_pool
     _http_pool = httpx.AsyncClient(
         timeout=10.0,

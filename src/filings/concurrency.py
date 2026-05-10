@@ -77,11 +77,8 @@ _DEFAULT_HEAVY_CONCURRENCY = 8
 
 # Cap concurrent Supabase calls at half the default-pool size so a
 # Supabase slowdown can't saturate the pool and starve the rest of
-# the request path (health check, static asset routes, non-Supabase
-# `to_light` work).  Sized empirically: >8 in flight has correlated
-# with the connection-pool / GIL-contention slowdown we caught in
-# 2026-05-10 prod logs.  Treat as a backpressure budget, not a
-# performance ceiling.
+# the request path (health check, static assets, non-Supabase work).
+# Treat as a backpressure budget, not a performance ceiling.
 _DEFAULT_SUPABASE_CONCURRENCY = 8
 
 
@@ -254,65 +251,78 @@ async def to_light(fn, *args, timeout: float = _DEFAULT_LIGHT_TIMEOUT):
         _to_light_active -= 1
 
 
+async def _run_under_supabase_gate(
+    awaitable,
+    *,
+    timeout: float,
+    allow_drop: bool,
+    label: str,
+):
+    """Shared body for ``to_supabase`` (sync fn) and ``gate_supabase_async``
+    (already-async coro).
+
+    Both wrappers do identical semaphore + active-counter + drop
+    bookkeeping; the only difference is what the awaitable was built
+    from.  Keeping the bookkeeping in one place means a future
+    watchdog/metric tweak only has to land here.
+
+    The counter increments BEFORE acquiring the semaphore so coroutines
+    queued waiting on a saturated semaphore are visible to the watchdog
+    -- otherwise it would see only the ~8 executing slots and miss the
+    case where 30+ coroutines are piled up behind them.
+    """
+    sem = _supabase_sem
+    if sem is None:
+        return await asyncio.wait_for(awaitable, timeout=timeout)
+
+    if allow_drop and sem.locked():
+        # Dispose of the awaitable so the runtime doesn't warn about
+        # a never-awaited coroutine.  No-op for non-coroutine types.
+        if hasattr(awaitable, "close"):
+            awaitable.close()
+        logger.debug("supabase: dropping %s (semaphore saturated)", label)
+        return None
+
+    global _to_light_active
+    _to_light_active += 1
+    try:
+        async with sem:
+            try:
+                return await asyncio.wait_for(awaitable, timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "supabase: upstream timeout after %.1fs in %s",
+                    timeout, label,
+                )
+                raise
+    finally:
+        _to_light_active -= 1
+
+
 async def to_supabase(
     fn,
     *args,
     timeout: float = _DEFAULT_LIGHT_TIMEOUT,
     allow_drop: bool = False,
 ):
-    """Run a Supabase blocking call on the default pool, gated by the
-    Supabase semaphore so a slow Supabase can't saturate the pool.
+    """Run a sync Supabase blocking call on the default pool, gated by
+    the Supabase semaphore so a slow Supabase can't saturate the pool.
 
-    Why not just `to_light`?  The 2026-05-10 outage showed that without
-    a per-source gate, every default-pool slot can end up stuck in an
-    8s Supabase timeout simultaneously -- and once that happens the
-    health check can't acquire a slot either, the worker 503s, the
-    watchdog (which monitored heavy-pool size) never fires.
+    For already-async callables (e.g. ``supabase_cache.X_async``) use
+    ``gate_supabase_async`` instead -- it skips the threadpool entirely.
 
     Args:
         fn:         Sync Supabase callable (typically from ``supabase_cache``).
         timeout:    Per-call timeout ceiling.
-        allow_drop: When True, return ``None`` immediately without
-                    queueing if the semaphore is full.  Use for
-                    fire-and-forget writebacks where dropping is
-                    preferable to piling up behind a Supabase
-                    slowdown.
-
-    Falls back to ``asyncio.to_thread`` when the semaphore isn't yet
-    initialised so unit tests + ad-hoc scripts work without lifespan
-    setup.
+        allow_drop: Return ``None`` immediately without queueing if the
+                    semaphore is full.  For fire-and-forget writebacks.
     """
-    sem = _supabase_sem
-    if sem is None:
-        return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
-
-    if allow_drop and sem.locked():
-        logger.debug(
-            "to_supabase: dropping %s (supabase semaphore saturated)",
-            _fn_label(fn),
-        )
-        return None
-
-    # Increment BEFORE acquiring the semaphore so coroutines queued
-    # waiting on a saturated semaphore are visible to the watchdog.
-    # Without this the watchdog sees only the ~8 executing slots and
-    # misses the case where 30+ coroutines are piled up behind them.
-    global _to_light_active
-    _to_light_active += 1
-    try:
-        async with sem:
-            try:
-                return await asyncio.wait_for(
-                    asyncio.to_thread(fn, *args), timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                logger.warning(
-                    "to_supabase: upstream timeout after %.1fs in %s",
-                    timeout, _fn_label(fn),
-                )
-                raise
-    finally:
-        _to_light_active -= 1
+    return await _run_under_supabase_gate(
+        asyncio.to_thread(fn, *args),
+        timeout=timeout,
+        allow_drop=allow_drop,
+        label=_fn_label(fn),
+    )
 
 
 def heavy_pool_status() -> dict:
@@ -328,6 +338,24 @@ def heavy_pool_status() -> dict:
         "supabase_semaphore_size": _supabase_concurrency_cfg,
         "supabase_saturated": is_supabase_saturated(),
     }
+
+
+async def gate_supabase_async(
+    coro,
+    *,
+    timeout: float = _DEFAULT_LIGHT_TIMEOUT,
+    allow_drop: bool = False,
+):
+    """Run an async Supabase coroutine under the Supabase semaphore.
+
+    Async equivalent of ``to_supabase`` for callers that already have
+    an awaitable (typically a ``X_async`` helper from ``supabase_cache``).
+    Skips the threadpool entirely so a Supabase slowdown can't hold
+    default-pool slots at all.
+    """
+    return await _run_under_supabase_gate(
+        coro, timeout=timeout, allow_drop=allow_drop, label="async",
+    )
 
 
 def is_heavy_saturated() -> bool:

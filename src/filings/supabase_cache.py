@@ -19,6 +19,7 @@ Env vars (set in Railway):
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json as _json
 import logging
@@ -36,6 +37,16 @@ _client = None  # supabase.Client | None
 _initialised = False  # True once we've attempted init (even if it failed)
 _table_verified = False  # True once we've confirmed the table exists
 _init_lock = threading.Lock()  # Protects one-time client creation
+
+# Async sibling for hot-path request callers -- runs on the event
+# loop so Supabase round trips don't hold default-pool slots.
+# Constructed at module import: asyncio.Lock() in 3.10+ binds to a
+# loop on first acquire, so import-time construction is safe and
+# avoids a TOCTOU race when two coroutines race past a `lock is None`
+# check.
+_async_client = None  # supabase.AsyncClient | None
+_async_initialised = False
+_async_init_lock = asyncio.Lock()
 
 _TABLE = "api_cache"
 
@@ -651,6 +662,72 @@ def _get_client():
     return _client
 
 
+async def _get_async_client():
+    """Lazy-init the async Supabase client.  Async sibling of ``_get_client``.
+
+    Returns ``None`` when env vars are missing or the library can't
+    construct the client -- callers degrade to a miss, matching the
+    sync helper's behaviour.
+    """
+    global _async_client, _async_initialised
+
+    if _async_initialised:
+        return _async_client
+
+    async with _async_init_lock:
+        if _async_initialised:
+            return _async_client
+
+        url = os.environ.get("SUPABASE_URL", "").strip()
+        key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+        if not url or not key:
+            logger.info(
+                "Supabase async client: not configured "
+                "(SUPABASE_URL / SUPABASE_SERVICE_KEY missing)"
+            )
+            _async_initialised = True
+            return None
+
+        try:
+            import httpx
+            from supabase import create_async_client
+            from supabase.lib.client_options import AsyncClientOptions
+
+            # Cap the connection pool just above the Supabase semaphore
+            # (8 in concurrency.py) so the underlying httpx pool doesn't
+            # advertise capacity we won't use.  postgrest_client_timeout
+            # set to 8s to match _DEFAULT_LIGHT_TIMEOUT -- the default
+            # 120s would let a slow Supabase pin a request long after
+            # our own timeout has fired.
+            options = AsyncClientOptions(
+                postgrest_client_timeout=8,
+                httpx_client=httpx.AsyncClient(
+                    limits=httpx.Limits(
+                        max_connections=12,
+                        max_keepalive_connections=8,
+                    ),
+                ),
+            )
+            _async_client = await create_async_client(url, key, options=options)
+            logger.info("Supabase async client initialised (%s)", url)
+        except Exception as exc:
+            logger.warning("Supabase async client init failed: %s", exc)
+            _async_client = None
+
+        _async_initialised = True
+
+    return _async_client
+
+
+async def init_async_client() -> None:
+    """Eager-init the async client at startup.
+
+    Called from the FastAPI lifespan so the first request doesn't pay
+    the init latency.  Idempotent -- safe to call multiple times.
+    """
+    await _get_async_client()
+
+
 # ── Public helpers ────────────────────────────────────────────────
 
 
@@ -708,6 +785,23 @@ def get_cached(cache_key: str) -> dict | None:
         return None
 
 
+def _interpret_cached_row(resp_data) -> tuple[dict | list | None, bool]:
+    """Decode the (data, is_fresh) tuple from a cache-row response.
+
+    Shared by the sync + async readers so both apply the same expiry
+    semantics.  Pure function -- no Supabase calls.
+    """
+    if resp_data is None:
+        return None, False
+    response_data = resp_data.get("response_data")
+    expires_at = resp_data.get("expires_at")
+    if expires_at is not None:
+        exp_dt = datetime.fromisoformat(expires_at)
+        if exp_dt < datetime.now(timezone.utc):
+            return response_data, False  # Stale but available
+    return response_data, True  # Fresh hit
+
+
 def get_cached_with_stale(cache_key: str) -> tuple[dict | list | None, bool]:
     """Fetch a cache row, distinguishing fresh hits from stale data.
 
@@ -728,19 +822,34 @@ def get_cached_with_stale(cache_key: str) -> tuple[dict | list | None, bool]:
             .maybe_single()
             .execute()
         )
-        if resp.data is None:
-            return None, False
+        return _interpret_cached_row(resp.data)
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return None, False
 
-        response_data = resp.data.get("response_data")
 
-        # Check expiry
-        expires_at = resp.data.get("expires_at")
-        if expires_at is not None:
-            exp_dt = datetime.fromisoformat(expires_at)
-            if exp_dt < datetime.now(timezone.utc):
-                return response_data, False  # Stale but available
+async def get_cached_with_stale_async(
+    cache_key: str,
+) -> tuple[dict | list | None, bool]:
+    """Async sibling of ``get_cached_with_stale``.
 
-        return response_data, True  # Fresh hit
+    Identical semantics; runs on the event loop instead of holding a
+    default-pool thread.  Use from async request handlers via
+    ``concurrency.gate_supabase_async`` for backpressure.
+    """
+    client = await _get_async_client()
+    if client is None:
+        return None, False
+
+    try:
+        resp = await (
+            client.table(_TABLE)
+            .select("response_data, expires_at")
+            .eq("cache_key", cache_key)
+            .maybe_single()
+            .execute()
+        )
+        return _interpret_cached_row(resp.data if resp else None)
     except Exception as exc:
         _handle_table_missing(exc)
         return None, False
@@ -918,6 +1027,94 @@ def set_cached(
         # TTLCache handles bounded growth + oldest-first eviction.
         _hash_cache.set(cache_key, new_hash)
         logger.debug("Cache updated for %s (new hash=%s)", cache_key, new_hash)
+        return True
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return False
+
+
+def _expires_at_iso(ttl_seconds: int | None) -> str | None:
+    """ISO timestamp for a row's expires_at given a TTL.
+
+    Pure helper extracted so the sync + async writers compute the
+    expiry the same way and don't drift.
+    """
+    if ttl_seconds is None:
+        return None
+    return (
+        datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+    ).isoformat()
+
+
+async def get_content_hash_async(cache_key: str) -> str:
+    """Async sibling of ``get_content_hash``.  Empty string on miss/error."""
+    client = await _get_async_client()
+    if client is None:
+        return ""
+    try:
+        resp = await (
+            client.table(_TABLE)
+            .select("content_hash")
+            .eq("cache_key", cache_key)
+            .maybe_single()
+            .execute()
+        )
+        if not resp or resp.data is None:
+            return ""
+        return resp.data.get("content_hash") or ""
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return ""
+
+
+async def set_cached_async(
+    cache_key: str,
+    category: str,
+    data: dict,
+    ttl_seconds: int | None = None,
+) -> bool:
+    """Async sibling of ``set_cached``.
+
+    Same content-hash + L1-hash-cache optimisation as the sync
+    version, just running on the event loop.  Used by ``cache_l2``
+    writeback so per-request cache writes don't hold default-pool
+    threads during the Supabase round-trip.
+
+    Returns ``True`` on success, ``False`` on error / not configured.
+    """
+    client = await _get_async_client()
+    if client is None:
+        return False
+
+    new_hash = _compute_hash(data)
+    cached_hash = _hash_cache.get(cache_key)
+    existing_hash = cached_hash or await get_content_hash_async(cache_key)
+    if existing_hash and cached_hash is None:
+        _hash_cache.set(cache_key, existing_hash)
+
+    if existing_hash and existing_hash == new_hash:
+        # Data unchanged — just bump TTL.
+        try:
+            await (
+                client.table(_TABLE)
+                .update({"expires_at": _expires_at_iso(ttl_seconds)})
+                .eq("cache_key", cache_key)
+                .execute()
+            )
+            return True
+        except Exception:
+            pass  # Fall through to full upsert.
+
+    row = {
+        "cache_key": cache_key,
+        "category": category,
+        "response_data": data,
+        "expires_at": _expires_at_iso(ttl_seconds),
+        "content_hash": new_hash,
+    }
+    try:
+        await client.table(_TABLE).upsert(row, on_conflict="cache_key").execute()
+        _hash_cache.set(cache_key, new_hash)
         return True
     except Exception as exc:
         _handle_table_missing(exc)
@@ -2166,6 +2363,24 @@ def get_monthly_raised_cents(month: str) -> int:
         return 0
 
 
+async def get_monthly_raised_cents_async(month: str) -> int:
+    """Async sibling of ``get_monthly_raised_cents``."""
+    client = await _get_async_client()
+    if client is None:
+        return 0
+    try:
+        resp = await (
+            client.table("supporters")
+            .select("amount_cents")
+            .eq("month", month)
+            .execute()
+        )
+        return sum(row["amount_cents"] for row in (resp.data or []))
+    except Exception as exc:
+        logger.warning("get_monthly_raised_cents_async: query failed: %s", exc)
+        return 0
+
+
 def get_funding_history(num_months: int = 6) -> list[dict]:
     """Return a list of {month, raised} dicts from the launch month to today.
 
@@ -2316,6 +2531,28 @@ def get_bell_state(since_iso: str) -> tuple[int, dict | None]:
         return count, latest
     except Exception as exc:
         logger.warning("get_bell_state failed: %s", exc)
+        return 0, None
+
+
+async def get_bell_state_async(since_iso: str) -> tuple[int, dict | None]:
+    """Async sibling of ``get_bell_state``."""
+    client = await _get_async_client()
+    if client is None:
+        return 0, None
+    try:
+        resp = await (
+            client.table("notifications")
+            .select(_NOTIFICATION_COLS, count="exact")
+            .gt("created_at", since_iso)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        count = resp.count or 0
+        latest = resp.data[0] if resp.data else None
+        return count, latest
+    except Exception as exc:
+        logger.warning("get_bell_state_async failed: %s", exc)
         return 0, None
 
 

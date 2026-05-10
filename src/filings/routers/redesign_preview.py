@@ -40,7 +40,13 @@ from filings import stock_bundle
 from filings.app_state import limiter, templates
 from filings.cache_l2 import l2_cached as _l2_cached
 from filings.caching import TTLCache
-from filings.concurrency import is_heavy_saturated, to_heavy, to_light, to_supabase
+from filings.concurrency import (
+    gate_supabase_async,
+    is_heavy_saturated,
+    to_heavy,
+    to_light,
+    to_supabase,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -246,9 +252,10 @@ async def _shell_context(request: Request, active: str) -> dict:
 
     async def _fetch_bell() -> int:
         try:
-            count, _latest = await to_supabase(
-                supabase_cache.get_bell_state, seen_iso,
+            result = await gate_supabase_async(
+                supabase_cache.get_bell_state_async(seen_iso),
             )
+            count, _latest = result if result is not None else (0, None)
             v = int(count or 0)
             _shell_cache.set(bell_key, v)
             return v
@@ -258,8 +265,8 @@ async def _shell_context(request: Request, active: str) -> dict:
 
     async def _fetch_panda() -> int:
         try:
-            c = await to_supabase(
-                supabase_cache.get_monthly_raised_cents, panda_month,
+            c = await gate_supabase_async(
+                supabase_cache.get_monthly_raised_cents_async(panda_month),
             )
             v = int(c or 0)
             _shell_cache.set(panda_key, v)

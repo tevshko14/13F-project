@@ -1,19 +1,15 @@
 """Standardised Supabase L2 read-through cache wrapper.
 
-The async-friendly companion to ``supabase_cache.fetch_with_cache``.
-Adds **stale-while-revalidate**: a stale row is returned to the caller
-immediately and a background task refreshes it, so the user-facing
-request never waits on the upstream API.
+Adds **stale-while-revalidate** on top of ``supabase_cache``: a stale
+row is returned to the caller immediately and a background task
+refreshes it, so the user-facing request never waits on the upstream
+API.
 
-Routing
--------
-* L2 reads + writes run on the *default* thread pool via ``to_supabase``
-  — Supabase round trips are 10-100ms network ops and don't deserve a
-  heavy-pool slot.  Gated by the Supabase semaphore so a Supabase
-  slowdown can't saturate the entire default pool (root cause of the
-  2026-05-10 outage).
-* The ``compute_sync`` callable runs on the *heavy* pool via ``to_heavy``
-  because that's where slow upstream APIs live (yfinance, Finnhub, …).
+L2 reads/writes run on the event loop via the async Supabase client
+(gated by ``gate_supabase_async`` for backpressure -- no thread
+held).  The ``compute_sync`` callable runs on the heavy pool via
+``to_heavy`` because the upstream libraries (yfinance, Finnhub, …)
+are sync.
 """
 
 from __future__ import annotations
@@ -23,7 +19,7 @@ import logging
 from typing import Any, Callable
 
 from filings import supabase_cache
-from filings.concurrency import to_heavy, to_supabase
+from filings.concurrency import gate_supabase_async, to_heavy
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +49,9 @@ async def l2_cached(
         both L2 and the upstream fail.
     """
     try:
-        result = await to_supabase(supabase_cache.get_cached_with_stale, key)
-        # `allow_drop` defaults to False for reads, so result is always
-        # the (cached, is_fresh) tuple unless the call raised.
+        result = await gate_supabase_async(
+            supabase_cache.get_cached_with_stale_async(key),
+        )
         cached, is_fresh = result if result is not None else (None, False)
     except Exception as exc:
         logger.debug("l2_cached: read failed for %s: %s", key, exc)
@@ -118,9 +114,8 @@ async def _writeback(key: str, category: str, payload: Any, ttl_seconds: int) ->
     background writes is what brings the site down.
     """
     try:
-        await to_supabase(
-            supabase_cache.set_cached,
-            key, category, payload, ttl_seconds,
+        await gate_supabase_async(
+            supabase_cache.set_cached_async(key, category, payload, ttl_seconds),
             allow_drop=True,
         )
     except Exception as exc:
