@@ -1795,27 +1795,29 @@ async def _run_gc_trim() -> None:
     )
 
 
-# ── Stuck-thread watchdog ───────────────────────────────────────────
-# CPython can't kill threads.  When a sync upstream call inside `to_heavy`
-# overruns the heavy-pool circuit-breaker (15s), the awaiting coroutine
-# gives up but the thread keeps running.  After enough such leaks the
-# heavy pool is empty and every request queues forever -- the silent
-# deadlock we observed twice (uptime 53min, then 62min).
+# ── Saturation watchdog ─────────────────────────────────────────────
+# Originally framed as a thread-LEAK watchdog (catch threads piling up
+# past pool capacity).  In practice the failure mode under crawler
+# load isn't leak -- it's the heavy pool sitting at 100% utilisation
+# with every slot busy on a slow rate-limited upstream.  Active-thread
+# count stays at ~43 (= default 16 + heavy 20 + framework ~7) which is
+# normal-pool-saturation, not leak.  Old threshold of 65 never fired
+# in that scenario; site stayed effectively hung until manual recycle.
 #
-# This watchdog is the safety net.  Every 30s it samples the live
-# Python thread count.  Steady-state we expect:
-#   default pool (16) + heavy pool (20) + framework (~10) ≈ 46.
-# If the count climbs past `_DANGER_THREADS` and stays there for
-# `_SUSTAIN_CHECKS` consecutive samples (default 3 min), threads are
-# leaking faster than they recover; we trigger SIGTERM so gunicorn
-# recycles the worker before it fully deadlocks.
+# New threshold: 50 -- just over the ~46 normal-pool-saturated max,
+# so we fire when the pool has stayed FULL for the sustained window.
+# Recovery is now ~2 min (4 × 30s) instead of "until I notice".  This
+# does NOT prevent saturation -- crawler-driven cold-path traffic
+# can still queue work indefinitely.  Backpressure on cold-tier
+# requests is the durable follow-up; this just makes the symptom
+# self-heal faster while we work on that.
 #
 # Reads `threading.active_count()` -- a free, sync, microsecond call,
 # so the watchdog itself can't get stuck on a slow upstream.
 
 _WATCHDOG_INTERVAL_S = 30
-_DANGER_THREADS = 65         # ~14 over the ~46 baseline; leaves headroom
-_SUSTAIN_CHECKS = 6          # 6 × 30s = 3 min of sustained danger
+_DANGER_THREADS = 50         # ~4 over the saturated-pool max
+_SUSTAIN_CHECKS = 4          # 4 × 30s = 2 min of sustained saturation
 
 # Optional alert destinations fired right before the watchdog SIGTERMs.
 # Both are independent -- you can set either, both, or neither:
