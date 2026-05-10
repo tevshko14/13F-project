@@ -277,7 +277,6 @@
       {%- set nav_groups = [
         {"hd": "Overview", "items": [
           {"name": "Home",          "href": "/",                      "badge": ""},
-          {"name": "Watchlist",     "href": "/profile?tab=Watchlist", "badge": "", "auth": "watchlist"},
           {"name": "Notifications", "href": "/notifications",         "badge": notif_unread|default("")},
         ]},
         {"hd": "Markets", "items": _markets_items},
@@ -286,6 +285,9 @@
           {"name": "Congress", "href": "/congress", "badge": ""},
           {"name": "Retail",   "href": "/retail",   "badge": ""},
           {"name": "Macro",    "href": "/macro",    "badge": ""},
+        ]},
+        {"hd": "Watchlist", "items": [
+          {"name": "Watchlist", "href": "/profile?tab=Watchlist", "badge": "", "auth": "watchlist"},
         ]},
       ] -%}
 
@@ -340,6 +342,18 @@
         {{ today_label|default('') }} · {{ market_status|default('MARKETS OPEN') }}
       </span>
       <div class="pp-topbar-spacer"></div>
+
+      {# Notification bell — "lights up" (coral accent) when notif_unread > 0.
+         Same shell-context value the sidenav Notifications badge uses, so
+         the two stay in sync without a second Supabase call. #}
+      <a class="pp-topbar-bell{% if notif_unread %} is-active{% endif %}"
+         href="/notifications"
+         aria-label="Notifications{% if notif_unread %} ({{ notif_unread }} unread){% endif %}">
+        <span class="pp-topbar-bell-icon" aria-hidden="true">🔔</span>
+        {% if notif_unread %}
+          <span class="pp-topbar-bell-badge">{{ notif_unread }}</span>
+        {% endif %}
+      </a>
 
       <div class="pp-theme-toggle" role="group" aria-label="Theme">
         <button type="button" class="pp-theme-toggle-btn"

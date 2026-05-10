@@ -285,6 +285,56 @@ body[data-pp-authed="false"] .pp-auth-signout { display: none; }
 
 .pp-topbar-spacer { flex: 1; }
 
+/* Notification bell — "lights up" (coral accent + dot) when there
+   are unread notifications.  Visually paired with the theme toggle:
+   same border, same height, sits to its left in the topbar. */
+.pp-topbar-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--pp-border-w) solid var(--pp-line2);
+  background: var(--pp-panel);
+  padding: 3px 8px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--pp-dim);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.08s ease, border-color 0.08s ease;
+  position: relative;
+}
+.pp-topbar-bell:hover { color: var(--pp-text); }
+.pp-topbar-bell.is-active {
+  color: var(--pp-accent);
+  border-color: var(--pp-accent);
+}
+.pp-topbar-bell-icon {
+  font-size: 13px;
+  line-height: 1;
+  /* Pulse only when lit -- subtle, single-cycle on hover-state change. */
+}
+.pp-topbar-bell.is-active .pp-topbar-bell-icon {
+  animation: pp-bell-pulse 1.6s ease-in-out infinite;
+}
+@keyframes pp-bell-pulse {
+  0%, 60%, 100% { transform: rotate(0deg); }
+  10%           { transform: rotate(10deg); }
+  20%           { transform: rotate(-10deg); }
+  30%           { transform: rotate(6deg); }
+  40%           { transform: rotate(-6deg); }
+  50%           { transform: rotate(0deg); }
+}
+.pp-topbar-bell-badge {
+  font-family: var(--pp-font-mono);
+  font-size: 9px;
+  color: var(--pp-accent);
+  margin-left: 5px;
+  padding: 1px 4px;
+  border: var(--pp-border-w) solid var(--pp-accent);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
 /* Theme toggle — pill segmented control with icons */
 .pp-theme-toggle {
   display: inline-flex;

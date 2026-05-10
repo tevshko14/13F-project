@@ -336,12 +336,21 @@ async def _shell_context(request: Request, active: str) -> dict:
     elif bell_count and bell_count > 0:
         notif_unread = bell_count
 
-    # Panda Fund — Stripe-backed monthly donation total.  Falls back to 0/0
-    # cleanly when the row is missing so the widget shows "$0 / $200 · May".
+    # Panda Fund — Stripe-backed monthly donation total.  When the
+    # `supporters` table has rows for this month, that's the truth.
+    # When it doesn't (e.g. before any donations have been recorded
+    # for the month, or for manual override during testing), fall
+    # back to the `PANDA_FUND_RAISED` env var in dollars -- same
+    # contract as the v1 `_get_panda_fund_stats` helper in web.py.
+    # Without this fallback the bar shows $0 / $200 even when the
+    # operator has set a manual amount via env.
     panda_raised, panda_goal, panda_pct = 0, _SHELL_PANDA_GOAL_CENTS // 100, 0
     if cents and cents > 0:
         panda_raised = min(cents // 100, panda_goal)
-        panda_pct    = min(100, round(panda_raised / panda_goal * 100))
+    else:
+        panda_raised = min(int(os.environ.get("PANDA_FUND_RAISED", "0")), panda_goal)
+    if panda_raised > 0:
+        panda_pct = min(100, round(panda_raised / panda_goal * 100))
 
     # Avatar initials — only when signed in.  Profile carries display_name;
     # fall back to email's local-part initial; otherwise empty so the
