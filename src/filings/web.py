@@ -172,6 +172,19 @@ _app_start_time = time_module.time()
 _ENABLE_BACKGROUND_REFRESH = (
     os.environ.get("ENABLE_BACKGROUND_REFRESH", "true").lower() == "true"
 )
+
+# WORKER_MODE controls which periodic tasks run in this process:
+#   "combined" (default) -- all tasks in this web process.  Legacy
+#                            behaviour, kept for backwards-compat.
+#   "web"                -- skip the heavy/external-API periodic tasks
+#                            that have a sibling worker process running them.
+#                            Web tier still runs its own watchdog, memprof
+#                            poller, gc trim -- those are web-specific.
+#   "worker"             -- not used by web.py (worker.py is the entry point)
+# When migrating, set both: the new worker service runs `filings-worker`,
+# and the web service gets WORKER_MODE=web so periodic tasks don't double up.
+_WORKER_MODE = os.environ.get("WORKER_MODE", "combined").strip().lower()
+_RUN_WORKER_TASKS = _WORKER_MODE != "web"
 # Per-CIK locks so the background sweep and request-triggered refreshes
 # can run concurrently for *different* funds without blocking each other.
 # Bounded: the 85 SUPERINVESTOR CIKs plus any ad-hoc /holdings/{cik} lookups
@@ -645,35 +658,46 @@ async def lifespan(app: FastAPI):
         task.add_done_callback(_bg_tasks.discard)
         return task
 
-    # Prefetch S&P 500 market data in background (~30-60s on cold start)
-    _track(_prefetch_market_data(app), "prefetch_market")
+    # ── Tasks below are gated by WORKER_MODE: when set to "web", a
+    # ── sibling worker process owns these and the web tier skips them.
 
-    # Run retention cleanup in background (keep DB small)
-    _track(asyncio.to_thread(supabase_cache.run_retention_cleanup), "retention_cleanup")
+    if _RUN_WORKER_TASKS:
+        # Prefetch S&P 500 market data in background (~30-60s on cold start)
+        _track(_prefetch_market_data(app), "prefetch_market")
 
-    # Self-heal: refresh any stale funds in background
-    if _ENABLE_BACKGROUND_REFRESH:
-        app.state.refresh_status = "pending"
-        _track(_delayed_refresh_sweep(app), "refresh_sweep")
+        # Run retention cleanup in background (keep DB small)
+        _track(asyncio.to_thread(supabase_cache.run_retention_cleanup), "retention_cleanup")
 
-    # Reddit velocity notification scanner (every 30 min)
-    _track(_periodic_task(
-        name="Reddit velocity scan", startup_delay=60,
-        interval=_REDDIT_SCAN_INTERVAL, body=_run_reddit_velocity_scan,
-    ), "reddit_scanner")
+        # Self-heal: refresh any stale funds in background
+        if _ENABLE_BACKGROUND_REFRESH:
+            app.state.refresh_status = "pending"
+            _track(_delayed_refresh_sweep(app), "refresh_sweep")
 
-    # Feature announcement → notification scanner (every 10 min)
-    _track(_periodic_task(
-        name="Feature announcement scan", startup_delay=45,
-        interval=_FEATURE_ANNOUNCE_INTERVAL, body=_run_feature_announcement_scan,
-    ), "feature_announce_scanner")
-
-    # Redesign /_v2/home L2 cache warmer (only when env-gated route is on)
-    if _redesign_preview_router.is_enabled():
+        # Reddit velocity notification scanner (every 30 min)
         _track(_periodic_task(
-            name="Redesign L2 warmer", startup_delay=30,
-            interval=_REDESIGN_L2_WARMER_INTERVAL, body=_run_redesign_l2_warm,
-        ), "redesign_l2_warmer")
+            name="Reddit velocity scan", startup_delay=60,
+            interval=_REDDIT_SCAN_INTERVAL, body=_run_reddit_velocity_scan,
+        ), "reddit_scanner")
+
+        # Feature announcement → notification scanner (every 10 min)
+        _track(_periodic_task(
+            name="Feature announcement scan", startup_delay=45,
+            interval=_FEATURE_ANNOUNCE_INTERVAL, body=_run_feature_announcement_scan,
+        ), "feature_announce_scanner")
+
+        # Redesign /_v2/home L2 cache warmer (only when env-gated route is on)
+        if _redesign_preview_router.is_enabled():
+            _track(_periodic_task(
+                name="Redesign L2 warmer", startup_delay=30,
+                interval=_REDESIGN_L2_WARMER_INTERVAL, body=_run_redesign_l2_warm,
+            ), "redesign_l2_warmer")
+    else:
+        logger.info(
+            "lifespan: WORKER_MODE=web -- skipping periodic tasks owned "
+            "by the worker process (prefetch_market, retention_cleanup, "
+            "refresh_sweep, reddit_scanner, feature_announce_scanner, "
+            "redesign_l2_warmer)"
+        )
 
     # Memory profile poller — logs RSS / threads / cache sizes every 5 min
     # to stdout so Railway log search can chart leaks over time.  Zero
@@ -699,19 +723,20 @@ async def lifespan(app: FastAPI):
         interval=_WATCHDOG_INTERVAL_S, body=_run_thread_watchdog,
     ), "thread_watchdog")
 
-    # Stock-bundle warmer — maintains the stock_overview_cache table so
-    # the /stock/{ticker} request path can serve from a single Supabase
-    # read instead of fanning out 10+ sync upstream calls.
-    _track(_periodic_task(
-        name="stock warmer", startup_delay=180,
-        interval=_STOCK_WARMER_INTERVAL_S, body=_run_stock_warmer,
-    ), "stock_warmer")
+    if _RUN_WORKER_TASKS:
+        # Stock-bundle warmer — maintains the stock_overview_cache table so
+        # the /stock/{ticker} request path can serve from a single Supabase
+        # read instead of fanning out 10+ sync upstream calls.
+        _track(_periodic_task(
+            name="stock warmer", startup_delay=180,
+            interval=_STOCK_WARMER_INTERVAL_S, body=_run_stock_warmer,
+        ), "stock_warmer")
 
-    # Seed the stock_overview_cache hot/warm tiers from the just-loaded
-    # fund_cache.  Idempotent (no-op when rows already exist), so it's
-    # safe to run on every worker startup.  Delay 60s so fund_cache is
-    # populated first (it loads in another startup task).
-    _track(_run_initial_tier_seed(), "stock_tier_seeder")
+        # Seed the stock_overview_cache hot/warm tiers from the just-loaded
+        # fund_cache.  Idempotent (no-op when rows already exist), so it's
+        # safe to run on every worker startup.  Delay 60s so fund_cache is
+        # populated first (it loads in another startup task).
+        _track(_run_initial_tier_seed(), "stock_tier_seeder")
     _alert_dests = []
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         _alert_dests.append("telegram")

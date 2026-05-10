@@ -175,6 +175,11 @@ def shutdown_pools() -> None:
             asyncio.get_running_loop().set_default_executor(None)
         except RuntimeError:
             pass  # No running loop (e.g. reloader teardown).
+        except TypeError:
+            # Python 3.12 rejects None here; harmless since the process
+            # is shutting down anyway.  The pool itself is already
+            # closed via shutdown(wait=False) above.
+            pass
     _heavy_sem = None
     _supabase_sem = None
 

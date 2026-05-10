@@ -36,6 +36,7 @@ test = [
 [project.scripts]
 filings = "filings.cli:main"
 filings-web = "filings.web:main"
+filings-worker = "filings.worker:main"
 filings-sync = "filings.sync_worker:main"
 filings-insider-sync = "filings.insider_sync:main"
 filings-youtube-sync = "filings.youtube_sync:main"
