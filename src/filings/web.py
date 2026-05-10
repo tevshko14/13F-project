@@ -143,18 +143,20 @@ _CLERK_PUBLISHABLE_KEY = os.environ.get("CLERK_PUBLISHABLE_KEY", "")
 
 # ═══════════════════════════════════════════════════════════════════════
 # Rate limiting (optional — graceful fallback if slowapi not installed)
+#
+# The ``limiter`` instance lives in ``filings.app_state`` so routers can
+# attach ``@limiter.limit(...)`` decorators without a circular import
+# back through this module.  See app_state.py for the actual definition.
 # ═══════════════════════════════════════════════════════════════════════
 
+from filings.app_state import limiter, has_limiter as _has_limiter
 try:
-    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
-
-    # _real_ip is imported from filings.app_state at the top of this file.
-    limiter = Limiter(key_func=_real_ip, default_limits=["60/minute"])
-    _has_limiter = True
 except ImportError:
-    limiter = None
-    _has_limiter = False
+    _rate_limit_exceeded_handler = None
+    RateLimitExceeded = None
+if not _has_limiter:
     logger.info("slowapi not installed — rate limiting disabled")
 
 

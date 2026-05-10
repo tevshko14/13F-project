@@ -76,3 +76,20 @@ def real_ip(request: Request) -> str:
     if request.client:
         return request.client.host
     return "unknown"
+
+
+# ── Rate limiter (slowapi) ────────────────────────────────────────────
+# Lives here (rather than in web.py) so any router can attach
+# ``@limiter.limit(...)`` decorators at function-definition time
+# without a circular import back through web.py.  Falls back to
+# ``None`` when slowapi isn't installed -- callers must guard with
+# ``has_limiter`` (or simply check ``limiter is not None``).
+try:
+    from slowapi import Limiter
+    from slowapi.errors import RateLimitExceeded  # noqa: F401  (re-exported)
+
+    limiter: Limiter | None = Limiter(key_func=real_ip, default_limits=["60/minute"])
+    has_limiter: bool = True
+except ImportError:
+    limiter = None
+    has_limiter = False

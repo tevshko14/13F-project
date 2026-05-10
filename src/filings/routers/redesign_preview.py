@@ -37,7 +37,7 @@ from fastapi.responses import HTMLResponse
 
 from filings import supabase_cache
 from filings import stock_bundle
-from filings.app_state import templates
+from filings.app_state import limiter, templates
 from filings.cache_l2 import l2_cached as _l2_cached
 from filings.concurrency import to_heavy, to_light
 
@@ -89,6 +89,19 @@ def _request_fund_cache(request: Request) -> dict:
     callers must not mutate.
     """
     return getattr(request.app.state, "fund_cache", {}) or {}
+
+
+def _maybe_rate_limit(spec: str):
+    """slowapi ``limiter.limit(spec)`` with a no-op fallback.
+
+    Returns the real decorator when slowapi is installed, else a
+    pass-through.  Lets routes use ``@_maybe_rate_limit("30/minute")``
+    unconditionally without breaking dev environments that haven't
+    installed the (optional) rate-limit dep.
+    """
+    if limiter is None:
+        return lambda f: f
+    return limiter.limit(spec)
 
 
 # Strong-reference set for fire-and-forget background tasks owned by
@@ -7053,6 +7066,7 @@ def _build_stock_template_ctx(
 
 
 @router.get("/stock/{ticker}", response_class=HTMLResponse)
+@_maybe_rate_limit("30/minute")
 async def preview_stock(request: Request, ticker: str):
     """Stock detail.
 
@@ -7062,6 +7076,11 @@ async def preview_stock(request: Request, ticker: str):
     cache.  Per-user state (watchlist) and per-render derivations
     (chart geometry, EPS SVG path, analyst ticks) are computed off
     the bundle at render time.
+
+    Rate-limited at 30/minute/IP (slowapi) -- real users browse one
+    ticker every 2-5s at most; sustained 30+/min is the crawler
+    pattern that drove the cold-path thread leak.  Limit applies
+    per-IP via ``X-Forwarded-For``.
     """
     fund_cache = _request_fund_cache(request)
 
