@@ -224,3 +224,17 @@ def heavy_pool_status() -> dict:
         "heavy_workers": _heavy_workers_cfg,
         "heavy_semaphore_size": _heavy_concurrency_cfg,
     }
+
+
+def is_heavy_saturated() -> bool:
+    """True when the heavy-pool semaphore has zero free slots.
+
+    Used by request handlers to apply backpressure -- if the pool is
+    already full, queueing additional cold-path work means an
+    indefinitely-long wait for the user (and continued upstream load
+    while we're being crawler-spammed).  Better to short-circuit and
+    serve stale or 503 immediately.
+    """
+    if _heavy_sem is None:
+        return False
+    return _heavy_sem.locked()

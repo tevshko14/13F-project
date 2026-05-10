@@ -32,14 +32,14 @@ from zoneinfo import ZoneInfo
 # stale browser caches after a release.
 _ASSET_VERSION = int(time.time())
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from filings import supabase_cache
 from filings import stock_bundle
 from filings.app_state import limiter, templates
 from filings.cache_l2 import l2_cached as _l2_cached
-from filings.concurrency import to_heavy, to_light
+from filings.concurrency import is_heavy_saturated, to_heavy, to_light
 
 logger = logging.getLogger(__name__)
 
@@ -7105,6 +7105,28 @@ async def preview_stock(request: Request, ticker: str):
             stock_bundle.record_hit()
             return cached["bundle"]
         stock_bundle.record_miss(had_cached=cached is not None)
+
+        # Backpressure: if the heavy pool is already saturated, don't
+        # queue another ~10-call cold-path fanout behind it.  Prefer
+        # serving stale-cached data ("stale > nothing"); 503 only when
+        # there's genuinely nothing to serve.  This bounds the tail
+        # latency under crawler load -- without it, queued requests
+        # wait indefinitely for slots to free.
+        if is_heavy_saturated():
+            stale_bundle = (cached or {}).get("bundle") or {}
+            if stale_bundle:
+                # Debug-level: under sustained saturation this fires
+                # per-request; keep out of the default log stream.
+                logger.debug(
+                    "backpressure: serving stale bundle for %s (heavy pool full)",
+                    ticker,
+                )
+                return stale_bundle
+            raise HTTPException(
+                status_code=503,
+                detail="Data temporarily unavailable. Please try again shortly.",
+            )
+
         bundle, source_status = await build_stock_data_bundle(fund_cache, ticker)
         # Preserve an existing tier classification when refreshing a
         # seeded row (hot/warm); default to cold for ad-hoc misses.

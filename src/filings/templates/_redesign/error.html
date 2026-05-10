@@ -27,6 +27,10 @@
   {%- set _emoji   = "🐼" -%}
   {%- set _headline = "Too many requests" -%}
   {%- set _default_msg = "Please slow down and try again in a minute." -%}
+{%- elif _status == 503 -%}
+  {%- set _emoji   = "🔄" -%}
+  {%- set _headline = "Refreshing data" -%}
+  {%- set _default_msg = "Data temporarily unavailable. Please try again shortly." -%}
 {%- else -%}
   {%- set _emoji   = "🐼" -%}
   {%- set _headline = "Something went wrong" -%}
