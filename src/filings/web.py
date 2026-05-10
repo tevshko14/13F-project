@@ -2009,7 +2009,13 @@ async def _run_redesign_l2_warm() -> None:
 # that table on the request path so popular tickers don't fan out 10+
 # parallel sync upstream calls per render.
 
-_STOCK_WARMER_INTERVAL_S = 10 * 60   # 10 min — matches BUNDLE_TTL_HOT_S
+# 5 min cycle vs 10 min hot TTL keeps hot tickers strictly within TTL
+# (a 10-min cycle = 10-min TTL meant hot tickers spent ~30-60s past
+# their TTL between refreshes -- users hitting in that gap fell to
+# the cold path and saw 4-5s waits).  Each cycle takes ~127s on prod,
+# so 5 min budget has plenty of headroom; warmer occupies the heavy
+# pool ~42% of the time vs ~21% before.
+_STOCK_WARMER_INTERVAL_S = 5 * 60
 # Per-tier batch size.  Sized so the hot tier (~50 tickers in steady
 # state) refreshes fully in one cycle; otherwise stragglers drift to
 # 2× the TTL window before the next cycle picks them up.  Confirmed
