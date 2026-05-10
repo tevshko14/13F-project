@@ -39,7 +39,8 @@ from filings import supabase_cache
 from filings import stock_bundle
 from filings.app_state import limiter, templates
 from filings.cache_l2 import l2_cached as _l2_cached
-from filings.concurrency import is_heavy_saturated, to_heavy, to_light
+from filings.caching import TTLCache
+from filings.concurrency import is_heavy_saturated, to_heavy, to_light, to_supabase
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,20 @@ _SHELL_NOTIF_COOKIE         = "pp-notif-seen"   # per-browser "last viewed notif
 _SHELL_NOTIF_COOKIE_MAX_AGE = 60 * 60 * 24 * 90 # 90 days
 _SHELL_PANDA_GOAL_CENTS     = 20_000            # $200/month — same goal as v1 widget
 
+# L1 cache for shell-context Supabase calls.  These run on every page
+# load via `_shell_context()` (header bell + panda fund widget) -- in
+# 2026-05-10 prod they were the dominant source of default-pool
+# saturation when Supabase queries slowed to >8s.  A short TTL is
+# fine because:
+#   - the bell badge reflects "new since last visit" cookie state, so
+#     a 30s lag in the count is invisible to the user
+#   - the panda fund total is a slow-moving metric (Stripe webhook
+#     fires hourly at most) -- 30s lag matches the data freshness
+# Keys are unique per request (cookie ISO + month) so the cache size
+# stays bounded by distinct visitor patterns over the TTL window.
+_SHELL_CACHE_TTL_S = 30
+_shell_cache = TTLCache(ttl=_SHELL_CACHE_TTL_S, max_size=2000)
+
 
 def _initials_from_name(name: str) -> str:
     """Two-letter initials from a display name; empty when unavailable."""
@@ -217,29 +232,63 @@ async def _shell_context(request: Request, active: str) -> dict:
         seen_iso = (datetime.now(timezone.utc)
                     - timedelta(hours=_SHELL_NOTIF_WINDOW_HOURS)).isoformat()
 
+    # Quantize the bell cache key to the minute -- the bell count
+    # doesn't change second-to-second, and the per-cookie raw ISO
+    # would give a near-0% hit rate against unique visitors.  Minute
+    # quantization collapses cardinality to (unique-cookies × minutes)
+    # and pushes hit rate to ~100% for repeat-page-loads-within-minute.
+    bell_key = f"bell:{seen_iso[:16]}"
+    panda_month = today.strftime("%Y-%m")
+    panda_key = f"panda:{panda_month}"
+
+    bell_count = _shell_cache.get(bell_key)
+    cents = _shell_cache.get(panda_key)
+
+    async def _fetch_bell() -> int:
+        try:
+            count, _latest = await to_supabase(
+                supabase_cache.get_bell_state, seen_iso,
+            )
+            v = int(count or 0)
+            _shell_cache.set(bell_key, v)
+            return v
+        except Exception as exc:
+            logger.debug("shell: bell state failed: %s", exc)
+            return _shell_cache.get_stale(bell_key, 0)
+
+    async def _fetch_panda() -> int:
+        try:
+            c = await to_supabase(
+                supabase_cache.get_monthly_raised_cents, panda_month,
+            )
+            v = int(c or 0)
+            _shell_cache.set(panda_key, v)
+            return v
+        except Exception as exc:
+            logger.debug("shell: panda fund failed: %s", exc)
+            return _shell_cache.get_stale(panda_key, 0)
+
+    # Hot path (both cache hits) issues zero awaits.  Cold path runs
+    # both Supabase reads in parallel rather than sequentially.
+    if bell_count is None and cents is None:
+        bell_count, cents = await asyncio.gather(_fetch_bell(), _fetch_panda())
+    elif bell_count is None:
+        bell_count = await _fetch_bell()
+    elif cents is None:
+        cents = await _fetch_panda()
+
     notif_unread: int | str = 0
-    try:
-        from filings import supabase_cache
-        count, _latest = await to_light(supabase_cache.get_bell_state, seen_iso)
-        if count > _SHELL_NOTIF_BADGE_CAP:
-            notif_unread = f"{_SHELL_NOTIF_BADGE_CAP}+"
-        elif count > 0:
-            notif_unread = count
-    except Exception as exc:
-        logger.debug("shell: bell state failed: %s", exc)
+    if bell_count and bell_count > _SHELL_NOTIF_BADGE_CAP:
+        notif_unread = f"{_SHELL_NOTIF_BADGE_CAP}+"
+    elif bell_count and bell_count > 0:
+        notif_unread = bell_count
 
     # Panda Fund — Stripe-backed monthly donation total.  Falls back to 0/0
     # cleanly when the row is missing so the widget shows "$0 / $200 · May".
     panda_raised, panda_goal, panda_pct = 0, _SHELL_PANDA_GOAL_CENTS // 100, 0
-    try:
-        from filings import supabase_cache
-        cents = await to_light(supabase_cache.get_monthly_raised_cents,
-                               today.strftime("%Y-%m"))
-        if cents and cents > 0:
-            panda_raised = min(cents // 100, panda_goal)
-            panda_pct    = min(100, round(panda_raised / panda_goal * 100))
-    except Exception as exc:
-        logger.debug("shell: panda fund failed: %s", exc)
+    if cents and cents > 0:
+        panda_raised = min(cents // 100, panda_goal)
+        panda_pct    = min(100, round(panda_raised / panda_goal * 100))
 
     # Avatar initials — only when signed in.  Profile carries display_name;
     # fall back to email's local-part initial; otherwise empty so the
@@ -2369,8 +2418,7 @@ async def _fetch_home_activity(limit: int = 12) -> list[dict]:
     is unreachable or returns an empty set.
     """
     try:
-        from filings import supabase_cache
-        notifs = await to_light(supabase_cache.get_recent_notifications, limit)
+        notifs = await to_supabase(supabase_cache.get_recent_notifications, limit)
     except Exception as exc:
         logger.warning("Activity feed fetch failed: %s", exc)
         return _HOME_ACTIVITY_FEED
@@ -3196,8 +3244,10 @@ async def _funds_capital_deployed(cik: str) -> dict:
     """
     cik_norm = (cik or "").lstrip("0") or cik
     try:
-        from filings import supabase_cache
-        cached, _fresh = await to_light(supabase_cache.get_cached_with_stale, f"deployment:{cik_norm}")
+        result = await to_supabase(
+            supabase_cache.get_cached_with_stale, f"deployment:{cik_norm}",
+        )
+        cached, _fresh = result if result is not None else (None, False)
     except Exception as exc:
         logger.warning("Capital deployed fetch failed for CIK=%s: %s", cik, exc)
         return {}
@@ -11827,7 +11877,10 @@ async def _v2_sentiment_payload() -> dict:
     # warm — better to retry than serve placeholders forever).
     raw: dict | None = None
     try:
-        cached, _is_fresh = await to_light(supabase_cache.get_cached_with_stale, _SENTIMENT_L2_KEY)
+        result = await to_supabase(
+            supabase_cache.get_cached_with_stale, _SENTIMENT_L2_KEY,
+        )
+        cached, _is_fresh = result if result is not None else (None, False)
         if cached and isinstance(cached, dict):
             usable = sum(
                 1 for v in cached.values()

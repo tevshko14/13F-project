@@ -1814,10 +1814,24 @@ async def _run_gc_trim() -> None:
 #
 # Reads `threading.active_count()` -- a free, sync, microsecond call,
 # so the watchdog itself can't get stuck on a slow upstream.
+#
+# 2026-05-10 update: added a SECOND trigger -- default-pool saturation.
+# The thread-count trigger never fired during that outage because the
+# failure mode was 16/16 default-pool slots stuck on slow Supabase
+# calls (with `_to_light_active=16` for sustained intervals) while
+# total threads stayed in the 60s -- below the 50 threshold by
+# construction, since `_DANGER_THREADS` measures the wrong thing for
+# that mode.  We now SIGTERM if EITHER trigger trips: thread-leak
+# (heavy-pool stuck) OR default-pool saturation (Supabase stuck).
 
 _WATCHDOG_INTERVAL_S = 30
 _DANGER_THREADS = 50         # ~4 over the saturated-pool max
 _SUSTAIN_CHECKS = 4          # 4 × 30s = 2 min of sustained saturation
+# Default-pool saturation trigger: when 90%+ of `to_light` slots are
+# in flight for sustained intervals, the pool is starved -- almost
+# always means Supabase calls aren't returning.  Health check can't
+# acquire a slot, requests queue, watchdog must recycle.
+_DEFAULT_POOL_DANGER_FRAC = 0.875   # 14/16 slots active
 
 # Optional alert destinations fired right before the watchdog SIGTERMs.
 # Both are independent -- you can set either, both, or neither:
@@ -1940,22 +1954,36 @@ async def _send_watchdog_alert(active: int) -> None:
 
 
 async def _run_thread_watchdog() -> None:
-    """One iteration of the stuck-thread watchdog.
+    """One iteration of the saturation watchdog.
 
-    Increments a module-level counter when active thread count is over
-    the danger threshold.  Resets to 0 when count drops back.  Triggers
-    a graceful SIGTERM (gunicorn restarts the worker) once the danger
-    state is sustained for `_SUSTAIN_CHECKS` consecutive intervals.
+    Two independent triggers; either one trips the SIGTERM:
+
+    1. **Thread-leak / heavy-pool stuck** -- active thread count over
+       `_DANGER_THREADS`.  Catches the original failure mode where
+       slow upstreams left ghost threads piling up past pool capacity.
+
+    2. **Default-pool saturation** -- `to_light` in-flight count at
+       >= 90% of pool capacity.  Catches the 2026-05-10 mode where
+       Supabase slowness pinned all 16 default workers, health check
+       starved, watchdog (1) never fired because total threads stayed
+       in the 60s (below 50 by definition -- saturation, not leak).
+
+    Each trigger has its own sustained-counter; both feed the same
+    SIGTERM path so gunicorn recycles the worker once either trigger
+    fires for `_SUSTAIN_CHECKS` consecutive intervals.
     """
-    global _watchdog_over_count
+    global _watchdog_over_count, _watchdog_pool_over_count
     import threading as _threading
+    from filings import concurrency as _concurrency
 
     try:
         active = _threading.active_count()
     except Exception:
-        return
+        active = 0
 
-    if active >= _DANGER_THREADS:
+    # Trigger 1: thread-leak / heavy-pool stuck.
+    leak_trip = active >= _DANGER_THREADS
+    if leak_trip:
         _watchdog_over_count += 1
         logger.warning(
             "watchdog: active_threads=%d >= %d (sustained %d/%d)",
@@ -1969,32 +1997,72 @@ async def _run_thread_watchdog() -> None:
                 active, _watchdog_over_count,
             )
         _watchdog_over_count = 0
+
+    # Trigger 2: default-pool saturation (Supabase stuck).
+    try:
+        in_flight = _concurrency.to_light_active()
+        capacity = _concurrency.default_pool_capacity()
+    except Exception:
+        in_flight, capacity = 0, 0
+    pool_trip = (
+        capacity > 0
+        and in_flight >= int(capacity * _DEFAULT_POOL_DANGER_FRAC)
+    )
+    if pool_trip:
+        _watchdog_pool_over_count += 1
+        logger.warning(
+            "watchdog: default_pool_active=%d/%d (sustained %d/%d)",
+            in_flight, capacity,
+            _watchdog_pool_over_count, _SUSTAIN_CHECKS,
+        )
+    else:
+        if _watchdog_pool_over_count > 0:
+            logger.info(
+                "watchdog: default_pool_active=%d/%d back below danger "
+                "(was %d cycles)",
+                in_flight, capacity, _watchdog_pool_over_count,
+            )
+        _watchdog_pool_over_count = 0
+
+    # Either trigger sustained -> SIGTERM.
+    leak_fire = _watchdog_over_count >= _SUSTAIN_CHECKS
+    pool_fire = _watchdog_pool_over_count >= _SUSTAIN_CHECKS
+    if not (leak_fire or pool_fire):
         return
 
-    if _watchdog_over_count >= _SUSTAIN_CHECKS:
-        logger.error(
-            "watchdog: active_threads=%d sustained > %d for %d min — "
-            "forcing graceful exit so gunicorn recycles this worker",
-            active, _DANGER_THREADS,
-            _SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60,
-        )
-        # Fire-and-forget alert before SIGTERM.  Capped at 5s so a slow
-        # webhook can't delay recovery; if it fails we still SIGTERM.
-        try:
-            await _send_watchdog_alert(active)
-        except Exception as exc:
-            logger.warning("watchdog: alert path threw: %s", exc)
-        try:
-            import os as _os
-            import signal as _signal
-            _os.kill(_os.getpid(), _signal.SIGTERM)
-        except Exception as exc:
-            logger.error("watchdog: SIGTERM failed: %s", exc)
-        # Reset so we don't re-fire immediately if SIGTERM was ignored.
-        _watchdog_over_count = 0
+    if leak_fire and pool_fire:
+        reason = "thread leak + pool saturation"
+    elif leak_fire:
+        reason = "thread leak"
+    else:
+        reason = "default-pool saturation"
+    logger.error(
+        "watchdog: %s sustained for %d min — "
+        "forcing graceful exit so gunicorn recycles this worker "
+        "(threads=%d default_pool=%d/%d)",
+        reason,
+        _SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60,
+        active, in_flight, capacity,
+    )
+    # Fire-and-forget alert before SIGTERM.  Capped at 5s so a slow
+    # webhook can't delay recovery; if it fails we still SIGTERM.
+    try:
+        await _send_watchdog_alert(active)
+    except Exception as exc:
+        logger.warning("watchdog: alert path threw: %s", exc)
+    try:
+        import os as _os
+        import signal as _signal
+        _os.kill(_os.getpid(), _signal.SIGTERM)
+    except Exception as exc:
+        logger.error("watchdog: SIGTERM failed: %s", exc)
+    # Reset so we don't re-fire immediately if SIGTERM was ignored.
+    _watchdog_over_count = 0
+    _watchdog_pool_over_count = 0
 
 
 _watchdog_over_count = 0
+_watchdog_pool_over_count = 0
 
 
 # ── /_v2/home L2 cache warmer ────────────────────────────────────────
