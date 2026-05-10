@@ -27,6 +27,7 @@ circular-import risk.
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -58,6 +59,14 @@ _supabase_concurrency_cfg = 0
 # downstream Supabase slowdown) and the worker should self-recycle
 # before the health check starts 503ing.
 _to_light_active = 0
+
+# Per-callsite breakdown of thread-holding work currently in the
+# default pool.  Diagnostic-only: lets us see WHICH function names
+# are holding default-pool slots when the pool saturates.  Excludes
+# `gate_supabase_async` (those run on the loop, no thread held).
+# Mutated only from coroutines on the asyncio loop -- the loop's
+# cooperative scheduling makes the +=/-= pair effectively atomic.
+_default_pool_active_by_label: collections.Counter[str] = collections.Counter()
 
 
 # Defaults sized for a Railway container with ~1-2 vCPU and ~512MB-2GB RAM.
@@ -237,18 +246,24 @@ async def to_light(fn, *args, timeout: float = _DEFAULT_LIGHT_TIMEOUT):
     Tracks ``_to_light_active`` so the saturation watchdog can spot
     pool starvation in real time.
     """
+    label = _fn_label(fn)
     global _to_light_active
     _to_light_active += 1
+    _default_pool_active_by_label[label] += 1
     try:
         return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
     except asyncio.TimeoutError:
         logger.warning(
             "to_light: upstream timeout after %.1fs in %s",
-            timeout, _fn_label(fn),
+            timeout, label,
         )
         raise
     finally:
         _to_light_active -= 1
+        if _default_pool_active_by_label[label] <= 1:
+            del _default_pool_active_by_label[label]
+        else:
+            _default_pool_active_by_label[label] -= 1
 
 
 async def _run_under_supabase_gate(
@@ -257,6 +272,7 @@ async def _run_under_supabase_gate(
     timeout: float,
     allow_drop: bool,
     label: str,
+    holds_thread: bool,
 ):
     """Shared body for ``to_supabase`` (sync fn) and ``gate_supabase_async``
     (already-async coro).
@@ -270,6 +286,12 @@ async def _run_under_supabase_gate(
     queued waiting on a saturated semaphore are visible to the watchdog
     -- otherwise it would see only the ~8 executing slots and miss the
     case where 30+ coroutines are piled up behind them.
+
+    ``holds_thread`` is True for the sync path (``to_supabase``) so
+    we record it in the per-label diagnostic counter; False for the
+    async path (``gate_supabase_async``) since those run on the loop
+    and don't hold a default-pool thread -- they shouldn't show up
+    when we're diagnosing pool saturation.
     """
     sem = _supabase_sem
     if sem is None:
@@ -285,6 +307,8 @@ async def _run_under_supabase_gate(
 
     global _to_light_active
     _to_light_active += 1
+    if holds_thread:
+        _default_pool_active_by_label[label] += 1
     try:
         async with sem:
             try:
@@ -297,6 +321,11 @@ async def _run_under_supabase_gate(
                 raise
     finally:
         _to_light_active -= 1
+        if holds_thread:
+            if _default_pool_active_by_label[label] <= 1:
+                del _default_pool_active_by_label[label]
+            else:
+                _default_pool_active_by_label[label] -= 1
 
 
 async def to_supabase(
@@ -322,6 +351,7 @@ async def to_supabase(
         timeout=timeout,
         allow_drop=allow_drop,
         label=_fn_label(fn),
+        holds_thread=True,
     )
 
 
@@ -340,6 +370,40 @@ def heavy_pool_status() -> dict:
     }
 
 
+def default_pool_diagnostic(top_n: int = 5) -> dict:
+    """Snapshot of default-pool work for diagnosing saturation events.
+
+    Includes:
+      * ``tracked_active`` -- sum of in-flight `to_light` + sync
+        `to_supabase` calls (work we know is holding pool threads)
+      * ``top_callers`` -- top-N callsites by current in-flight count
+      * ``queue_depth`` -- best-effort read of the executor's pending
+        work queue (private API; falls back to None)
+      * ``untracked_estimate`` -- if `tracked_active < max_workers`
+        but the pool is starved, the gap is work that bypassed our
+        wrappers (raw asyncio.to_thread, framework internals, etc.)
+
+    Called from saturation-detection paths (health-check 503,
+    watchdog SIGTERM) so the next event lands an actionable trace
+    in the logs instead of just "pool starved -- bye".
+    """
+    queue_depth = None
+    if _default_pool is not None:
+        try:
+            queue_depth = _default_pool._work_queue.qsize()
+        except Exception:
+            queue_depth = None
+
+    tracked = sum(_default_pool_active_by_label.values())
+    return {
+        "tracked_active": tracked,
+        "max_workers": _default_workers_cfg,
+        "queue_depth": queue_depth,
+        "to_light_active_total": _to_light_active,
+        "top_callers": _default_pool_active_by_label.most_common(top_n),
+    }
+
+
 async def gate_supabase_async(
     coro,
     *,
@@ -354,7 +418,8 @@ async def gate_supabase_async(
     default-pool slots at all.
     """
     return await _run_under_supabase_gate(
-        coro, timeout=timeout, allow_drop=allow_drop, label="async",
+        coro, timeout=timeout, allow_drop=allow_drop,
+        label="async", holds_thread=False,
     )
 
 

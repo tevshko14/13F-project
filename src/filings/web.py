@@ -2046,13 +2046,19 @@ async def _run_thread_watchdog() -> None:
         reason = "thread leak"
     else:
         reason = "default-pool saturation"
+    # Snapshot of who's holding pool slots, so post-mortem doesn't
+    # require log archaeology to figure out the saturator.
+    try:
+        diag = _concurrency.default_pool_diagnostic()
+    except Exception:
+        diag = {}
     logger.error(
         "watchdog: %s sustained for %d min — "
         "forcing graceful exit so gunicorn recycles this worker "
-        "(threads=%d default_pool=%d/%d)",
+        "(threads=%d default_pool=%d/%d) diag=%s",
         reason,
         _SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60,
-        active, in_flight, capacity,
+        active, in_flight, capacity, diag,
     )
     # Fire-and-forget alert before SIGTERM.  Capped at 5s so a slow
     # webhook can't delay recovery; if it fails we still SIGTERM.
@@ -2305,7 +2311,18 @@ async def health_check():
                 asyncio.to_thread(lambda: True), timeout=5
             )
         except (asyncio.TimeoutError, Exception):
-            logger.error("health_check: default thread pool starved — returning 503")
+            # Dump a per-callsite snapshot so we can see WHICH functions
+            # are holding pool slots when the pool starves.  See
+            # concurrency.default_pool_diagnostic() docstring for fields.
+            try:
+                from filings import concurrency as _concurrency
+                diag = _concurrency.default_pool_diagnostic()
+            except Exception:
+                diag = {}
+            logger.error(
+                "health_check: default thread pool starved — returning 503; "
+                "diag=%s", diag,
+            )
             return JSONResponse(
                 {"status": "unhealthy", "reason": "thread pool exhausted"},
                 status_code=503,
@@ -2856,6 +2873,30 @@ async def admin_memprof_diag(request: Request):
         lines.append(_tb.format_exc())
 
     return PlainTextResponse("\n".join(lines))
+
+
+@app.get("/admin/pool-diag")
+async def admin_pool_diag(request: Request):
+    """Snapshot of default-pool work for diagnosing saturation.
+
+    Returns JSON: tracked_active, queue_depth, top_callers (top 10 by
+    in-flight count), max_workers, plus the standard heavy_pool_status.
+    Token-gated.  Safe to expose -- only counts and function names,
+    no payload data.
+
+    Useful for:
+      * polling during a load-test to watch what saturates first
+      * comparing tracked_active vs queue_depth to spot untracked
+        saturators (raw asyncio.to_thread, framework internals)
+    """
+    if (gate := _require_admin_token(request)) is not None:
+        return gate
+
+    from filings import concurrency as _concurrency
+    return JSONResponse({
+        "pool_status": _concurrency.heavy_pool_status(),
+        "default_pool": _concurrency.default_pool_diagnostic(top_n=10),
+    })
 
 
 @app.get("/api/admin/memprof")
