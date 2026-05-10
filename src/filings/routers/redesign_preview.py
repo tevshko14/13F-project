@@ -41,6 +41,7 @@ from filings.app_state import limiter, templates
 from filings.cache_l2 import l2_cached as _l2_cached
 from filings.caching import TTLCache
 from filings.concurrency import (
+    fire_and_forget,
     gate_supabase_async,
     is_heavy_saturated,
     to_heavy,
@@ -125,12 +126,6 @@ def _maybe_rate_limit(spec: str):
     return limiter.limit(spec)
 
 
-# Strong-reference set for fire-and-forget background tasks owned by
-# this router.  Tasks add themselves via :func:`_track_bg` and remove
-# themselves on completion; without this they'd be GC'd mid-flight by
-# asyncio (which only weakly tracks pending tasks).
-_bg_tasks: set[asyncio.Task] = set()
-
 # Tickers currently being refreshed by an SWR background task.
 # Used to debounce stampedes -- when 100 concurrent requests hit a
 # stale ticker, we serve the stale bundle to all of them but only
@@ -152,18 +147,15 @@ _SWR_MAX_CONCURRENT = 6
 _SWR_REFRESH_TIMEOUT_S = 30.0
 
 
-def _track_bg(coro, *, name: str) -> asyncio.Task:
-    """Spawn *coro* as a fire-and-forget task with a strong reference.
+def _track_bg(coro, *, name: str):
+    """Spawn *coro* as a fire-and-forget task owned by this router.
 
-    Used for "do this side-effect, don't make the user wait" work --
-    e.g. populating the stock-bundle cache after a request-path miss.
-    Exceptions are logged via the coroutine itself; this wrapper just
-    keeps the task alive until completion.
+    Thin wrapper around :func:`concurrency.fire_and_forget` with
+    ``swallow=False`` -- bundle writebacks log their own errors
+    internally, so we want exceptions to surface normally rather
+    than be re-logged.
     """
-    task = asyncio.create_task(coro, name=name)
-    _bg_tasks.add(task)
-    task.add_done_callback(_bg_tasks.discard)
-    return task
+    return fire_and_forget(coro, name=name, swallow=False)
 
 
 async def _swr_refresh_bundle(
@@ -6487,7 +6479,7 @@ async def _fetch_stock_meta(fund_cache: dict, ticker: str) -> dict:
     t_up = ticker.upper()
 
     async def _about_row() -> dict | None:
-        return await to_light(ca.get_row, t_up)
+        return await to_supabase(ca.get_row, t_up)
 
     async def _finnhub() -> dict:
         async def _compute() -> dict:
@@ -6519,7 +6511,7 @@ async def _fetch_stock_meta(fund_cache: dict, ticker: str) -> dict:
             async def _writeback() -> None:
                 row = await to_heavy(ca.fetch_live, t_up)
                 if row.get("source") != "empty":
-                    await to_light(ca.upsert_row, row)
+                    await to_supabase(ca.upsert_row, row)
             asyncio.create_task(_writeback())
 
     # Walk fund_cache once for holders count + CUSIP/issuer fallback.
@@ -6963,7 +6955,7 @@ async def build_stock_data_bundle(fund_cache: dict, ticker: str) -> tuple[dict, 
                            "per_insider_chart": {}, "insights": None,
                            "total_count": 0},
                  name="ownership_insiders"),
-        _bounded(to_light(_stock_build_ownership_congress, ticker),  timeout=3.0,
+        _bounded(to_supabase(_stock_build_ownership_congress, ticker), timeout=3.0,
                  fallback={"rows": [], "total_count": 0,
                            "politicians": [], "party_breakdown": None,
                            "total_politicians": 0, "total_trades": 0},
@@ -12201,7 +12193,7 @@ async def _sentiment_warm_l2() -> None:
             if usable > 0:
                 # Write to L2 directly (skipping the read path).  Same
                 # category as redesign_home so ops queries stay simple.
-                await to_light(
+                await to_supabase(
                     supabase_cache.set_cached, _SENTIMENT_L2_KEY,
                     "macro", payload, ttl_seconds=_SENTIMENT_L2_TTL,
                 )

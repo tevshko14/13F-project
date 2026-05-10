@@ -232,6 +232,73 @@ _upstream_sems: dict[str, asyncio.Semaphore] = {}
 _upstream_failures: dict[str, list[float]] = {}
 _upstream_open_until: dict[str, float] = {}
 
+# Optional callback fired the moment a circuit opens (not on every
+# failure -- once per open transition).  Web layer registers an async
+# webhook-poster here during lifespan so operators get pinged when an
+# upstream starts misbehaving, before it cascades into a saturation
+# event.  Kept as a module-level hook to avoid a concurrency -> web
+# import (web already imports concurrency).
+_circuit_open_callback = None  # Callable[[str, dict], Awaitable[None]] | None
+
+# Strong-reference set for fire-and-forget tasks owned by `fire_and_forget`.
+# asyncio only weakly tracks pending tasks, so without this the GC could
+# collect the task mid-flight and the work never completes.
+_fire_and_forget_tasks: set[asyncio.Task] = set()
+
+
+def fire_and_forget(coro, *, name: str = "fire-and-forget", swallow: bool = True):
+    """Spawn a coroutine fire-and-forget, with a strong reference held.
+
+    Replaces the ``set + create_task + add_done_callback(discard)`` idiom
+    that's footgun-prone (asyncio's weak tracking can GC the task before
+    it completes; the first time you forget the set you get silently
+    dropped work).
+
+    ``swallow=True`` (default): catches + logs exceptions from the
+    coroutine -- prevents "Task exception was never retrieved" log noise
+    when the caller can't reasonably handle the error (alerts, metrics,
+    cache writebacks).  Pass ``swallow=False`` for cases where the
+    coroutine handles its own errors and you want them to surface
+    normally (e.g. a router's bundle writeback that logs internally).
+
+    Returns the created Task, or ``None`` when there's no running loop
+    (unit tests, sync-only paths) -- the coroutine is closed so the
+    runtime doesn't warn about a never-awaited coroutine.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        if hasattr(coro, "close"):
+            coro.close()
+        return None
+
+    if swallow:
+        async def _safe(_c=coro, _n=name):
+            try:
+                await _c
+            except Exception as exc:
+                logger.warning("fire_and_forget[%s] failed: %s", _n, exc)
+        runnable = _safe()
+    else:
+        runnable = coro
+
+    task = loop.create_task(runnable, name=name)
+    _fire_and_forget_tasks.add(task)
+    task.add_done_callback(_fire_and_forget_tasks.discard)
+    return task
+
+
+def set_circuit_open_callback(cb) -> None:
+    """Register an async callback fired once per circuit-open transition.
+
+    Called as ``await cb(source, info_dict)`` where info_dict carries
+    {failures, window_s, open_for_s, sem_size}.  Best-effort: callback
+    exceptions are swallowed so a failing alert path can't block
+    legitimate work.  Pass ``None`` to clear.
+    """
+    global _circuit_open_callback
+    _circuit_open_callback = cb
+
 
 def _upstream_cfg(name: str) -> dict:
     return _UPSTREAM_CFG.get(name, _DEFAULT_UPSTREAM_CFG)
@@ -263,12 +330,28 @@ def _record_upstream_failure(name: str) -> None:
     while failures and failures[0] < cutoff:
         failures.pop(0)
     if len(failures) >= cfg["threshold"]:
+        n_failures = len(failures)
         _upstream_open_until[name] = now + cfg["open_for_s"]
         logger.warning(
             "upstream %s: circuit OPEN for %ds after %d failures in %ds",
-            name, cfg["open_for_s"], len(failures), cfg["window_s"],
+            name, cfg["open_for_s"], n_failures, cfg["window_s"],
         )
         failures.clear()  # avoid double-trigger right after reopen
+        # Fire alert callback (best-effort) so operators get a Slack/Telegram
+        # ping the moment a circuit opens, before it cascades.  `fire_and_forget`
+        # holds the task reference + swallows callback exceptions so a
+        # broken alert path can't crash legitimate work.
+        cb = _circuit_open_callback
+        if cb is not None:
+            fire_and_forget(
+                cb(name, {
+                    "failures":    n_failures,
+                    "window_s":    cfg["window_s"],
+                    "open_for_s":  cfg["open_for_s"],
+                    "sem_size":    cfg["sem"],
+                }),
+                name=f"circuit-open[{name}]",
+            )
 
 
 def _record_upstream_success(name: str) -> None:

@@ -743,13 +743,16 @@ async def lifespan(app: FastAPI):
     if WATCHDOG_ALERT_URL:
         _alert_dests.append("webhook")
     if _alert_dests:
-        logger.info("watchdog: alert destinations active = %s",
-                    ", ".join(_alert_dests))
+        logger.info("alerts: destinations active = %s", ", ".join(_alert_dests))
     else:
         logger.info(
-            "watchdog: no alert destinations (set TELEGRAM_BOT_TOKEN+"
-            "TELEGRAM_CHAT_ID and/or WATCHDOG_ALERT_URL to enable)"
+            "alerts: no destinations (set TELEGRAM_BOT_TOKEN+TELEGRAM_CHAT_ID "
+            "and/or WATCHDOG_ALERT_URL to enable)"
         )
+
+    # Register circuit-open webhook callback.
+    from filings.concurrency import set_circuit_open_callback
+    set_circuit_open_callback(_send_circuit_open_alert)
 
     yield
 
@@ -1892,13 +1895,14 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 WATCHDOG_ALERT_URL = os.environ.get("WATCHDOG_ALERT_URL", "").strip()
 
 
-async def _send_watchdog_alert(active: int) -> None:
-    """Best-effort POST to alert destinations before forcing exit.
+async def _post_alert(tg_text: str, webhook_payload: dict, *, name: str) -> None:
+    """Shared posting plumbing for any alert path.
 
-    Both destinations (Telegram + generic webhook) fire in parallel
-    when configured.  Each has a hard 5s timeout so a slow service
-    can't delay SIGTERM (recovery > alert delivery).  Failures are
-    logged and swallowed.
+    Sends ``tg_text`` to Telegram (when configured) and ``webhook_payload``
+    to the generic webhook URL (when configured), in parallel, each with
+    a hard 5s timeout.  Failures are logged and swallowed so a slow
+    alert service can't block the legitimate caller (watchdog SIGTERM,
+    circuit-open record, etc.).  ``name`` shows up in the log lines.
 
     To set up Telegram:
       1. In Telegram, open @BotFather and send /newbot.  Follow prompts;
@@ -1913,56 +1917,6 @@ async def _send_watchdog_alert(active: int) -> None:
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID) and not WATCHDOG_ALERT_URL:
         return
 
-    try:
-        import psutil
-        proc = psutil.Process()
-        rss_mb = proc.memory_info().rss // (1024 * 1024)
-        uptime_min = (time_module.time() - proc.create_time()) / 60
-    except Exception:
-        rss_mb = -1
-        uptime_min = -1.0
-
-    sustained_min = _SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60
-
-    # Telegram HTML formatting (cleaner than MarkdownV2, which would
-    # require escaping every . _ * [ ] ( ) etc.).
-    tg_text = (
-        "🚨 <b>paperpanda.io watchdog: thread leak detected</b>\n"
-        f"• active threads: <b>{active}</b> (danger ≥ {_DANGER_THREADS})\n"
-        f"• sustained: {sustained_min} min\n"
-        f"• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {os.getpid()}\n"
-        f"• action: <i>SIGTERM imminent — gunicorn will recycle this worker</i>\n"
-        f"• log search: <code>watchdog: active_threads=</code>"
-    )
-
-    # Discord uses standard markdown (`**bold**`, `*italic*`).
-    # Slack uses its own "mrkdwn" (`*bold*`, `_italic_`).  They're
-    # incompatible: Slack renders `**bold**` as literal asterisks.
-    # Detect the destination and pick the right syntax.
-    is_slack = "hooks.slack.com" in WATCHDOG_ALERT_URL.lower()
-    if is_slack:
-        md_text = (
-            "🚨 *paperpanda.io watchdog: thread leak detected*\n"
-            f"• active threads: *{active}* (danger ≥ {_DANGER_THREADS})\n"
-            f"• sustained: {sustained_min} min\n"
-            f"• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {os.getpid()}\n"
-            f"• action: _SIGTERM imminent — gunicorn will recycle this worker_\n"
-            f"• log search: `watchdog: active_threads=`"
-        )
-        webhook_payload = {"text": md_text}
-    else:
-        md_text = (
-            "🚨 **paperpanda.io watchdog: thread leak detected**\n"
-            f"• active threads: **{active}** (danger ≥ {_DANGER_THREADS})\n"
-            f"• sustained: {sustained_min} min\n"
-            f"• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {os.getpid()}\n"
-            f"• action: *SIGTERM imminent — gunicorn will recycle this worker*\n"
-            f"• log search: `watchdog: active_threads=`"
-        )
-        # Discord webhooks read `content`; generic webhooks may read `text`.
-        webhook_payload = {"content": md_text, "text": md_text}
-
-    import httpx
     tasks = []
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -1976,22 +1930,148 @@ async def _send_watchdog_alert(active: int) -> None:
     if WATCHDOG_ALERT_URL:
         tasks.append(("webhook", WATCHDOG_ALERT_URL, webhook_payload))
 
-    async def _post(name: str, url: str, payload: dict) -> None:
+    # Prefer the pooled async client (TLS+connection reuse).  Falls back
+    # to a one-shot client when called before lifespan startup completes
+    # (e.g. test scripts, ad-hoc invocation).
+    pool = _http_pool
+
+    async def _post(label: str, url: str, payload: dict) -> None:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(url, json=payload)
-                if resp.status_code >= 400:
-                    logger.warning("watchdog: %s alert returned %d: %s",
-                                   name, resp.status_code, resp.text[:200])
-                else:
-                    logger.info("watchdog: %s alert delivered", name)
+            if pool is not None:
+                resp = await pool.post(url, json=payload, timeout=5.0)
+            else:
+                import httpx
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(url, json=payload)
+            if resp.status_code >= 400:
+                logger.warning("alert[%s]: %s returned %d: %s",
+                               name, label, resp.status_code, resp.text[:200])
+            else:
+                logger.info("alert[%s]: %s delivered", name, label)
         except Exception as exc:
-            logger.warning("watchdog: %s alert POST failed: %s", name, exc)
+            logger.warning("alert[%s]: %s POST failed: %s", name, label, exc)
 
     await asyncio.gather(
         *(_post(n, u, p) for n, u, p in tasks),
         return_exceptions=True,
     )
+
+
+# Markdown flavour markers -- collapses the otherwise-triple-duplicate
+# message construction (TG / Discord / Slack) to a single template that
+# gets formatted three times with these dicts.  Slack mrkdwn and Discord
+# md are incompatible (single vs double asterisks) so each alert path
+# has to render all three.
+_FLAVOR_TG = {
+    "b1": "<b>", "b2": "</b>", "i1": "<i>", "i2": "</i>",
+    "c1": "<code>", "c2": "</code>",
+}
+_FLAVOR_DISCORD = {
+    "b1": "**", "b2": "**", "i1": "*", "i2": "*",
+    "c1": "`", "c2": "`",
+}
+_FLAVOR_SLACK = {
+    "b1": "*", "b2": "*", "i1": "_", "i2": "_",
+    "c1": "`", "c2": "`",
+}
+
+
+def _render_alert(template: str, **fields) -> tuple[str, dict]:
+    """Render one alert template into (telegram_text, webhook_payload).
+
+    ``template`` uses the markup placeholders {b1}/{b2} (bold open/close),
+    {i1}/{i2} (italic), {c1}/{c2} (code), plus any **fields the caller
+    passes for interpolation.  Returns the TG-HTML text and the JSON
+    payload for the configured webhook destination (auto-detects Slack
+    vs Discord from the URL).
+    """
+    tg_text = template.format(**_FLAVOR_TG, **fields)
+    is_slack = "hooks.slack.com" in WATCHDOG_ALERT_URL.lower()
+    md = template.format(
+        **(_FLAVOR_SLACK if is_slack else _FLAVOR_DISCORD), **fields,
+    )
+    payload = {"text": md} if is_slack else {"content": md, "text": md}
+    return tg_text, payload
+
+
+async def _send_watchdog_alert(active: int) -> None:
+    """Best-effort POST to alert destinations before the watchdog SIGTERMs."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID) and not WATCHDOG_ALERT_URL:
+        return
+
+    try:
+        import psutil
+        proc = psutil.Process()
+        rss_mb = proc.memory_info().rss // (1024 * 1024)
+        uptime_min = (time_module.time() - proc.create_time()) / 60
+    except Exception:
+        rss_mb = -1
+        uptime_min = -1.0
+
+    template = (
+        "🚨 {b1}paperpanda.io watchdog: thread leak detected{b2}\n"
+        "• active threads: {b1}{active}{b2} (danger ≥ {danger})\n"
+        "• sustained: {sustained_min} min\n"
+        "• rss: {rss_mb} MB · uptime: {uptime_min:.1f} min · pid: {pid}\n"
+        "• action: {i1}SIGTERM imminent — gunicorn will recycle this worker{i2}\n"
+        "• log search: {c1}watchdog: active_threads={c2}"
+    )
+    tg_text, webhook_payload = _render_alert(
+        template,
+        active=active, danger=_DANGER_THREADS,
+        sustained_min=_SUSTAIN_CHECKS * _WATCHDOG_INTERVAL_S // 60,
+        rss_mb=rss_mb, uptime_min=uptime_min, pid=os.getpid(),
+    )
+    await _post_alert(tg_text, webhook_payload, name="watchdog")
+
+
+# Per-source alert suppression window.  Keyed by ``_UPSTREAM_CFG`` source
+# names, bounded ~8 entries.  A shared-backend hiccup can open multiple
+# circuits within seconds (Tiingo + yfinance + Finnhub all riding on the
+# same network blip); without this you'd page 3+ webhooks at once.
+_CIRCUIT_ALERT_DEBOUNCE_S = 60
+_circuit_alert_last: dict[str, float] = {}
+
+
+async def _send_circuit_open_alert(source: str, info: dict) -> None:
+    """Best-effort POST when an upstream's circuit breaker opens.
+
+    Fires once per circuit-open transition (callback registered with
+    ``concurrency.set_circuit_open_callback``).  Per-source debounce
+    drops alerts within ``_CIRCUIT_ALERT_DEBOUNCE_S`` of the previous
+    one for the same source.
+    """
+    now = time_module.time()
+    last = _circuit_alert_last.get(source, 0)
+    if now - last < _CIRCUIT_ALERT_DEBOUNCE_S:
+        logger.debug(
+            "circuit-open alert for %s debounced (%.0fs since last)",
+            source, now - last,
+        )
+        return
+    _circuit_alert_last[source] = now
+
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID) and not WATCHDOG_ALERT_URL:
+        return
+
+    template = (
+        "⚠️ {b1}paperpanda.io upstream OPEN: {source}{b2}\n"
+        "• {failures} failures in {window_s}s\n"
+        "• circuit will reopen in {open_for_s}s\n"
+        "• per-source budget: {sem_size} slots\n"
+        "• effect: {i1}calls to {source} return None instantly; "
+        "bundle sections fall back gracefully — site stays up{i2}\n"
+        "• log search: {c1}upstream {source}: circuit OPEN{c2}"
+    )
+    tg_text, webhook_payload = _render_alert(
+        template,
+        source=source,
+        failures=info.get("failures", "?"),
+        window_s=info.get("window_s", "?"),
+        open_for_s=info.get("open_for_s", "?"),
+        sem_size=info.get("sem_size", "?"),
+    )
+    await _post_alert(tg_text, webhook_payload, name=f"circuit-open[{source}]")
 
 
 async def _run_thread_watchdog() -> None:
