@@ -123,6 +123,20 @@ _bg_tasks: set[asyncio.Task] = set()
 # fire ONE bg refresh.  Mutated only on the asyncio loop.
 _swr_refreshing: set[str] = set()
 
+# Global cap on concurrent SWR background refreshes.  Each refresh
+# fans out ~6 to_heavy calls inside `build_stock_data_bundle`; without
+# a cap, a sustained crawler hitting many distinct stale tickers could
+# pin the entire heavy-pool semaphore on bg work and starve organic
+# request fanout.  Sized below the heavy-pool semaphore (8) so the
+# warmer + organic to_heavy traffic always have headroom.
+_SWR_MAX_CONCURRENT = 6
+
+# Per-refresh timeout: caps how long any single SWR bg refresh can
+# hold the per-ticker debounce flag.  Without this a hung upstream
+# would leave the flag set indefinitely and the ticker would silently
+# stop refreshing until MAX_STALE_AGE_S forced a sync rebuild.
+_SWR_REFRESH_TIMEOUT_S = 30.0
+
 
 def _track_bg(coro, *, name: str) -> asyncio.Task:
     """Spawn *coro* as a fire-and-forget task with a strong reference.
@@ -144,17 +158,20 @@ async def _swr_refresh_bundle(
     """Background SWR refresh: rebuild the bundle and write it back.
 
     Errors are logged + swallowed; the user already got their stale
-    response.  The ticker's debounce flag is cleared in `finally` so
-    the next stale request can fire another refresh after this one
-    completes (rather than racing).
+    response.  Bounded by `_SWR_REFRESH_TIMEOUT_S` so a hung upstream
+    can't pin the per-ticker debounce flag forever.  ``finally``
+    clears the flag so the next stale request can re-arm.
     """
     t_up = ticker.upper()
     try:
-        bundle, source_status = await build_stock_data_bundle(fund_cache, ticker)
-        await asyncio.to_thread(
-            stock_bundle.set_bundle, ticker, bundle,
-            tier=write_tier, source_status=source_status,
-        )
+        async with asyncio.timeout(_SWR_REFRESH_TIMEOUT_S):
+            bundle, source_status = await build_stock_data_bundle(fund_cache, ticker)
+            await asyncio.to_thread(
+                stock_bundle.set_bundle, ticker, bundle,
+                tier=write_tier, source_status=source_status,
+            )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        logger.debug("SWR bg refresh timed out for %s: %s", ticker, exc)
     except Exception as exc:
         logger.debug("SWR bg refresh failed for %s: %s", ticker, exc)
     finally:
@@ -7191,7 +7208,6 @@ async def preview_stock(request: Request, ticker: str):
     async def _bundle_or_fresh() -> dict:
         cached = await asyncio.to_thread(stock_bundle.get_bundle, ticker)
 
-        # Fresh hit: within tier TTL, return immediately.
         if cached and stock_bundle.is_fresh(cached["refreshed_at"], cached["tier"]):
             stock_bundle.record_hit()
             return cached["bundle"]
@@ -7206,11 +7222,17 @@ async def preview_stock(request: Request, ticker: str):
                 and cached.get("bundle")
                 and not stock_bundle.is_too_stale(cached["refreshed_at"])):
             t_up = ticker.upper()
-            # Debounce: only fire one bg refresh per ticker at a time.
-            # Without this a stampede of concurrent requests on a stale
-            # ticker would each fire a refresh -- N×fanout to upstreams
-            # for no gain.
-            if t_up not in _swr_refreshing:
+            # Two-level gating on the bg refresh:
+            #   1. per-ticker debounce -- N concurrent stale requests
+            #      for the same ticker fire only one refresh.
+            #   2. global cap (`_SWR_MAX_CONCURRENT`) -- caps total
+            #      concurrent bg refreshes so SWR can't pin the heavy
+            #      pool the way the warmer used to.
+            # If we hit either gate, just serve the stale bundle and
+            # let the next request re-arm; worst case the warmer
+            # picks the ticker up.
+            if (t_up not in _swr_refreshing
+                    and len(_swr_refreshing) < _SWR_MAX_CONCURRENT):
                 _swr_refreshing.add(t_up)
                 stock_bundle.record_bg_refresh()
                 _track_bg(

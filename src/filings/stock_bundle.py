@@ -15,6 +15,7 @@ import collections as _collections
 import dataclasses as _dc
 import json as _json
 import logging
+import os
 import re as _re
 import statistics as _stats
 from datetime import datetime, timezone
@@ -41,6 +42,16 @@ _TTL_BY_TIER = {
 }
 
 _VALID_TIERS = frozenset(_TTL_BY_TIER)
+
+# After this age the cached bundle is past its SWR sweet spot and the
+# request handler will block on a fresh rebuild rather than serve it.
+# Sized 24h because:
+#   - 13F holdings change ~once per quarter; stale data >24h is fine
+#   - Financials are quarterly; stale data >24h is fine
+#   - Insider trades roll in continuously; >24h means we'd miss
+#     today's filings, which IS user-visible -- so 24h is the cap.
+# Override per-deploy with `STOCK_BUNDLE_MAX_STALE_S` env var.
+MAX_STALE_AGE_S = int(os.environ.get("STOCK_BUNDLE_MAX_STALE_S", 24 * 3600))
 
 # Tier names exposed for callers so the strings aren't sprinkled around.
 HOT_TIER:  str = "hot"
@@ -71,6 +82,8 @@ FAILURE_BACKOFF_S = 5 * 60
 # rollups later, push to a Supabase row instead).  Read via
 # :func:`get_request_metrics` for /admin/stock-cache-status.
 
+# Mutated only from coroutines on the asyncio loop -- single-loop
+# scheduling makes the +=1 increments atomic for monitoring purposes.
 _request_metrics: dict[str, int] = {
     "hits":          0,  # cached row found + within tier TTL
     "stale_served":  0,  # SWR: cached row past TTL but served immediately
@@ -142,18 +155,6 @@ def is_fresh(refreshed_at: datetime | None, tier: str) -> bool:
     ttl = _TTL_BY_TIER.get(tier, BUNDLE_TTL_COLD_S)
     age = (datetime.now(timezone.utc) - refreshed_at).total_seconds()
     return age < ttl
-
-
-# After this age we stop trusting the cached bundle even for SWR
-# fallback -- the user is better off paying the cold-build cost than
-# seeing data from yesterday.  Sized 24h because:
-#   - 13F holdings change ~once per quarter; warm data >24h is fine
-#   - Financials are quarterly; warm data >24h is fine
-#   - Insider trades roll in continuously; >24h means we'd miss
-#     today's filings, which IS user-visible -- so 24h is the cap.
-# Override per-deploy with `STOCK_BUNDLE_MAX_STALE_S` env var if needed.
-import os as _os
-MAX_STALE_AGE_S = int(_os.environ.get("STOCK_BUNDLE_MAX_STALE_S", 24 * 3600))
 
 
 def is_too_stale(refreshed_at: datetime | None) -> bool:
