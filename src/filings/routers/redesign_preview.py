@@ -4325,13 +4325,16 @@ async def _fetch_funds_panes(
 
     tasks = []
     if need_holdings:
-        tasks.append(asyncio.to_thread(client.build_grand_portfolio,
-                                       fund_cache, SUPERINVESTORS_BY_CIK))
-        tasks.append(asyncio.to_thread(market_data.build_most_added_table,
-                                       fund_cache, SUPERINVESTORS_BY_CIK))
+        # Heavy iteration + yfinance fanout (503 S&P tickers) -- route
+        # through to_heavy so it lands on the heavy pool, not default.
+        tasks.append(to_heavy(client.build_grand_portfolio,
+                              fund_cache, SUPERINVESTORS_BY_CIK, timeout=30.0))
+        tasks.append(to_heavy(market_data.build_most_added_table,
+                              fund_cache, SUPERINVESTORS_BY_CIK, timeout=60.0))
     if need_activity:
-        tasks.append(asyncio.to_thread(_funds_activity_consensus_sync,
-                                       request, fund_cache, SUPERINVESTORS_BY_CIK))
+        tasks.append(to_heavy(_funds_activity_consensus_sync,
+                              request, fund_cache, SUPERINVESTORS_BY_CIK,
+                              timeout=15.0))
 
     results = await asyncio.gather(*tasks) if tasks else []
     i = 0

@@ -1534,7 +1534,13 @@ async def _refresh_single_fund_async(app: FastAPI, cik: str) -> bool:
 
     _refresh_in_progress.add(cik)
     try:
-        data = await asyncio.to_thread(cache.refresh_single_fund, cik)
+        # SEC EDGAR (via edgartools) is heavy, rate-limited, and locks
+        # an httpcore HTTP/2 connection internally -- 12 concurrent
+        # refreshes serialize on that lock and saturate the default
+        # pool (caught in 2026-05-10 stack-trace diagnostic).  Route
+        # through `to_heavy` so the heavy semaphore caps concurrent
+        # SEC work at 8 and the default pool stays free for requests.
+        data = await _to_heavy(cache.refresh_single_fund, cik, timeout=60.0)
         if data is not None:
             app.state.fund_cache[cik] = data
             logger.info("Background refresh OK: CIK %s (%s)", cik, data.get("name", ""))
@@ -3883,10 +3889,14 @@ async def funds_page(request: Request, view: str = "funds"):
             },
         )
 
-    # Run both CPU-bound computations concurrently in threads
+    # Run both CPU-bound computations concurrently via the heavy pool.
+    # `build_most_added_table` triggers a yfinance fetch for 503 S&P
+    # tickers when the close_df cache is cold; without `to_heavy`
+    # routing it lands on the default pool and starves health checks
+    # (2026-05-10 saturation pattern).
     entries, most_added = await asyncio.gather(
-        asyncio.to_thread(client.build_grand_portfolio, cache_data, SUPERINVESTORS_BY_CIK),
-        asyncio.to_thread(market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK),
+        _to_heavy(client.build_grand_portfolio, cache_data, SUPERINVESTORS_BY_CIK, timeout=30.0),
+        _to_heavy(market_data.build_most_added_table, cache_data, SUPERINVESTORS_BY_CIK, timeout=60.0),
     )
 
     # ── Build Consensus Leaders data (top 10 by holder count) ──
