@@ -370,6 +370,73 @@ def heavy_pool_status() -> dict:
     }
 
 
+def default_pool_thread_traces(max_frames_per_thread: int = 3) -> list[dict]:
+    """Stack-trace each default-pool worker so we can see WHAT it's doing
+    without requiring callers to go through our wrappers.
+
+    Catches the bulk of pool saturators we can't see otherwise -- 163
+    raw ``asyncio.to_thread`` callsites + library code + framework
+    internals all dispatch through the default pool but skip our
+    counter.  ``sys._current_frames()`` gives us each live thread's
+    current frame; we walk up through callers (skipping the
+    concurrent.futures worker plumbing) and capture the top user/lib
+    frames.  An idle pool worker blocks in ``queue.get``; after
+    skipping plumbing its trace is empty -- that's how we distinguish
+    busy from idle.
+
+    Cost: ~10ms for 16-32 threads, only called on saturation events
+    or admin polling -- never on the request hot path.
+    """
+    import sys
+    import threading as _threading
+
+    frames = sys._current_frames()
+    threads_by_id = {t.ident: t for t in _threading.enumerate()}
+
+    # Skip the outer worker plumbing so the trace shows the caller's
+    # actual work, not concurrent.futures._worker -> queue.get bookkeeping.
+    skip_modules = (
+        "concurrent.futures",
+        "queue",
+        "threading",
+        "_thread",
+    )
+
+    traces: list[dict] = []
+    for tid, frame in frames.items():
+        thread = threads_by_id.get(tid)
+        if thread is None:
+            continue
+        # Default ThreadPoolExecutor names threads `<prefix>_<n>`.
+        if not thread.name.startswith("default_"):
+            continue
+
+        chain: list[str] = []
+        f = frame
+        # Walk from deepest (currently executing) up through callers.
+        while f is not None and len(chain) < max_frames_per_thread:
+            mod = f.f_globals.get("__name__", "?")
+            if any(mod.startswith(s) for s in skip_modules):
+                f = f.f_back
+                continue
+            try:
+                qual = f.f_code.co_qualname  # 3.11+
+            except AttributeError:
+                qual = f.f_code.co_name
+            chain.append(f"{mod}.{qual}:{f.f_lineno}")
+            f = f.f_back
+
+        traces.append({
+            "thread": thread.name,
+            "busy": bool(chain),  # empty chain = idle worker waiting on queue.get
+            "trace": chain,       # deepest frame first
+        })
+
+    # Stable order by thread name so logs are diff-friendly.
+    traces.sort(key=lambda t: t["thread"])
+    return traces
+
+
 def default_pool_diagnostic(top_n: int = 5) -> dict:
     """Snapshot of default-pool work for diagnosing saturation events.
 
@@ -379,9 +446,12 @@ def default_pool_diagnostic(top_n: int = 5) -> dict:
       * ``top_callers`` -- top-N callsites by current in-flight count
       * ``queue_depth`` -- best-effort read of the executor's pending
         work queue (private API; falls back to None)
-      * ``untracked_estimate`` -- if `tracked_active < max_workers`
-        but the pool is starved, the gap is work that bypassed our
-        wrappers (raw asyncio.to_thread, framework internals, etc.)
+      * ``thread_traces`` -- stack trace for each default-pool worker
+        so saturators that bypass our wrappers are visible too
+      * ``busy_threads`` / ``idle_threads`` -- derived from traces so
+        we can spot the gap: if `busy_threads > tracked_active`, the
+        difference is untracked work (raw asyncio.to_thread, libs,
+        framework internals)
 
     Called from saturation-detection paths (health-check 503,
     watchdog SIGTERM) so the next event lands an actionable trace
@@ -395,12 +465,19 @@ def default_pool_diagnostic(top_n: int = 5) -> dict:
             queue_depth = None
 
     tracked = sum(_default_pool_active_by_label.values())
+    traces = default_pool_thread_traces()
+    busy = sum(1 for t in traces if t["busy"])
+
     return {
         "tracked_active": tracked,
         "max_workers": _default_workers_cfg,
         "queue_depth": queue_depth,
         "to_light_active_total": _to_light_active,
+        "busy_threads": busy,
+        "idle_threads": len(traces) - busy,
+        "untracked_estimate": max(0, busy - tracked),
         "top_callers": _default_pool_active_by_label.most_common(top_n),
+        "thread_traces": traces,
     }
 
 
