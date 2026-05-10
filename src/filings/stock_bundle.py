@@ -72,14 +72,27 @@ FAILURE_BACKOFF_S = 5 * 60
 # :func:`get_request_metrics` for /admin/stock-cache-status.
 
 _request_metrics: dict[str, int] = {
-    "hits":         0,  # cached row found + within tier TTL
-    "miss_stale":   0,  # cached row found but past tier TTL
-    "miss_cold":    0,  # no cached row at all (first-time materialisation)
+    "hits":          0,  # cached row found + within tier TTL
+    "stale_served":  0,  # SWR: cached row past TTL but served immediately
+                         #   while a background refresh runs.  This is the
+                         #   "fast" path for what previously blocked on rebuild.
+    "miss_stale":    0,  # cached row past TTL AND past max-stale-age (or
+                         #   user-driven force-rebuild) -- blocked on rebuild
+    "miss_cold":     0,  # no cached row at all (first-time materialisation)
+    "bg_refreshes":  0,  # background refreshes triggered by SWR stale-serves
 }
 
 
 def record_hit() -> None:
     _request_metrics["hits"] += 1
+
+
+def record_stale_served() -> None:
+    _request_metrics["stale_served"] += 1
+
+
+def record_bg_refresh() -> None:
+    _request_metrics["bg_refreshes"] += 1
 
 
 def record_miss(*, had_cached: bool) -> None:
@@ -92,8 +105,17 @@ def record_miss(*, had_cached: bool) -> None:
 def get_request_metrics() -> dict:
     """Snapshot of request-path counters since worker startup."""
     snap = dict(_request_metrics)
-    total = snap["hits"] + snap["miss_stale"] + snap["miss_cold"]
+    # `served_fast` = both fresh hits and stale-serves -- both are
+    # sub-second from the user's perspective.  This is the metric that
+    # actually matters for perceived latency.
+    served_fast = snap["hits"] + snap["stale_served"]
+    total = served_fast + snap["miss_stale"] + snap["miss_cold"]
     snap["total"] = total
+    snap["served_fast"] = served_fast
+    snap["served_fast_pct"] = (
+        round(served_fast * 100 / total, 1) if total else 0.0
+    )
+    # Keep `hit_rate_pct` for back-compat with existing dashboards / logs.
     snap["hit_rate_pct"] = round(snap["hits"] * 100 / total, 1) if total else 0.0
     return snap
 
@@ -120,6 +142,32 @@ def is_fresh(refreshed_at: datetime | None, tier: str) -> bool:
     ttl = _TTL_BY_TIER.get(tier, BUNDLE_TTL_COLD_S)
     age = (datetime.now(timezone.utc) - refreshed_at).total_seconds()
     return age < ttl
+
+
+# After this age we stop trusting the cached bundle even for SWR
+# fallback -- the user is better off paying the cold-build cost than
+# seeing data from yesterday.  Sized 24h because:
+#   - 13F holdings change ~once per quarter; warm data >24h is fine
+#   - Financials are quarterly; warm data >24h is fine
+#   - Insider trades roll in continuously; >24h means we'd miss
+#     today's filings, which IS user-visible -- so 24h is the cap.
+# Override per-deploy with `STOCK_BUNDLE_MAX_STALE_S` env var if needed.
+import os as _os
+MAX_STALE_AGE_S = int(_os.environ.get("STOCK_BUNDLE_MAX_STALE_S", 24 * 3600))
+
+
+def is_too_stale(refreshed_at: datetime | None) -> bool:
+    """True if the bundle is past the absolute max-stale ceiling.
+
+    Stale-but-recent (past tier TTL but under MAX_STALE_AGE_S) is the
+    SWR sweet spot -- serve it now, refresh in background.
+    Stale-and-ancient (past MAX_STALE_AGE_S) is past the point where
+    serving it is useful -- block on rebuild instead.
+    """
+    if not refreshed_at:
+        return True
+    age = (datetime.now(timezone.utc) - refreshed_at).total_seconds()
+    return age >= MAX_STALE_AGE_S
 
 
 def _to_json_safe(obj):

@@ -117,6 +117,12 @@ def _maybe_rate_limit(spec: str):
 # asyncio (which only weakly tracks pending tasks).
 _bg_tasks: set[asyncio.Task] = set()
 
+# Tickers currently being refreshed by an SWR background task.
+# Used to debounce stampedes -- when 100 concurrent requests hit a
+# stale ticker, we serve the stale bundle to all of them but only
+# fire ONE bg refresh.  Mutated only on the asyncio loop.
+_swr_refreshing: set[str] = set()
+
 
 def _track_bg(coro, *, name: str) -> asyncio.Task:
     """Spawn *coro* as a fire-and-forget task with a strong reference.
@@ -130,6 +136,29 @@ def _track_bg(coro, *, name: str) -> asyncio.Task:
     _bg_tasks.add(task)
     task.add_done_callback(_bg_tasks.discard)
     return task
+
+
+async def _swr_refresh_bundle(
+    ticker: str, fund_cache: dict, write_tier: str,
+) -> None:
+    """Background SWR refresh: rebuild the bundle and write it back.
+
+    Errors are logged + swallowed; the user already got their stale
+    response.  The ticker's debounce flag is cleared in `finally` so
+    the next stale request can fire another refresh after this one
+    completes (rather than racing).
+    """
+    t_up = ticker.upper()
+    try:
+        bundle, source_status = await build_stock_data_bundle(fund_cache, ticker)
+        await asyncio.to_thread(
+            stock_bundle.set_bundle, ticker, bundle,
+            tier=write_tier, source_status=source_status,
+        )
+    except Exception as exc:
+        logger.debug("SWR bg refresh failed for %s: %s", ticker, exc)
+    finally:
+        _swr_refreshing.discard(t_up)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -7161,22 +7190,48 @@ async def preview_stock(request: Request, ticker: str):
 
     async def _bundle_or_fresh() -> dict:
         cached = await asyncio.to_thread(stock_bundle.get_bundle, ticker)
+
+        # Fresh hit: within tier TTL, return immediately.
         if cached and stock_bundle.is_fresh(cached["refreshed_at"], cached["tier"]):
             stock_bundle.record_hit()
             return cached["bundle"]
+
+        # Stale-While-Revalidate: cached row exists, past tier TTL but
+        # under MAX_STALE_AGE_S.  Serve the stale bundle immediately
+        # (sub-second response) and refresh in background so the next
+        # request gets fresh data.  This is the path that turns a
+        # 6-second cold-rebuild into a 300ms response on the dominant
+        # case (warmer permanently behind the universe of tickers).
+        if (cached
+                and cached.get("bundle")
+                and not stock_bundle.is_too_stale(cached["refreshed_at"])):
+            t_up = ticker.upper()
+            # Debounce: only fire one bg refresh per ticker at a time.
+            # Without this a stampede of concurrent requests on a stale
+            # ticker would each fire a refresh -- N×fanout to upstreams
+            # for no gain.
+            if t_up not in _swr_refreshing:
+                _swr_refreshing.add(t_up)
+                stock_bundle.record_bg_refresh()
+                _track_bg(
+                    _swr_refresh_bundle(ticker, fund_cache, cached["tier"]),
+                    name=f"stock-bundle-swr:{ticker}",
+                )
+            stock_bundle.record_stale_served()
+            return cached["bundle"]
+
+        # True cold miss OR ancient (>MAX_STALE_AGE_S) cache: must
+        # block on a synchronous rebuild.  This is the only path
+        # where the user sees the full fanout latency.
         stock_bundle.record_miss(had_cached=cached is not None)
 
         # Backpressure: if the heavy pool is already saturated, don't
-        # queue another ~10-call cold-path fanout behind it.  Prefer
-        # serving stale-cached data ("stale > nothing"); 503 only when
-        # there's genuinely nothing to serve.  This bounds the tail
-        # latency under crawler load -- without it, queued requests
-        # wait indefinitely for slots to free.
+        # queue another ~10-call cold-path fanout behind it.  Serve
+        # stale even past MAX_STALE_AGE_S (better than nothing); 503
+        # only when there's genuinely nothing to serve.
         if is_heavy_saturated():
             stale_bundle = (cached or {}).get("bundle") or {}
             if stale_bundle:
-                # Debug-level: under sustained saturation this fires
-                # per-request; keep out of the default log stream.
                 logger.debug(
                     "backpressure: serving stale bundle for %s (heavy pool full)",
                     ticker,
@@ -7193,10 +7248,6 @@ async def preview_stock(request: Request, ticker: str):
         # Without this, the request path would clobber a hot ticker
         # back to cold and the warmer would stop refreshing it.
         write_tier = cached["tier"] if cached else stock_bundle.COLD_TIER
-        # Fire-and-forget the cache write so we don't pay the Supabase
-        # round-trip on the user's response after they already paid for
-        # the live fanout.  Failures inside `set_bundle` are logged and
-        # swallowed; lifespan tracks the task so it isn't GC'd mid-flight.
         _track_bg(asyncio.to_thread(
             stock_bundle.set_bundle, ticker, bundle,
             tier=write_tier, source_status=source_status,
