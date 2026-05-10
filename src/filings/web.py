@@ -116,23 +116,11 @@ _setup_logging()
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# Sentry (optional — only if SENTRY_DSN is set)
-# ═══════════════════════════════════════════════════════════════════════
-
-_sentry_dsn = os.environ.get("SENTRY_DSN", "")
-if _sentry_dsn:
-    try:
-        import sentry_sdk
-
-        sentry_sdk.init(
-            dsn=_sentry_dsn,
-            traces_sample_rate=0.1,
-            environment=os.environ.get("RAILWAY_ENVIRONMENT", "development"),
-        )
-        logger.info("Sentry initialized (10%% trace sampling)")
-    except ImportError:
-        logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
+# Sentry init (no-op when SENTRY_DSN unset).  Shared with worker.py via
+# filings.observability so both tiers feed the same Sentry project with
+# a `service=web|worker` tag.
+from filings.observability import init_sentry as _init_sentry
+_init_sentry("web")
 
 # ── Analytics (optional) ─────────────────────────────────────────────
 # NOTE: Set POSTHOG_KEY in production (Railway) to enable analytics.
@@ -1704,6 +1692,15 @@ async def _trigger_single_refresh(app: FastAPI, cik: str) -> None:
 
 # ── Reddit velocity notification scanner ──────────────────────────────
 
+# Per-task heartbeat registry -- updated on every successful iteration.
+# Worker-side watchdog reads this to detect silent hangs (task that
+# stopped iterating without crashing).  Keys: task name.  Values:
+# {"interval": int, "last_completed_at": float, "started_at": float}.
+# Living in web.py because `_periodic_task` does -- both web's lifespan
+# and worker.py share the same wrapper.
+_periodic_heartbeats: dict[str, dict] = {}
+
+
 async def _periodic_task(
     *, name: str, startup_delay: int, interval: int, body,
 ) -> None:
@@ -1713,14 +1710,71 @@ async def _periodic_task(
     sleep`` skeleton each background scanner used to copy.  Exceptions
     from *body* are logged and swallowed so one bad iteration never
     kills the loop.
+
+    Records a heartbeat in ``_periodic_heartbeats`` after every
+    iteration (success OR exception -- both mean the task is alive).
+    Only a stuck-await leaves the heartbeat stale, which the worker
+    watchdog uses to detect silent hangs.
     """
+    _periodic_heartbeats[name] = {
+        "interval":          interval,
+        "startup_delay":     startup_delay,
+        "started_at":        time_module.time(),
+        "last_completed_at": 0.0,
+    }
     await asyncio.sleep(startup_delay)
     while True:
         try:
             await body()
         except Exception as exc:
             logger.error("%s iteration failed: %s", name, exc)
+        _periodic_heartbeats[name]["last_completed_at"] = time_module.time()
         await asyncio.sleep(interval)
+
+
+def periodic_heartbeat_status() -> list[dict]:
+    """Snapshot of periodic-task heartbeats for diagnostics + watchdog.
+
+    Overdue = no heartbeat within ``interval × _WORKER_WATCHDOG_GRACE_FACTOR``
+    + ``_WORKER_WATCHDOG_GRACE_SLACK_S`` after the task should have run
+    its first iteration.  A task still in its ``startup_delay`` window
+    (``last_completed_at == 0``) gets that delay added to the grace
+    window so a long initial sleep doesn't trip the watchdog.
+    """
+    now = time_module.time()
+    out: list[dict] = []
+    for name, meta in _periodic_heartbeats.items():
+        last = meta["last_completed_at"]
+        interval = meta["interval"]
+        startup_delay = meta.get("startup_delay", 0)
+        # Reference timestamp: last completion if we've ever run, else
+        # the task's start (so a startup-delay-long initial sleep
+        # doesn't count as 'overdue').
+        reference = last if last > 0 else meta["started_at"]
+        elapsed = now - reference
+        grace_window = (
+            interval * _WORKER_WATCHDOG_GRACE_FACTOR
+            + _WORKER_WATCHDOG_GRACE_SLACK_S
+        )
+        if last == 0:
+            grace_window += startup_delay
+        out.append({
+            "name":                      name,
+            "interval":                  interval,
+            "last_completed_at":         last,
+            "seconds_since_heartbeat":   round(elapsed, 1),
+            "overdue":                   elapsed > grace_window,
+        })
+    return out
+
+
+# Worker watchdog tuning.  A task is "overdue" when the gap since its
+# last heartbeat exceeds (interval × GRACE_FACTOR) + GRACE_SLACK_S.
+# GRACE_FACTOR=3 absorbs occasional slow iterations; SLACK_S=60 adds a
+# minute on top so very fast tasks (interval=60s) don't trip from a
+# 90-second blip.
+_WORKER_WATCHDOG_GRACE_FACTOR = 3
+_WORKER_WATCHDOG_GRACE_SLACK_S = 60
 
 
 # ── Reddit velocity → notification scanner ──────────────────────────
@@ -2190,6 +2244,82 @@ async def _run_thread_watchdog() -> None:
 
 _watchdog_over_count = 0
 _watchdog_pool_over_count = 0
+
+
+# ── Worker-side watchdog: silent-hang detection for periodic tasks ────
+
+# Periodic intervals at which the worker watchdog samples heartbeats.
+# 60s is the right cadence: fast enough to catch a hang within the
+# grace window for typical 30-min-or-faster tasks, slow enough that
+# the watchdog itself contributes negligible load.
+_WORKER_WATCHDOG_INTERVAL_S = 60
+
+
+async def _run_worker_watchdog() -> None:
+    """One iteration of the worker-process watchdog.
+
+    Reads the periodic-task heartbeat registry (populated by
+    `_periodic_task`); if any task is overdue beyond its grace window,
+    SIGTERMs the worker so Railway restarts it.  The web tier has its
+    own thread watchdog (`_run_thread_watchdog`) for pool starvation;
+    this one catches the orthogonal failure mode of a periodic-task
+    coroutine that hangs without crashing -- pool stays healthy, no
+    auto-recovery would otherwise fire.
+
+    SIGTERM is the right action: gunicorn/uvicorn isn't running in
+    the worker process, but the entrypoint's signal handler shuts
+    down cleanly, and Railway's restart-on-exit policy spins a fresh
+    container.  Heartbeats reset with the new process.
+    """
+    overdue = [h for h in periodic_heartbeat_status() if h["overdue"]]
+    if not overdue:
+        return
+
+    # Format the offenders compactly for the log line + alert.
+    summary = ", ".join(
+        f'{h["name"]}({h["seconds_since_heartbeat"]:.0f}s ago)'
+        for h in overdue
+    )
+    logger.error(
+        "worker watchdog: %d periodic task(s) overdue -- forcing exit. %s",
+        len(overdue), summary,
+    )
+    # Fire alert before SIGTERM.  Best-effort -- if the webhook is
+    # slow, we still SIGTERM after at most 5s (inside _post_alert).
+    try:
+        await _send_worker_hang_alert(overdue)
+    except Exception as exc:
+        logger.warning("worker watchdog: alert path threw: %s", exc)
+    try:
+        import signal as _signal
+        os.kill(os.getpid(), _signal.SIGTERM)
+    except Exception as exc:
+        logger.error("worker watchdog: SIGTERM failed: %s", exc)
+
+
+async def _send_worker_hang_alert(overdue: list[dict]) -> None:
+    """Webhook alert when the worker watchdog detects a hung task."""
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID) and not WATCHDOG_ALERT_URL:
+        return
+    # Defensive double-escape on dynamic field content: `lines` is
+    # interpolated into the template via .format(), and any literal
+    # `{` / `}` in a task name would otherwise blow up with KeyError.
+    lines = "\n".join(
+        f"  · {h['name']}: {h['seconds_since_heartbeat']:.0f}s since heartbeat "
+        f"(interval={h['interval']}s)"
+        for h in overdue
+    ).replace("{", "{{").replace("}", "}}")
+    template = (
+        "🚨 {b1}paperpanda.io worker watchdog: periodic task hang{b2}\n"
+        "• overdue tasks: {b1}{count}{b2}\n"
+        "{lines}\n"
+        "• action: {i1}SIGTERM imminent — Railway will restart this worker{i2}\n"
+        "• log search: {c1}worker watchdog:{c2}"
+    )
+    tg_text, webhook_payload = _render_alert(
+        template, count=len(overdue), lines=lines,
+    )
+    await _post_alert(tg_text, webhook_payload, name="worker-watchdog")
 
 
 # ── /_v2/home L2 cache warmer ────────────────────────────────────────

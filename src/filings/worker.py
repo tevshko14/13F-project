@@ -138,6 +138,11 @@ async def _run() -> None:
     logger.info("worker: starting (WORKER_MODE=%s)",
                 os.environ.get("WORKER_MODE", "<unset>"))
 
+    # Sentry first so any startup error below shows up tagged as
+    # service=worker.  No-op when SENTRY_DSN is unset.
+    from filings.observability import init_sentry
+    init_sentry("worker")
+
     # Bring up the healthcheck endpoint FIRST so Railway's probe
     # passes during the (potentially slow) init that follows.  PORT
     # is set by Railway; default to 8081 for local dev so we don't
@@ -247,6 +252,18 @@ async def _run() -> None:
     # must run AFTER our load above.  Idempotent (Supabase upsert
     # with on_conflict ignore_duplicates), safe across restarts.
     _track(_web._run_initial_tier_seed(), "stock_tier_seeder")
+
+    # Worker watchdog -- detects silent hangs in any periodic task and
+    # SIGTERMs the process so Railway restarts it.  Mirror of web's
+    # thread watchdog but tuned for the heartbeat-staleness signal.
+    _track(
+        _web._periodic_task(
+            name="worker watchdog", startup_delay=120,
+            interval=_web._WORKER_WATCHDOG_INTERVAL_S,
+            body=_web._run_worker_watchdog,
+        ),
+        "worker_watchdog",
+    )
 
     logger.info("worker: %d periodic tasks armed", len(tasks))
 
