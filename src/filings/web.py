@@ -721,18 +721,31 @@ async def lifespan(app: FastAPI):
     ), "thread_watchdog")
 
     if _RUN_WORKER_TASKS:
-        # Stock-bundle warmer — maintains the stock_overview_cache table so
-        # the /stock/{ticker} request path can serve from a single Supabase
-        # read instead of fanning out 10+ sync upstream calls.
-        _track(_periodic_task(
-            name="stock warmer", startup_delay=180,
-            interval=_STOCK_WARMER_INTERVAL_S, body=_run_stock_warmer,
-        ), "stock_warmer")
-
-        # Seed the stock_overview_cache hot/warm tiers from the just-loaded
-        # fund_cache.  Idempotent (no-op when rows already exist), so it's
-        # safe to run on every worker startup.  Delay 60s so fund_cache is
-        # populated first (it loads in another startup task).
+        # Stock-bundle warmer DISABLED 2026-05-11.
+        #
+        # The 120-ticker-per-5min warmer was self-throttling yfinance:
+        # ~240 upstream calls/min sustained, well past yfinance's
+        # ~60/min rate-limit.  Once throttled, each subsequent cycle
+        # piled on more hung calls — heavy pool slots leaked at 15 s
+        # each (to_heavy internal timeout), pool saturated, request
+        # path queued behind warmer hangs.  Reliably produced a
+        # 15-min degradation cycle from every fresh deploy.
+        #
+        # Going pure-lazy: /stock/{ticker} cold-miss costs ~2-3 s
+        # (healthy) or 6-8 s (degraded), then 10-30 min of fast
+        # cached reads.  No worse than current degraded state, no
+        # self-throttle, no cascading saturation.
+        #
+        # If popular-ticker first-visit-after-TTL becomes a real UX
+        # complaint, the right re-introduction is a narrowed
+        # visit-count-driven warmer (top ~10 by recent /stock/X
+        # request count, every 15 min) — NOT 13F-popularity-based.
+        # `_run_initial_tier_seed` stays — it's idempotent + doesn't
+        # hit upstreams, just seeds tier assignments.
+        # _track(_periodic_task(
+        #     name="stock warmer", startup_delay=180,
+        #     interval=_STOCK_WARMER_INTERVAL_S, body=_run_stock_warmer,
+        # ), "stock_warmer")
         _track(_run_initial_tier_seed(), "stock_tier_seeder")
     _alert_dests = []
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
