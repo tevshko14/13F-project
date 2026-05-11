@@ -22,6 +22,7 @@ import functools
 import logging
 import re
 from datetime import datetime
+from typing import TypedDict
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -37,12 +38,73 @@ from filings.routers._redesign.helpers import (
     _nice_axis_step,
     _shell_context,
     _short_date,
+    GracefulRoute,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
 
+
+# ── Payload contracts ─────────────────────────────────────────────────
+# TypedDict shapes for the dict-returning helpers consumed by the
+# Funds detail template.  Pairing each with an `_empty()` builder keeps
+# the inline route-handler fallbacks in lockstep with the success shape
+# so a missing key never crashes the page at Jinja-render time.
+
+
+class FundsConcentrationPayload(TypedDict):
+    """Portfolio Concentration donut payload (Portfolio tab)."""
+    have_data: bool
+    wedges:    list[dict]
+    legend:    list[dict]
+    viewbox:   str
+
+
+class FundsAumChartPayload(TypedDict):
+    """AUM history line chart payload (Performance tab)."""
+    have_data:     bool
+    points:        list[dict]
+    ticks:         list[dict]
+    y_labels:      list[dict]
+    grid_ys:       list[float]
+    qoq_str:       str
+    qoq_up:        bool | None
+    fill_d:        str
+    line_d:        str
+    vb_width:      float
+    vb_height:     float
+    chart_history: list[dict]
+
+
+class FundsCapitalPanel(TypedDict):
+    """Capital Deployed panel payload (Performance tab)."""
+    have_data:   bool
+    cells:       list[dict]
+    data_source: str | None
+
+
+def _empty_fund(cik: str) -> dict:
+    """Inline-fallback fund payload when L2 cache misses for `cik`.
+
+    Returns a `dict` (not TypedDict) because the fund payload flows into
+    8+ downstream helpers that take `dict` parameters; widening their
+    contracts would mean a sweeping signature refactor for no enforcement
+    gain.  Leaf payloads (concentration / aum chart / capital panel) are
+    typed because they're consumed only by templates.
+    """
+    return {
+        "name":              "—",
+        "cik":               cik,
+        "report_period":     "",
+        "filing_date":       "",
+        "total_value":       0,
+        "total_holdings":    0,
+        "top_holdings":      [],
+        "all_holdings":      [],
+        "changes":           [],
+        "quarterly_changes": [],
+    }
 
 
 # Berkshire Hathaway is the demo fund the design ships with.
@@ -233,14 +295,14 @@ def _funds_kpi_strip(fund: dict, history: list[dict] | None = None) -> list[dict
     ]
 
 
-def _funds_concentration_donut(fund: dict) -> dict:
+def _funds_concentration_donut(fund: dict) -> FundsConcentrationPayload:
     """v1's Portfolio Concentration donut — top 10 holdings as wedges + "Other"
     bucket for the long tail.  Returns a payload the template walks to render
     an SVG donut + legend."""
     aum = fund.get("total_value") or 0
     holdings = fund.get("all_holdings") or []
     if not aum or not holdings:
-        return {"have_data": False, "wedges": [], "legend": []}
+        return {"have_data": False, "wedges": [], "legend": [], "viewbox": "0 0 200 200"}
 
     palette = [
         "#3b82f6",  # blue (AAPL-style anchor)
@@ -371,7 +433,7 @@ async def _funds_capital_deployed(cik: str) -> dict:
     return cached if isinstance(cached, dict) else {}
 
 
-def _funds_capital_panel(deployment: dict, fund: dict) -> dict:
+def _funds_capital_panel(deployment: dict, fund: dict) -> FundsCapitalPanel:
     """Format the deployment payload into a 4-cell capital panel.
 
     Falls back to the in-fund 13F value when the deployment row is missing
@@ -394,7 +456,7 @@ def _funds_capital_panel(deployment: dict, fund: dict) -> dict:
         else ("AUM gap (RAUM − 13F)" if est_non_eq is not None else None)
     )
 
-    cells = [
+    cells: list[dict] = [
         {"label": "13F Equity", "value": _format_dollars(thirteenf),
          "sub":   "from 13F-HR holdings"},
         {"label": cash_label,   "value": _format_dollars(cash_value),
@@ -689,7 +751,7 @@ def _funds_sectors_breakdown(fund: dict) -> list[dict]:
     # Pull "Other" out of the named buckets so the long-tail rollup doesn't
     # create a duplicate row when the cap (>5) trips.
     other_pct = (by_sector.pop("Other", 0.0) / aum) if aum else 0.0
-    rows = [
+    rows: list[dict] = [
         {
             "name":  name,
             "pct":   total / aum,
@@ -831,7 +893,7 @@ async def _fund_aum_history(cik: str) -> list[dict]:
 # `_format_dollars_compact` moved to _redesign.helpers (used by funds + insiders).
 
 
-def _funds_aum_chart_payload(history: list[dict]) -> dict:
+def _funds_aum_chart_payload(history: list[dict]) -> FundsAumChartPayload:
     """Convert AUM history into the data the SVG template needs.
 
     Produces SVG point pairs + nice-rounded y-axis labels in a 600×220
@@ -843,15 +905,18 @@ def _funds_aum_chart_payload(history: list[dict]) -> dict:
     """
     if not history:
         return {
-            "have_data": False,
-            "points":     [],
-            "ticks":      [],
-            "y_labels":   [],
-            "grid_ys":    [],
-            "qoq_str":    "",
-            "qoq_up":     None,
-            "fill_d":     "",
-            "line_d":     "",
+            "have_data":     False,
+            "points":        [],
+            "ticks":         [],
+            "y_labels":      [],
+            "grid_ys":       [],
+            "qoq_str":       "",
+            "qoq_up":        None,
+            "fill_d":        "",
+            "line_d":        "",
+            "vb_width":      1500.0,
+            "vb_height":     240.0,
+            "chart_history": [],
         }
 
     # ViewBox sized 1500×240 to match the typical full-width container's
@@ -1468,10 +1533,10 @@ async def preview_funds_activity_partial(request: Request):
     activity_payload: dict = {"moves": [], "summary": {}}
     if fund_cache:
         try:
-            _, activity_payload = await _fetch_funds_panes(
+            _, fetched_activity = await _fetch_funds_panes(
                 request, fund_cache, need_holdings=False, need_activity=True,
             )
-            activity_payload = activity_payload or {"moves": [], "summary": {}}
+            activity_payload = fetched_activity or {"moves": [], "summary": {}}
         except Exception as exc:
             logger.warning("Funds activity partial failed: %s", exc)
     return templates.TemplateResponse(
@@ -1557,12 +1622,7 @@ async def _render_fund_detail(request: Request, *, cik: str, tab: str):
 
     fund = await _fetch_fund_data(cik)
     if not fund:
-        fund = {
-            "name": "—", "cik": cik, "report_period": "", "filing_date": "",
-            "total_value": 0, "total_holdings": 0,
-            "top_holdings": [], "all_holdings": [],
-            "changes": [], "quarterly_changes": [],
-        }
+        fund = _empty_fund(cik)
 
     meta = _FUND_META.get(cik.lstrip("0") or cik) or _FUND_META.get(cik) or {}
     adds, cuts = _funds_changes_split(fund)

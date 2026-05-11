@@ -28,12 +28,13 @@ from filings.concurrency import to_heavy, to_supabase
 from filings.routers._redesign.helpers import (
     _initials_from_name,
     _shell_context,
+    GracefulRoute,
     is_profile_preview_enabled,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
 
 
 # ── Helpers shared by /profile + /watchlist ──────────────────────────
@@ -213,16 +214,20 @@ async def _fetch_profile_watchlist(
     spark_task = to_heavy(market_data.get_sparkline_points, tickers, 20)
     md_task    = to_heavy(market_data.get_sp500_market_data, "1D")
     notif_task = to_supabase(supabase_cache.get_recent_notifications, 200)
+    spark_map: dict = {}
+    md_map:    dict = {}
+    notifs:    list = []
     try:
-        spark_map, md_map, notifs = await asyncio.gather(
+        results = await asyncio.gather(
             spark_task, md_task, notif_task, return_exceptions=True,
         )
-        if isinstance(spark_map, Exception): spark_map = {}
-        if isinstance(md_map, Exception):    md_map = {}
-        if isinstance(notifs, Exception):    notifs = []
+        spark_raw, md_raw, notif_raw = results[0], results[1], results[2]
+        # Exception → keep default; success (incl. empty {}/[]) → use upstream value.
+        if not isinstance(spark_raw, BaseException): spark_map = spark_raw
+        if not isinstance(md_raw,    BaseException): md_map    = md_raw
+        if not isinstance(notif_raw, BaseException): notifs    = notif_raw
     except Exception as exc:
         logger.debug("Watchlist enrichment failed for %s: %s", user_id, exc)
-        spark_map, md_map, notifs = {}, {}, []
 
     # Bucket notifications by ticker (matches the /api/watchlist API
     # enrichment so both surfaces see the same counts).

@@ -27,7 +27,7 @@ import logging
 import math
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
@@ -51,13 +51,65 @@ from filings.routers._redesign.helpers import (
     _insiders_format_title,
     _shell_context,
     _short_date,
+    _time_ago_iso,
+    GracefulRoute,
     SPARK,
     SPARK_DOWN,
 )
 
+# ── Payload contracts ────────────────────────────────────────────────
+# TypedDict shapes for the two highest-traffic dict-shaped fallbacks on
+# the homepage hot path.  Catches drift between the bounded fallback
+# (returned on upstream failure) and the success payload — exactly the
+# class of bug we hit when ``_fetch_hero_chart`` gained a new key and
+# ``_fallback_hero_payload`` didn't, so degraded renders 500'd on the
+# missing ``chart_history_json`` key.
+#
+# The list-shaped fallbacks (top_movers / fund_flows / insiders / etc.)
+# can't carry TypedDict contracts — the elements are heterogeneous and
+# the templates iterate with `.get()` defenses.  Their module-level
+# constants serve as the shape reference.
+
+
+class HeroChartPayload(TypedDict):
+    """`/` hero S&P/NASDAQ/DOW chart — full server-side render bundle."""
+    chart_path:           str
+    chart_area:           str
+    chart_ref_y:          float
+    chart_tag_y:          float
+    chart_change:         str
+    chart_change_pct:     str
+    chart_change_up:      bool
+    chart_tag:            str
+    chart_label:          str
+    chart_history_json:   str
+    chart_prev_close:     str
+    chart_ohlcv:          list[tuple[str, str]]
+    chart_ohlcv_json:     str
+    chart_default_index:  str
+    chart_default_period: str
+    chart_indices_json:   str
+
+
+class FearGreedPayload(TypedDict):
+    """CNN Fear & Greed gauge payload — bounded fallback target."""
+    value:      int
+    label:      str
+    yesterday:  int
+    week_ago:   int
+    month_ago:  int
+    year_ago:   int
+    week_band:  str
+    month_band: str
+    year_band:  str
+    as_of:      str
+    needle_x:   float
+    needle_y:   float
+
+
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -329,7 +381,7 @@ def _build_period_payload(history: list, reference: float | None, label: str) ->
     }
 
 
-def _fallback_hero_payload() -> dict:
+def _fallback_hero_payload() -> HeroChartPayload:
     """Synthetic single-period payload for when every upstream fails."""
     fallback_pts = [
         110 + math.sin(i * 0.4) * 30 + math.cos(i * 0.9) * 10 - i * 0.55
@@ -342,7 +394,7 @@ def _fallback_hero_payload() -> dict:
         for i, y in enumerate(fallback_pts)
     )
     area_d = f"{line_d} L {_HERO_VB_W} {_HERO_VB_H} L 0 {_HERO_VB_H} Z"
-    period = {
+    period: dict = {
         "path":       line_d,
         "area":       area_d,
         "ref_y":      74,
@@ -355,22 +407,22 @@ def _fallback_hero_payload() -> dict:
         "history":    [],
         "prev_close": 0,
     }
-    fallback_ohlcv = [
+    fallback_ohlcv: list[tuple[str, str]] = [
         ("OPEN",  "5,805.56"),
         ("HIGH",  "5,851.20"),
         ("LOW",   "5,798.14"),
         ("VOL",   "3.41B"),
     ]
     return {
-        "chart_path":           period["path"],
-        "chart_area":           period["area"],
-        "chart_ref_y":          period["ref_y"],
-        "chart_tag_y":          period["tag_y"],
-        "chart_change":         period["change"],
-        "chart_change_pct":     period["change_pct"],
-        "chart_change_up":      period["change_up"],
-        "chart_tag":            period["tag"],
-        "chart_label":          period["label"],
+        "chart_path":           line_d,
+        "chart_area":           area_d,
+        "chart_ref_y":          74.0,
+        "chart_tag_y":          74.0,
+        "chart_change":         "41.86",
+        "chart_change_pct":     "0.72%",
+        "chart_change_up":      True,
+        "chart_tag":            "5847",
+        "chart_label":          "INTRADAY · 15M",
         "chart_history_json":   "[]",
         "chart_prev_close":     "",
         "chart_ohlcv":          fallback_ohlcv,
@@ -432,7 +484,7 @@ def _index_ohlcv_strip(intraday: dict | None) -> list[tuple[str, str]]:
     ]
 
 
-async def _hero_chart_compute() -> dict | None:
+async def _hero_chart_compute() -> list[tuple[dict | None, dict | None]] | None:
     """Inner fetcher for the hero chart.  Fans out 6 yfinance calls (3
     indices × intraday + 5Y) in parallel.  Returns ``None`` on total
     failure so the L2 wrapper can return a stale entry instead of
@@ -440,15 +492,14 @@ async def _hero_chart_compute() -> dict | None:
     from filings import market_data
 
     async def _fetch_pair(symbol: str) -> tuple[dict | None, dict | None]:
-        intraday, history_5y = await asyncio.gather(
+        results = await asyncio.gather(
             to_heavy(market_data.get_intraday_chart, symbol),
             to_heavy(market_data.get_stock_ohlcv, symbol, "5Y"),
             return_exceptions=True,
         )
-        if isinstance(intraday, BaseException):
-            intraday = None
-        if isinstance(history_5y, BaseException):
-            history_5y = None
+        intraday_raw, history_raw = results[0], results[1]
+        intraday:   dict | None = None if isinstance(intraday_raw, BaseException) else intraday_raw
+        history_5y: dict | None = None if isinstance(history_raw,  BaseException) else history_raw
         return intraday, history_5y
 
     try:
@@ -461,7 +512,7 @@ async def _hero_chart_compute() -> dict | None:
         return None
 
 
-async def _fetch_hero_chart() -> dict:
+async def _fetch_hero_chart() -> HeroChartPayload:
     """Build the hero chart context for all 3 indices × all 6 periods.
 
     Fetches intraday + 5Y daily for S&P / NASDAQ / DOW concurrently
@@ -494,7 +545,10 @@ async def _fetch_hero_chart() -> dict:
 
     # SSR defaults — first index in _HERO_INDICES that returned data,
     # then the shortest period we built for it.  Almost always (S&P, 1D).
-    default_idx = next((lbl for lbl, _ in _HERO_INDICES if lbl in indices_payload), None)
+    # `indices_payload` was non-empty (guard above), and every key in it
+    # came from `_HERO_INDICES`, so the `next` always finds a match —
+    # the `cast` documents that for mypy.
+    default_idx = next(lbl for lbl, _ in _HERO_INDICES if lbl in indices_payload)
     default_periods = indices_payload[default_idx]
     default_period_key = next((k for k in _CHART_PERIODS if k in default_periods), "1D")
     default = default_periods[default_period_key]
@@ -621,7 +675,7 @@ def _feargreed_payload(
     yesterday: int, week_ago: int,
     month_ago: int = 0, year_ago: int = 0,
     as_of: str | None = None,
-) -> dict:
+) -> FearGreedPayload:
     """Build the F&G context with precomputed needle endpoint.
 
     The semicircular gauge maps 0..100 → -90°..+90° around (cx=50, cy=50).
@@ -651,7 +705,7 @@ def _feargreed_payload(
     }
 
 
-def _home_feargreed_mock() -> dict:
+def _home_feargreed_mock() -> FearGreedPayload:
     """Fresh mock F&G payload — built per-call so the ``as_of`` stamp
     reflects render time, not server-start time."""
     return _feargreed_payload(
@@ -1321,7 +1375,7 @@ async def _fetch_home_retail() -> dict:
 
 
 # ── 7) Fear & Greed ─────────────────────────────────────────────────
-async def _fetch_home_feargreed() -> dict:
+async def _fetch_home_feargreed() -> FearGreedPayload:
     """CNN Fear & Greed live data.
 
     Returns the same shape `_feargreed_payload()` produces — value, label,
@@ -2025,29 +2079,8 @@ async def warm_homepage_caches() -> None:
 # ── Activity feed — Supabase notifications shaped for the redesign row.
 
 def _activity_iso_time_ago(iso_str: str) -> str:
-    """Convert ISO 8601 timestamp to "3m" / "2h" / "1d" / "3w" — same shape
-    as web.py::_time_ago but without the trailing " ago" so the template
-    can append it consistently."""
-    if not iso_str:
-        return ""
-    try:
-        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        diff = datetime.now(timezone.utc) - dt
-        seconds = int(diff.total_seconds())
-        if seconds < 60:
-            return "now"
-        minutes = seconds // 60
-        if minutes < 60:
-            return f"{minutes}m"
-        hours = minutes // 60
-        if hours < 24:
-            return f"{hours}h"
-        days = hours // 24
-        if days < 7:
-            return f"{days}d"
-        return f"{days // 7}w"
-    except Exception:
-        return ""
+    """Bare-number variant of `_time_ago_iso` — template appends " ago" itself."""
+    return _time_ago_iso(iso_str, suffix="", just_now="now")
 
 
 # Notification type → (cat-css variant, src label, pill label).  The cat

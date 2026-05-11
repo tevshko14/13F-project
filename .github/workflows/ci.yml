@@ -43,7 +43,28 @@ jobs:
       - run: pip install mypy
       - run: |
           mypy --config-file pyproject.toml \
-            src/filings/routers/_redesign/macro.py
+            src/filings/routers/_redesign/congress.py \
+            src/filings/routers/_redesign/funds.py \
+            src/filings/routers/_redesign/helpers.py \
+            src/filings/routers/_redesign/home.py \
+            src/filings/routers/_redesign/insiders.py \
+            src/filings/routers/_redesign/macro.py \
+            src/filings/routers/_redesign/notifications.py \
+            src/filings/routers/_redesign/profile_watchlist.py \
+            src/filings/routers/_redesign/retail.py \
+            src/filings/routers/_redesign/stock.py \
+            src/filings/routers/_redesign/support.py
+
+  bounded-coverage:
+    # AST-walk lint: every `await to_X(...)` inside a `@router.get`
+    # handler must be wrapped in `_bounded` / `_bounded_call`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/lint_bounded_coverage.py
 
   import-smoke:
     runs-on: ubuntu-latest

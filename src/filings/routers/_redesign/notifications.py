@@ -21,14 +21,17 @@ from fastapi.responses import HTMLResponse
 from filings.app_state import templates
 from filings.concurrency import to_supabase
 from filings.routers._redesign.helpers import (
+    _bounded_call,
     _SHELL_NOTIF_COOKIE,
     _SHELL_NOTIF_COOKIE_MAX_AGE,
     _shell_context,
+    _time_ago_iso,
+    GracefulRoute,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
 
 
 _NOTIF_PAGE_TYPE_META: dict[str, dict[str, str]] = {
@@ -39,31 +42,6 @@ _NOTIF_PAGE_TYPE_META: dict[str, dict[str, str]] = {
     "insider_trade":   {"label": "Insider",    "color": "#7c3aed"},
     "feature_release": {"label": "New feature","color": "#0ea5e9"},
 }
-
-
-def _time_ago_v2(iso_str: str) -> str:
-    """Same shape as web._time_ago — duplicated so the redesign router stays
-    importable without pulling all of web.py."""
-    if not iso_str:
-        return ""
-    try:
-        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        diff = datetime.now(timezone.utc) - dt
-        seconds = int(diff.total_seconds())
-        if seconds < 60:
-            return "just now"
-        minutes = seconds // 60
-        if minutes < 60:
-            return f"{minutes}m ago"
-        hours = minutes // 60
-        if hours < 24:
-            return f"{hours}h ago"
-        days = hours // 24
-        if days < 7:
-            return f"{days}d ago"
-        return f"{days // 7}w ago"
-    except Exception:
-        return ""
 
 
 @router.get("/notifications", response_class=HTMLResponse)
@@ -78,19 +56,17 @@ async def preview_notifications(request: Request, types: str = "", page: int = 1
     per_page = 30
     offset = (page - 1) * per_page
 
-    try:
-        from filings import supabase_cache
-        # Supabase-direct call -- to_supabase keeps it off the heavy
-        # pool so yfinance saturation can't queue it.
-        notifs = await to_supabase(
+    # Supabase-direct call -- to_supabase keeps it off the heavy pool
+    # so yfinance saturation can't queue it.  Wrapped in _bounded_call
+    # because to_supabase raises on hang; ungated would crash the page.
+    from filings import supabase_cache
+    notifs = await _bounded_call(
+        to_supabase(
             supabase_cache.get_recent_notifications,
-            per_page + 1,
-            active_types or None,
-            offset,
-        )
-    except Exception as exc:
-        logger.warning("Notifications fetch failed: %s", exc)
-        notifs = []
+            per_page + 1, active_types or None, offset,
+        ),
+        timeout=6.0, fallback=[], name="notifications",
+    )
 
     has_next = len(notifs) > per_page
     notifs = notifs[:per_page]
@@ -110,7 +86,7 @@ async def preview_notifications(request: Request, types: str = "", page: int = 1
             "icon":      n.get("icon", "•"),
             "link":      n.get("link", ""),
             "ticker":    ticker,
-            "time_ago":  _time_ago_v2(n.get("created_at", "")),
+            "time_ago":  _time_ago_iso(n.get("created_at", "")),
             "created_at": n.get("created_at", ""),
         })
 

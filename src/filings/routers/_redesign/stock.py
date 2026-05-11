@@ -40,15 +40,17 @@ from filings.concurrency import (
     to_upstream,
 )
 from filings.routers._redesign.helpers import (
+    _bounded_call,
     _compact_range_str,
     _maybe_rate_limit,
     _request_fund_cache,
     _shell_context,
+    GracefulRoute,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
 
 
 # ── SWR background refresh state (stock bundle write-through) ──
@@ -166,8 +168,8 @@ def _stock_format_employees(n: int | float | None) -> str:
 
 
 def _stock_format_hq(info: dict, finnhub_profile: dict) -> str:
-    parts = [info.get("city"), info.get("state"), info.get("country")]
-    parts = [p for p in parts if p]
+    raw_parts = [info.get("city"), info.get("state"), info.get("country")]
+    parts: list[str] = [str(p) for p in raw_parts if p]
     if parts:
         return ", ".join(parts)
     fh_country = (finnhub_profile or {}).get("country")
@@ -375,7 +377,7 @@ _STOCK_VITALS_PEERS = [
     {"ticker": "MRVL", "name": "Marvell Technology",     "price": "112.32", "chg":  0.031, "pe": "68.2", "mc": "$98B"},
 ]
 
-_STOCK_FCT_TARGET_BAND = {"low": 80, "high": 220}
+_STOCK_FCT_TARGET_BAND: dict[str, float] = {"low": 80.0, "high": 220.0}
 _STOCK_FCT_PRICE_PCT = (142.18 - 80) / (220 - 80) * 100  # current price tick
 
 _STOCK_VITALS_SHARE_STATS = [
@@ -616,6 +618,7 @@ def _stock_build_forecasts(ticker: str, current_price: float | None) -> dict:
 
     # ── Price target band + current-price tick ──
     targets = [r.current_price_target for r in ratings_objs if r.current_price_target]
+    target_band: dict[str, float]
     if targets:
         low, high = min(targets), max(targets)
         if low == high:
@@ -798,7 +801,12 @@ def _stock_compute_signals(
             v_score = -0.3; v_detail = f"P/E {pe_val:.1f} (stretched)"
     except (TypeError, ValueError):
         pass
-    v_verdict = "CAUTION" if v_score is not None and -0.3 <= v_score < 0 else _verdict(v_score)
+    if v_score is None:
+        v_verdict = "NEUTRAL"
+    elif -0.3 <= v_score < 0:
+        v_verdict = "CAUTION"
+    else:
+        v_verdict = _verdict(v_score)
     rows.append({"name": "Valuation", "score": v_score, "weight": "medium",
                  "detail": v_detail,
                  "verdict": v_verdict if v_score is not None else "NEUTRAL"})
@@ -1478,7 +1486,8 @@ def _stock_build_ownership_congress(ticker: str) -> dict:
             t_dt = datetime.strptime(td, "%Y-%m-%d") if td else None
             f_dt = datetime.strptime(fd, "%Y-%m-%d") if fd else None
             days = (f_dt - t_dt).days if t_dt and f_dt else 0
-            date_str = (f_dt or t_dt).strftime("%b %d %Y") if (f_dt or t_dt) else ""
+            pivot_dt = f_dt or t_dt
+            date_str = pivot_dt.strftime("%b %d %Y") if pivot_dt else ""
         except (TypeError, ValueError):
             days, date_str = 0, fd or td
 
@@ -2555,7 +2564,7 @@ def _build_stock_template_ctx(
     # Initial page render uses 1M (default range_chip selection);
     # range-chip clicks swap via /stock/{ticker}/chart/{p}.
     chart = _stock_candlestick_paths(payload.get("candles") or [], period="1M")
-    news_items = _format_news_items(payload.get("news"))[:6]
+    news_items = _format_news_items(payload.get("news") or [])[:6]
 
     # Forecasts EPS chart geometry (server-rendered SVG line).
     eps_series = forecasts.get("eps") or _STOCK_FCT_EPS_REVISIONS
@@ -2800,12 +2809,13 @@ async def preview_stock_chart(request: Request, ticker: str, period: str):
     """
     period_norm = period.upper() if period.upper() in _CHART_PERIODS else "1M"
 
-    try:
-        from filings import market_data
-        ohlcv = await to_heavy(market_data.get_stock_ohlcv, ticker.upper(), period_norm)
-    except Exception as exc:
-        logger.warning("Stock OHLCV(%s, %s) failed: %s", ticker, period_norm, exc)
-        ohlcv = None
+    # Wrapped in _bounded_call because to_heavy raises on hang;
+    # ungated would crash the partial when yfinance is slow.
+    from filings import market_data
+    ohlcv = await _bounded_call(
+        to_heavy(market_data.get_stock_ohlcv, ticker.upper(), period_norm),
+        timeout=8.0, fallback=None, name=f"stock_chart:{ticker}",
+    )
 
     candles = (ohlcv or {}).get("ohlcv") or []
     chart = _stock_candlestick_paths(candles, period=period_norm)

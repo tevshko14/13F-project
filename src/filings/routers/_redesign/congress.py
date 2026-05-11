@@ -25,6 +25,7 @@ import functools
 import logging
 import math
 from datetime import datetime
+from typing import TypedDict
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -37,11 +38,66 @@ from filings.routers._redesign.helpers import (
     _format_compact_dollars,
     _nice_axis_step,
     _shell_context,
+    GracefulRoute,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
+
+
+# ── Payload contracts ────────────────────────────────────────────────
+# TypedDict shapes for the dict-returning helpers wrapped in `_bounded`.
+# Pairing each helper with a matching `_empty()` lets mypy catch any
+# drift between the bounded fallback and the successful payload.
+
+
+class CongressRecentTradesPayload(TypedDict):
+    """Recent congressional trades + mock-flag for the Congress hero list."""
+    rows:    list[dict]
+    is_mock: bool
+
+
+class CongressPerfChartPayload(TypedDict):
+    """Performance tab — Congress index vs SPY SVG chart geometry."""
+    have_data:         bool
+    cong_line:         str
+    cong_fill:         str
+    spy_line:          str
+    vb_width:          float
+    vb_height:         float
+    chart_history:     list[dict]
+    ytd_buys:          str
+    ytd_sells:         str
+    cong_buy_bias_str: str
+    cong_buy_bias_up:  bool | None
+    spy_ytd_str:       str
+    spy_ytd_up:        bool | None
+
+
+def _congress_recent_trades_empty() -> CongressRecentTradesPayload:
+    """Bounded fallback for `_fetch_congress_data` — empty list, real-data flag."""
+    return {"rows": [], "is_mock": False}
+
+
+def _congress_perf_chart_empty() -> CongressPerfChartPayload:
+    """Bounded fallback for `_performance_index_chart` — `have_data=False` so
+    the template's `{% if perf_chart.have_data %}` guard collapses the panel."""
+    return {
+        "have_data":         False,
+        "cong_line":         "",
+        "cong_fill":         "",
+        "spy_line":          "",
+        "vb_width":          1500.0,
+        "vb_height":         220.0,
+        "chart_history":     [],
+        "ytd_buys":          "—",
+        "ytd_sells":         "—",
+        "cong_buy_bias_str": "—",
+        "cong_buy_bias_up":  None,
+        "spy_ytd_str":       "—",
+        "spy_ytd_up":        None,
+    }
 
 
 # ── Trade-row helpers ─────────────────────────────────────────────────
@@ -100,7 +156,7 @@ def _format_signed_compact_dollars(v: float | int | None) -> str:
 # ── Data fetchers ─────────────────────────────────────────────────────
 
 
-async def _fetch_congress_data() -> dict:
+async def _fetch_congress_data() -> CongressRecentTradesPayload:
     """Read recent congressional trades from Supabase cache."""
     try:
         from filings import supabase_cache
@@ -220,7 +276,7 @@ def _congress_notable(rows: list[dict]) -> dict | None:
 # ── Performance tab — Congress vs SPY ─────────────────────────────────
 
 
-async def _performance_index_chart(wider_rows: list[dict]) -> dict:
+async def _performance_index_chart(wider_rows: list[dict]) -> CongressPerfChartPayload:
     """Build a Congress index vs SPY chart payload from the last 6 months.
 
     Congress series = cumulative net buy/sell weighted by amount midpoint
@@ -531,7 +587,7 @@ async def preview_congress(
     bounded = functools.partial(_bounded, page="Congress page")
 
     payload, wider_rows, members = await asyncio.gather(
-        bounded(_fetch_congress_data(),                timeout=4.0, fallback={"rows": [], "is_mock": False}, name="recent_trades"),
+        bounded(_fetch_congress_data(),                timeout=4.0, fallback=_congress_recent_trades_empty, name="recent_trades"),
         bounded(_fetch_congress_wider_window(6, 5000), timeout=6.0, fallback=[],                              name="wider_trades"),
         bounded(_fetch_congress_members(),             timeout=4.0, fallback=[],                              name="members"),
     )
@@ -567,7 +623,7 @@ async def preview_congress(
     perf_chart = await bounded(
         _performance_index_chart(wider_rows or []),
         timeout=5.0,
-        fallback={"have_data": False},
+        fallback=_congress_perf_chart_empty,
         name="perf_chart",
     )
 

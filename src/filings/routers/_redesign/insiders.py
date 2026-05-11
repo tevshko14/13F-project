@@ -17,6 +17,7 @@ import functools
 import logging
 import math
 from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -31,11 +32,12 @@ from filings.routers._redesign.helpers import (
     _insiders_format_title,
     _nice_axis_step,
     _shell_context,
+    GracefulRoute,
 )
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
 
 
 # ── Trade-type classifiers ───────────────────────────────────────────
@@ -302,7 +304,7 @@ _INSIDERS_DIRECTIONS = {
     "purchases": {"label": "Purchases", "trade_type": "p"},
     "sales":     {"label": "Sales",     "trade_type": "s"},
 }
-_INSIDERS_WINDOWS = {
+_INSIDERS_WINDOWS: dict[str, dict[str, Any]] = {
     "today":   {"label": "Today",         "days": 1,   "kpi": "today"},
     "7d":      {"label": "Last 7 days",   "days": 7,   "kpi": "7d"},
     "30d":     {"label": "Last 30 days",  "days": 30,  "kpi": "30d"},
@@ -590,11 +592,14 @@ async def preview_insiders(
     momentum_chart = _insiders_momentum_chart(filings_trades)
 
     # Pull the full cluster list (not just the top 4) so we can server-side
-    # filter by direction before slicing to the 2x2 grid.
-    clusters_all = (
-        await to_light(_insiders_clusters_panel, wide_trades, 99)
-        if wide_trades else []
-    )
+    # filter by direction before slicing to the 2x2 grid.  Wrapped in
+    # ``bounded`` because ``to_light`` raises TimeoutError on hang; an
+    # ungated raise here would crash the whole /insiders page when the
+    # cluster build (~6s on big trade volumes) slips past its deadline.
+    clusters_all = await bounded(
+        to_light(_insiders_clusters_panel, wide_trades, 99),
+        timeout=6.0, fallback=[], name="clusters",
+    ) if wide_trades else []
 
     # Cluster sub-pill: filter by direction (BUY/SELL/All), then take top 4.
     if cluster == "All":

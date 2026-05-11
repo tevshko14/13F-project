@@ -302,3 +302,112 @@ def test_extracted_route_renders(test_client, path, ok_statuses):
         f"{path}: got {resp.status_code}, expected one of {ok_statuses}. "
         f"Response head: {resp.text[:200]}"
     )
+
+
+# ── Degraded-upstream tests ──────────────────────────────────────────
+#
+# Monkeypatch every blocking-upstream wrapper to raise TimeoutError,
+# then hit each route and assert it doesn't crash (renders normally
+# OR returns the GracefulRoute 503 fallback page).  Catches:
+#   * bounded() fallback shape drift from template expectations
+#   * ungated `await to_X(...)` inside a route handler
+#   * any unhandled exception that escapes the route handler
+
+
+# 503 = GracefulRoute fallback; 200 = bounded() fallback render;
+# 301/302 = auth-gate redirect.
+DEGRADED_OK_STATUSES = {200, 301, 302, 503}
+
+
+@pytest.fixture
+def mock_all_upstreams_timeout(monkeypatch):
+    """Replace ``to_heavy`` / ``to_light`` / ``to_supabase`` with stubs
+    that immediately raise TimeoutError.  Simulates what happens during
+    a real upstream degradation event (yfinance rate limit, Supabase
+    slowdown, etc.) without waiting for actual timeouts.
+    """
+    import asyncio
+
+    async def _raise_timeout(*args, **kwargs):
+        raise asyncio.TimeoutError("simulated upstream timeout")
+
+    # Patch the source module so every importer sees the stub.
+    monkeypatch.setattr("filings.concurrency.to_heavy",    _raise_timeout)
+    monkeypatch.setattr("filings.concurrency.to_light",    _raise_timeout)
+    monkeypatch.setattr("filings.concurrency.to_supabase", _raise_timeout)
+    monkeypatch.setattr("filings.concurrency.to_upstream", _raise_timeout)
+    yield
+
+
+# Routes to verify under degraded conditions.  Mirrors SMOKE_ROUTES
+# but accepts the GracefulRoute 503 fallback as "passed" -- a 503 with
+# the error.html shell is the correct behaviour when something inside
+# the route truly can't render.  A 500 (or hung connection) means
+# either the route's bounded fallbacks are wrong shape OR an ungated
+# upstream call escaped the safety net.
+DEGRADED_ROUTES = [
+    "/support",
+    "/support/thank-you",
+    "/profile",
+    "/watchlist",
+    "/insiders",
+    "/notifications",
+    "/congress",
+    "/retail",
+    "/funds",
+    "/api/home/heatmap",
+    "/api/home/activity",
+    "/api/home/calendar",
+]
+
+
+@pytest.mark.parametrize("path", DEGRADED_ROUTES)
+def test_route_survives_upstream_degradation(
+    test_client, mock_all_upstreams_timeout, path,
+):
+    """Each route returns a non-500 even when every upstream times out.
+
+    Today's prod crashes (Phase 1 fixed) were exactly this: yfinance
+    got rate-limited, bounds fired, fallback dicts were missing keys
+    the templates referenced, Jinja UndefinedError → 500.  With
+    GracefulRoute in place AND the fallback shapes fixed in Phase 1,
+    the same scenario now degrades to either a successful render
+    (em-dashed widgets) or a 503 error page (full shell intact).
+    """
+    resp = test_client.get(path, follow_redirects=False)
+    assert resp.status_code in DEGRADED_OK_STATUSES, (
+        f"{path} crashed under simulated upstream timeout: "
+        f"status={resp.status_code}, body head: {resp.text[:300]}"
+    )
+
+
+def test_graceful_route_catches_unhandled_exception(test_client):
+    """A route that raises an arbitrary exception should return a 503
+    via GracefulRoute, NOT propagate the exception up.
+
+    Asserts that GracefulRoute is wired correctly: explicitly raising
+    inside a fetcher should NOT crash the page.  Validates the safety
+    net for crash classes we haven't predicted.
+    """
+    from unittest.mock import patch
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("simulated crash in shell_context")
+
+    # Patch where the support route's handler LOOKS UP _shell_context
+    # (it imported it directly via `from ... import _shell_context`,
+    # so the binding to patch is on the support module).
+    with patch("filings.routers._redesign.support._shell_context", _boom):
+        resp = test_client.get("/support", follow_redirects=False)
+
+    # Should be the templated 503 or the static-HTML last-resort, never
+    # a 500 or hung connection.
+    assert resp.status_code == 503, (
+        f"GracefulRoute didn't catch the exception: status={resp.status_code}"
+    )
+    # The error page mentions either "temporarily unavailable" (templated
+    # path) or "Refresh" (last-resort HTML).
+    body_lc = resp.text.lower()
+    assert "temporarily unavailable" in body_lc or "refresh" in body_lc, (
+        f"503 body doesn't look like the error page: {resp.text[:300]}"
+    )

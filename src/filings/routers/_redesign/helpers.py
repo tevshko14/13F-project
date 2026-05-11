@@ -16,6 +16,9 @@ re-exports for backward-compat with ``web.py``):
   * Shell context          — ``_shell_context``
   * Chart axis helper      — ``_nice_axis_step``
   * Module constants       — ``_ASSET_VERSION``, ``SPARK``, ``SPARK_DOWN``
+  * Crash-safety router    — ``GracefulRoute`` (APIRoute subclass that
+                              catches unhandled exceptions and returns
+                              a templated 503 instead of a blank 500)
 """
 
 from __future__ import annotations
@@ -29,10 +32,14 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fastapi import Request
+from typing import Callable
+
+from fastapi import HTTPException, Request, Response
+from fastapi.responses import HTMLResponse
+from fastapi.routing import APIRoute
 
 from filings import supabase_cache
-from filings.app_state import limiter
+from filings.app_state import limiter, templates
 from filings.caching import TTLCache
 from filings.concurrency import gate_supabase_async
 
@@ -194,6 +201,34 @@ def _short_date(iso: str) -> str:
     """
     from filings.dates_format import format_date
     return format_date(iso, fallback=iso[:10] if iso else "")
+
+
+def _time_ago_iso(iso_str: str, *, suffix: str = " ago", just_now: str = "just now") -> str:
+    """ISO-8601 → "3m ago" / "2h ago" / "1d ago" / "3w ago" relative time.
+
+    `suffix=""` for the bare-number variant used inside `home._activity_*`
+    (template appends " ago" itself); `just_now="now"` matches the same.
+    """
+    if not iso_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        diff = datetime.now(timezone.utc) - dt
+        seconds = int(diff.total_seconds())
+        if seconds < 60:
+            return just_now
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes}m{suffix}"
+        hours = minutes // 60
+        if hours < 24:
+            return f"{hours}h{suffix}"
+        days = hours // 24
+        if days < 7:
+            return f"{days}d{suffix}"
+        return f"{days // 7}w{suffix}"
+    except Exception:
+        return ""
 
 
 def _initials_from_name(name: str) -> str:
@@ -561,3 +596,156 @@ async def _shell_context(request: Request, active: str) -> dict:
         # Alerts / Subscription tabs still render mock data.
         "show_profile_nav":     is_profile_preview_enabled(),
     }
+
+
+# ── Crash-safety router class ────────────────────────────────────────
+#
+# Wraps every redesign route handler in a try/except that catches any
+# unhandled exception and returns a templated 503 instead of a blank
+# 500.  Sub-routers opt in by passing ``route_class=GracefulRoute`` to
+# their ``APIRouter()`` constructor.
+#
+# The handler attempts a 3-step graceful render:
+#   1. Templated ``_redesign/error.html`` with full shell_context
+#      (best UX -- nav + footer intact, user can navigate away).
+#   2. If shell_context itself raises (e.g. Supabase down too), fall
+#      back to a minimal error.html render without shell.
+#   3. If templates are entirely broken, fall back to a hardcoded
+#      HTML string (last-resort, no template dependency).
+#
+# All three steps log to Sentry via the existing logger.exception
+# chain -- so we never silently swallow the original crash.
+
+# Last-resort static HTML when even the error template fails.  Self-
+# contained: no external CSS/JS, no template-engine dependency.  Same
+# dark-mode default + Geist-stack font hint as the rest of the app.
+_FALLBACK_ERROR_HTML = """<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Temporarily unavailable · PaperPanda</title>
+  <meta name="robots" content="noindex,nofollow">
+  <style>
+    body { background: #0a0a0a; color: #f5f5f5;
+           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+           margin: 0; padding: 8vh 24px; text-align: center; }
+    h1 { font-size: 28px; margin: 0 0 14px; font-weight: 700; letter-spacing: -0.02em; }
+    p  { color: #999; font-size: 15px; max-width: 42ch; margin: 0 auto 24px; line-height: 1.55; }
+    .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+    a.btn { display: inline-block; padding: 9px 18px; border-radius: 8px;
+            text-decoration: none; font-size: 15px;
+            background: #f5f5f5; color: #0a0a0a; border: 1px solid #f5f5f5; }
+    a.btn.secondary { background: transparent; color: #f5f5f5; border-color: #333; }
+  </style>
+</head>
+<body>
+  <div style="font-size: 48px; line-height: 1; margin-bottom: 18px;">🔄</div>
+  <h1>Temporarily unavailable</h1>
+  <p>This page hit a snag. Try refreshing in a moment, or head back to the homepage.</p>
+  <div class="actions">
+    <a href="/" class="btn">Home</a>
+    <a href="javascript:location.reload()" class="btn secondary">Refresh</a>
+  </div>
+</body>
+</html>"""
+
+
+async def _render_graceful_error(
+    request: Request, exc: BaseException, status_code: int = 503,
+) -> Response:
+    """3-step graceful error render.
+
+    1. Templated error.html with shell_context (best UX).
+    2. Templated error.html WITHOUT shell_context (skip the helper
+       that might also be failing).
+    3. Hardcoded ``_FALLBACK_ERROR_HTML`` string (last resort).
+    """
+    logger.exception(
+        "Redesign route crashed -- rendering graceful 503: path=%s exc=%s",
+        request.url.path, exc,
+    )
+
+    # Attempt 1: full templated page with shell (sidenav, footer).
+    try:
+        ctx = await _shell_context(request, "")
+        ctx.update({
+            "request":     request,
+            "status_code": status_code,
+            "message":     "Data temporarily unavailable. Please try again shortly.",
+        })
+        return templates.TemplateResponse(
+            "_redesign/error.html", ctx, status_code=status_code,
+        )
+    except Exception as inner1:
+        logger.warning(
+            "Graceful error: shell_context render failed (%s); "
+            "falling back to shell-less error template",
+            inner1,
+        )
+
+    # Attempt 2: templated page WITHOUT shell_context.
+    # Pass an empty stub so base.html's `{% if nav_active %}` clauses
+    # render cleanly without crashing on missing keys.
+    try:
+        stub: dict = {
+            "request":              request,
+            "status_code":          status_code,
+            "message":              "Data temporarily unavailable. Please try again shortly.",
+            "nav_active":           "",
+            "today_label":          "",
+            "market_status":        "",
+            "panda_raised":         0,
+            "panda_goal":           _SHELL_PANDA_GOAL_CENTS // 100,
+            "panda_month":          "",
+            "panda_pct":            0,
+            "user_initials":        "",
+            "notif_unread":         0,
+            "asset_version":        _ASSET_VERSION,
+            "is_authed":            False,
+            "show_placeholder_nav": False,
+            "show_profile_nav":     False,
+        }
+        return templates.TemplateResponse(
+            "_redesign/error.html", stub, status_code=status_code,
+        )
+    except Exception as inner2:
+        logger.warning(
+            "Graceful error: shell-less template render also failed (%s); "
+            "falling back to static HTML",
+            inner2,
+        )
+
+    # Attempt 3: hardcoded HTML, no template dependency, can't fail.
+    return HTMLResponse(content=_FALLBACK_ERROR_HTML, status_code=status_code)
+
+
+class GracefulRoute(APIRoute):
+    """APIRoute subclass that catches unhandled exceptions and returns
+    a templated 503 page instead of a blank 500.
+
+    Sub-routers in ``_redesign/`` opt in by passing this class:
+
+        router = APIRouter(route_class=GracefulRoute)
+
+    ``HTTPException`` instances raised by the handler are re-raised
+    unchanged so FastAPI's normal handling (custom status codes,
+    redirect responses, etc.) keeps working.  Everything else --
+    timeouts, KeyErrors, Jinja undefineds, AttributeErrors -- gets
+    wrapped into a graceful 503.
+    """
+
+    def get_route_handler(self) -> Callable:
+        original = super().get_route_handler()
+
+        async def custom_route_handler(request: Request) -> Response:
+            try:
+                return await original(request)
+            except HTTPException:
+                # FastAPI status responses (e.g. 401, 404, 429) flow through unchanged.
+                raise
+            except Exception as exc:
+                # Anything unhandled -> graceful 503 with templated error page.
+                return await _render_graceful_error(request, exc, status_code=503)
+
+        return custom_route_handler

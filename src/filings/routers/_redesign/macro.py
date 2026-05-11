@@ -37,6 +37,7 @@ from filings.routers._redesign.helpers import (
     _bounded,
     _shell_context,
     _short_date,
+    GracefulRoute,
 )
 
 
@@ -142,7 +143,7 @@ class MacroPerformancePayload(TypedDict):
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
 
 
 # ── Indicators tab ───────────────────────────────────────────────────

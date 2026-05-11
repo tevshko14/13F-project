@@ -22,6 +22,7 @@ import asyncio
 import functools
 import html as _html
 import logging
+from typing import TypedDict
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -29,11 +30,55 @@ from fastapi.responses import HTMLResponse
 from filings.app_state import templates
 from filings.cache_l2 import l2_cached as _l2_cached
 from filings.concurrency import to_heavy, to_light
-from filings.routers._redesign.helpers import _bounded, _shell_context
+from filings.routers._redesign.helpers import (
+    _bounded,
+    _shell_context,
+    GracefulRoute,
+)
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+
+# ── TypedDict contracts for the per-tab payloads ─────────────────────
+#
+# Templates assume these dict shapes hold; mypy enforces that both the
+# success path AND any early-empty-return inside the builders match the
+# contract.  See macro.py for the same pattern with explicit empty-
+# factory functions (this module's builders handle their own empty
+# cases internally so no separate factory is needed).
+
+
+class SentimentPayload(TypedDict):
+    """`/retail` Sentiment tab — F&G gauge + 3 callout cards."""
+    fear_greed:     dict | None
+    most_mentioned: dict | None
+    biggest_mover:  dict | None
+    top_trending:   list
+
+
+class LeaderboardPayload(TypedDict):
+    """`/retail` Leaderboard tab — treemap + bubble chart + table."""
+    treemap_boxes: list
+    bubbles:       list
+    bubble_vb_w:   float
+    bubble_vb_h:   float
+    bubble_pad:    dict
+    table:         list
+    total_count:   int
+    timestamp:     str
+    market_mood:   str | None
+    market_score:  float | int | None
+
+
+class CalendarPayload(TypedDict):
+    """`/retail` Calendar tab — recent YouTube uploads + channel grid."""
+    uploads:        list
+    uploads_total:  int
+    channels:       list
+    channels_total: int
+
+
+router = APIRouter(route_class=GracefulRoute)
 
 
 
@@ -435,7 +480,7 @@ def _retail_kpi_strip_v2(apewisdom: list[dict], fear_greed: dict | None) -> list
     ]
 
 
-def _retail_sentiment_payload(apewisdom: list[dict], fear_greed: dict | None) -> dict:
+def _retail_sentiment_payload(apewisdom: list[dict], fear_greed: dict | None) -> SentimentPayload:
     """Sentiment tab payload — Market Mood gauge + 3 callout cards."""
     # CNN Fear & Greed gauge data + four reference points.
     fg = None
@@ -604,7 +649,7 @@ def _squarify_treemap(items: list[dict], width: float = 100.0, height: float = 1
     return boxes
 
 
-def _retail_leaderboard_payload(lb: dict) -> dict:
+def _retail_leaderboard_payload(lb: dict) -> LeaderboardPayload:
     """Leaderboard tab payload — pre-computes treemap geometry, scatter
     bubble coords, and an enriched leaderboard table.
 
@@ -706,7 +751,7 @@ def _retail_leaderboard_payload(lb: dict) -> dict:
     }
 
 
-def _retail_calendar_payload(uploads: list[dict], channels: list[dict]) -> dict:
+def _retail_calendar_payload(uploads: list[dict], channels: list[dict]) -> CalendarPayload:
     """Calendar tab payload — recent YouTube uploads grid + channel directory."""
     from datetime import datetime, timezone
 

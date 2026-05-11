@@ -17,9 +17,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from filings.app_state import templates
-from filings.routers._redesign.helpers import _nice_axis_step, _shell_context
+from filings.routers._redesign.helpers import (
+    _nice_axis_step,
+    _shell_context,
+    GracefulRoute,
+)
 
-router = APIRouter()
+router = APIRouter(route_class=GracefulRoute)
 
 
 def _support_history_chart(months: list[str], raised: list[int], goal: int) -> dict:
@@ -41,7 +45,7 @@ def _support_history_chart(months: list[str], raised: list[int], goal: int) -> d
 
     # Y axis: nice round step up to (and beyond) the goal so the dashed
     # goal line always lands on a labelled tick.
-    y_top = max(goal, max(raised) if raised else 1)
+    y_top: float = max(goal, max(raised) if raised else 1)
     step = _nice_axis_step(y_top, target_steps=4)
     import math
     y_top = math.ceil(y_top / step) * step
@@ -68,14 +72,14 @@ def _support_history_chart(months: list[str], raised: list[int], goal: int) -> d
             "value_str": f"${v}",
         })
 
-    y_labels = []
-    grid_ys = []
-    v = 0.0
-    while v <= y_top + step / 2:
-        y_pos = round(_y_for(v), 1)
-        y_labels.append({"label": f"${int(v)}", "y": y_pos})
+    y_labels: list[dict] = []
+    grid_ys:  list[float] = []
+    yv: float = 0.0
+    while yv <= y_top + step / 2:
+        y_pos = round(_y_for(yv), 1)
+        y_labels.append({"label": f"${int(yv)}", "y": y_pos})
         grid_ys.append(y_pos)
-        v += step
+        yv += step
 
     return {
         "have_data": True,
