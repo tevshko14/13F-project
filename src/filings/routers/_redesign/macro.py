@@ -1871,10 +1871,10 @@ async def preview_macro(
     from filings import treasury_data as _treasury_data
     from filings import frankfurter   as _frankfurter
     from filings import market_data   as _market_data
-    # Heatmap helpers still live in redesign_preview.py (will move to
-    # _redesign.home when home is extracted).  Lazy-import here so this
-    # module stays free of circular-import risk.
-    from filings.routers.redesign_preview import (
+    # Heatmap helpers live in _redesign.home (home owns the SP500 +
+    # sector-ETF heatmap data; macro and home share the same visual).
+    # Lazy-imported to keep both modules free of circular-import risk.
+    from filings.routers._redesign.home import (
         _fetch_home_heatmap_companies,
         _fetch_home_heatmap_sectors,
     )

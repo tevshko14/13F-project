@@ -151,6 +151,9 @@ def test_all_expected_routes_registered():
     ("stock",             "/stock/{ticker}",   ("GET", "/stock/{ticker}")),
     ("stock",             "/stock/{ticker}/chart/{period}",
                                                 ("GET", "/stock/{ticker}/chart/{period}")),
+    ("home",              "/",                 ("GET", "/")),
+    ("home",              "/_pages",           ("GET", "/_pages")),
+    ("home",              "/api/home/heatmap", ("GET", "/api/home/heatmap")),
 ])
 def test_sub_router_owns_its_route(module, path, expected_route):
     """Each sub-router module exposes its own ``router`` carrying its routes.
@@ -204,18 +207,17 @@ def test_helpers_public_surface():
     assert isinstance(h._SHELL_NOTIF_COOKIE_MAX_AGE, int)
 
 
-def test_home_fetchers_can_import_shared_helpers():
-    """The home fetchers in redesign_preview.py still import the helpers
-    that moved to _redesign.helpers.  This is the integration point most
-    likely to break -- home stayed in redesign_preview but its deps moved.
+def test_home_module_can_import_shared_helpers():
+    """The home module imports the helpers it needs from _redesign.helpers.
 
-    Note: this list shrinks over time as additional features get extracted
-    and their helpers move out of redesign_preview entirely.  Only the
-    helpers that home's own Phase-1/2 fetchers actually consume remain.
+    Catches the failure mode where a helper got renamed or moved without
+    updating home's import block -- which would crash at home import time.
     """
-    from filings.routers.redesign_preview import (  # noqa: F401
+    from filings.routers._redesign.home import (  # noqa: F401
         _bounded_call,
         _build_cusip_ticker_map,
+        _compact_amount_str,
+        _compact_range_str,
         _congress_action,
         _insiders_action,
         _insiders_format_title,
