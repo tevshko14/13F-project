@@ -1508,11 +1508,17 @@ async def _prefetch_market_data(app: FastAPI):
     except Exception:
         pass
 
-    # ── Phase 2: yfinance refresh (slow, runs regardless) ──
+    # ── Phase 2: yfinance refresh, gated by the per-source circuit
+    # breaker.  When yfinance is degraded, `to_upstream("yfinance", ...)`
+    # opens the circuit after 5 failures in 60s and stops calling
+    # upstream for 3 minutes -- worker stops hammering, Slack alerts
+    # fire, and web continues serving stale Supabase data unaffected. ──
+    from filings.concurrency import to_upstream
     try:
         await asyncio.gather(
-            _to_heavy(market_data.get_sp500_market_data),
-            _to_heavy(market_data.get_index_market_data),
+            to_upstream("yfinance", market_data.get_sp500_market_data),
+            to_upstream("yfinance", market_data.get_index_market_data),
+            return_exceptions=True,
         )
         app.state.market_data_ready = True
         logger.info("Phase 2 complete: market data refreshed from yfinance")
@@ -1521,14 +1527,20 @@ async def _prefetch_market_data(app: FastAPI):
         if not app.state.market_data_ready:
             app.state.market_data_ready = False
 
-    # ── Phase 3: Warm remaining homepage widgets (parallel, best-effort) ──
-    # Prevents cold-cache stampede when first user hits homepage after deploy.
+    # ── Phase 3: Warm homepage L2 caches (parallel, best-effort) ──
+    # Prevents the cold-cache 15s yfinance hit when the first user
+    # lands on the homepage after a fresh deploy.  `warm_homepage_caches`
+    # primes the sector-ETF L2 row (otherwise lazy-populated by the
+    # heatmap fetcher); other Phase-3 items prime retail sentiment +
+    # the notifications feed.
     try:
+        from filings.routers.redesign_preview import warm_homepage_caches
         await asyncio.gather(
-            _to_heavy(sentiment.get_retail_sentiment_overview),
+            to_upstream("yfinance", sentiment.get_retail_sentiment_overview),
             asyncio.to_thread(
                 supabase_cache.get_recent_notifications, 7
             ),
+            warm_homepage_caches(),
             return_exceptions=True,
         )
         logger.info("Phase 3 complete: homepage widgets pre-warmed")

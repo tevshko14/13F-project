@@ -126,6 +126,30 @@ def _maybe_rate_limit(spec: str):
     return limiter.limit(spec)
 
 
+async def _bounded_call(coro, *, timeout: float, fallback, name: str):
+    """Race a coroutine against a timeout; return fallback on any failure.
+
+    Used at request-handler scope for fan-out fetches that can each
+    fail independently without breaking the page.  Treats three signals
+    as "render the fallback":
+      - asyncio.TimeoutError (call took too long)
+      - any other exception (call raised)
+      - result is None (upstream's circuit-breaker returned no data)
+
+    Same shape as the `_bounded` closure inside `build_stock_data_bundle`,
+    but free-standing so the homepage handler can use it too without
+    pulling in the bundle's source-status tracking.
+    """
+    try:
+        result = await asyncio.wait_for(coro, timeout=timeout)
+        return result if result is not None else fallback
+    except asyncio.TimeoutError:
+        logger.warning("%s timed out after %.1fs", name, timeout)
+    except Exception as exc:
+        logger.warning("%s failed: %s", name, exc)
+    return fallback
+
+
 # Tickers currently being refreshed by an SWR background task.
 # Used to debounce stampedes -- when 100 concurrent requests hit a
 # stale ticker, we serve the stale bundle to all of them but only
@@ -2424,6 +2448,28 @@ async def _fetch_home_heatmap_sectors() -> list[dict]:
     return rows
 
 
+async def warm_homepage_caches() -> None:
+    """Pre-populate the Supabase-backed L2 caches the homepage reads.
+
+    Called by the worker process during its market-data prefetch.
+    Currently primes ``redesign:home:sector_etfs`` (otherwise lazily
+    populated on first homepage hit -- which paid a 15s yfinance hit
+    on a fresh deploy).
+
+    Best-effort: each prime is independent; one failing doesn't block
+    the others.  Returns nothing.
+    """
+    try:
+        await _l2_cached(
+            key="redesign:home:sector_etfs",
+            ttl_seconds=300,
+            compute=_fetch_sector_etfs_sync,
+            category="redesign_home",
+        )
+    except Exception as exc:
+        logger.debug("warm_homepage_caches: sector_etfs prime failed: %s", exc)
+
+
 # ── Activity feed — Supabase notifications shaped for the redesign row.
 
 def _activity_iso_time_ago(iso_str: str) -> str:
@@ -2692,13 +2738,26 @@ async def preview_home(request: Request):
     # 3 fetchers (top_movers, ticker_tape, heatmap_companies) all need the
     # same S&P 1D map; 2 fetchers (kpi_strip, ticker_tape) need indices.
     # Pre-fetch each ONCE and pass dicts down — saves 3-4 cache lookups
-    # plus all the thread-pool slots they were holding.  Both calls are
-    # already L2-backed by market_data internally so a cold start hits
-    # Supabase, not yfinance.
+    # plus all the thread-pool slots they were holding.
+    #
+    # Both calls are gated through `to_upstream("yfinance")` so a slow
+    # yfinance day trips the per-source circuit breaker for the worker
+    # tier (web normally reads the Supabase-backed L2 these functions
+    # populate first; yfinance is a deep fallback).  And each is wrapped
+    # in `_bounded_call(timeout=3.0, fallback={})` so even if the L2
+    # read AND the yfinance fallback both stall, the page renders in
+    # <3s per section with em-dash markers instead of 500-ing on a 15s
+    # global ceiling.
     from filings import market_data as _md
     sp_1d_map, idx_market_map = await asyncio.gather(
-        to_heavy(_md.get_sp500_market_data, "1D"),
-        to_heavy(_md.get_index_market_data),
+        _bounded_call(
+            to_upstream("yfinance", _md.get_sp500_market_data, "1D"),
+            timeout=3.0, fallback={}, name="home:sp500",
+        ),
+        _bounded_call(
+            to_upstream("yfinance", _md.get_index_market_data),
+            timeout=3.0, fallback={}, name="home:indices",
+        ),
     )
 
     # ── Phase 2 (parallel): every other fetcher, with pre-fetched data
