@@ -139,6 +139,7 @@ def test_all_expected_routes_registered():
     ("insiders",          "/insiders",         ("GET", "/insiders")),
     ("notifications",     "/notifications",    ("GET", "/notifications")),
     ("congress",          "/congress",         ("GET", "/congress")),
+    ("macro",             "/macro",            ("GET", "/macro")),
 ])
 def test_sub_router_owns_its_route(module, path, expected_route):
     """Each sub-router module exposes its own ``router`` carrying its routes.
@@ -248,6 +249,12 @@ SMOKE_ROUTES: list[tuple[str, set[int]]] = [
     ("/insiders",          {200}),
     ("/notifications",     {200}),
     ("/congress",          {200}),
+    # /macro is intentionally NOT in the smoke list -- it does ~12
+    # parallel upstream fetches that all hit their (bounded) timeouts
+    # without API keys configured locally, which makes the test take
+    # 5+ minutes.  Static registration is verified above and the live
+    # post-deploy curl in prod (which has data caches) validates it
+    # actually renders correctly.
 ]
 
 
