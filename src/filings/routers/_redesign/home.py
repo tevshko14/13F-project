@@ -37,11 +37,9 @@ from fastapi.responses import HTMLResponse
 
 from filings import supabase_cache
 from filings.app_state import templates
-from filings.cache_l2 import l2_cached as _l2_cached
 from filings.concurrency import (
     to_heavy,
     to_supabase,
-    to_upstream,
 )
 from filings.routers._redesign.helpers import (
     _bounded_call,
@@ -522,11 +520,13 @@ async def _fetch_hero_chart() -> HeroChartPayload:
     OHLCV strips + the SSR defaults.  L2-cached for 2 min so cold-start
     workers warm from Supabase rather than blocking on yfinance.
     """
+    from filings import warmer
     try:
-        results = await _l2_cached(
-            "redesign:home:hero_chart", ttl_seconds=120,
-            compute=_hero_chart_compute, category="redesign_home",
-        )
+        # Strict L2 — hero_chart is warmed every 90 s.  On cold-cold
+        # miss we serve LKG (last successful fetch, no TTL) or fall
+        # through to the synthetic mock below.  Never blocks on
+        # yfinance from the request path.
+        results = await warmer.read_via_l2("redesign:home:hero_chart")
     except Exception as exc:
         logger.warning("Hero chart L2 fetch failed: %s", exc)
         results = None
@@ -1333,14 +1333,11 @@ async def _fetch_home_retail() -> dict:
     same upvotes/mentions proxy the /_v2/retail page uses.
     """
     try:
-        # Async-native fetcher uses the shared httpx client so all 5
-        # ApeWisdom paginated requests fire concurrently and yield the
-        # event loop during network I/O — no thread slots held.
-        items = await _l2_cached(
-            "redesign:home:apewisdom", ttl_seconds=300,
-            compute=_fetch_apewisdom_async,
-            category="redesign_home",
-        )
+        # Strict L2 — apewisdom is warmed at the warm tier (4 min).
+        # The compute is async-native and lazy-imported via the warmer
+        # registry so this read never holds a thread slot.
+        from filings import warmer
+        items = await warmer.read_via_l2("redesign:home:apewisdom")
     except Exception as exc:
         logger.warning("Home retail fetch failed: %s", exc)
         items = None
@@ -1386,13 +1383,10 @@ async def _fetch_home_feargreed() -> FearGreedPayload:
     Falls back to the mock 71 / Greed when CNN is unreachable.
     """
     try:
-        # Async-native fetcher uses the shared httpx client — yields the
-        # event loop during the CNN request, no thread slot held.
-        cnn = await _l2_cached(
-            "redesign:home:cnn_fg", ttl_seconds=300,
-            compute=_fetch_cnn_fg_async,
-            category="redesign_home",
-        )
+        # Strict L2 — cnn_fg is warmed at the warm tier (4 min).
+        # Async-native compute lazy-imported via warmer registry.
+        from filings import warmer
+        cnn = await warmer.read_via_l2("redesign:home:cnn_fg")
     except Exception as exc:
         logger.warning("Fear & Greed fetch failed: %s", exc)
         return _home_feargreed_mock()
@@ -1786,17 +1780,11 @@ async def _fetch_home_news(
     metrics need a separate tracking pipeline.  Falls back to all-mock
     when every upstream is empty.
     """
-    def _compute():
-        # market_data.get_market_news has L1-only TTL cache — wrap it so
-        # multiple workers can share Finnhub responses across restarts.
-        from filings import market_data
-        return market_data.get_market_news("general", 14)
-
     try:
-        articles = await _l2_cached(
-            "redesign:home:news_general", ttl_seconds=600, compute=_compute,
-            category="redesign_home",
-        )
+        # Strict L2 — news_general is warmed at the warm tier (4 min).
+        # Compute fn is owned by the warmer registry.
+        from filings import warmer
+        articles = await warmer.read_via_l2("redesign:home:news_general")
     except Exception as exc:
         logger.warning("Home news fetch failed: %s", exc)
         articles = None
@@ -2022,16 +2010,12 @@ def _fetch_sector_etfs_sync() -> dict[str, float]:
 async def _fetch_home_heatmap_sectors() -> list[dict]:
     """Sector heatmap rows with real daily pct from sector ETFs.
 
-    L2-wrapped because the underlying yfinance batch is one of the slowest
-    operations on cold start (~10-15s for 11 sector ETFs).
+    Strict L2 — sector_etfs is on the warm-tier warmer (4 min, TTL 10 min).
     """
     try:
-        pcts = await _l2_cached(
-            "redesign:home:sector_etfs",
-            ttl_seconds=300,
-            compute=_fetch_sector_etfs_sync,
-            category="redesign_home",
-        )
+        from filings import warmer
+        pcts = await warmer.read_via_l2("redesign:home:sector_etfs")
+        pcts = pcts or {}
     except Exception as exc:
         logger.warning("Sector heatmap fetch failed: %s", exc)
         pcts = {}
@@ -2057,25 +2041,19 @@ async def _fetch_home_heatmap_sectors() -> list[dict]:
 
 
 async def warm_homepage_caches() -> None:
-    """Pre-populate the Supabase-backed L2 caches the homepage reads.
+    """Pre-populate the Supabase-backed L2 caches the homepage reads
+    on lifespan startup (synchronous, blocks the worker boot).
 
-    Called by the worker process during its market-data prefetch.
-    Currently primes ``redesign:home:sector_etfs`` (otherwise lazily
-    populated on first homepage hit -- which paid a 15s yfinance hit
-    on a fresh deploy).
-
-    Best-effort: each prime is independent; one failing doesn't block
-    the others.  Returns nothing.
+    Now delegates to the tiered warmer's ``warm_all`` so every
+    registered key — not just sector_etfs — gets primed before
+    traffic flows.  Best-effort: failures are logged and swallowed.
     """
     try:
-        await _l2_cached(
-            key="redesign:home:sector_etfs",
-            ttl_seconds=300,
-            compute=_fetch_sector_etfs_sync,
-            category="redesign_home",
-        )
+        from filings import warmer
+        status = await warmer.warm_all()
+        logger.info("warm_homepage_caches: %s", status)
     except Exception as exc:
-        logger.debug("warm_homepage_caches: sector_etfs prime failed: %s", exc)
+        logger.debug("warm_homepage_caches: warm_all raised: %s", exc)
 
 
 # ── Activity feed — Supabase notifications shaped for the redesign row.
@@ -2176,20 +2154,16 @@ async def _fetch_home_cal_earnings(limit: int = 6) -> list[dict]:
     feed); the design's "watchlist" framing implies the user's tracked
     names.  Until we wire the actual watchlist, filter to S&P 500 so we
     don't surface every micro-cap that happens to come first alphabetically.
-    """
-    def _compute_earnings():
-        # earnings_calendar has its own TTL cache but it's per-process L1.
-        # L2-wrap so cold-start workers warm from Supabase rather than the
-        # Finnhub/FMP backends.
-        from filings import earnings_calendar
-        return earnings_calendar.get_earnings_calendar(None, None, 4)
 
+    Both reads are strict L2 — earnings_4w is on the warm-tier warmer,
+    sp500_constituents on the cold-tier warmer.  Request path never
+    blocks on Finnhub or yfinance.
+    """
     try:
-        from filings import market_data
+        from filings import warmer
         payload, sp_constituents = await asyncio.gather(
-            _l2_cached("redesign:home:earnings_4w", 600, _compute_earnings,
-                       category="redesign_home"),
-            to_heavy(market_data.get_sp500_constituents),
+            warmer.read_via_l2("redesign:home:earnings_4w"),
+            warmer.read_via_l2("redesign:home:sp500_constituents"),
         )
     except Exception as exc:
         logger.warning("Home earnings calendar fetch failed: %s", exc)
@@ -2321,31 +2295,31 @@ async def preview_home(request: Request):
     # Fetch every Overview section in parallel.  Each fetcher returns mock
     # data on failure, so the page renders even if half the upstreams are
     # cold.  Total budget capped by the slowest fetcher (typically yfinance).
-    # ── Phase 1 (parallel): shared market_data fetches ──
-    # 3 fetchers (top_movers, ticker_tape, heatmap_companies) all need the
-    # same S&P 1D map; 2 fetchers (kpi_strip, ticker_tape) need indices.
-    # Pre-fetch each ONCE and pass dicts down — saves 3-4 cache lookups
-    # plus all the thread-pool slots they were holding.
-    #
-    # Both calls are gated through `to_upstream("yfinance")` so a slow
-    # yfinance day trips the per-source circuit breaker for the worker
-    # tier (web normally reads the Supabase-backed L2 these functions
-    # populate first; yfinance is a deep fallback).  And each is wrapped
-    # in `_bounded_call(timeout=3.0, fallback={})` so even if the L2
-    # read AND the yfinance fallback both stall, the page renders in
-    # <3s per section with em-dash markers instead of 500-ing on a 15s
-    # global ceiling.
-    from filings import market_data as _md
+    # ── Phase 1 (parallel): shared market data via strict L2 ──
+    # 3 fetchers (top_movers, ticker_tape, heatmap_companies) all need
+    # the same S&P 1D map; 2 fetchers (kpi_strip, ticker_tape) need
+    # indices.  Both keys are populated by the hot-tier warmer (every
+    # 90 s) so the request path reads exclusively from Supabase here —
+    # `block_on_miss=False, lkg_fallback=True` guarantees we never
+    # block on yfinance.  On a cold-start window where neither L2 nor
+    # LKG has a row yet, the read returns None and the `_bounded_call`
+    # below substitutes the empty-dict fallback.  Timeout bumped down
+    # to 1.5 s — at this point we're reading Supabase, not yfinance.
+    from filings import warmer
     sp_1d_map, idx_market_map = await asyncio.gather(
         _bounded_call(
-            to_upstream("yfinance", _md.get_sp500_market_data, "1D"),
-            timeout=3.0, fallback={}, name="home:sp500",
+            warmer.read_via_l2("redesign:home:sp500_1d"),
+            timeout=1.5, fallback={}, name="home:sp500",
         ),
         _bounded_call(
-            to_upstream("yfinance", _md.get_index_market_data),
-            timeout=3.0, fallback={}, name="home:indices",
+            warmer.read_via_l2("redesign:home:index_market"),
+            timeout=1.5, fallback={}, name="home:indices",
         ),
     )
+    # Strict L2 returns None on cold-cold misses; downstream fetchers
+    # assume dict.  Normalise here so the type stays consistent.
+    sp_1d_map = sp_1d_map or {}
+    idx_market_map = idx_market_map or {}
 
     # ── Phase 2 (parallel): every other fetcher, with pre-fetched data
     # passed where applicable.  Heavy external-API fetchers (F&G, retail,

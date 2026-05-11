@@ -188,6 +188,87 @@ def targets_by_tier(tier: Tier) -> list[WarmerTarget]:
     return [t for t in WARMER_TARGETS if t.tier == tier]
 
 
+def get_target(key: str) -> WarmerTarget | None:
+    """Look up the registered target for an L2 key.  Returns None if
+    the key isn't in the registry — callers should treat that as a
+    programming error (the request path should only read keys that
+    the warmer can refresh)."""
+    for t in WARMER_TARGETS:
+        if t.key == key:
+            return t
+    return None
+
+
+# ── Request-path readers (strict L2) ─────────────────────────────────
+
+
+async def read_via_l2(
+    key: str,
+    *,
+    block_on_miss: bool = False,
+    lkg_fallback: bool = True,
+    stale_budget_seconds: int | None = None,
+) -> Any:
+    """Strict L2 read for the request path.
+
+    Looks up the warmer target for ``key`` and calls ``l2_cached`` with
+    that target's TTL / compute / category.  Defaults to strict mode
+    (``block_on_miss=False, lkg_fallback=True``) so the request path
+    never blocks on upstream — fresh L2 hit → stale-in-budget → LKG
+    snapshot → None.  Callers wrap the return in their own bounded()
+    fallback for the final-final case.
+
+    Using this instead of a raw ``l2_cached`` call guarantees the
+    request-path compute fn matches what the warmer registered, so the
+    bg refresh (when L2 is stale) writes data shaped identically to
+    what the warmer would have written.
+
+    Raises ``KeyError`` if the key isn't registered — surfacing that as
+    a programming error rather than a silent None.
+    """
+    target = get_target(key)
+    if target is None:
+        raise KeyError(
+            f"warmer.read_via_l2: '{key}' is not in WARMER_TARGETS. "
+            f"Register it in filings/warmer.py before reading from the "
+            f"request path; otherwise the bg refresh path can't refill it."
+        )
+    return await l2_cached(
+        target.key, ttl_seconds=target.ttl_seconds, compute=target.compute,
+        category=target.category,
+        block_on_miss=block_on_miss,
+        lkg_fallback=lkg_fallback,
+        stale_budget_seconds=stale_budget_seconds,
+    )
+
+
+async def read_via_l2_with_meta(
+    key: str,
+    *,
+    block_on_miss: bool = False,
+    lkg_fallback: bool = True,
+    stale_budget_seconds: int | None = None,
+):
+    """Sibling of ``read_via_l2`` returning ``(data, CacheMeta)``.
+
+    The meta surfaces source provenance (l2_fresh / l2_stale / lkg /
+    miss) + as_of_ts so the template can render a "Cached · 2m ago"
+    badge or log degraded-mode renders.  Use when freshness matters
+    to the UI.
+    """
+    from filings.cache_l2 import l2_cached_with_meta
+    target = get_target(key)
+    if target is None:
+        raise KeyError(f"warmer.read_via_l2_with_meta: '{key}' not registered")
+    return await l2_cached_with_meta(
+        target.key, ttl_seconds=target.ttl_seconds, compute=target.compute,
+        category=target.category,
+        block_on_miss=block_on_miss,
+        lkg_fallback=lkg_fallback,
+        stale_budget_seconds=stale_budget_seconds,
+    )
+
+
 # ── Tier runners ─────────────────────────────────────────────────────
 
 
