@@ -141,6 +141,8 @@ def test_all_expected_routes_registered():
     ("congress",          "/congress",         ("GET", "/congress")),
     ("macro",             "/macro",            ("GET", "/macro")),
     ("retail",            "/retail",           ("GET", "/retail")),
+    ("funds",             "/funds",            ("GET", "/funds")),
+    ("funds",             "/funds/{cik}",      ("GET", "/funds/{cik}")),
 ])
 def test_sub_router_owns_its_route(module, path, expected_route):
     """Each sub-router module exposes its own ``router`` carrying its routes.
@@ -198,11 +200,15 @@ def test_home_fetchers_can_import_shared_helpers():
     """The home fetchers in redesign_preview.py still import the helpers
     that moved to _redesign.helpers.  This is the integration point most
     likely to break -- home stayed in redesign_preview but its deps moved.
+
+    Note: this list shrinks over time as additional features get extracted
+    and their helpers move out of redesign_preview entirely.  Only the
+    helpers that home's own Phase-1/2 fetchers actually consume remain.
     """
     from filings.routers.redesign_preview import (  # noqa: F401
         _bounded_call,
+        _build_cusip_ticker_map,
         _congress_action,
-        _format_dollars_compact,
         _insiders_action,
         _insiders_format_title,
         _shell_context,
@@ -251,6 +257,7 @@ SMOKE_ROUTES: list[tuple[str, set[int]]] = [
     ("/notifications",     {200}),
     ("/congress",          {200}),
     ("/retail",            {200}),
+    ("/funds",             {200}),
     # /macro is intentionally NOT in the smoke list -- it does ~12
     # parallel upstream fetches that all hit their (bounded) timeouts
     # without API keys configured locally, which makes the test take

@@ -298,6 +298,26 @@ def _congress_action(trade_type: str) -> str:
     return (trade_type or "—").upper()
 
 
+# ── CUSIP → ticker resolver (shared by home + funds pages) ──────────
+
+
+def _build_cusip_ticker_map(fund_cache: dict) -> dict[str, str]:
+    """Walk every fund's `all_holdings` once to build CUSIP → ticker.
+
+    The flat `changes` records carry CUSIP but not ticker; this resolver
+    is what turns "70450Y103" into "PYPL" for display.  Cached on
+    app.state at first build to avoid recomputing per request.
+    """
+    cmap: dict[str, str] = {}
+    for fund_data in fund_cache.values():
+        for h in fund_data.get("all_holdings") or []:
+            cusip = h.get("cusip")
+            ticker = h.get("ticker")
+            if cusip and ticker and cusip not in cmap:
+                cmap[cusip] = ticker
+    return cmap
+
+
 # ── Sparkline mock series (used by mock-data fallbacks) ──────────────
 
 
