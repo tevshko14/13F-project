@@ -2516,12 +2516,27 @@ async def preview_home(request: Request):
 
 @router.get("/api/home/heatmap", response_class=HTMLResponse)
 async def preview_home_heatmap_partial(request: Request):
-    """Lazy-loaded Heatmap pane — companies + sectors grids."""
+    """Lazy-loaded Heatmap pane — companies + sectors grids.
+
+    ``to_heavy`` raises ``TimeoutError`` on hung yfinance fetches -- the
+    fetchers below have their own internal fallbacks, but this top-level
+    call needs ``_bounded_call`` so a saturated yfinance pool can't 500
+    the partial.  Empty dict triggers the fetchers' mock-fallback path.
+    """
     from filings import market_data as _md
-    sp_1d_map = await to_heavy(_md.get_sp500_market_data, "1D")
+    sp_1d_map = await _bounded_call(
+        to_heavy(_md.get_sp500_market_data, "1D"),
+        timeout=8.0, fallback={}, name="heatmap:sp500",
+    )
     companies, sectors = await asyncio.gather(
-        _fetch_home_heatmap_companies(mkt=sp_1d_map),
-        _fetch_home_heatmap_sectors(),
+        _bounded_call(
+            _fetch_home_heatmap_companies(mkt=sp_1d_map),
+            timeout=10.0, fallback=[], name="heatmap:companies",
+        ),
+        _bounded_call(
+            _fetch_home_heatmap_sectors(),
+            timeout=10.0, fallback=[], name="heatmap:sectors",
+        ),
     )
     return templates.TemplateResponse(
         "_redesign/partials/home_heatmap.html",
@@ -2536,7 +2551,10 @@ async def preview_home_heatmap_partial(request: Request):
 @router.get("/api/home/activity", response_class=HTMLResponse)
 async def preview_home_activity_partial(request: Request):
     """Lazy-loaded Activity pane — live activity feed."""
-    activity_rows = await _fetch_home_activity(limit=12)
+    activity_rows = await _bounded_call(
+        _fetch_home_activity(limit=12),
+        timeout=6.0, fallback=[], name="activity",
+    )
     return templates.TemplateResponse(
         "_redesign/partials/home_activity.html",
         {"request": request, "activity_feed": activity_rows},
@@ -2547,8 +2565,14 @@ async def preview_home_activity_partial(request: Request):
 async def preview_home_calendar_partial(request: Request):
     """Lazy-loaded Calendar pane — earnings + macro events."""
     cal_earnings, cal_macro = await asyncio.gather(
-        _fetch_home_cal_earnings(limit=6),
-        _fetch_home_cal_macro(limit=6),
+        _bounded_call(
+            _fetch_home_cal_earnings(limit=6),
+            timeout=6.0, fallback=[], name="cal_earnings",
+        ),
+        _bounded_call(
+            _fetch_home_cal_macro(limit=6),
+            timeout=6.0, fallback=[], name="cal_macro",
+        ),
     )
     return templates.TemplateResponse(
         "_redesign/partials/home_calendar.html",

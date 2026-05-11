@@ -148,15 +148,19 @@ async def _bounded(coro, *, timeout: float, fallback, name: str, page: str = "pa
 
     ``page`` shows up in the warning log so the timing-out source is easy
     to spot when several routes share the same upstream.
+
+    ``fallback`` may be a value or a zero-arg callable; callables are
+    invoked only on the failure path so callers can pass full-shape
+    payloads (which can be expensive to build) without paying for them
+    on the happy path.  Same contract as :func:`_bounded_call`.
     """
     try:
         return await asyncio.wait_for(coro, timeout=timeout)
     except asyncio.TimeoutError:
         logger.warning("%s: %s timed out (>%ss)", page, name, timeout)
-        return fallback
     except Exception as exc:
         logger.warning("%s: %s failed: %s", page, name, exc)
-        return fallback
+    return fallback() if callable(fallback) else fallback
 
 
 # ── Date / format helpers ─────────────────────────────────────────────

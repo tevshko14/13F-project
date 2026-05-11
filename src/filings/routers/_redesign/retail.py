@@ -834,9 +834,15 @@ async def preview_retail(request: Request, view: str = "sentiment"):
             except Exception as exc:
                 logger.warning("Retail page: leaderboard cache bust failed: %s", exc)
 
-    leaderboard = await to_light(
-        _sent.build_retail_leaderboard_data,
-        apewisdom_data or [], ticker_map, fear_greed,
+    # Wrap in bounded() because to_light raises TimeoutError on hang
+    # (and ApeWisdom-derived leaderboard work can take seconds on cold
+    # cache); without the wrap a slow leaderboard build 500s the page.
+    leaderboard = await bounded(
+        to_light(
+            _sent.build_retail_leaderboard_data,
+            apewisdom_data or [], ticker_map, fear_greed,
+        ),
+        timeout=10.0, fallback={}, name="leaderboard",
     )
 
     sentiment_ctx  = _retail_sentiment_payload(apewisdom_data or [], fear_greed)

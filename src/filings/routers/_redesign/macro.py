@@ -783,6 +783,39 @@ def _events_just_released(events_by_date: list[dict], limit: int = 10) -> list[d
     return out[:limit]
 
 
+def _v2_events_calendar_empty() -> dict:
+    """Empty-shape fallback for the events-calendar tab.
+
+    Matches the success-path return of :func:`_v2_events_calendar_payload`
+    so the macro template can iterate ``events.periods``, ``events.kpi_strip``,
+    etc. unconditionally without hitting Jinja UndefinedError when the
+    bound fires.  Built lazily so the upstream-constant imports happen
+    only on the failure path.
+    """
+    from filings import economic_calendar
+    return {
+        "have_data":       False,
+        "events_by_date":  [],
+        "week_grid":       [],
+        "just_released":   [],
+        "metrics":         {},
+        "countdown":       None,
+        "kpi_strip":       [
+            _kpi("Total Events", 0, ""),
+            _kpi("High Impact",  0, "market-moving"),
+            _kpi("Released",     0, "actuals in"),
+            _kpi("Upcoming",     0, "still pending"),
+        ],
+        "current_period":  "this_week",
+        "current_country": "us",
+        "current_impact":  "all",
+        "periods":         economic_calendar.PERIOD_CHOICES,
+        "countries":       economic_calendar.COUNTRY_CHOICES,
+        "impact_choices":  economic_calendar.IMPACT_CHOICES,
+        "is_mock":         False,
+    }
+
+
 async def _v2_events_calendar_payload(
     period: str = "this_week",
     country: str = "us",
@@ -1098,9 +1131,19 @@ def _earn_trend_chart(trend: list[dict]) -> dict:
 
 
 def _earn_kpi_strip(metrics: dict) -> list[dict]:
-    """Map _compute_metrics() → 4-cell KPI strip."""
+    """Map _compute_metrics() → 4-cell KPI strip.
+
+    Always returns a 4-cell list (em-dashed when metrics is empty) so
+    the template's ``earn.kpi_strip`` iteration is a stable contract --
+    callers can rely on a non-empty strip regardless of upstream state.
+    """
     if not metrics:
-        return []
+        return [
+            _kpi("EPS Beat Rate",       "—", "no data"),
+            _kpi("Revenue Beat Rate",   "—", "no data"),
+            _kpi("Dual Beats",          "—", "no data"),
+            _kpi("Avg Market Reaction", "—", "next-day price"),
+        ]
     eps_rate = metrics.get("eps_beat_rate", 0)
     rev_rate = metrics.get("rev_beat_rate", 0)
     rxn      = metrics.get("avg_price_change", 0)
@@ -1114,6 +1157,27 @@ def _earn_kpi_strip(metrics: dict) -> list[dict]:
              f"of {metrics.get('total', 0)} reporting"),
         _kpi("Avg Market Reaction", f"{rxn:+.2f}%", "next-day price", rxn >= 0),
     ]
+
+
+def _v2_macro_earnings_empty() -> dict:
+    """Empty-shape fallback matching :func:`_v2_macro_earnings_payload`."""
+    from filings import earnings_scorecard
+    return {
+        "have_data":       False,
+        "metrics":         {},
+        "results":         [],
+        "results_total":   0,
+        "kpi_strip":       _earn_kpi_strip({}),
+        "donut_eps":       _earn_donut(0, 0, 0),
+        "donut_rev":       _earn_donut(0, 0, 0),
+        "trend":           _earn_trend_chart([]),
+        "current_index":   "all",
+        "current_quarter": "",
+        "current_sector":  "",
+        "quarters":        [],
+        "indices":         earnings_scorecard.INDEX_CHOICES,
+        "sectors":         earnings_scorecard.SECTORS,
+    }
 
 
 async def _v2_macro_earnings_payload(
@@ -1171,6 +1235,28 @@ async def _v2_macro_earnings_payload(
 
 
 # ── Earnings tab — Calendar sub-pane ─────────────────────────────────────
+
+def _v2_macro_calendar_empty() -> dict:
+    """Empty-shape fallback matching :func:`_v2_macro_calendar_payload`."""
+    from filings import earnings_scorecard
+    return {
+        "have_data":      False,
+        "metrics":        {},
+        "upcoming":       [],
+        "just_reported":  [],
+        "kpi_strip":      [
+            _kpi("Reporting",   0, ""),
+            _kpi("Before Open", 0, "BMO releases"),
+            _kpi("After Close", 0, "AMC releases"),
+            _kpi("SI Holdings", 0, "tracked names"),
+        ],
+        "week_grid":      [],
+        "current_index":  "all",
+        "current_period": "this_week",
+        "indices":        earnings_scorecard.INDEX_CHOICES,
+        "periods":        earnings_scorecard.CALENDAR_PERIODS,
+    }
+
 
 async def _v2_macro_calendar_payload(
     request: Request, index: str, period: str,
@@ -1334,6 +1420,38 @@ def _perf_momentum_chart(ad_line: dict) -> dict:
         "hover_points": hover_points,
         "index_name": index_name,
         "n_days": n,
+    }
+
+
+def _v2_macro_performance_empty() -> dict:
+    """Empty-shape fallback matching :func:`_v2_macro_performance_payload`."""
+    from filings import market_breadth
+    return {
+        "have_data":         False,
+        "metrics":           {},
+        "advance_pct":       0.0,
+        "decline_pct":       0.0,
+        "unchanged_pct":     0.0,
+        "status":            _perf_status(0.0),
+        "above_50d":         {},
+        "sector_breadth":    [],
+        "top_gainers":       [],
+        "top_losers":        [],
+        "divergence":        None,
+        "momentum":          _perf_momentum_chart(None),
+        "kpi_strip":         [
+            _kpi("Up / Down",       0, "0 : 0", None),
+            _kpi("Advancers",       0, "0.0%",  None),
+            _kpi("Decliners",       0, "0.0%",  None),
+            _kpi("Above 50-day MA", "—", "", None),
+        ],
+        "current_index":     "sp500",
+        "current_period":    "1d",
+        "indices":           market_breadth.INDEX_CHOICES,
+        "periods":           market_breadth.PERIOD_CHOICES,
+        "data_period_label": "",
+        "data_index_name":   "",
+        "data_as_of":        "",
     }
 
 
@@ -1792,6 +1910,23 @@ def _skew_chart(rows: list[dict]) -> dict:
     }
 
 
+def _v2_volatility_empty() -> dict:
+    """Empty-shape fallback matching :func:`_v2_volatility_payload`.
+
+    Note: ``pc`` / ``vix`` / ``skew`` use the chart builders' own
+    ``{"have_data": False}`` shape so the template can branch on
+    ``vol.pc.have_data`` etc. without crashing on missing keys.
+    """
+    return {
+        "have_data":  False,
+        "current_pc": "total",
+        "pc_types":   _PC_RATIO_TYPES,
+        "pc":         _pc_ratio_chart([], "total"),
+        "vix":        _vix_term_payload(None),
+        "skew":       _skew_chart([]),
+    }
+
+
 async def _v2_volatility_payload(ratio_type: str = "total") -> dict:
     """Fetch + reshape Put/Call · VIX · SKEW for the v2 Volatility tab."""
     from filings import cboe_data
@@ -1897,16 +2032,16 @@ async def preview_macro(
         bounded(to_heavy(_market_data.get_index_market_data),       timeout=6.0, fallback=None, name="index_md"),
         bounded(_macro_calendar_rows(top_n=12),                     timeout=5.0, fallback=[],   name="calendar"),
         bounded(_v2_macro_earnings_payload(earn_index, earn_quarter or None, earn_sector or None),
-                timeout=10.0, fallback={"have_data": False}, name="earnings"),
+                timeout=10.0, fallback=_v2_macro_earnings_empty, name="earnings"),
         bounded(_v2_macro_calendar_payload(request, cal_index, cal_period),
-                timeout=8.0,  fallback={"have_data": False}, name="ecal"),
+                timeout=8.0,  fallback=_v2_macro_calendar_empty, name="ecal"),
         bounded(_v2_macro_performance_payload(perf_index, perf_period),
-                timeout=10.0, fallback={"have_data": False}, name="performance"),
+                timeout=10.0, fallback=_v2_macro_performance_empty, name="performance"),
         bounded(_v2_events_calendar_payload(ev_period, ev_country, ev_impact),
-                timeout=6.0,  fallback={"have_data": False}, name="events"),
+                timeout=6.0,  fallback=_v2_events_calendar_empty, name="events"),
         bounded(to_heavy(_treasury_data.get_debt_data),             timeout=6.0, fallback=None, name="debt"),
         bounded(_v2_volatility_payload(pc_type),
-                timeout=12.0, fallback={"have_data": False}, name="volatility"),
+                timeout=12.0, fallback=_v2_volatility_empty, name="volatility"),
         # Sentiment is L2-only on the request path — slow Google Trends
         # fetch runs in a background task, so this should always be ~10ms.
         # Bumped from 2s after the simplify-pass review: a regional
