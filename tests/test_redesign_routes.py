@@ -94,7 +94,12 @@ def test_sub_router_modules_import():
 
 
 def test_public_api_for_web_py():
-    """web.py imports these symbols from redesign_preview — they must exist."""
+    """web.py imports these symbols from redesign_preview — they must exist.
+
+    ``build_stock_data_bundle`` lives in ``_redesign.stock`` post-extraction
+    but is re-exported from ``redesign_preview`` so web.py's existing import
+    keeps working without changes.
+    """
     from filings.routers import redesign_preview as rp
 
     # Functions web.py calls.
@@ -143,6 +148,9 @@ def test_all_expected_routes_registered():
     ("retail",            "/retail",           ("GET", "/retail")),
     ("funds",             "/funds",            ("GET", "/funds")),
     ("funds",             "/funds/{cik}",      ("GET", "/funds/{cik}")),
+    ("stock",             "/stock/{ticker}",   ("GET", "/stock/{ticker}")),
+    ("stock",             "/stock/{ticker}/chart/{period}",
+                                                ("GET", "/stock/{ticker}/chart/{period}")),
 ])
 def test_sub_router_owns_its_route(module, path, expected_route):
     """Each sub-router module exposes its own ``router`` carrying its routes.

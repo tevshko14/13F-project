@@ -298,6 +298,73 @@ def _congress_action(trade_type: str) -> str:
     return (trade_type or "—").upper()
 
 
+# ── Dollar-string compactors (shared by home + stock + congress) ────
+
+
+_AMOUNT_RE = re.compile(r"[-+]?[\d,.]+")
+
+
+def _compact_amount_str(s: str | None) -> str:
+    """Reformat a free-form dollar string ("$25,080,696" or "+$52.1M") into
+    the compact form ("$25M" / "$52.1M") used everywhere on the home page.
+
+    Handles long-form numbers from OpenInsider as well as already-compact
+    inputs.  Strips leading sign — direction is conveyed by the action tag,
+    not the amount.  Returns "" when nothing parses out.
+    """
+    if not s:
+        return ""
+    raw = s.strip().lstrip("+-").lstrip("$").strip()
+    # Already compact (ends with K/M/B/T) — accept as-is, just prefix $.
+    if raw and raw[-1].upper() in ("K", "M", "B", "T"):
+        return f"${raw.upper()}"
+    m = _AMOUNT_RE.search(raw)
+    if not m:
+        return ""
+    try:
+        v = float(m.group(0).replace(",", ""))
+    except ValueError:
+        return ""
+    a = abs(v)
+    if a >= 1e12: return f"${a / 1e12:.1f}T"
+    if a >= 1e10: return f"${a / 1e9:.0f}B"
+    if a >= 1e9:  return f"${a / 1e9:.1f}B"
+    if a >= 1e6:  return f"${a / 1e6:.0f}M"
+    if a >= 1e3:  return f"${a / 1e3:.0f}K"
+    return f"${a:,.0f}"
+
+
+def _compact_range_str(s: str | None) -> str:
+    """Compact a Congress-style amount range ("$1,001 - $15,000") to a
+    short form ("$1K–15K" / "$50K–100K" / "$1M–5M").
+
+    Picks the lo/hi numbers, scales each to K/M/B and combines.  Falls
+    back to a single compact value if only one number is parseable.
+    """
+    if not s:
+        return ""
+    nums = _AMOUNT_RE.findall(s.replace(",", ""))
+    if not nums:
+        return ""
+    try:
+        vals = [float(n) for n in nums if n not in ("-", "+")]
+    except ValueError:
+        return ""
+    if not vals:
+        return ""
+
+    def _short(a: float) -> str:
+        a = abs(a)
+        if a >= 1e9: return f"{a / 1e9:.0f}B"
+        if a >= 1e6: return f"{a / 1e6:.0f}M"
+        if a >= 1e3: return f"{a / 1e3:.0f}K"
+        return f"{a:.0f}"
+
+    if len(vals) == 1:
+        return f"${_short(vals[0])}"
+    return f"${_short(vals[0])}–{_short(vals[-1])}"
+
+
 # ── CUSIP → ticker resolver (shared by home + funds pages) ──────────
 
 
