@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from filings import warmer
 from filings.app_state import templates
 from filings.concurrency import to_heavy, to_supabase
 from filings.routers._redesign.helpers import (
@@ -208,7 +209,7 @@ async def _fetch_profile_watchlist(
     # Parallel enrichment: sparklines (per-ticker fanout via heavy pool —
     # not warmable since ticker list varies by user) + S&P 1D quote map
     # (strict L2 — hot-tier warmer) + recent notifications (Supabase).
-    from filings import market_data, supabase_cache, warmer
+    from filings import market_data, supabase_cache
     spark_task = to_heavy(market_data.get_sparkline_points, tickers, 20)
     md_task    = warmer.read_via_l2("redesign:home:sp500_1d")
     notif_task = to_supabase(supabase_cache.get_recent_notifications, 200)

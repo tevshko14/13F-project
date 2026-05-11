@@ -2349,19 +2349,19 @@ async def _send_worker_hang_alert(overdue: list[dict]) -> None:
 # request after a worker restart would fan out every yfinance call
 # synchronously — what jammed the thread pool the first time we
 # shipped /_v2/home.
+from filings import warmer as _warmer
 
-_REDESIGN_L2_HOT_INTERVAL  = 90
-_REDESIGN_L2_WARM_INTERVAL = 4 * 60
-_REDESIGN_L2_COLD_INTERVAL = 6 * 60 * 60
+_REDESIGN_L2_HOT_INTERVAL  = _warmer.HOT_INTERVAL_SECONDS
+_REDESIGN_L2_WARM_INTERVAL = _warmer.WARM_INTERVAL_SECONDS
+_REDESIGN_L2_COLD_INTERVAL = _warmer.COLD_INTERVAL_SECONDS
 
 # Back-compat alias for any external callers (admin endpoint etc.)
 _REDESIGN_L2_WARMER_INTERVAL = _REDESIGN_L2_WARM_INTERVAL
 
 
-async def _run_redesign_l2_warm_tier(tier: str) -> None:
+async def _run_redesign_l2_warm_tier(tier: _warmer.Tier) -> None:
     """One iteration of the tier-specific L2 cache warmer."""
-    from filings import warmer
-    status = await warmer.warm_tier(tier)  # type: ignore[arg-type]
+    status = await _warmer.warm_tier(tier)
     logger.info(
         "redesign L2 warmer[%s]: warmed %d/%d (failed=%s)",
         tier,
@@ -3094,12 +3094,13 @@ async def admin_cache_status(request: Request):
         return gate
 
     from filings import warmer
+    from filings.cache_l2 import lkg_key as _lkg_key
     from filings.supabase_cache import get_cached_full_row_async
 
     async def _probe(target):
         actual_key = warmer.versioned_key(target.key)
         primary = await get_cached_full_row_async(actual_key)
-        lkg     = await get_cached_full_row_async(warmer._lkg_key(actual_key))
+        lkg     = await get_cached_full_row_async(_lkg_key(actual_key))
         return {
             "key":               target.key,
             "actual_key":        actual_key,
@@ -3109,9 +3110,11 @@ async def admin_cache_status(request: Request):
             "primary_is_fresh":  (primary or {}).get("is_fresh"),
             "primary_age_s":     (primary or {}).get("age_seconds"),
             "primary_as_of":     (primary or {}).get("as_of_ts"),
+            "primary_age_human": _time_ago((primary or {}).get("as_of_ts") or ""),
             "lkg_present":       lkg is not None,
             "lkg_age_s":         (lkg or {}).get("age_seconds"),
             "lkg_as_of":         (lkg or {}).get("as_of_ts"),
+            "lkg_age_human":     _time_ago((lkg or {}).get("as_of_ts") or ""),
         }
 
     rows = await asyncio.gather(

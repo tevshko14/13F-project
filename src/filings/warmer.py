@@ -4,25 +4,23 @@ Owns every L2 cache key the redesign request path can read.  Three
 tiers run at independent intervals:
 
   * **hot**  — every 90 s.  Tick-by-tick data (sp500 1D quote map,
-               index quotes, hero intraday).  TTL ≥ 240 s so SWR
-               refresh always lands inside the TTL window.
-  * **warm** — every 4 min.  Slow-moving data (news, sentiment,
-               sector ETFs, F&G, ApeWisdom, FRED, earnings).
-               TTL ≥ 600 s.
-  * **cold** — every 6 h.   Near-immutable (S&P / NASDAQ constituents,
-               hero 5Y history).  TTL ≥ 24 h so a missed cycle still
-               hits a fresh row.
+               index quotes, hero intraday).
+  * **warm** — every 4 min.  Slow-moving (news, sentiment, sector
+               ETFs, F&G, ApeWisdom, FRED, earnings).
+  * **cold** — every 6 h.   Near-immutable (S&P / NASDAQ constituents).
+
+TTL discipline: ``ttl_seconds ≥ tier_interval × 2.5`` so SWR refresh
+always lands inside the TTL window even if one warmer cycle is missed.
+Enforced by ``test_ttl_at_least_2_5x_tier_interval``.
 
 Compute functions lazy-import their upstream modules so this file has
 zero load-time dependencies — the registry can be imported and walked
-from anywhere (lifespan setup, admin endpoints, tests) without
-triggering market_data / fred_indicators / earnings_calendar loads.
+from anywhere (lifespan, admin endpoints, tests) without triggering
+market_data / fred_indicators / earnings_calendar loads.
 
 This file IS the source of truth for what data the request path
-needs pre-populated.  When Phase 3 flips the request path to
-``block_on_miss=False``, every key the request handler reads must
-appear here — otherwise that key returns LKG / None forever instead
-of recovering on the next cycle.
+needs pre-populated.  Every key read via ``read_via_l2`` must be
+registered here, otherwise the bg refresh path can't refill it.
 """
 
 from __future__ import annotations
@@ -47,21 +45,10 @@ WARM_INTERVAL_SECONDS = 4 * 60
 COLD_INTERVAL_SECONDS = 6 * 60 * 60
 
 
-# ── Cache-key schema version ─────────────────────────────────────────
-# Bump this when the SHAPE of any registered payload changes in a way
-# the request-path consumer can't tolerate (e.g., renaming a field
-# the template uses, dropping a key, or changing a list-of-dicts to
-# a dict-of-lists).
-#
-# The warmer constructs the actual L2 key as `{base_key}:v{N}` so old
-# rows with stale shapes are abandoned cleanly (the new keys cold-miss
-# and refill on the next warmer cycle).  Old rows expire on their
-# own TTL and disappear without manual purge.
-#
-# Bumping schema_version is a coordinated change: every consumer of
-# the keys in WARMER_TARGETS reads through `read_via_l2(key)` which
-# applies the same version suffix, so the registry stays the source
-# of truth.
+# Bump when a registered payload's SHAPE changes incompatibly.
+# See ``versioned_key`` — v1 keeps bare keys, v2+ adds ``:vN`` suffix
+# so old rows are abandoned and the warmer refills the new keys on
+# its next cycle.  Schema-rotation primitive: no manual purge.
 CACHE_SCHEMA_VERSION = 1
 
 
@@ -138,13 +125,7 @@ async def _compute_apewisdom() -> list[dict]:
 
 
 async def _compute_hero_chart() -> Any:
-    """Hero S&P/NASDAQ/DOW intraday + 5Y combined payload.
-
-    NOTE: today this combines intraday (tick) + 5Y (daily) into one row.
-    A future split into hero_intraday (hot) + hero_5y (cold) will let
-    us refresh the fast-moving series more aggressively without paying
-    the 5Y fetch every cycle.  Tracked separately.
-    """
+    """Hero S&P/NASDAQ/DOW intraday + 5Y combined payload."""
     from filings.routers._redesign import home
     return await home._hero_chart_compute()
 
@@ -208,7 +189,14 @@ def versioned_key(base_key: str) -> str:
     entry — guarantees the warmer's writes and the request path's
     reads target the same row.  Old rows from prior versions live out
     their TTL untouched and disappear without explicit cleanup.
+
+    Version 1 is the inaugural state — we return the bare key (no
+    suffix) so existing L2 rows continue to be read.  Versions >= 2
+    add ``:vN`` to invalidate.  Bumping CACHE_SCHEMA_VERSION above 1
+    is the schema-rotation primitive.
     """
+    if CACHE_SCHEMA_VERSION <= 1:
+        return base_key
     return f"{base_key}:v{CACHE_SCHEMA_VERSION}"
 
 
@@ -231,46 +219,6 @@ def get_target(key: str) -> WarmerTarget | None:
 # ── Request-path readers (strict L2) ─────────────────────────────────
 
 
-async def read_via_l2(
-    key: str,
-    *,
-    block_on_miss: bool = False,
-    lkg_fallback: bool = True,
-    stale_budget_seconds: int | None = None,
-) -> Any:
-    """Strict L2 read for the request path.
-
-    Looks up the warmer target for ``key`` and calls ``l2_cached`` with
-    that target's TTL / compute / category.  Defaults to strict mode
-    (``block_on_miss=False, lkg_fallback=True``) so the request path
-    never blocks on upstream — fresh L2 hit → stale-in-budget → LKG
-    snapshot → None.  Callers wrap the return in their own bounded()
-    fallback for the final-final case.
-
-    Using this instead of a raw ``l2_cached`` call guarantees the
-    request-path compute fn matches what the warmer registered, so the
-    bg refresh (when L2 is stale) writes data shaped identically to
-    what the warmer would have written.
-
-    Raises ``KeyError`` if the key isn't registered — surfacing that as
-    a programming error rather than a silent None.
-    """
-    target = get_target(key)
-    if target is None:
-        raise KeyError(
-            f"warmer.read_via_l2: '{key}' is not in WARMER_TARGETS. "
-            f"Register it in filings/warmer.py before reading from the "
-            f"request path; otherwise the bg refresh path can't refill it."
-        )
-    return await l2_cached(
-        versioned_key(target.key), ttl_seconds=target.ttl_seconds,
-        compute=target.compute, category=target.category,
-        block_on_miss=block_on_miss,
-        lkg_fallback=lkg_fallback,
-        stale_budget_seconds=stale_budget_seconds,
-    )
-
-
 async def read_via_l2_with_meta(
     key: str,
     *,
@@ -278,17 +226,35 @@ async def read_via_l2_with_meta(
     lkg_fallback: bool = True,
     stale_budget_seconds: int | None = None,
 ):
-    """Sibling of ``read_via_l2`` returning ``(data, CacheMeta)``.
+    """Strict L2 read for the request path.  Returns ``(data, CacheMeta)``.
+
+    Looks up the warmer target for ``key`` and calls ``l2_cached_with_meta``
+    with that target's TTL / compute / category.  Defaults to strict mode
+    (``block_on_miss=False, lkg_fallback=True``) so the request path
+    never blocks on upstream — fresh L2 hit → stale-in-budget → LKG
+    snapshot → None.
+
+    Using this instead of a raw ``l2_cached`` call guarantees the
+    request-path compute fn matches what the warmer registered, so the
+    bg refresh (when L2 is stale) writes data shaped identically to
+    what the warmer would have written.
 
     The meta surfaces source provenance (l2_fresh / l2_stale / lkg /
-    miss) + as_of_ts so the template can render a "Cached · 2m ago"
-    badge or log degraded-mode renders.  Use when freshness matters
-    to the UI.
+    miss) + as_of_ts — use for "Cached · 2m ago" badges or
+    degraded-mode telemetry.  The thin ``read_via_l2`` wrapper drops
+    it for callers that don't need it.
+
+    Raises ``KeyError`` if the key isn't registered — surfacing that as
+    a programming error rather than a silent None.
     """
     from filings.cache_l2 import l2_cached_with_meta
     target = get_target(key)
     if target is None:
-        raise KeyError(f"warmer.read_via_l2_with_meta: '{key}' not registered")
+        raise KeyError(
+            f"warmer.read_via_l2: '{key}' is not in WARMER_TARGETS. "
+            f"Register it in filings/warmer.py before reading from the "
+            f"request path; otherwise the bg refresh path can't refill it."
+        )
     return await l2_cached_with_meta(
         versioned_key(target.key), ttl_seconds=target.ttl_seconds,
         compute=target.compute, category=target.category,
@@ -296,6 +262,24 @@ async def read_via_l2_with_meta(
         lkg_fallback=lkg_fallback,
         stale_budget_seconds=stale_budget_seconds,
     )
+
+
+async def read_via_l2(
+    key: str,
+    *,
+    block_on_miss: bool = False,
+    lkg_fallback: bool = True,
+    stale_budget_seconds: int | None = None,
+) -> Any:
+    """Data-only wrapper around ``read_via_l2_with_meta`` — same lookup,
+    drops the freshness metadata for callers that don't need it."""
+    data, _meta = await read_via_l2_with_meta(
+        key,
+        block_on_miss=block_on_miss,
+        lkg_fallback=lkg_fallback,
+        stale_budget_seconds=stale_budget_seconds,
+    )
+    return data
 
 
 # ── Tier runners ─────────────────────────────────────────────────────
@@ -341,10 +325,12 @@ async def warm_tier(tier: Tier) -> dict:
 
 
 async def warm_all() -> dict[str, dict]:
-    """Run every tier sequentially.  Used by the on-demand admin warmer
-    endpoint + at startup to prime cold workers."""
-    return {
-        "hot":  await warm_tier("hot"),
-        "warm": await warm_tier("warm"),
-        "cold": await warm_tier("cold"),
-    }
+    """Run every tier in parallel.  Tiers share no compute, so parallel
+    fanout gives boot wall-time = max(tier) instead of sum(tier).  Each
+    tier's internal gather is rate-limited by the heavy semaphore +
+    ``gate_supabase_async`` so this stays within the same backpressure
+    budget as the existing per-tier periodic tasks."""
+    hot_r, warm_r, cold_r = await asyncio.gather(
+        warm_tier("hot"), warm_tier("warm"), warm_tier("cold"),
+    )
+    return {"hot": hot_r, "warm": warm_r, "cold": cold_r}

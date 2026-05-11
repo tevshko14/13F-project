@@ -30,6 +30,7 @@ from typing import TypedDict
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
+from filings import warmer
 from filings.app_state import templates
 from filings.concurrency import to_light, to_supabase
 from filings.routers._redesign.helpers import (
@@ -287,7 +288,6 @@ async def _performance_index_chart(wider_rows: list[dict]) -> CongressPerfChartP
     try:
         # Strict L2 — index_market is on the hot-tier warmer (90 s).
         # Request path reads from Supabase only.
-        from filings import warmer
         idx = await warmer.read_via_l2("redesign:home:index_market")
         idx = idx or {}
     except Exception as exc:

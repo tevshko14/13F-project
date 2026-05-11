@@ -1,26 +1,18 @@
-"""Standardised Supabase L2 read-through cache with LKG fallback.
+"""Supabase L2 read-through cache with SWR + LKG sidecar.
 
-Adds two layers on top of ``supabase_cache``:
+Two layers on top of ``supabase_cache``:
 
   1. **Stale-while-revalidate** — a stale row is returned immediately
-     and the upstream is refreshed in the background, so the user-facing
-     request never waits on yfinance / Finnhub / etc.
+     and the upstream is refreshed in the background.
   2. **Last-known-good (LKG) sidecar** — every successful write also
-     persists a ``lkg:{key}`` row with no TTL.  When the primary L2 row
-     is missing AND the caller has opted out of synchronous upstream
-     fetching (``block_on_miss=False, lkg_fallback=True``), the request
-     falls back to the LKG snapshot instead of None / design-time mocks.
+     persists a ``lkg:{key}`` row with no TTL.  When ``block_on_miss=False
+     lkg_fallback=True``, an L2 miss reads the LKG snapshot before
+     falling through to None.
 
-The combination lets the request path read exclusively from Supabase
-even during a full upstream outage: fresh hit → stale hit → LKG hit →
-caller's bounded() fallback.  Upstream API failures stop affecting
-rendered pages once an LKG row exists for the key.
-
-L2 reads/writes run on the event loop via the async Supabase client
-(gated by ``gate_supabase_async`` for backpressure -- no thread
-held).  The ``compute_sync`` callable runs on the heavy pool via
-``to_heavy`` because the upstream libraries (yfinance, Finnhub, …)
-are sync.
+Read order: fresh hit → stale hit → LKG hit → None / compute.  Reads/
+writes run on the event loop via the async Supabase client (gated by
+``gate_supabase_async`` for backpressure).  Sync compute callables
+go through ``to_heavy`` for thread-pool budget.
 """
 
 from __future__ import annotations
@@ -38,12 +30,17 @@ logger = logging.getLogger(__name__)
 # ── LKG sidecar key naming ───────────────────────────────────────────
 
 
-def _lkg_key(key: str) -> str:
+def lkg_key(key: str) -> str:
     """LKG rows live under a parallel ``lkg:`` namespace so they coexist
     with the primary TTL'd row.  Overwritten on every successful refresh,
     so reading ``lkg:{key}`` always returns the most recent successful
     upstream snapshot."""
     return f"lkg:{key}"
+
+
+# Back-compat private alias — old call sites used `_lkg_key`.  Will be
+# removed once all callers migrate to the public name.
+_lkg_key = lkg_key
 
 
 # ── Cache metadata returned alongside data ──────────────────────────
@@ -72,7 +69,7 @@ class CacheMeta(TypedDict, total=False):
 # ── Public API ───────────────────────────────────────────────────────
 
 
-async def l2_cached(
+async def l2_cached_with_meta(
     key: str,
     ttl_seconds: int,
     compute: Callable[[], Any],
@@ -81,8 +78,14 @@ async def l2_cached(
     block_on_miss: bool = True,
     stale_budget_seconds: int | None = None,
     lkg_fallback: bool = False,
-) -> Any:
+) -> tuple[Any, CacheMeta]:
     """Read-through Supabase L2 cache with SWR + optional LKG fallback.
+
+    Returns ``(data, meta)``.  ``meta`` carries freshness info
+    (source, as_of_ts, age_seconds) so callers can render a "Cached ·
+    2m ago" badge or log degraded-mode renders without an extra
+    Supabase round-trip.  The thin ``l2_cached(...)`` wrapper drops
+    the meta for callers that don't need it.
 
     Args:
         key:                  Supabase cache key, e.g. ``"redesign:home:cnn_fg"``.
@@ -97,40 +100,30 @@ async def l2_cached(
                               ``False`` — cold miss returns LKG (if
                               ``lkg_fallback``) or None; ``compute`` is
                               still kicked off in the background so the
-                              next caller sees a fresh row.  Request-path
-                              callers that have warmer coverage should
-                              pass ``False`` to guarantee the request
-                              never blocks on upstream.
-        stale_budget_seconds: Beyond this age (since last successful
-                              upstream fetch), a stale row is treated as
+                              next caller sees a fresh row.
+        stale_budget_seconds: Beyond this age, a stale row is treated as
                               missing.  Default ``None`` = serve stale
-                              indefinitely.  Set on data that must not
-                              be served as live beyond a horizon.
+                              indefinitely.
         lkg_fallback:         When ``block_on_miss=False`` and the
                               primary row is missing/exceeded budget,
                               read ``lkg:{key}`` instead of returning
                               None.  No effect when ``block_on_miss=True``.
 
-    Returns:
-        Cached, LKG, or freshly-computed payload.  Returns ``None`` only
-        when every source failed.
-
-    Behavior matrix (block_on_miss / fresh / stale-in-budget / stale-over-budget / missing):
+    Behavior matrix:
 
       | block_on_miss | fresh L2 | stale L2 (in budget) | stale over budget | L2 missing |
       |---------------|----------|----------------------|-------------------|------------|
       | True          | return   | return + bg refresh  | compute + write   | compute + write |
       | False         | return   | return + bg refresh  | LKG / None + bg   | LKG / None + bg |
     """
-    data, meta = await _l2_cached_impl(
+    return await _l2_cached_impl(
         key, ttl_seconds, compute,
         category=category, block_on_miss=block_on_miss,
         stale_budget_seconds=stale_budget_seconds, lkg_fallback=lkg_fallback,
     )
-    return data
 
 
-async def l2_cached_with_meta(
+async def l2_cached(
     key: str,
     ttl_seconds: int,
     compute: Callable[[], Any],
@@ -139,18 +132,15 @@ async def l2_cached_with_meta(
     block_on_miss: bool = True,
     stale_budget_seconds: int | None = None,
     lkg_fallback: bool = False,
-) -> tuple[Any, CacheMeta]:
-    """Sibling of ``l2_cached`` that returns ``(data, meta)``.
-
-    ``meta`` carries freshness info (source, as_of_ts, age_seconds) so
-    callers can render a "Cached · 2m ago" badge or log degraded-mode
-    renders without an extra Supabase round-trip.
-    """
-    return await _l2_cached_impl(
+) -> Any:
+    """Data-only wrapper around ``l2_cached_with_meta`` — same behavior,
+    discards the freshness metadata for callers that don't need it."""
+    data, _meta = await l2_cached_with_meta(
         key, ttl_seconds, compute,
         category=category, block_on_miss=block_on_miss,
         stale_budget_seconds=stale_budget_seconds, lkg_fallback=lkg_fallback,
     )
+    return data
 
 
 # ── Internals ────────────────────────────────────────────────────────
@@ -256,18 +246,9 @@ async def _refresh(
 
 
 async def _writeback(key: str, category: str, payload: Any, ttl_seconds: int) -> None:
-    """Background task: write a payload to L2 + LKG.  Errors are swallowed.
-
-    Uses ``allow_drop=True`` so that under Supabase saturation we
-    skip the writeback entirely instead of piling up behind already-
-    timed-out calls.  Losing an L2 write is recoverable (next request
-    will recompute and try again); saturating the default pool with
-    background writes is what brings the site down.
-
-    LKG sidecar (``lkg:{key}`` with ``ttl_seconds=None``) is written
-    after the primary so a primary write failure doesn't poison the
-    LKG snapshot.  Both writes go through the same backpressure gate.
-    """
+    """Write a payload to L2 + LKG.  Errors swallowed; ``allow_drop=True``
+    so Supabase saturation skips the writeback instead of piling up.
+    LKG is written second so a primary failure doesn't poison the snapshot."""
     try:
         await gate_supabase_async(
             supabase_cache.set_cached_async(key, category, payload, ttl_seconds),

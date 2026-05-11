@@ -27,7 +27,7 @@ from typing import TypedDict
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from filings import supabase_cache
+from filings import supabase_cache, warmer
 from filings.app_state import templates
 from filings.cache_l2 import l2_cached as _l2_cached
 from filings.concurrency import to_heavy, to_supabase
@@ -1644,8 +1644,7 @@ async def _render_fund_detail(request: Request, *, cik: str, tab: str):
     # join doesn't hit yfinance during render.  Falls through to empty
     # dict if L2 + LKG are both cold — _funds_holdings_market_join then
     # uses get_current_prices_batch for missing prices.
-    from filings import warmer as _warmer
-    sp500_map = (await _warmer.read_via_l2("redesign:home:sp500_1d")) or {}
+    sp500_map = (await warmer.read_via_l2("redesign:home:sp500_1d")) or {}
 
     history, market_join, deployment, filings = await asyncio.gather(
         bounded(_fund_aum_history(cik),                        timeout=8.0,

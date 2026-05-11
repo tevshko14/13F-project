@@ -62,8 +62,9 @@ def test_ttl_at_least_2_5x_tier_interval():
 
 def test_targets_by_tier_filters_correctly():
     """targets_by_tier returns exactly the entries with matching tier."""
-    for tier in ("hot", "warm", "cold"):
-        subset = warmer.targets_by_tier(tier)  # type: ignore[arg-type]
+    tiers: tuple[warmer.Tier, ...] = ("hot", "warm", "cold")
+    for tier in tiers:
+        subset = warmer.targets_by_tier(tier)
         assert all(t.tier == tier for t in subset)
         assert len(subset) == sum(1 for t in warmer.WARMER_TARGETS if t.tier == tier)
 
@@ -110,14 +111,20 @@ async def test_warm_tier_calls_l2_cached_for_each_target(monkeypatch):
     assert result["total"]  == len(expected_keys)
 
 
-def test_versioned_key_appends_schema_version():
-    """versioned_key always adds the current CACHE_SCHEMA_VERSION suffix.
+def test_versioned_key_at_v1_returns_bare_key():
+    """At the inaugural CACHE_SCHEMA_VERSION (1), versioned_key returns
+    the bare key so existing L2 rows continue to be read.  Bumping to 2+
+    adds the ``:vN`` suffix and invalidates."""
+    assert warmer.CACHE_SCHEMA_VERSION == 1
+    assert warmer.versioned_key("foo:bar") == "foo:bar"
 
-    Bumping CACHE_SCHEMA_VERSION abandons all prior rows (they live out
-    their TTL untouched) and the warmer refills the new versioned keys
-    on its next cycle — clean schema rotation without manual purge.
-    """
-    assert warmer.versioned_key("foo:bar") == f"foo:bar:v{warmer.CACHE_SCHEMA_VERSION}"
+
+def test_versioned_key_above_v1_appends_suffix(monkeypatch):
+    """When CACHE_SCHEMA_VERSION > 1 the suffix is appended, abandoning
+    prior rows (they expire on their own TTL).  Bumping the constant is
+    the clean schema-rotation primitive."""
+    monkeypatch.setattr(warmer, "CACHE_SCHEMA_VERSION", 2)
+    assert warmer.versioned_key("foo:bar") == "foo:bar:v2"
 
 
 @pytest.mark.asyncio
@@ -164,7 +171,8 @@ async def test_warm_all_runs_every_tier(monkeypatch):
     result = await warmer.warm_all()
 
     assert set(result.keys()) == {"hot", "warm", "cold"}
-    for tier, status in result.items():
+    for tier_key, status in result.items():
+        tier: warmer.Tier = tier_key  # type: ignore[assignment]
         assert status["tier"]   == tier
         assert status["failed"] == []
-        assert status["total"]  == len(warmer.targets_by_tier(tier))  # type: ignore[arg-type]
+        assert status["total"]  == len(warmer.targets_by_tier(tier))

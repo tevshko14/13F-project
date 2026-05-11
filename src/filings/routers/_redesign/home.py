@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from filings import supabase_cache
+from filings import supabase_cache, warmer
 from filings.app_state import templates
 from filings.concurrency import (
     to_heavy,
@@ -520,7 +520,7 @@ async def _fetch_hero_chart() -> HeroChartPayload:
     OHLCV strips + the SSR defaults.  L2-cached for 2 min so cold-start
     workers warm from Supabase rather than blocking on yfinance.
     """
-    from filings import warmer
+
     try:
         # Strict L2 — hero_chart is warmed every 90 s.  On cold-cold
         # miss we serve LKG (last successful fetch, no TTL) or fall
@@ -1336,7 +1336,7 @@ async def _fetch_home_retail() -> dict:
         # Strict L2 — apewisdom is warmed at the warm tier (4 min).
         # The compute is async-native and lazy-imported via the warmer
         # registry so this read never holds a thread slot.
-        from filings import warmer
+
         items = await warmer.read_via_l2("redesign:home:apewisdom")
     except Exception as exc:
         logger.warning("Home retail fetch failed: %s", exc)
@@ -1385,7 +1385,7 @@ async def _fetch_home_feargreed() -> FearGreedPayload:
     try:
         # Strict L2 — cnn_fg is warmed at the warm tier (4 min).
         # Async-native compute lazy-imported via warmer registry.
-        from filings import warmer
+
         cnn = await warmer.read_via_l2("redesign:home:cnn_fg")
     except Exception as exc:
         logger.warning("Fear & Greed fetch failed: %s", exc)
@@ -1783,7 +1783,7 @@ async def _fetch_home_news(
     try:
         # Strict L2 — news_general is warmed at the warm tier (4 min).
         # Compute fn is owned by the warmer registry.
-        from filings import warmer
+
         articles = await warmer.read_via_l2("redesign:home:news_general")
     except Exception as exc:
         logger.warning("Home news fetch failed: %s", exc)
@@ -2013,7 +2013,7 @@ async def _fetch_home_heatmap_sectors() -> list[dict]:
     Strict L2 — sector_etfs is on the warm-tier warmer (4 min, TTL 10 min).
     """
     try:
-        from filings import warmer
+
         pcts = await warmer.read_via_l2("redesign:home:sector_etfs")
         pcts = pcts or {}
     except Exception as exc:
@@ -2049,7 +2049,7 @@ async def warm_homepage_caches() -> None:
     traffic flows.  Best-effort: failures are logged and swallowed.
     """
     try:
-        from filings import warmer
+
         status = await warmer.warm_all()
         logger.info("warm_homepage_caches: %s", status)
     except Exception as exc:
@@ -2160,7 +2160,7 @@ async def _fetch_home_cal_earnings(limit: int = 6) -> list[dict]:
     blocks on Finnhub or yfinance.
     """
     try:
-        from filings import warmer
+
         payload, sp_constituents = await asyncio.gather(
             warmer.read_via_l2("redesign:home:earnings_4w"),
             warmer.read_via_l2("redesign:home:sp500_constituents"),
@@ -2305,7 +2305,7 @@ async def preview_home(request: Request):
     # LKG has a row yet, the read returns None and the `_bounded_call`
     # below substitutes the empty-dict fallback.  Timeout bumped down
     # to 1.5 s — at this point we're reading Supabase, not yfinance.
-    from filings import warmer
+
     sp_1d_map, idx_market_map = await asyncio.gather(
         _bounded_call(
             warmer.read_via_l2("redesign:home:sp500_1d"),
@@ -2649,7 +2649,7 @@ async def warm_l2_caches() -> dict:
     on-demand admin endpoint.  Phase 2 introduced hot/warm/cold tiers
     run on separate intervals — see ``filings.warmer.warm_tier``.
     """
-    from filings import warmer
+
     return await warmer.warm_tier("warm")
 
 
