@@ -34,6 +34,7 @@ from filings.app_state import templates
 from filings.concurrency import to_heavy, to_supabase
 from filings.routers._redesign.helpers import (
     _bounded,
+    _bounded_call,
     _shell_context,
     _short_date,
     GracefulRoute,
@@ -2125,10 +2126,14 @@ async def preview_macro(
     # /macro went from ~24s p99 to ~12s p99 with this change.  None of
     # the heatmap inputs read from the other fetches' results, so the
     # merge is data-flow safe.
+    # Volatility was cut from this gather — it's lazy-loaded via
+    # /api/macro/volatility on first tab activation.  Saves up to
+    # 12 s off the macro page's initial-paint when yfinance is
+    # degraded (CBOE/yfinance options data is the worst-case fetch).
     (
         payload, yield_curve, fx_payload, idx_payload, calendar_rows,
         earnings_payload, calendar_payload, performance_payload,
-        events_payload, debt_payload, volatility_payload, sentiment_payload,
+        events_payload, debt_payload, sentiment_payload,
         heatmap_companies_rows, heatmap_sectors_rows,
     ) = await asyncio.gather(
         bounded(_fetch_macro_indicators(),                          timeout=8.0, fallback={},   name="indicators"),
@@ -2145,14 +2150,11 @@ async def preview_macro(
         bounded(_v2_events_calendar_payload(ev_period, ev_country, ev_impact),
                 timeout=6.0,  fallback=_v2_events_calendar_empty, name="events"),
         bounded(to_heavy(_treasury_data.get_debt_data),             timeout=6.0, fallback=None, name="debt"),
-        bounded(_v2_volatility_payload(pc_type),
-                timeout=12.0, fallback=_v2_volatility_empty, name="volatility"),
         # Sentiment is L2-only on the request path — slow Google Trends
         # fetch runs in a background task, so this should always be ~10ms.
-        # Bumped from 2s after the simplify-pass review: a regional
-        # Supabase blip can spike past 2s and would spuriously trigger
-        # the warmer + show "warming up" placeholders even when data
-        # exists.  4s is still well under any user-perceived stall.
+        # 4s timeout chosen to survive regional Supabase blips without
+        # spuriously triggering the warmer / showing "warming up"
+        # placeholders when fresh data exists.
         bounded(_v2_sentiment_payload(),
                 timeout=4.0,  fallback={"have_data": False, "cards": [],
                                         "categories": [], "is_warming": True}, name="sentiment"),
@@ -2211,7 +2213,33 @@ async def preview_macro(
         "events":           events_payload,
         "ev_view":          ev_view,
         "earn_view":        earn_view,
-        "vol":              volatility_payload,
+        # `vol` is now fetched via /api/macro/volatility on tab
+        # activation — pass the active pc_type through so the lazy
+        # endpoint URL carries the user's sub-tab selection.
+        "vol_pc_type":      pc_type,
         "sentiment":        sentiment_payload,
     }
     return templates.TemplateResponse("_redesign/macro.html", ctx)
+
+
+@router.get("/api/macro/volatility", response_class=HTMLResponse)
+async def preview_macro_volatility_partial(
+    request: Request, pc_type: str = "total",
+):
+    """Lazy-loaded Volatility pane — Put/Call ratio + VIX term + SKEW.
+
+    Cut from the initial /macro gather so a slow CBOE/yfinance options
+    fetch (worst case 12 s) doesn't bound the macro page's first paint.
+    The pane's skeleton in macro.html carries
+    ``data-pane-fetch="/api/macro/volatility?..."``; ``ppBindActivator``
+    fires this on first activation and replaces the stub with the
+    rendered partial.
+    """
+    volatility_payload = await _bounded_call(
+        _v2_volatility_payload(pc_type),
+        timeout=12.0, fallback=_v2_volatility_empty, name="volatility",
+    )
+    return templates.TemplateResponse(
+        "_redesign/partials/macro_volatility.html",
+        {"request": request, "vol": volatility_payload},
+    )

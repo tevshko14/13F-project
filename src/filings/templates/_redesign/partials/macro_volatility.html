@@ -1,0 +1,172 @@
+{#-
+  Macro · Volatility pane partial — fetched on first Volatility-tab
+  activation.  See `preview_macro_volatility_partial` in
+  filings/routers/_redesign/macro.py.
+-#}
+{% from "_redesign/macros/_primitives.html" import panel, panel_head, label %}
+
+{# ── Sub-segment: Total / Index / Equity drives the P/C ratio source ── #}
+<div class="pp-macro-subtabs">
+  <div class="pp-segment pp-segment-mono pp-segment-accent" id="pp-macro-vol-pcseg" role="tablist">
+    {% for k, lbl in (vol.pc_types or {}).items() %}
+      <a class="pp-segment-opt {% if (vol.current_pc or 'total') == k %}is-active{% endif %}"
+         href="?tab=volatility&pc_type={{ k }}"
+         data-value="{{ k }}" role="tab" tabindex="0">{{ lbl }}</a>
+    {% endfor %}
+  </div>
+  <span class="pp-mono pp-dim pp-macro-subtabs-meta">
+    Volatility &amp; Options Sentiment
+  </span>
+</div>
+
+<div class="pp-row pp-row-2-1">
+  {# ── Put/Call Ratio (1 year) ── #}
+  {% call panel() %}
+    {{ panel_head("Put/Call Ratio",
+                  sub=(vol.pc.ratio_label|default('Total')) ~ " · 1 Year") }}
+    {% if vol.pc.have_data %}
+      <div class="pp-macro-vol-pc-body">
+        <div class="pp-macro-vol-pc-stats">
+          <div class="pp-macro-vol-pc-stat">
+            {{ label("CURRENT") }}
+            <span class="pp-macro-vol-pc-cur">{{ vol.pc.current }}</span>
+          </div>
+          <div class="pp-macro-vol-pc-stat">
+            {{ label("SIGNAL") }}
+            <span class="pp-macro-vol-pc-signal pp-macro-vol-pc-signal-{{ vol.pc.signal.tone }}">
+              {{ vol.pc.signal.label }}
+            </span>
+          </div>
+        </div>
+        <div class="pp-chart-hover pp-macro-vol-pc-chart"
+             data-vb-w="{{ vol.pc.vb_w }}" data-vb-h="{{ vol.pc.vb_h }}"
+             data-chart-points='{{ vol.pc.hover_points|default([])|tojson }}'>
+          <svg class="pp-macro-vol-pc-svg"
+               viewBox="0 0 {{ vol.pc.vb_w }} {{ vol.pc.vb_h }}"
+               preserveAspectRatio="none"
+               aria-label="Put/Call ratio history">
+            {% for t in vol.pc.y_ticks %}
+              <line class="pp-home-chart-grid"
+                    x1="50" x2="{{ vol.pc.vb_w - 8 }}"
+                    y1="{{ t.y }}" y2="{{ t.y }}"
+                    vector-effect="non-scaling-stroke"/>
+            {% endfor %}
+            {# 1.0 threshold (bearish/bullish split) #}
+            <line x1="50" x2="{{ vol.pc.vb_w - 8 }}"
+                  y1="{{ vol.pc.threshold_y }}" y2="{{ vol.pc.threshold_y }}"
+                  stroke="var(--pp-down)" stroke-width="1"
+                  stroke-dasharray="6 4"
+                  vector-effect="non-scaling-stroke"/>
+            <path d="{{ vol.pc.path_d }}" fill="none"
+                  stroke="var(--pp-up)" stroke-width="2"
+                  vector-effect="non-scaling-stroke"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="pp-macro-vol-pc-yaxis">
+          {% for t in vol.pc.y_ticks %}
+            <span class="pp-mono pp-macro-vol-pc-ytick"
+                  style="top: {{ (t.y / vol.pc.vb_h * 100) }}%;">{{ t.label }}</span>
+          {% endfor %}
+        </div>
+        <div class="pp-macro-vol-pc-xaxis">
+          <span class="pp-mono pp-dim">{{ vol.pc.first_date }}</span>
+          <span class="pp-mono pp-dim">{{ vol.pc.last_date }}</span>
+        </div>
+      </div>
+    {% else %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-sub">Put/Call ratio data unavailable.</div>
+      </div>
+    {% endif %}
+  {% endcall %}
+
+  {# ── VIX term structure ── #}
+  {% call panel() %}
+    {{ panel_head("VIX Term Structure",
+                  sub=(vol.vix.state|default('—')) ~ (" · spot " ~ vol.vix.spot if vol.vix.spot else "")) }}
+    {% if vol.vix.have_data %}
+      <div class="pp-macro-vol-vix-body">
+        <div class="pp-chart-hover pp-macro-vol-vix-chart"
+             data-vb-w="{{ vol.vix.vb_w }}" data-vb-h="{{ vol.vix.vb_h }}"
+             data-chart-points='{{ vol.vix.hover_points|default([])|tojson }}'>
+          <svg class="pp-macro-vol-vix-svg"
+               viewBox="0 0 {{ vol.vix.vb_w }} {{ vol.vix.vb_h }}"
+               preserveAspectRatio="none"
+               aria-label="VIX term structure">
+            <path d="{{ vol.vix.path_d }}" fill="none"
+                  stroke="var(--pp-accent)" stroke-width="2.4"
+                  vector-effect="non-scaling-stroke"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+            {% for d in vol.vix.dots %}
+              <circle cx="{{ d.x }}" cy="{{ d.y }}" r="4"
+                      fill="var(--pp-bg)" stroke="var(--pp-accent)" stroke-width="2"
+                      vector-effect="non-scaling-stroke"/>
+            {% endfor %}
+          </svg>
+        </div>
+        <div class="pp-macro-vol-vix-axis">
+          {% for d in vol.vix.dots %}
+            <span class="pp-macro-vol-vix-tick"
+                  style="left: {{ (d.x / vol.vix.vb_w * 100) }}%;">
+              <span class="pp-mono pp-macro-vol-vix-tenor">{{ d.label }}</span>
+              <span class="pp-mono pp-macro-vol-vix-val">{{ d.value }}</span>
+            </span>
+          {% endfor %}
+        </div>
+        {% if vol.vix.updated %}
+          <span class="pp-mono pp-dim2 pp-macro-vol-vix-updated">Updated {{ vol.vix.updated }}</span>
+        {% endif %}
+      </div>
+    {% else %}
+      <div class="pp-page-placeholder">
+        <div class="pp-page-placeholder-sub">VIX term structure data unavailable.</div>
+      </div>
+    {% endif %}
+  {% endcall %}
+</div>
+
+{# ── CBOE SKEW Index ── #}
+{% call panel() %}
+  {{ panel_head("CBOE SKEW Index",
+                sub="Tail Risk Indicator · 1 Year"
+                    ~ (" · current " ~ vol.skew.current if vol.skew.current else "")) }}
+  {% if vol.skew.have_data %}
+    <div class="pp-macro-vol-skew-body">
+      <div class="pp-chart-hover pp-macro-vol-skew-chart"
+           data-vb-w="{{ vol.skew.vb_w }}" data-vb-h="{{ vol.skew.vb_h }}"
+           data-chart-points='{{ vol.skew.hover_points|default([])|tojson }}'>
+      <svg class="pp-macro-vol-skew-svg"
+           viewBox="0 0 {{ vol.skew.vb_w }} {{ vol.skew.vb_h }}"
+           preserveAspectRatio="none"
+           aria-label="CBOE SKEW index">
+        {% if vol.skew.threshold_y is not none %}
+          <line x1="50" x2="{{ vol.skew.vb_w - 8 }}"
+                y1="{{ vol.skew.threshold_y }}" y2="{{ vol.skew.threshold_y }}"
+                stroke="var(--pp-down)" stroke-width="1"
+                stroke-dasharray="6 4"
+                vector-effect="non-scaling-stroke"/>
+        {% endif %}
+        <path d="{{ vol.skew.path_d }}" fill="none"
+              stroke="var(--pp-accent)" stroke-width="2"
+              vector-effect="non-scaling-stroke"
+              stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      </div>{# /pp-chart-hover #}
+      <div class="pp-macro-vol-pc-xaxis">
+        <span class="pp-mono pp-dim">{{ vol.skew.first_date }}</span>
+        <span class="pp-mono pp-dim">{{ vol.skew.last_date }}</span>
+      </div>
+    </div>
+  {% else %}
+    <div class="pp-page-placeholder">
+      <div class="pp-page-placeholder-sub">SKEW index data unavailable.</div>
+    </div>
+  {% endif %}
+{% endcall %}
+
+<p class="pp-macro-sentiment-foot">
+  Put/Call Ratio from CBOE.  VIX data from Yahoo Finance.  SKEW from CBOE via Yahoo Finance.
+  P/C &gt; 1.0 = bearish (more puts), P/C &lt; 0.7 = bullish (more calls).
+  SKEW &gt; 130 = elevated tail risk.
+</p>

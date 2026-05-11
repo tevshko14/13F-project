@@ -458,6 +458,27 @@
       if (opts.paneIdPrefix) return (p.id || '').replace(opts.paneIdPrefix, '');
       return null;
     }
+    /* Lazy-load any pane carrying `data-pane-fetch="..."` on first
+       activation.  The pane ships a skeleton server-side; the first
+       activation (initial render OR tab click) replaces the skeleton
+       with fetched HTML.  Keeps yfinance / Finnhub / other slow
+       upstreams off the critical render path. */
+    function loadPane(p) {
+      var url = p.getAttribute('data-pane-fetch');
+      if (!url || p.dataset.loaded) return;
+      p.dataset.loaded = '1';
+      fetch(url, {credentials: 'same-origin'})
+        .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
+        .then(function (html) { p.innerHTML = html; })
+        .catch(function () {
+          p.dataset.loaded = '';
+          var stub = p.querySelector('[data-pane-stub]');
+          if (stub) {
+            stub.innerHTML = '<div class="pp-page-placeholder-sub">' +
+              'Failed to load — switch tabs to retry.</div>';
+          }
+        });
+    }
     function activate(value) {
       seg.querySelectorAll('.pp-segment-opt').forEach(function (o) {
         var match = o.getAttribute('data-value') === value;
@@ -469,8 +490,19 @@
         if (hideMode) {
           p.classList.toggle('is-hidden', !(value === allKey || value === k));
         } else {
-          p.classList.toggle('is-active', value === k);
+          var active = value === k;
+          p.classList.toggle('is-active', active);
+          if (active) loadPane(p);
         }
+      });
+    }
+    /* Trigger lazy-load for any pane already active on initial render.
+       Tab activation via click goes through `activate()`; this branch
+       covers the page-load case where the active tab was set
+       server-side and never fires a click. */
+    if (!hideMode) {
+      panels.forEach(function (p) {
+        if (p.classList.contains('is-active')) loadPane(p);
       });
     }
     seg.addEventListener('click', function (ev) {

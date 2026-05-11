@@ -63,6 +63,7 @@ EXPECTED_ROUTES: set[tuple[str, str]] = {
     # Other feature pages
     ("GET", "/retail"),
     ("GET", "/macro"),
+    ("GET", "/api/macro/volatility"),  # Phase 6 lazy partial
     # Support / payments
     ("GET", "/support"),
     ("GET", "/support/thank-you"),
