@@ -107,7 +107,7 @@ def get_expirations(ticker: str) -> list[str]:
     if cached is not None:
         return cached
 
-    data = _tradier_get(f"/markets/options/expirations", params={
+    data = _tradier_get("/markets/options/expirations", params={
         "symbol": key,
         "includeAllRoots": "true",
     })

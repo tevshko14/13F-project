@@ -25,7 +25,6 @@ import logging
 import os
 import threading
 import time
-import json
 import zipfile
 from datetime import datetime, timedelta
 
@@ -164,7 +163,6 @@ _TICKER_TO_DOMAIN: dict[str, str] = {
     "PINS": "pinterest.com",
     "SNAP": "snapchat.com",
     "TTD": "thetradedesk.com",
-    "NFLX": "netflix.com",
     "DIS": "disneyplus.com",
 }
 

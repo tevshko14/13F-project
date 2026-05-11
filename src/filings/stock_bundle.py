@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import collections as _collections
 import dataclasses as _dc
-import json as _json
 import logging
 import os
 import re as _re

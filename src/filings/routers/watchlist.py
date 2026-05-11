@@ -19,10 +19,10 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 
 from filings import supabase_cache
-from filings.app_state import templates, valid_ticker
+from filings.app_state import valid_ticker
 
 router = APIRouter()
 

@@ -1606,9 +1606,6 @@ def resolve_stock_info(ticker: str, cache_data: dict) -> StockInfo:
     Always tries to resolve logo_domain via yfinance.
     Always returns a StockInfo — never raises.
     """
-    import logging
-
-    logger = logging.getLogger(__name__)
     ticker_upper = ticker.upper().strip()
 
     # Single yfinance fetch (cached with 1h TTL)

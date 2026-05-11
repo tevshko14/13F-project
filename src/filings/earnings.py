@@ -579,7 +579,6 @@ def _parse_earnings_dates(ticker: str, tk, fy_end_month: int | None = None) -> l
 
 def _parse_forward_estimates(tk) -> dict | None:
     """Parse forward EPS and revenue estimates from yfinance."""
-    import pandas as pd
 
     result: dict = {}
 

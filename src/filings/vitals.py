@@ -31,7 +31,7 @@ from datetime import datetime
 
 from filings import supabase_cache
 from filings.cache import CACHE_DIR
-from filings.caching import MISS, TTLCache
+from filings.caching import TTLCache
 
 logger = logging.getLogger(__name__)
 

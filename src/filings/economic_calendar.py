@@ -337,9 +337,6 @@ def fetch_economic_events(
         filtered.append(ev)
 
     # ── Enrich events ────────────────────────────────────────────
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    now_time_str = datetime.now().strftime("%H:%M")
-
     for ev in filtered:
         # Category
         ev["category"] = _categorise(ev.get("event", ""))

@@ -23,7 +23,7 @@ import argparse
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import yfinance as yf
 import pandas as pd

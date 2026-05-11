@@ -399,8 +399,6 @@ def _fetch_from_earnings_history(
 
             actual_eps = _safe_float(row.get("eps_actual"))
             est_eps = _safe_float(row.get("eps_estimate"))
-            actual_rev = _safe_float(row.get("revenue_actual"))
-            est_rev = _safe_float(row.get("revenue_estimate"))
 
             # Skip rows without any actuals
             if actual_eps is None:

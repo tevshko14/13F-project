@@ -54,3 +54,21 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/filings"]
 artifacts = ["src/filings/static/*", "src/filings/templates/**/*"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+# Default rule selection (E, F) plus warnings.  Skip style rules that
+# fight intentional patterns in this codebase: one-line guard clauses
+# (`if x: continue`) and deferred imports inside route handlers /
+# fetcher closures (we use these to break import cycles).
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # line too long -- visual review, not auto-enforced
+    "E701",  # one-line `if x: y` -- preferred for tight guard clauses
+    "E702",  # one-line `x; y` -- same
+    "E402",  # late imports -- intentional for cycle-breaking + lazy load
+    "E741",  # ambiguous var names (l/I/O) -- legacy spots, low value to fix
+]

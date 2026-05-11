@@ -3713,8 +3713,6 @@ def build_leaderboard_from_db(
     Returns the same dict shape that ``short_interest_sync._build_leaderboard``
     produces, or ``None`` if no data is available.
     """
-    import time
-
     rows = get_latest_short_interest_all(limit=limit)
     if not rows:
         return None

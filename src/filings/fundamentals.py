@@ -491,8 +491,6 @@ def _compute_ratios(
     def _get(items: dict, label: str, period: str) -> float | None:
         return items.get(label, {}).get(period)
 
-    ratio_defs: list[tuple[str, Any]] = []
-
     # ── Profitability ────────────────────────────────────────────────
     def gross_margin(p: str) -> float | None:
         return _safe_pct(_get(income_items, "Gross Profit", p),

@@ -11,7 +11,6 @@ Provides:
 
 import json
 import logging
-import time
 import urllib.request
 from datetime import datetime, timedelta
 

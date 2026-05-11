@@ -20,7 +20,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import date as _date, datetime, timezone
 
 import httpx

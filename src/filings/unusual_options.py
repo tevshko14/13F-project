@@ -18,8 +18,8 @@ import os
 import threading
 import time
 from collections import defaultdict
-from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timezone
+from dataclasses import asdict, dataclass
+from datetime import date
 
 from filings import supabase_cache
 from filings.caching import TTLCache

@@ -1577,13 +1577,11 @@ async def _fetch_home_fund_flows(request: Request, limit: int = 6) -> list[dict]
                 continue
             action = _FUND_STATUS_MAP.get(raw_status, raw_status)
             cusip = c.get("cusip", "")
-            # Resolve ticker; fall back to first 5 chars of issuer if unknown.
+            # Resolve ticker; skip the row if we can't (no robust way to
+            # derive a ticker from "MARTIN MARIETTA MATERIALS"-style issuer
+            # names — we prefer hiding the row to showing junk).
             ticker = c.get("ticker") or cmap.get(cusip) or ""
             if not ticker:
-                issuer = c.get("issuer") or ""
-                # Try to extract a plausible ticker-ish token from the issuer
-                # name (e.g. "MARTIN MARIETTA MATERIALS" → "MMM"-style).  We
-                # prefer hiding the row to showing junk.
                 continue
 
             # Approximate trade $ delta from share_change × implied price.
@@ -1628,7 +1626,11 @@ async def _fetch_home_insiders(limit: int = 5) -> list[dict]:
     """5 most recent insider trades shaped for the Home Overview list."""
     try:
         from filings import insider_trading
-        trades = await to_heavy(
+        # insider_trading.get_latest_insider_trades is Supabase-first
+        # (hot table + cold archive; OpenInsider scrape is emergency
+        # fallback only).  Route through to_supabase so it can't get
+        # queued behind slow yfinance work on the heavy pool.
+        trades = await to_supabase(
             insider_trading.get_latest_insider_trades, "", limit, "",
         )
     except Exception as exc:
@@ -1658,7 +1660,7 @@ async def _fetch_home_congress(limit: int = 5) -> list[dict]:
     """5 most recent congress trades shaped for the Home Overview list."""
     try:
         from filings import supabase_cache
-        rows_raw = await to_heavy(
+        rows_raw = await to_supabase(
             supabase_cache.get_congress_recent_trades, limit,
         )
     except Exception as exc:
@@ -2126,7 +2128,7 @@ def _build_news_market_wire(
             return
         try:
             pct_f = float(pct)
-            price_f = float(price)
+            float(price)  # validate; we format the raw `price` value below
         except (TypeError, ValueError):
             return
         sign = "+" if pct_f >= 0 else "−"
@@ -5621,8 +5623,7 @@ async def _stock_build_vitals(request: Request, ticker: str) -> dict:
         _yf_info(), _peer_tickers(), _events(),
     )
 
-    # ── Institutional ownership: count of distinct super-fund holdings. ──
-    fund_cache = getattr(request.app.state, "fund_cache", {}) or {}
+    # ── Institutional ownership: yfinance-reported % held by institutions. ──
     inst_pct = info.get("heldPercentInstitutions")
 
     def _pct_str(v: float | None) -> str:
@@ -7516,8 +7517,8 @@ async def _fetch_screener_signals(months: int = 3) -> dict:
         return {"insiders": [], "congress": []}
 
     insiders, congress = await asyncio.gather(
-        to_heavy(insider_trading.get_latest_insider_trades, "", 200, ""),
-        to_heavy(supabase_cache.get_congress_trades_recent_months, months, 5000),
+        to_supabase(insider_trading.get_latest_insider_trades, "", 200, ""),
+        to_supabase(supabase_cache.get_congress_trades_recent_months, months, 5000),
         return_exceptions=True,
     )
     if isinstance(insiders, Exception):
@@ -7936,7 +7937,7 @@ async def _fetch_congress_data() -> dict:
     """Read recent congressional trades from Supabase cache."""
     try:
         from filings import supabase_cache
-        rows = await to_heavy(supabase_cache.get_congress_recent_trades, 60)
+        rows = await to_supabase(supabase_cache.get_congress_recent_trades, 60)
     except Exception as exc:
         logger.warning("Congress trades fetch failed: %s", exc)
         rows = None
@@ -8051,7 +8052,7 @@ async def _fetch_congress_members() -> list[dict]:
     """Member profile rows — name/party/chamber/state/net_worth."""
     try:
         from filings import supabase_cache
-        rows = await to_heavy(supabase_cache.get_all_congress_members)
+        rows = await to_supabase(supabase_cache.get_all_congress_members)
     except Exception as exc:
         logger.warning("Congress members fetch failed: %s", exc)
         return []
@@ -9038,7 +9039,6 @@ def _insiders_clusters_panel(trades: list, top_n: int = 4) -> list[dict]:
     """Group trades by ticker; surface tickers with 3+ insiders all trading
     the same direction inside the window.  Returns the densest 4 cards by
     aggregate dollar volume — matches the design's 2x2 grid."""
-    from collections import defaultdict
 
     by_ticker: dict[str, dict] = {}
     for tr in trades:

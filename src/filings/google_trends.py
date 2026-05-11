@@ -25,13 +25,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import threading
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
-from urllib.parse import quote
+from datetime import datetime
 
 import httpx
 

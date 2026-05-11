@@ -47,7 +47,6 @@ from fastapi.responses import (
     Response,
 )
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -73,14 +72,13 @@ from filings import (
     google_trends,
 )
 from filings.app_state import (
-    real_ip as _real_ip,
     templates,
     valid_cik as _valid_cik,
     valid_cusip as _valid_cusip,
     valid_member_id as _valid_member_id,
     valid_ticker as _valid_ticker,
 )
-from filings.concurrency import to_heavy as _to_heavy
+from filings.concurrency import to_heavy as _to_heavy, to_supabase as _to_supabase
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.routers import auth_admin as _auth_admin_router
 from filings.routers import redesign_preview as _redesign_preview_router
@@ -4651,7 +4649,7 @@ async def signals_short_interest(request: Request, ticker: str):
     ticker = ticker.upper().strip()
     if not _valid_ticker(ticker):
         return PlainTextResponse("Invalid ticker", status_code=400)
-    rows = await _to_heavy(supabase_cache.get_short_interest_history, ticker, 24)
+    rows = await _to_supabase(supabase_cache.get_short_interest_history, ticker, 24)
     return templates.TemplateResponse(
         "partials/short_interest_ticker.html",
         {"request": request, "ticker": ticker, "history": rows},
@@ -6227,6 +6225,7 @@ async def earnings_calendar_day_api(
     date: str = "",
 ):
     """HTMX endpoint — returns the day detail table partial."""
+    import re
     from filings import earnings_calendar
     from datetime import datetime
 
