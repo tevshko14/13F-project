@@ -855,6 +855,69 @@ async def get_cached_with_stale_async(
         return None, False
 
 
+async def get_cached_full_row_async(
+    cache_key: str,
+) -> dict | None:
+    """Richer L2 reader that surfaces freshness metadata.
+
+    Returns a dict ``{data, is_fresh, expires_at, ttl_seconds, as_of_ts,
+    age_seconds}`` or ``None`` on cache miss / Supabase unavailable.
+
+    ``as_of_ts`` is derived from ``expires_at - ttl_seconds`` (the schema
+    has no separate ``updated_at`` column on api_cache).  ``age_seconds``
+    is the wall-clock age right now.  Used by ``cache_l2.l2_cached_with_meta``
+    so the request path can render "Cached · 2m ago" badges without an
+    extra round-trip.
+    """
+    client = await _get_async_client()
+    if client is None:
+        return None
+
+    try:
+        resp = await (
+            client.table(_TABLE)
+            .select("response_data, expires_at, ttl_seconds")
+            .eq("cache_key", cache_key)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return None
+
+    row = resp.data if resp else None
+    if row is None:
+        return None
+    data = row.get("response_data")
+    if data is None:
+        return None
+    expires_at = row.get("expires_at")
+    ttl_seconds = row.get("ttl_seconds")
+
+    now = datetime.now(timezone.utc)
+    is_fresh = True
+    as_of_ts: str | None = None
+    age_seconds: int | None = None
+    if expires_at is not None:
+        try:
+            exp_dt = datetime.fromisoformat(expires_at)
+            is_fresh = exp_dt >= now
+            if ttl_seconds is not None:
+                as_of_dt = exp_dt - timedelta(seconds=int(ttl_seconds))
+                as_of_ts = as_of_dt.isoformat()
+                age_seconds = int((now - as_of_dt).total_seconds())
+        except (ValueError, TypeError):
+            pass
+    return {
+        "data":         data,
+        "is_fresh":     is_fresh,
+        "expires_at":   expires_at,
+        "ttl_seconds":  ttl_seconds,
+        "as_of_ts":     as_of_ts,
+        "age_seconds":  age_seconds,
+    }
+
+
 # Keys whose value changes every fetch (timestamps, freshness markers)
 # but whose presence does NOT mean the underlying data changed.  Stripped
 # from `_compute_hash` so re-fetching identical upstream data doesn't
@@ -1018,6 +1081,7 @@ def set_cached(
         "category": category,
         "response_data": data,
         "expires_at": expires_at,
+        "ttl_seconds": ttl_seconds,
         "content_hash": new_hash,
     }
 
@@ -1110,6 +1174,7 @@ async def set_cached_async(
         "category": category,
         "response_data": data,
         "expires_at": _expires_at_iso(ttl_seconds),
+        "ttl_seconds": ttl_seconds,
         "content_hash": new_hash,
     }
     try:
