@@ -449,15 +449,20 @@ class TestTopTickersHelper:
         from filings.web import _top_tickers
         self._top_tickers = _top_tickers
 
+    # _top_tickers used to read from ``top_holdings``; the prefix was
+    # dropped (it duplicated ``all_holdings[:N]``) and the helper now
+    # reads from ``all_holdings`` directly.  These tests carry the new
+    # contract.
+
     def test_extracts_valid_tickers(self):
-        cached = {"top_holdings": [
+        cached = {"all_holdings": [
             {"ticker": "AAPL", "issuer": "Apple"},
             {"ticker": "META", "issuer": "Meta"},
         ]}
         assert self._top_tickers(cached) == ["AAPL", "META"]
 
     def test_skips_none_tickers(self):
-        cached = {"top_holdings": [
+        cached = {"all_holdings": [
             {"ticker": "AAPL", "issuer": "Apple"},
             {"ticker": None, "issuer": "Hilton Grand Vacations"},
             {"ticker": "GOOGL", "issuer": "Alphabet"},
@@ -465,33 +470,33 @@ class TestTopTickersHelper:
         assert self._top_tickers(cached) == ["AAPL", "GOOGL"]
 
     def test_respects_n_parameter(self):
-        cached = {"top_holdings": [
+        cached = {"all_holdings": [
             {"ticker": "AAPL"}, {"ticker": "META"}, {"ticker": "GOOGL"},
             {"ticker": "AMZN"}, {"ticker": "MSFT"},
         ]}
         assert self._top_tickers(cached, n=3) == ["AAPL", "META", "GOOGL"]
 
     def test_default_n_is_5(self):
-        cached = {"top_holdings": [
+        cached = {"all_holdings": [
             {"ticker": f"T{i}"} for i in range(10)
         ]}
         assert len(self._top_tickers(cached)) == 5
 
     def test_empty_holdings(self):
-        assert self._top_tickers({"top_holdings": []}) == []
+        assert self._top_tickers({"all_holdings": []}) == []
 
-    def test_missing_top_holdings_key(self):
+    def test_missing_all_holdings_key(self):
         assert self._top_tickers({}) == []
 
     def test_all_none_tickers(self):
-        cached = {"top_holdings": [
+        cached = {"all_holdings": [
             {"ticker": None}, {"ticker": None}, {"ticker": None},
         ]}
         assert self._top_tickers(cached) == []
 
     def test_missing_ticker_key_in_holding(self):
         """Holdings without a 'ticker' key at all should be skipped."""
-        cached = {"top_holdings": [
+        cached = {"all_holdings": [
             {"issuer": "Apple"},  # no ticker key
             {"ticker": "META"},
         ]}
