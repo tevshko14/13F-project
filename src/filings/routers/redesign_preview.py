@@ -136,18 +136,24 @@ async def _bounded_call(coro, *, timeout: float, fallback, name: str):
       - any other exception (call raised)
       - result is None (upstream's circuit-breaker returned no data)
 
+    ``fallback`` may be a value or a zero-arg callable; callables are
+    invoked only on the failure path, so callers can pass heavy-to-build
+    payloads (sin/cos series, json.dumps, etc.) without paying for them
+    on the happy path.
+
     Same shape as the `_bounded` closure inside `build_stock_data_bundle`,
     but free-standing so the homepage handler can use it too without
     pulling in the bundle's source-status tracking.
     """
     try:
         result = await asyncio.wait_for(coro, timeout=timeout)
-        return result if result is not None else fallback
+        if result is not None:
+            return result
     except asyncio.TimeoutError:
         logger.warning("%s timed out after %.1fs", name, timeout)
     except Exception as exc:
         logger.warning("%s failed: %s", name, exc)
-    return fallback
+    return fallback() if callable(fallback) else fallback
 
 
 # Tickers currently being refreshed by an SWR background task.
@@ -2772,6 +2778,17 @@ async def preview_home(request: Request):
     # `/api/home/{heatmap,activity,calendar}` (see partial handlers
     # below).  Skipping their 5 fetchers here saves ~5 thread slots and
     # ~95KB of HTML on the default Overview landing.
+    #
+    # Each fetcher is wrapped in `_bounded_call(timeout=4.0, fallback=…)`
+    # so that ONE slow fetcher (cold-L2 hero chart blocked on yfinance,
+    # FRED hiccup, etc.) can't drag the whole gather to its worst-case.
+    # Each fallback matches the fetcher's own internal mock so the
+    # template renders identically to an internal-error path.  Worst
+    # case homepage budget: Phase 1 (3s) + Phase 2 (4s) ≈ 7s.
+    #
+    # Heavy fallbacks (hero payload, feargreed mock, news 4-tuple) are
+    # passed as zero-arg callables so they only build on the failure
+    # path — saves a few ms per happy-path request.
     (
         kpi_items, hero,
         top_movers_rows, fund_flows_full, insider_rows, congress_full,
@@ -2779,18 +2796,64 @@ async def preview_home(request: Request):
         flow_trending_payload,
         news_payload,
     ) = await asyncio.gather(
-        _fetch_kpi_strip(),
-        _fetch_hero_chart(),
-        _fetch_home_top_movers(limit=6, mkt=sp_1d_map),
-        _fetch_home_fund_flows(request, limit=8),
-        _fetch_home_insiders(limit=5),
-        _fetch_home_congress(limit=8),
-        _fetch_home_macro(),
-        _fetch_home_retail(),
-        _fetch_home_feargreed(),
-        _fetch_home_ticker_tape(idx_data=idx_market_map, sp_data=sp_1d_map),
-        _fetch_home_flow_trending(request, limit=12),
-        _fetch_home_news(idx_data=idx_market_map, sp_data=sp_1d_map),
+        _bounded_call(
+            _fetch_kpi_strip(),
+            timeout=4.0, fallback=[], name="home:kpi",
+        ),
+        _bounded_call(
+            _fetch_hero_chart(),
+            timeout=4.0, fallback=_fallback_hero_payload, name="home:hero",
+        ),
+        _bounded_call(
+            _fetch_home_top_movers(limit=6, mkt=sp_1d_map),
+            timeout=4.0, fallback=_HOME_TOP_MOVERS, name="home:top_movers",
+        ),
+        _bounded_call(
+            _fetch_home_fund_flows(request, limit=8),
+            timeout=4.0, fallback=_HOME_FUND_FLOWS, name="home:fund_flows",
+        ),
+        _bounded_call(
+            _fetch_home_insiders(limit=5),
+            timeout=4.0, fallback=_HOME_INSIDERS, name="home:insiders",
+        ),
+        _bounded_call(
+            _fetch_home_congress(limit=8),
+            timeout=4.0, fallback=_HOME_CONGRESS, name="home:congress",
+        ),
+        _bounded_call(
+            _fetch_home_macro(),
+            timeout=4.0, fallback=_HOME_MACRO, name="home:macro",
+        ),
+        _bounded_call(
+            _fetch_home_retail(),
+            timeout=4.0,
+            fallback=lambda: {"feat": _HOME_RETAIL_FEAT, "rows": _retail_rows()},
+            name="home:retail",
+        ),
+        _bounded_call(
+            _fetch_home_feargreed(),
+            timeout=4.0, fallback=_home_feargreed_mock, name="home:feargreed",
+        ),
+        _bounded_call(
+            _fetch_home_ticker_tape(idx_data=idx_market_map, sp_data=sp_1d_map),
+            timeout=4.0, fallback=_HOME_TICKER_TAPE, name="home:ticker_tape",
+        ),
+        _bounded_call(
+            _fetch_home_flow_trending(request, limit=12),
+            timeout=4.0,
+            fallback=(_HOME_FLOW_TRENDING, _HOME_FLOW_TRENDING_MAX),
+            name="home:flow_trending",
+        ),
+        _bounded_call(
+            _fetch_home_news(idx_data=idx_market_map, sp_data=sp_1d_map),
+            timeout=4.0,
+            fallback=lambda: (
+                _HOME_NEWS_FEATURED, _HOME_NEWS_STORIES,
+                _HOME_NEWS_MOST_READ,
+                _build_news_market_wire(idx_market_map, sp_1d_map),
+            ),
+            name="home:news",
+        ),
     )
     # Lazy-loaded panes get empty defaults; the partial endpoints render
     # the real content into the page on first tab activation.
