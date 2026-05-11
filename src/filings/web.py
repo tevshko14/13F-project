@@ -671,18 +671,29 @@ async def lifespan(app: FastAPI):
             interval=_FEATURE_ANNOUNCE_INTERVAL, body=_run_feature_announcement_scan,
         ), "feature_announce_scanner")
 
-        # Redesign /_v2/home L2 cache warmer (only when env-gated route is on)
+        # Tiered redesign L2 cache warmer — hot/warm/cold run on independent
+        # intervals so fast-moving data refreshes aggressively without paying
+        # the cold-tier cost on every cycle.  All three share the registry
+        # in filings.warmer; each task just picks its tier.
         if _redesign_preview_router.is_enabled():
             _track(_periodic_task(
-                name="Redesign L2 warmer", startup_delay=30,
-                interval=_REDESIGN_L2_WARMER_INTERVAL, body=_run_redesign_l2_warm,
-            ), "redesign_l2_warmer")
+                name="Redesign L2 warmer · hot", startup_delay=15,
+                interval=_REDESIGN_L2_HOT_INTERVAL, body=_run_redesign_l2_warm_hot,
+            ), "redesign_l2_warmer_hot")
+            _track(_periodic_task(
+                name="Redesign L2 warmer · warm", startup_delay=30,
+                interval=_REDESIGN_L2_WARM_INTERVAL, body=_run_redesign_l2_warm,
+            ), "redesign_l2_warmer_warm")
+            _track(_periodic_task(
+                name="Redesign L2 warmer · cold", startup_delay=60,
+                interval=_REDESIGN_L2_COLD_INTERVAL, body=_run_redesign_l2_warm_cold,
+            ), "redesign_l2_warmer_cold")
     else:
         logger.info(
             "lifespan: WORKER_MODE=web -- skipping periodic tasks owned "
             "by the worker process (prefetch_market, retention_cleanup, "
             "refresh_sweep, reddit_scanner, feature_announce_scanner, "
-            "redesign_l2_warmer)"
+            "redesign_l2_warmer_hot/warm/cold)"
         )
 
     # Memory profile poller — logs RSS / threads / cache sizes every 5 min
@@ -2332,25 +2343,45 @@ async def _send_worker_hang_alert(overdue: list[dict]) -> None:
     await _post_alert(tg_text, webhook_payload, name="worker-watchdog")
 
 
-# ── /_v2/home L2 cache warmer ────────────────────────────────────────
+# ── Tiered L2 cache warmer ───────────────────────────────────────────
+# Hot / warm / cold intervals come from filings.warmer; the periodic
+# task wiring just selects the tier.  Without these warmers, the first
+# request after a worker restart would fan out every yfinance call
+# synchronously — what jammed the thread pool the first time we
+# shipped /_v2/home.
 
-_REDESIGN_L2_WARMER_INTERVAL = 4 * 60  # 4 min — refreshes before any 5-min TTL expires
+_REDESIGN_L2_HOT_INTERVAL  = 90
+_REDESIGN_L2_WARM_INTERVAL = 4 * 60
+_REDESIGN_L2_COLD_INTERVAL = 6 * 60 * 60
+
+# Back-compat alias for any external callers (admin endpoint etc.)
+_REDESIGN_L2_WARMER_INTERVAL = _REDESIGN_L2_WARM_INTERVAL
 
 
-async def _run_redesign_l2_warm() -> None:
-    """One iteration of the redesign L2 cache warmer.
-
-    Without this, the first /_v2/home request after a worker restart
-    fills every L2 entry by hitting upstreams synchronously — that's
-    what jammed the thread pool the first time we shipped /_v2/home.
-    """
-    status = await _redesign_preview_router.warm_l2_caches()
+async def _run_redesign_l2_warm_tier(tier: str) -> None:
+    """One iteration of the tier-specific L2 cache warmer."""
+    from filings import warmer
+    status = await warmer.warm_tier(tier)  # type: ignore[arg-type]
     logger.info(
-        "redesign L2 warmer: warmed %d/%d (failed=%s)",
+        "redesign L2 warmer[%s]: warmed %d/%d (failed=%s)",
+        tier,
         status.get("warmed", 0),
         status.get("total", 0),
         status.get("failed", []),
     )
+
+
+async def _run_redesign_l2_warm() -> None:
+    """Back-compat shim: refresh the warm tier (existing periodic task)."""
+    await _run_redesign_l2_warm_tier("warm")
+
+
+async def _run_redesign_l2_warm_hot() -> None:
+    await _run_redesign_l2_warm_tier("hot")
+
+
+async def _run_redesign_l2_warm_cold() -> None:
+    await _run_redesign_l2_warm_tier("cold")
 
 
 # ── Stock-page bundle warmer ─────────────────────────────────────────

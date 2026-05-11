@@ -9,9 +9,11 @@ Routes:
 
 Also owns:
   * ``warm_homepage_caches``       -- worker prefetch primer for home L2 reads
-  * ``warm_l2_caches``             -- recurring L2-warmer task body
-  * ``_l2_warmup_targets``         -- list of (key, ttl, compute) tuples
-  * Async-native fetchers          -- ApeWisdom / CNN F&G shared HTTP path
+  * ``warm_l2_caches``             -- back-compat shim into the tiered
+                                      warmer (see ``filings.warmer``)
+  * Async-native fetchers          -- ApeWisdom / CNN F&G / hero shared
+                                      HTTP path; registered as warmer
+                                      compute fns in ``filings.warmer``
 
 The home page Phase-1 / Phase-2 gather fans out to 14 fetchers; every
 one is wrapped in ``_bounded_call`` so a single slow upstream can't stall
@@ -27,7 +29,7 @@ import logging
 import math
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any, Callable, TypedDict
+from typing import TypedDict
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Request
@@ -2665,54 +2667,15 @@ async def _fetch_apewisdom_async(pages: int = 5) -> list[dict]:
     return merged
 
 
-def _l2_warmup_targets() -> list[tuple[str, int, Callable[[], Any]]]:
-    """L2 cache entries keyed by (cache_key, ttl_seconds, compute_fn).
-
-    The warmer awaits ``l2_cached`` against each — async compute fns
-    bypass the heavy pool (yield event loop on network I/O); sync fns
-    flow through the heavy semaphore.
-    """
-    from filings import market_data, fred_indicators, earnings_calendar
-
-    return [
-        # Async-native — no thread slot held during network I/O.
-        ("redesign:home:cnn_fg",          300, _fetch_cnn_fg_async),
-        ("redesign:home:apewisdom",       300, _fetch_apewisdom_async),
-        ("redesign:home:hero_chart",      120, _hero_chart_compute),
-        # Sync upstreams — go through the heavy pool / semaphore.
-        ("redesign:home:sector_etfs",     300, _fetch_sector_etfs_sync),
-        ("redesign:home:news_general",    600, lambda: market_data.get_market_news("general", 14)),
-        ("redesign:home:earnings_4w",     600, lambda: earnings_calendar.get_earnings_calendar(None, None, 4)),
-        ("redesign:home:fred_indicators", 900, lambda: fred_indicators.fetch_indicators() or {}),
-    ]
-
-
 async def warm_l2_caches() -> dict:
-    """Pre-warm every L2 cache entry the home page depends on.
+    """Back-compat shim — refresh every warm-tier target.
 
-    Designed to be called from a recurring background task in the FastAPI
-    lifespan.  All targets fire concurrently — independent upstreams,
-    no shared backpressure beyond the heavy semaphore.  Returns a small
-    status dict so the caller can log progress.
+    The actual registry lives in ``filings.warmer``; this thin wrapper
+    is kept for the existing periodic-task wiring in ``web.py`` and the
+    on-demand admin endpoint.  Phase 2 introduced hot/warm/cold tiers
+    run on separate intervals — see ``filings.warmer.warm_tier``.
     """
-    targets = _l2_warmup_targets()
-    results = await asyncio.gather(
-        *(
-            _l2_cached(key, ttl_seconds=ttl, compute=compute_fn, category="redesign_home")
-            for key, ttl, compute_fn in targets
-        ),
-        return_exceptions=True,
-    )
-    succeeded = 0
-    failed: list[str] = []
-    for (key, _ttl, _fn), result in zip(targets, results):
-        if isinstance(result, Exception):
-            logger.debug("warm_l2_caches: %s raised: %s", key, result)
-            failed.append(key)
-        elif result is None:
-            failed.append(key)
-        else:
-            succeeded += 1
-    return {"warmed": succeeded, "failed": failed, "total": len(targets)}
+    from filings import warmer
+    return await warmer.warm_tier("warm")
 
 
