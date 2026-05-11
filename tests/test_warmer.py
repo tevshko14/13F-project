@@ -89,7 +89,8 @@ def test_cold_tier_contains_constituents():
 
 @pytest.mark.asyncio
 async def test_warm_tier_calls_l2_cached_for_each_target(monkeypatch):
-    """warm_tier dispatches one l2_cached call per matched target."""
+    """warm_tier dispatches one l2_cached call per matched target,
+    using the versioned key shape."""
     calls: list[tuple[str, int, str]] = []
 
     async def fake_l2_cached(key, ttl_seconds, compute, *, category, **kwargs):
@@ -100,12 +101,23 @@ async def test_warm_tier_calls_l2_cached_for_each_target(monkeypatch):
 
     result = await warmer.warm_tier("hot")
 
-    hot_keys = {t.key for t in warmer.targets_by_tier("hot")}
+    expected_keys = {warmer.versioned_key(t.key)
+                     for t in warmer.targets_by_tier("hot")}
     called_keys = {c[0] for c in calls}
-    assert called_keys == hot_keys
-    assert result["warmed"] == len(hot_keys)
+    assert called_keys == expected_keys
+    assert result["warmed"] == len(expected_keys)
     assert result["failed"] == []
-    assert result["total"]  == len(hot_keys)
+    assert result["total"]  == len(expected_keys)
+
+
+def test_versioned_key_appends_schema_version():
+    """versioned_key always adds the current CACHE_SCHEMA_VERSION suffix.
+
+    Bumping CACHE_SCHEMA_VERSION abandons all prior rows (they live out
+    their TTL untouched) and the warmer refills the new versioned keys
+    on its next cycle — clean schema rotation without manual purge.
+    """
+    assert warmer.versioned_key("foo:bar") == f"foo:bar:v{warmer.CACHE_SCHEMA_VERSION}"
 
 
 @pytest.mark.asyncio

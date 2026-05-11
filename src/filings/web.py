@@ -3074,6 +3074,86 @@ async def admin_tier_seed(
     })
 
 
+@app.get("/admin/cache-status")
+async def admin_cache_status(request: Request):
+    """Freshness inspection for every L2 cache key the warmer manages.
+
+    Walks ``filings.warmer.WARMER_TARGETS``, reads the primary L2 row +
+    the LKG sidecar for each, and reports:
+
+        primary_present / primary_age_s / primary_is_fresh
+        lkg_present     / lkg_age_s
+
+    A row with ``primary_present=False, lkg_present=False`` means the
+    warmer has never successfully refreshed that key — the request
+    path will fall back to design-time mocks for any caller reading it.
+
+    Token-gated.  Leaks only timestamps + booleans, no payload data.
+    """
+    if (gate := _require_admin_token(request)) is not None:
+        return gate
+
+    from filings import warmer
+    from filings.supabase_cache import get_cached_full_row_async
+
+    async def _probe(target):
+        actual_key = warmer.versioned_key(target.key)
+        primary = await get_cached_full_row_async(actual_key)
+        lkg     = await get_cached_full_row_async(warmer._lkg_key(actual_key))
+        return {
+            "key":               target.key,
+            "actual_key":        actual_key,
+            "tier":              target.tier,
+            "ttl_seconds":       target.ttl_seconds,
+            "primary_present":   primary is not None,
+            "primary_is_fresh":  (primary or {}).get("is_fresh"),
+            "primary_age_s":     (primary or {}).get("age_seconds"),
+            "primary_as_of":     (primary or {}).get("as_of_ts"),
+            "lkg_present":       lkg is not None,
+            "lkg_age_s":         (lkg or {}).get("age_seconds"),
+            "lkg_as_of":         (lkg or {}).get("as_of_ts"),
+        }
+
+    rows = await asyncio.gather(
+        *(_probe(t) for t in warmer.WARMER_TARGETS), return_exceptions=True,
+    )
+    # Surface gather exceptions inline so a single Supabase blip doesn't 500 the endpoint.
+    safe_rows: list[dict] = []
+    for r in rows:
+        if isinstance(r, Exception):
+            safe_rows.append({"error": f"{type(r).__name__}: {r}"})
+        else:
+            safe_rows.append(r)
+
+    # Aggregate counts for at-a-glance status.
+    n_primary = sum(1 for r in safe_rows if r.get("primary_present"))
+    n_lkg     = sum(1 for r in safe_rows if r.get("lkg_present"))
+    n_stale   = sum(1 for r in safe_rows if r.get("primary_present") and not r.get("primary_is_fresh"))
+    return JSONResponse({
+        "total_keys":         len(safe_rows),
+        "primary_populated":  n_primary,
+        "primary_stale":      n_stale,
+        "lkg_populated":      n_lkg,
+        "rows":               safe_rows,
+    })
+
+
+@app.get("/admin/cache-warm-now")
+async def admin_cache_warm_now(request: Request):
+    """Manually trigger a full warmer cycle (every tier).
+
+    Token-gated.  Useful after a known-bad period to confirm L2 +
+    LKG refill cleanly, or before a high-traffic moment to ensure
+    every key is fresh.  Returns the same status dict as the
+    background warmer task does.
+    """
+    if (gate := _require_admin_token(request)) is not None:
+        return gate
+    from filings import warmer
+    status = await warmer.warm_all()
+    return JSONResponse(status)
+
+
 @app.get("/admin/watchdog-test")
 async def admin_watchdog_test(request: Request):
     """Token-gated end-to-end test of the watchdog alert pipeline.

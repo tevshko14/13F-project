@@ -47,6 +47,24 @@ WARM_INTERVAL_SECONDS = 4 * 60
 COLD_INTERVAL_SECONDS = 6 * 60 * 60
 
 
+# ── Cache-key schema version ─────────────────────────────────────────
+# Bump this when the SHAPE of any registered payload changes in a way
+# the request-path consumer can't tolerate (e.g., renaming a field
+# the template uses, dropping a key, or changing a list-of-dicts to
+# a dict-of-lists).
+#
+# The warmer constructs the actual L2 key as `{base_key}:v{N}` so old
+# rows with stale shapes are abandoned cleanly (the new keys cold-miss
+# and refill on the next warmer cycle).  Old rows expire on their
+# own TTL and disappear without manual purge.
+#
+# Bumping schema_version is a coordinated change: every consumer of
+# the keys in WARMER_TARGETS reads through `read_via_l2(key)` which
+# applies the same version suffix, so the registry stays the source
+# of truth.
+CACHE_SCHEMA_VERSION = 1
+
+
 @dataclass(frozen=True)
 class WarmerTarget:
     """One row in the warmer registry.
@@ -183,6 +201,17 @@ WARMER_TARGETS: list[WarmerTarget] = [
 ]
 
 
+def versioned_key(base_key: str) -> str:
+    """Append the current CACHE_SCHEMA_VERSION to a registry key.
+
+    Always use this when computing the actual L2 key from a registry
+    entry — guarantees the warmer's writes and the request path's
+    reads target the same row.  Old rows from prior versions live out
+    their TTL untouched and disappear without explicit cleanup.
+    """
+    return f"{base_key}:v{CACHE_SCHEMA_VERSION}"
+
+
 def targets_by_tier(tier: Tier) -> list[WarmerTarget]:
     """All registered targets matching the given tier."""
     return [t for t in WARMER_TARGETS if t.tier == tier]
@@ -234,8 +263,8 @@ async def read_via_l2(
             f"request path; otherwise the bg refresh path can't refill it."
         )
     return await l2_cached(
-        target.key, ttl_seconds=target.ttl_seconds, compute=target.compute,
-        category=target.category,
+        versioned_key(target.key), ttl_seconds=target.ttl_seconds,
+        compute=target.compute, category=target.category,
         block_on_miss=block_on_miss,
         lkg_fallback=lkg_fallback,
         stale_budget_seconds=stale_budget_seconds,
@@ -261,8 +290,8 @@ async def read_via_l2_with_meta(
     if target is None:
         raise KeyError(f"warmer.read_via_l2_with_meta: '{key}' not registered")
     return await l2_cached_with_meta(
-        target.key, ttl_seconds=target.ttl_seconds, compute=target.compute,
-        category=target.category,
+        versioned_key(target.key), ttl_seconds=target.ttl_seconds,
+        compute=target.compute, category=target.category,
         block_on_miss=block_on_miss,
         lkg_fallback=lkg_fallback,
         stale_budget_seconds=stale_budget_seconds,
@@ -290,8 +319,8 @@ async def warm_tier(tier: Tier) -> dict:
     results = await asyncio.gather(
         *(
             l2_cached(
-                t.key, ttl_seconds=t.ttl_seconds, compute=t.compute,
-                category=t.category,
+                versioned_key(t.key), ttl_seconds=t.ttl_seconds,
+                compute=t.compute, category=t.category,
             )
             for t in targets
         ),
