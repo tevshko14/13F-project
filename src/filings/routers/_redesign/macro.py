@@ -2201,13 +2201,19 @@ async def preview_macro_volatility_partial(
 ):
     """Lazy-loaded Volatility pane — Put/Call ratio + VIX term + SKEW.
 
-    Cut from the initial /macro gather so a slow CBOE/yfinance options
-    fetch (worst case 12 s) doesn't bound the macro page's first paint.
+    Default ``pc_type=total`` reads from warmer-managed L2 + LKG (sub-
+    500 ms typical, real data even during yfinance degradation).
+    Non-default pc_type (index / equity, rare) pays a cold fetch
+    through bounded() with the 12 s ceiling.
     """
-    volatility_payload = await _bounded_call(
-        _v2_volatility_payload(pc_type),
-        timeout=12.0, fallback=_v2_volatility_empty, name="volatility",
-    )
+    if pc_type == "total":
+        volatility_payload = await _warmer.read_via_l2("redesign:macro:volatility")
+        volatility_payload = volatility_payload or _v2_volatility_empty()
+    else:
+        volatility_payload = await _bounded_call(
+            _v2_volatility_payload(pc_type),
+            timeout=12.0, fallback=_v2_volatility_empty, name="volatility",
+        )
     return templates.TemplateResponse(
         "_redesign/partials/macro_volatility.html",
         {"request": request, "vol": volatility_payload},
@@ -2226,20 +2232,29 @@ async def preview_macro_earnings_partial(
 ):
     """Lazy-loaded Earnings pane — Scorecard + Calendar sub-tabs.
 
-    Cut from the initial /macro gather (10 s + 8 s combined ceiling).
-    Both sub-payloads run in parallel here so the lazy fetch wall
-    time = max(earnings 10s, ecal 8s) instead of the sum.
+    Scorecard default (all / current quarter / all sectors) reads
+    warmer-managed L2 + LKG.  Non-default Scorecard params + the
+    Calendar sub-tab pay cold-fetch (Calendar isn't warmable — needs
+    request.app.state for fund_cache).
     """
-    earnings_payload, calendar_payload = await asyncio.gather(
-        _bounded_call(
+    is_default_scorecard = (
+        earn_index == "all" and not earn_quarter and not earn_sector
+    )
+    if is_default_scorecard:
+        earnings_task = _warmer.read_via_l2("redesign:macro:earnings_default")
+    else:
+        earnings_task = _bounded_call(
             _v2_macro_earnings_payload(earn_index, earn_quarter or None, earn_sector or None),
             timeout=10.0, fallback=_v2_macro_earnings_empty, name="earnings",
-        ),
+        )
+    earnings_payload, calendar_payload = await asyncio.gather(
+        earnings_task,
         _bounded_call(
             _v2_macro_calendar_payload(request, cal_index, cal_period),
             timeout=8.0,  fallback=_v2_macro_calendar_empty, name="ecal",
         ),
     )
+    earnings_payload = earnings_payload or _v2_macro_earnings_empty()
     earn_view_norm = "calendar" if (earn_view or "").lower() == "calendar" else "scorecard"
     return templates.TemplateResponse(
         "_redesign/partials/macro_earnings.html",
@@ -2260,13 +2275,17 @@ async def preview_macro_performance_partial(
 ):
     """Lazy-loaded Performance pane — market breadth.
 
-    Cut from the initial /macro gather (10 s ceiling).  Pure-payload
-    fetch; no sub-tab activator needed.
+    Default (sp500 / 1d) reads warmer-managed L2 + LKG.  Other
+    index/period combos pay cold-fetch.
     """
-    performance_payload = await _bounded_call(
-        _v2_macro_performance_payload(perf_index, perf_period),
-        timeout=10.0, fallback=_v2_macro_performance_empty, name="performance",
-    )
+    if perf_index == "sp500" and perf_period == "1d":
+        performance_payload = await _warmer.read_via_l2("redesign:macro:performance_default")
+        performance_payload = performance_payload or _v2_macro_performance_empty()
+    else:
+        performance_payload = await _bounded_call(
+            _v2_macro_performance_payload(perf_index, perf_period),
+            timeout=10.0, fallback=_v2_macro_performance_empty, name="performance",
+        )
     return templates.TemplateResponse(
         "_redesign/partials/macro_performance.html",
         {"request": request, "perf": performance_payload},
@@ -2278,29 +2297,17 @@ async def preview_macro_heatmap_partial(request: Request):
     """Lazy-loaded Heatmap pane — Companies grid + Sectors grid +
     Global regions table.
 
-    Cut from the initial /macro gather so the slowest yfinance batch
-    (12 s for the 500-ticker company heatmap) doesn't bound the macro
-    page's first paint.  ``_fetch_home_heatmap_companies`` and
-    ``_fetch_home_heatmap_sectors`` reuse the home page's L2-cached
-    fetchers — same data + visual as the home heatmap.
+    Reads warmer-managed L2 + LKG.  The warmer's compute fn fans out
+    the three sub-fetches together so they share one TTL window.
     """
-    from filings.routers._redesign.home import (
-        _fetch_home_heatmap_companies, _fetch_home_heatmap_sectors,
-    )
-    companies_rows, sectors_rows, idx_payload = await asyncio.gather(
-        _bounded_call(_fetch_home_heatmap_companies(),
-                      timeout=12.0, fallback=[], name="heatmap_companies"),
-        _bounded_call(_fetch_home_heatmap_sectors(),
-                      timeout=8.0,  fallback=[], name="heatmap_sectors_etf"),
-        _bounded_call(_warmer.read_via_l2("redesign:home:index_market"),
-                      timeout=2.0,  fallback=None, name="index_md"),
-    )
+    bundle = await _warmer.read_via_l2("redesign:macro:heatmap")
+    bundle = bundle or {}
     return templates.TemplateResponse(
         "_redesign/partials/macro_heatmap.html",
         {
             "request":           request,
-            "heatmap_companies": companies_rows,
-            "heatmap_sectors":   sectors_rows,
-            "heatmap_indices":   _heatmap_global_indices(idx_payload),
+            "heatmap_companies": bundle.get("heatmap_companies", []),
+            "heatmap_sectors":   bundle.get("heatmap_sectors", []),
+            "heatmap_indices":   bundle.get("heatmap_indices", []),
         },
     )

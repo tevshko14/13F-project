@@ -146,6 +146,75 @@ def _compute_fred_indicators() -> dict:
     return fred_indicators.fetch_indicators() or {}
 
 
+# ── /macro lazy-panel computes ───────────────────────────────────────
+# These back the /api/macro/{panel} endpoints (Phase 6 lazy-load).
+# Without warmer coverage, every user's first visit to a tab pays the
+# 4-12 s upstream-fetch cost — even subsequent refreshes hit cold
+# upstreams.  Warming the DEFAULT parameter combination means the
+# common-case panel render reads strict-L2 in <500 ms; non-default
+# combos still pay cold cost (rare).
+
+
+async def _compute_macro_volatility() -> Any:
+    """Macro · Volatility default (pc_type=total) — CBOE Put/Call + VIX + SKEW."""
+    from filings.routers._redesign import macro
+    return await macro._v2_volatility_payload("total")
+
+
+async def _compute_macro_heatmap() -> dict:
+    """Macro · Heatmap — Companies + Sectors + Global indices.
+
+    Returns a wrapper dict the lazy endpoint unpacks; warming the bundle
+    together keeps the three sub-fetches inside one TTL window.
+    """
+    import asyncio
+    from filings.routers._redesign import home, macro
+    companies, sectors, idx = await asyncio.gather(
+        home._fetch_home_heatmap_companies(),
+        home._fetch_home_heatmap_sectors(),
+        _read_l2_idx_market(),
+        return_exceptions=True,
+    )
+    return {
+        "heatmap_companies": companies if not isinstance(companies, BaseException) else [],
+        "heatmap_sectors":   sectors   if not isinstance(sectors,   BaseException) else [],
+        "heatmap_indices":   macro._heatmap_global_indices(
+            idx if not isinstance(idx, BaseException) else None
+        ),
+    }
+
+
+async def _read_l2_idx_market() -> dict | None:
+    """Read the already-warmed index_market key inside a compute fn.
+    Avoids a duplicate yfinance fetch."""
+    from filings.cache_l2 import l2_cached
+    return await l2_cached(
+        versioned_key("redesign:home:index_market"),
+        ttl_seconds=240,
+        compute=_compute_index_market,
+        category="redesign_home",
+        block_on_miss=False, lkg_fallback=True,
+    )
+
+
+async def _compute_macro_earnings_default() -> Any:
+    """Macro · Earnings · Scorecard default (all / current quarter / all sectors).
+
+    Only warms the Scorecard sub-tab — the Calendar sub-tab's helper
+    (``_v2_macro_calendar_payload``) needs a Request to read app.state
+    fund_cache, which the warmer doesn't have.  Calendar pays cold-fetch
+    cost on user click (rare sub-tab).
+    """
+    from filings.routers._redesign import macro
+    return await macro._v2_macro_earnings_payload("all", None, None)
+
+
+async def _compute_macro_performance_default() -> Any:
+    """Macro · Performance default (sp500 / 1d)."""
+    from filings.routers._redesign import macro
+    return await macro._v2_macro_performance_payload("sp500", "1d")
+
+
 # ── Registry ─────────────────────────────────────────────────────────
 # Ordered by tier → key (alphabetical within tier) for readability.
 # TTLs follow the rule: ttl ≥ tier_interval × 2.5.
@@ -173,6 +242,21 @@ WARMER_TARGETS: list[WarmerTarget] = [
                  "warm", "redesign_home"),
     WarmerTarget("redesign:home:sector_etfs",      600, _compute_sector_etfs,
                  "warm", "redesign_home"),
+
+    # /macro lazy-panel defaults — the Phase 6 lazy endpoints
+    # (/api/macro/{volatility,heatmap,earnings,performance}) read these.
+    # Warming default params eliminates the empty-panel UX during
+    # yfinance degradation: lazy endpoint reads strict-L2 + LKG
+    # instead of cold-fetching each time.  Non-default params (e.g.
+    # pc_type=index, perf_period=1w) still pay cold-fetch on user-click.
+    WarmerTarget("redesign:macro:volatility",          1800, _compute_macro_volatility,
+                 "warm", "redesign_macro"),
+    WarmerTarget("redesign:macro:heatmap",              600, _compute_macro_heatmap,
+                 "warm", "redesign_macro"),
+    WarmerTarget("redesign:macro:earnings_default",    1800, _compute_macro_earnings_default,
+                 "warm", "redesign_macro"),
+    WarmerTarget("redesign:macro:performance_default", 1800, _compute_macro_performance_default,
+                 "warm", "redesign_macro"),
 
     # ── COLD (6 h interval, TTL 24 h+) ───────────────────────────────
     WarmerTarget("redesign:home:nasdaq100_constituents", 86400,
