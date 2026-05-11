@@ -646,109 +646,17 @@
   </section>
 
   {# ━━━━━━━━━━ HEATMAP ━━━━━━━━━━ #}
-  <section class="pp-page-pane{% if _macro_tab == 'Heatmap' %} is-active{% endif %}" data-tab-pane="Heatmap">
-    {# Mirrors the homepage heatmap subtab — Companies / Sectors toggle,
-       variable-size weight-driven tiles, color-mixed up/down backgrounds.
-       Reuses the same `pp-home-heatmap-*` classes + the same data
-       fetchers (`_fetch_home_heatmap_companies`, `_fetch_home_heatmap_sectors`)
-       so the two views can never visually drift. #}
-    {% call panel(cls="pp-macro-heat-panel") %}
-      {% call panel_head("Market heatmap", sub="today · live") %}
-        <div class="pp-segment pp-segment-mono" id="pp-macro-heatmap-mode" role="tablist">
-          <span class="pp-segment-opt is-active" data-heatmap-mode="Companies" role="tab" tabindex="0">Companies</span>
-          <span class="pp-segment-opt"           data-heatmap-mode="Sectors"   role="tab" tabindex="0">Sectors</span>
-        </div>
-      {% endcall %}
-      <div class="pp-home-heatmap-body">
-
-        {# ── Companies grid (default visible) ── #}
-        <div class="pp-home-heatmap-grid pp-home-heatmap-grid-companies is-active"
-             data-heatmap-pane="Companies">
-          {% for c in heatmap_companies %}
-            <a class="pp-home-heatmap-tile{% if c.is_large %} is-large{% endif %}{% if c.tile_dark %} is-dark{% endif %}"
-               href="/stock/{{ c.ticker }}"
-               style="background: {{ c.tile_bg }};
-                      grid-column: span {{ c.span_col }};
-                      grid-row: span {{ c.span_row }};">
-              <span class="pp-mono pp-home-heatmap-tk">{{ c.ticker }}</span>
-              <div>
-                <span class="pp-mono pp-home-heatmap-pct">
-                  {%- if c.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(c.pct * 100) }}%
-                </span>
-                {% if c.show_mcap %}
-                  <span class="pp-mono pp-home-heatmap-mcap">{{ c.mcap }}</span>
-                {% endif %}
-              </div>
-            </a>
-          {% else %}
-            <div class="pp-page-placeholder" style="grid-column: 1 / -1;">
-              <div class="pp-page-placeholder-sub">Company data warming up.</div>
-            </div>
-          {% endfor %}
-        </div>
-
-        {# ── Sectors grid ── #}
-        <div class="pp-home-heatmap-grid pp-home-heatmap-grid-sectors"
-             data-heatmap-pane="Sectors">
-          {% for s in heatmap_sectors %}
-            <div class="pp-home-heatmap-tile pp-home-heatmap-sector{% if s.tile_dark %} is-dark{% endif %}"
-                 style="background: {{ s.tile_bg }};
-                        grid-column: span {{ s.span_col }};">
-              <div class="pp-home-heatmap-sector-name">{{ s.name }}</div>
-              <span class="pp-mono pp-home-heatmap-sector-pct">
-                {%- if s.pct >= 0 -%}+{%- endif -%}{{ "%.2f"|format(s.pct * 100) }}%
-              </span>
-              <span class="pp-mono pp-home-heatmap-sector-mcap">Mkt cap {{ s.mcap }}</span>
-            </div>
-          {% else %}
-            <div class="pp-page-placeholder" style="grid-column: 1 / -1;">
-              <div class="pp-page-placeholder-sub">Sector data warming up.</div>
-            </div>
-          {% endfor %}
-        </div>
-
-      </div>
-    {% endcall %}
-
-    {% call panel() %}
-      {{ panel_head("Global regions", sub="major equity indices") }}
-      {% if heatmap_indices %}
-        <table class="pp-table pp-macro-regions-table">
-          <thead>
-            <tr>
-              <th>Region</th>
-              <th>Index</th>
-              <th class="pp-num">Last</th>
-              <th class="pp-num">Today</th>
-              <th class="pp-num pp-macro-th-spark">1Y</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for r in heatmap_indices %}
-              <tr>
-                <td class="pp-dim">{{ r.region }}</td>
-                <td class="pp-ink-strong"><span class="pp-mono">{{ r.name }}</span></td>
-                <td class="pp-num pp-mono pp-ink-strong">{{ r.price_str }}</td>
-                <td class="pp-num pp-mono {% if r.today_up == True %}pp-up{% elif r.today_up == False %}pp-down{% else %}pp-dim{% endif %}">
-                  {{ r.today_str }}
-                </td>
-                <td class="pp-num">
-                  {% if r.spark %}
-                    {{ spark(r.spark, color=("var(--pp-up)" if r.today_up else "var(--pp-down)"), w=80, h=20) }}
-                  {% else %}
-                    <span class="pp-mono pp-dim2">—</span>
-                  {% endif %}
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <div class="pp-page-placeholder">
-          <div class="pp-page-placeholder-sub">Index data warming up.</div>
-        </div>
-      {% endif %}
-    {% endcall %}
+  {# ━━━━━━━━━━ HEATMAP — lazy-loaded ━━━━━━━━━━
+     companies = 12 s bounded, sectors = 8 s, both yfinance batch
+     fetches.  Skeleton here; ppBindActivator fetches the partial on
+     first tab visit.  ``pp-pane-loaded`` event re-binds the Companies/
+     Sectors sub-tab activator (see script block below). #}
+  <section class="pp-page-pane{% if _macro_tab == 'Heatmap' %} is-active{% endif %}"
+           data-tab-pane="Heatmap"
+           data-pane-fetch="/api/macro/heatmap">
+    <div data-pane-stub class="pp-page-placeholder">
+      <div class="pp-page-placeholder-sub">Loading heatmap…</div>
+    </div>
   </section>
 
   {# ━━━━━━━━━━ SENTIMENT — Google Trends macro dashboard ━━━━━━━━━━ #}
@@ -1507,7 +1415,19 @@ ppBindActivator({segId: 'pp-macro-tabs',           paneSelector: '.pp-page-pane'
 ppBindActivator({segId: 'pp-macro-earn-subtabs',   paneSelector: '.pp-macro-subpane', paneAttr: 'data-subpane', scoped: true});
 ppBindActivator({segId: 'pp-macro-events-view',    paneSelector: '.pp-macro-subpane', paneAttr: 'data-subpane', scoped: true});
 ppBindActivator({segId: 'pp-macro-ind-groups',     paneSelector: '.pp-macro-ind-group', paneIdPrefix: 'pp-macro-ind-group-', hideMode: true, allKey: 'all'});
-ppBindActivator({segId: 'pp-macro-heatmap-mode',   paneSelector: '.pp-home-heatmap-grid', paneAttr: 'data-heatmap-pane', scoped: true});
+
+/* Heatmap pane lazy-loads via data-pane-fetch — its
+   Companies/Sectors sub-segment markup doesn't exist at initial
+   bind time, so re-bind after the pane's HTML lands. */
+function _ppBindHeatmapMode() {
+  ppBindActivator({segId: 'pp-macro-heatmap-mode',
+                   paneSelector: '.pp-home-heatmap-grid',
+                   paneAttr: 'data-heatmap-pane', scoped: true});
+}
+_ppBindHeatmapMode();
+document.addEventListener('pp-pane-loaded', function (ev) {
+  if (ev.detail && ev.detail.name === 'Heatmap') _ppBindHeatmapMode();
+});
 
 /* Earnings Calendar — day-tabs strip (horizontal scroll) + per-day expand.
    Mirrors the Funds page Position-changes UI: one tab per upcoming day,

@@ -2112,29 +2112,15 @@ async def preview_macro(
 
     from filings import treasury_data as _treasury_data
     from filings import frankfurter   as _frankfurter
-    # Heatmap helpers live in _redesign.home (home owns the SP500 +
-    # sector-ETF heatmap data; macro and home share the same visual).
-    # Lazy-imported to keep both modules free of circular-import risk.
-    from filings.routers._redesign.home import (
-        _fetch_home_heatmap_companies,
-        _fetch_home_heatmap_sectors,
-    )
 
-    # All upstream data fetches dispatch in parallel.  Heatmap rows used
-    # to live in a second sequential gather; folded into this one so the
-    # worst-case wait is max(timeouts) instead of sum-of-the-two-blocks.
-    # /macro went from ~24s p99 to ~12s p99 with this change.  None of
-    # the heatmap inputs read from the other fetches' results, so the
-    # merge is data-flow safe.
-    # Volatility was cut from this gather — it's lazy-loaded via
-    # /api/macro/volatility on first tab activation.  Saves up to
-    # 12 s off the macro page's initial-paint when yfinance is
-    # degraded (CBOE/yfinance options data is the worst-case fetch).
+    # Volatility (12 s) + Heatmap companies/sectors (12 s + 8 s) cut
+    # from this gather — both lazy-load via /api/macro/{volatility,heatmap}
+    # on first tab activation.  Saves up to 12 s off macro's initial
+    # paint when yfinance is degraded.
     (
         payload, yield_curve, fx_payload, idx_payload, calendar_rows,
         earnings_payload, calendar_payload, performance_payload,
         events_payload, debt_payload, sentiment_payload,
-        heatmap_companies_rows, heatmap_sectors_rows,
     ) = await asyncio.gather(
         bounded(_fetch_macro_indicators(),                          timeout=8.0, fallback={},   name="indicators"),
         bounded(to_heavy(_treasury_data.get_yield_curve),           timeout=6.0, fallback=None, name="yield_curve"),
@@ -2158,14 +2144,6 @@ async def preview_macro(
         bounded(_v2_sentiment_payload(),
                 timeout=4.0,  fallback={"have_data": False, "cards": [],
                                         "categories": [], "is_warming": True}, name="sentiment"),
-        # Heatmap — same data + visual treatment as the homepage so the
-        # macro tab and home tab read as the same tool.  Both fetchers
-        # L2-cache + share the underlying yfinance batch within the 5-min
-        # TTL window.
-        bounded(_fetch_home_heatmap_companies(), timeout=12.0, fallback=[],
-                name="heatmap_companies"),
-        bounded(_fetch_home_heatmap_sectors(),   timeout=8.0,  fallback=[],
-                name="heatmap_sectors_etf"),
     )
 
     indicators = payload.get("indicators") or []
@@ -2203,9 +2181,9 @@ async def preview_macro(
         "fx_table":         _fx_rates_table(fx_payload),
         "commodity_rows":   _commodities_panel_rows(idx_payload),
         "macro_calendar":   calendar_rows,
-        "heatmap_companies": heatmap_companies_rows,
-        "heatmap_sectors":   heatmap_sectors_rows,
-        "heatmap_indices":   _heatmap_global_indices(idx_payload),
+        # heatmap_companies / heatmap_sectors / heatmap_indices are
+        # fetched via /api/macro/heatmap on tab activation — no need
+        # to pass them through the main route context.
         "macro_tab":        active_tab,
         "earn":             earnings_payload,
         "ecal":             calendar_payload,
@@ -2230,10 +2208,6 @@ async def preview_macro_volatility_partial(
 
     Cut from the initial /macro gather so a slow CBOE/yfinance options
     fetch (worst case 12 s) doesn't bound the macro page's first paint.
-    The pane's skeleton in macro.html carries
-    ``data-pane-fetch="/api/macro/volatility?..."``; ``ppBindActivator``
-    fires this on first activation and replaces the stub with the
-    rendered partial.
     """
     volatility_payload = await _bounded_call(
         _v2_volatility_payload(pc_type),
@@ -2242,4 +2216,37 @@ async def preview_macro_volatility_partial(
     return templates.TemplateResponse(
         "_redesign/partials/macro_volatility.html",
         {"request": request, "vol": volatility_payload},
+    )
+
+
+@router.get("/api/macro/heatmap", response_class=HTMLResponse)
+async def preview_macro_heatmap_partial(request: Request):
+    """Lazy-loaded Heatmap pane — Companies grid + Sectors grid +
+    Global regions table.
+
+    Cut from the initial /macro gather so the slowest yfinance batch
+    (12 s for the 500-ticker company heatmap) doesn't bound the macro
+    page's first paint.  ``_fetch_home_heatmap_companies`` and
+    ``_fetch_home_heatmap_sectors`` reuse the home page's L2-cached
+    fetchers — same data + visual as the home heatmap.
+    """
+    from filings.routers._redesign.home import (
+        _fetch_home_heatmap_companies, _fetch_home_heatmap_sectors,
+    )
+    companies_rows, sectors_rows, idx_payload = await asyncio.gather(
+        _bounded_call(_fetch_home_heatmap_companies(),
+                      timeout=12.0, fallback=[], name="heatmap_companies"),
+        _bounded_call(_fetch_home_heatmap_sectors(),
+                      timeout=8.0,  fallback=[], name="heatmap_sectors_etf"),
+        _bounded_call(_warmer.read_via_l2("redesign:home:index_market"),
+                      timeout=2.0,  fallback=None, name="index_md"),
+    )
+    return templates.TemplateResponse(
+        "_redesign/partials/macro_heatmap.html",
+        {
+            "request":           request,
+            "heatmap_companies": companies_rows,
+            "heatmap_sectors":   sectors_rows,
+            "heatmap_indices":   _heatmap_global_indices(idx_payload),
+        },
     )

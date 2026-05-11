@@ -469,7 +469,16 @@
       p.dataset.loaded = '1';
       fetch(url, {credentials: 'same-origin'})
         .then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); })
-        .then(function (html) { p.innerHTML = html; })
+        .then(function (html) {
+          p.innerHTML = html;
+          /* Notify listeners — pages that have sub-tab activators or
+             other JS scoped to a lazy-loaded pane bind to this event
+             to re-attach handlers once the pane's markup exists.  The
+             detail carries the pane's name so listeners can filter. */
+          document.dispatchEvent(new CustomEvent('pp-pane-loaded', {
+            detail: {name: paneKey(p), pane: p},
+          }));
+        })
         .catch(function () {
           p.dataset.loaded = '';
           var stub = p.querySelector('[data-pane-stub]');
