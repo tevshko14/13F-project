@@ -31,7 +31,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from filings.app_state import templates
-from filings.concurrency import to_heavy, to_light, to_supabase
+from filings.concurrency import to_light, to_supabase
 from filings.routers._redesign.helpers import (
     _bounded,
     _congress_action,
@@ -285,8 +285,11 @@ async def _performance_index_chart(wider_rows: list[dict]) -> CongressPerfChartP
     SPY series uses the real ^GSPC daily close pulled from market_data.
     """
     try:
-        from filings import market_data
-        idx = await to_heavy(market_data.get_index_market_data)
+        # Strict L2 — index_market is on the hot-tier warmer (90 s).
+        # Request path reads from Supabase only.
+        from filings import warmer
+        idx = await warmer.read_via_l2("redesign:home:index_market")
+        idx = idx or {}
     except Exception as exc:
         logger.warning("Performance: SPY fetch failed: %s", exc)
         idx = {}

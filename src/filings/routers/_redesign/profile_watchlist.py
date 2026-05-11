@@ -205,14 +205,12 @@ async def _fetch_profile_watchlist(
     tickers = [(e.get("ticker") or "").upper() for e in entries]
     tickers = [t for t in tickers if t]
 
-    # Parallel enrichment: sparklines + day-period market data +
-    # recent notifications.  `get_sp500_market_data("1D")` yields
-    # {ticker: {"price": ..., "pct_change": ...}} for every S&P
-    # ticker in one cached call (30-min TTL), so we avoid per-ticker
-    # network calls in the request path.
-    from filings import market_data, supabase_cache
+    # Parallel enrichment: sparklines (per-ticker fanout via heavy pool —
+    # not warmable since ticker list varies by user) + S&P 1D quote map
+    # (strict L2 — hot-tier warmer) + recent notifications (Supabase).
+    from filings import market_data, supabase_cache, warmer
     spark_task = to_heavy(market_data.get_sparkline_points, tickers, 20)
-    md_task    = to_heavy(market_data.get_sp500_market_data, "1D")
+    md_task    = warmer.read_via_l2("redesign:home:sp500_1d")
     notif_task = to_supabase(supabase_cache.get_recent_notifications, 200)
     spark_map: dict = {}
     md_map:    dict = {}
@@ -224,7 +222,7 @@ async def _fetch_profile_watchlist(
         spark_raw, md_raw, notif_raw = results[0], results[1], results[2]
         # Exception → keep default; success (incl. empty {}/[]) → use upstream value.
         if not isinstance(spark_raw, BaseException): spark_map = spark_raw
-        if not isinstance(md_raw,    BaseException): md_map    = md_raw
+        if not isinstance(md_raw,    BaseException): md_map    = md_raw or {}
         if not isinstance(notif_raw, BaseException): notifs    = notif_raw
     except Exception as exc:
         logger.debug("Watchlist enrichment failed for %s: %s", user_id, exc)

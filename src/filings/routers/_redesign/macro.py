@@ -29,9 +29,8 @@ from typing import TypedDict
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from filings import supabase_cache
+from filings import supabase_cache, warmer as _warmer
 from filings.app_state import templates
-from filings.cache_l2 import l2_cached as _l2_cached
 from filings.concurrency import to_heavy, to_supabase
 from filings.routers._redesign.helpers import (
     _bounded,
@@ -223,19 +222,12 @@ async def _fetch_macro_indicators() -> dict:
     """Fetch FRED indicators in a thread (sync httpx pool).  Falls back to
     the module's mock-builder if the FRED key isn't set or all series fail.
 
-    L2-wrapped because the cold-start path fires 13 parallel FRED API
-    requests (one per indicator), each ~1-2s — too expensive on every
-    worker cold start.
+    Strict L2 — fred_indicators is warmed at the warm tier (4 min)
+    via the warmer registry.  Request path reads from Supabase only.
     """
-    def _compute():
-        from filings import fred_indicators
-        return fred_indicators.fetch_indicators() or {}
-
     try:
-        payload = await _l2_cached(
-            "redesign:home:fred_indicators", ttl_seconds=900, compute=_compute,
-            category="redesign_home",
-        )
+        from filings import warmer
+        payload = await warmer.read_via_l2("redesign:home:fred_indicators")
         return payload or {}
     except Exception as exc:
         logger.warning("Macro indicators fetch failed: %s", exc)
@@ -2119,7 +2111,6 @@ async def preview_macro(
 
     from filings import treasury_data as _treasury_data
     from filings import frankfurter   as _frankfurter
-    from filings import market_data   as _market_data
     # Heatmap helpers live in _redesign.home (home owns the SP500 +
     # sector-ETF heatmap data; macro and home share the same visual).
     # Lazy-imported to keep both modules free of circular-import risk.
@@ -2143,7 +2134,7 @@ async def preview_macro(
         bounded(_fetch_macro_indicators(),                          timeout=8.0, fallback={},   name="indicators"),
         bounded(to_heavy(_treasury_data.get_yield_curve),           timeout=6.0, fallback=None, name="yield_curve"),
         bounded(to_heavy(_frankfurter.get_fx_dashboard),            timeout=6.0, fallback=None, name="fx"),
-        bounded(to_heavy(_market_data.get_index_market_data),       timeout=6.0, fallback=None, name="index_md"),
+        bounded(_warmer.read_via_l2("redesign:home:index_market"),  timeout=2.0, fallback=None, name="index_md"),
         bounded(_macro_calendar_rows(top_n=12),                     timeout=5.0, fallback=[],   name="calendar"),
         bounded(_v2_macro_earnings_payload(earn_index, earn_quarter or None, earn_sector or None),
                 timeout=10.0, fallback=_v2_macro_earnings_empty, name="earnings"),

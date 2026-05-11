@@ -769,13 +769,22 @@ def _funds_sectors_breakdown(fund: dict) -> list[dict]:
     return rows
 
 
-def _funds_holdings_market_join(holdings: list[dict]) -> tuple[dict[str, dict], dict[str, list[float]]]:
+def _funds_holdings_market_join(
+    holdings: list[dict],
+    sp500: dict | None = None,
+) -> tuple[dict[str, dict], dict[str, list[float]]]:
     """Fetch current prices + sparkline series for the given holdings.
 
     Synchronous (uses market_data's in-memory caches).  Wrap calls in
     `to_heavy` from the route for cold paths where these may pull from
     yfinance.  Always returns dicts (possibly empty) so callers can safely
     pass the results into `_funds_holdings_table`.
+
+    ``sp500``: optional pre-fetched S&P 500 1D quote map.  When provided
+    (the strict-L2 path uses ``warmer.read_via_l2('redesign:home:sp500_1d')``
+    upstream), this function skips its own ``get_sp500_market_data('1D')``
+    call entirely — keeping the request path off yfinance.  When None
+    (legacy callers), falls back to the direct sync market_data call.
     """
     tickers = sorted({(h.get("ticker") or "").upper() for h in holdings if h.get("ticker")})
     if not tickers:
@@ -787,7 +796,10 @@ def _funds_holdings_market_join(holdings: list[dict]) -> tuple[dict[str, dict], 
 
     # 1. Day-percent + price for each S&P 500 holding (covers ~80% of typical
     #    13F top-10s; the rest fall back to current_prices_batch).
-    sp500 = market_data.get_sp500_market_data("1D") or {}
+    #    Prefer the pre-fetched strict-L2 sp500 map when the caller
+    #    supplied one — keeps yfinance off the request path.
+    if sp500 is None:
+        sp500 = market_data.get_sp500_market_data("1D") or {}
     prices_by_ticker: dict[str, dict] = {
         t: {"price": v.get("price"), "pct_change": v.get("pct_change")}
         for t, v in sp500.items()
@@ -1628,10 +1640,18 @@ async def _render_fund_detail(request: Request, *, cik: str, tab: str):
     adds, cuts = _funds_changes_split(fund)
     top10 = (fund.get("all_holdings") or [])[:10]
 
+    # Pre-fetch the S&P 500 1D quote map via strict L2 so the holdings
+    # join doesn't hit yfinance during render.  Falls through to empty
+    # dict if L2 + LKG are both cold — _funds_holdings_market_join then
+    # uses get_current_prices_batch for missing prices.
+    from filings import warmer as _warmer
+    sp500_map = (await _warmer.read_via_l2("redesign:home:sp500_1d")) or {}
+
     history, market_join, deployment, filings = await asyncio.gather(
         bounded(_fund_aum_history(cik),                        timeout=8.0,
                  fallback=[],          name="aum_history"),
-        bounded(to_heavy(_funds_holdings_market_join, top10),  timeout=4.0,
+        bounded(to_heavy(_funds_holdings_market_join, top10, sp500_map),
+                                                               timeout=4.0,
                  fallback=({}, {}),    name="holdings_market_join"),
         bounded(_funds_capital_deployed(cik),                  timeout=3.0,
                  fallback={},          name="capital_deployed"),
