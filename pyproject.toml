@@ -72,3 +72,22 @@ ignore = [
     "E402",  # late imports -- intentional for cycle-breaking + lazy load
     "E741",  # ambiguous var names (l/I/O) -- legacy spots, low value to fix
 ]
+
+# ── mypy: type-checking, scoped to the redesign sub-router package ──
+# We don't yet have the bandwidth to clean up the whole codebase under
+# strict mypy.  Scoping to `_redesign/` lets us enforce TypedDict
+# contracts on the per-feature route modules (catches "bounded fallback
+# missing a key from the template's expected payload shape" at lint
+# time instead of at template-render time in prod).  Expanding scope
+# is a future task.
+[tool.mypy]
+python_version = "3.12"
+files = ["src/filings/routers/_redesign"]
+# Don't require type hints on every function -- only TypedDict-annotated
+# returns get checked.  Gradual-typing posture.
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = false
+check_untyped_defs = false

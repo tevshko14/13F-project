@@ -28,6 +28,23 @@ jobs:
       - run: pip install hatchling && pip install ".[test]"
       - run: pytest tests/ -v
 
+  typecheck:
+    # mypy gate scoped to files that carry TypedDict contracts.
+    # Expanding scope is a per-file task: add TypedDicts, fix any
+    # drift mypy surfaces, then add the file to this `mypy` invocation.
+    # Catches "bounded fallback drifted from template's expected shape"
+    # at PR time rather than at template-render time in prod.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install mypy
+      - run: |
+          mypy --config-file pyproject.toml \
+            src/filings/routers/_redesign/macro.py
+
   import-smoke:
     runs-on: ubuntu-latest
     steps:

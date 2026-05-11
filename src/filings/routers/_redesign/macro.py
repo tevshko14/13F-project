@@ -24,6 +24,7 @@ import functools
 import logging
 import math
 from datetime import datetime, timedelta
+from typing import TypedDict
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -37,6 +38,107 @@ from filings.routers._redesign.helpers import (
     _shell_context,
     _short_date,
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TypedDict contracts for the per-tab payloads.
+#
+# Each ``_v2_*_payload`` function returns a dict matching one of these
+# types; each ``_v2_*_empty`` function returns the SAME type with empty
+# / zero values.  mypy enforces that both implementations stay in sync
+# -- so the next time someone adds a key the template references, the
+# linter catches the missing-fallback-key bug at PR time, not in prod.
+#
+# Nested values (e.g. ``vol.pc``, ``earn.donut_eps``) are typed as
+# ``dict[str, Any]`` for now -- the chart builders (`_pc_ratio_chart`,
+# `_earn_donut`, etc.) each carry their own ``{"have_data": False}``
+# sentinel + payload keys.  Templates branch on ``.have_data`` for the
+# nested dicts; we don't need TypedDict precision two levels deep.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class VolatilityPayload(TypedDict):
+    """`/macro` Volatility tab — Put/Call · VIX · SKEW."""
+    have_data: bool
+    current_pc: str
+    pc_types: dict
+    pc:        dict
+    vix:       dict
+    skew:      dict
+
+
+class EventsCalendarPayload(TypedDict):
+    """`/macro` Events Calendar tab — week grid + just-released."""
+    have_data:        bool
+    events_by_date:   list
+    week_grid:        list
+    just_released:    list
+    metrics:          dict
+    countdown:        dict | None
+    kpi_strip:        list
+    current_period:   str
+    current_country:  str
+    current_impact:   str
+    periods:          dict
+    countries:        dict
+    impact_choices:   dict
+    is_mock:          bool
+
+
+class MacroEarningsPayload(TypedDict):
+    """`/macro` Earnings tab — scorecard + donuts + trend chart."""
+    have_data:       bool
+    metrics:         dict
+    results:         list
+    results_total:   int
+    kpi_strip:       list
+    donut_eps:       dict
+    donut_rev:       dict
+    trend:           dict
+    current_index:   str
+    current_quarter: str
+    current_sector:  str
+    quarters:        list
+    indices:         dict
+    sectors:         list | dict
+
+
+class MacroCalendarPayload(TypedDict):
+    """`/macro` Earnings Calendar sub-pane — week grid + just-reported."""
+    have_data:      bool
+    metrics:        dict
+    upcoming:       list
+    just_reported:  list
+    kpi_strip:      list
+    week_grid:      list
+    current_index:  str
+    current_period: str
+    indices:        dict
+    periods:        dict
+
+
+class MacroPerformancePayload(TypedDict):
+    """`/macro` Performance tab — breadth + ad-line + momentum chart."""
+    have_data:           bool
+    metrics:             dict
+    advance_pct:         float
+    decline_pct:         float
+    unchanged_pct:       float
+    status:              dict
+    above_50d:           dict
+    sector_breadth:      list
+    top_gainers:         list
+    top_losers:          list
+    divergence:          dict | None
+    momentum:            dict
+    kpi_strip:           list
+    current_index:       str
+    current_period:      str
+    indices:             dict
+    periods:             dict
+    data_period_label:   str
+    data_index_name:     str
+    data_as_of:          str
 
 logger = logging.getLogger(__name__)
 
@@ -783,7 +885,7 @@ def _events_just_released(events_by_date: list[dict], limit: int = 10) -> list[d
     return out[:limit]
 
 
-def _v2_events_calendar_empty() -> dict:
+def _v2_events_calendar_empty() -> EventsCalendarPayload:
     """Empty-shape fallback for the events-calendar tab.
 
     Matches the success-path return of :func:`_v2_events_calendar_payload`
@@ -820,7 +922,7 @@ async def _v2_events_calendar_payload(
     period: str = "this_week",
     country: str = "us",
     impact_filter: str = "all",
-) -> dict:
+) -> EventsCalendarPayload:
     """Fetch + reshape economic events for the v2 Calendar tab."""
     from filings import economic_calendar
 
@@ -835,7 +937,10 @@ async def _v2_events_calendar_payload(
         economic_calendar.fetch_economic_events, period, country, impact_filter,
     )
     if not bundle:
-        return {"have_data": False}
+        # Upstream returned nothing -- match the same complete-shape
+        # contract the bounded() fallback uses so the template can
+        # always iterate `events.periods`, `events.kpi_strip`, etc.
+        return _v2_events_calendar_empty()
 
     events_by_date = bundle.get("events_by_date") or []
     metrics        = bundle.get("metrics") or {}
@@ -1159,7 +1264,7 @@ def _earn_kpi_strip(metrics: dict) -> list[dict]:
     ]
 
 
-def _v2_macro_earnings_empty() -> dict:
+def _v2_macro_earnings_empty() -> MacroEarningsPayload:
     """Empty-shape fallback matching :func:`_v2_macro_earnings_payload`."""
     from filings import earnings_scorecard
     return {
@@ -1182,7 +1287,7 @@ def _v2_macro_earnings_empty() -> dict:
 
 async def _v2_macro_earnings_payload(
     index: str, quarter: str | None, sector: str | None,
-) -> dict:
+) -> MacroEarningsPayload:
     """Fetch + reshape Earnings Scorecard data for the v2 Earnings tab."""
     from filings import earnings_scorecard
 
@@ -1236,7 +1341,7 @@ async def _v2_macro_earnings_payload(
 
 # ── Earnings tab — Calendar sub-pane ─────────────────────────────────────
 
-def _v2_macro_calendar_empty() -> dict:
+def _v2_macro_calendar_empty() -> MacroCalendarPayload:
     """Empty-shape fallback matching :func:`_v2_macro_calendar_payload`."""
     from filings import earnings_scorecard
     return {
@@ -1260,7 +1365,7 @@ def _v2_macro_calendar_empty() -> dict:
 
 async def _v2_macro_calendar_payload(
     request: Request, index: str, period: str,
-) -> dict:
+) -> MacroCalendarPayload:
     """Fetch + reshape Earnings Calendar data for the v2 Earnings tab."""
     from filings import earnings_scorecard
     from filings.client import build_ticker_ownership_map
@@ -1352,8 +1457,13 @@ def _perf_status(advance_pct: float) -> dict:
     return {"label": "Neutral", "tone": "dim"}
 
 
-def _perf_momentum_chart(ad_line: dict) -> dict:
-    """Dual-axis line chart: cumulative A/D vs index price (last 60 trading days)."""
+def _perf_momentum_chart(ad_line: dict | None) -> dict:
+    """Dual-axis line chart: cumulative A/D vs index price (last 60 trading days).
+
+    Accepts ``None`` (handled identically to an empty dict) so callers can
+    pass the raw result of ``to_heavy(market_breadth.fetch_ad_line_history)``
+    without an extra guard.
+    """
     if not ad_line:
         return {"have_data": False}
     dates = ad_line.get("dates") or []
@@ -1423,7 +1533,7 @@ def _perf_momentum_chart(ad_line: dict) -> dict:
     }
 
 
-def _v2_macro_performance_empty() -> dict:
+def _v2_macro_performance_empty() -> MacroPerformancePayload:
     """Empty-shape fallback matching :func:`_v2_macro_performance_payload`."""
     from filings import market_breadth
     return {
@@ -1455,7 +1565,7 @@ def _v2_macro_performance_empty() -> dict:
     }
 
 
-async def _v2_macro_performance_payload(index: str, period: str) -> dict:
+async def _v2_macro_performance_payload(index: str, period: str) -> MacroPerformancePayload:
     """Fetch + reshape Market Breadth data for the v2 Performance tab."""
     from filings import market_breadth
 
@@ -1665,9 +1775,12 @@ async def _sentiment_warm_l2() -> None:
             if usable > 0:
                 # Write to L2 directly (skipping the read path).  Same
                 # category as redesign_home so ops queries stay simple.
+                # ``to_supabase(fn, *args)`` forwards positionally only --
+                # ``ttl_seconds`` is `set_cached`'s 4th positional param,
+                # NOT a kwarg to ``to_supabase`` (mypy caught this).
                 await to_supabase(
-                    supabase_cache.set_cached, _SENTIMENT_L2_KEY,
-                    "macro", payload, ttl_seconds=_SENTIMENT_L2_TTL,
+                    supabase_cache.set_cached,
+                    _SENTIMENT_L2_KEY, "macro", payload, _SENTIMENT_L2_TTL,
                 )
                 logger.info("sentiment warmer: L2 row written (%d/%d categories)",
                             usable, len(payload))
@@ -1910,7 +2023,7 @@ def _skew_chart(rows: list[dict]) -> dict:
     }
 
 
-def _v2_volatility_empty() -> dict:
+def _v2_volatility_empty() -> VolatilityPayload:
     """Empty-shape fallback matching :func:`_v2_volatility_payload`.
 
     Note: ``pc`` / ``vix`` / ``skew`` use the chart builders' own
@@ -1927,7 +2040,7 @@ def _v2_volatility_empty() -> dict:
     }
 
 
-async def _v2_volatility_payload(ratio_type: str = "total") -> dict:
+async def _v2_volatility_payload(ratio_type: str = "total") -> VolatilityPayload:
     """Fetch + reshape Put/Call · VIX · SKEW for the v2 Volatility tab."""
     from filings import cboe_data
 
