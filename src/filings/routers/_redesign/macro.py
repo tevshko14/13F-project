@@ -2113,13 +2113,14 @@ async def preview_macro(
     from filings import treasury_data as _treasury_data
     from filings import frankfurter   as _frankfurter
 
-    # Volatility (12 s) + Heatmap companies/sectors (12 s + 8 s) cut
-    # from this gather — both lazy-load via /api/macro/{volatility,heatmap}
-    # on first tab activation.  Saves up to 12 s off macro's initial
-    # paint when yfinance is degraded.
+    # Lazy-loaded (cut from this gather, fetched via /api/macro/{X} on
+    # first tab activation): Volatility (12 s), Heatmap (12 s + 8 s),
+    # Earnings + ecal (10 s + 8 s), Performance (10 s).  Initial paint
+    # max bounded = max(indicators 8s, yields 6s, fx 6s, events 6s,
+    # debt 6s, calendar 5s, sentiment 4s, idx 2s) = 8 s ceiling,
+    # typical <500 ms with warm L2.
     (
         payload, yield_curve, fx_payload, idx_payload, calendar_rows,
-        earnings_payload, calendar_payload, performance_payload,
         events_payload, debt_payload, sentiment_payload,
     ) = await asyncio.gather(
         bounded(_fetch_macro_indicators(),                          timeout=8.0, fallback={},   name="indicators"),
@@ -2127,20 +2128,11 @@ async def preview_macro(
         bounded(to_heavy(_frankfurter.get_fx_dashboard),            timeout=6.0, fallback=None, name="fx"),
         bounded(_warmer.read_via_l2("redesign:home:index_market"),  timeout=2.0, fallback=None, name="index_md"),
         bounded(_macro_calendar_rows(top_n=12),                     timeout=5.0, fallback=[],   name="calendar"),
-        bounded(_v2_macro_earnings_payload(earn_index, earn_quarter or None, earn_sector or None),
-                timeout=10.0, fallback=_v2_macro_earnings_empty, name="earnings"),
-        bounded(_v2_macro_calendar_payload(request, cal_index, cal_period),
-                timeout=8.0,  fallback=_v2_macro_calendar_empty, name="ecal"),
-        bounded(_v2_macro_performance_payload(perf_index, perf_period),
-                timeout=10.0, fallback=_v2_macro_performance_empty, name="performance"),
         bounded(_v2_events_calendar_payload(ev_period, ev_country, ev_impact),
                 timeout=6.0,  fallback=_v2_events_calendar_empty, name="events"),
         bounded(to_heavy(_treasury_data.get_debt_data),             timeout=6.0, fallback=None, name="debt"),
         # Sentiment is L2-only on the request path — slow Google Trends
         # fetch runs in a background task, so this should always be ~10ms.
-        # 4s timeout chosen to survive regional Supabase blips without
-        # spuriously triggering the warmer / showing "warming up"
-        # placeholders when fresh data exists.
         bounded(_v2_sentiment_payload(),
                 timeout=4.0,  fallback={"have_data": False, "cards": [],
                                         "categories": [], "is_warming": True}, name="sentiment"),
@@ -2185,16 +2177,19 @@ async def preview_macro(
         # fetched via /api/macro/heatmap on tab activation — no need
         # to pass them through the main route context.
         "macro_tab":        active_tab,
-        "earn":             earnings_payload,
-        "ecal":             calendar_payload,
-        "perf":             performance_payload,
         "events":           events_payload,
         "ev_view":          ev_view,
-        "earn_view":        earn_view,
-        # `vol` is now fetched via /api/macro/volatility on tab
-        # activation — pass the active pc_type through so the lazy
-        # endpoint URL carries the user's sub-tab selection.
+        # Lazy-loaded tab params — pass through so each tab's
+        # data-pane-fetch URL carries the user's sub-selection.
         "vol_pc_type":      pc_type,
+        "earn_index":       earn_index,
+        "earn_quarter":     earn_quarter,
+        "earn_sector":      earn_sector,
+        "earn_view":        earn_view,
+        "cal_index":        cal_index,
+        "cal_period":       cal_period,
+        "perf_index":       perf_index,
+        "perf_period":      perf_period,
         "sentiment":        sentiment_payload,
     }
     return templates.TemplateResponse("_redesign/macro.html", ctx)
@@ -2216,6 +2211,65 @@ async def preview_macro_volatility_partial(
     return templates.TemplateResponse(
         "_redesign/partials/macro_volatility.html",
         {"request": request, "vol": volatility_payload},
+    )
+
+
+@router.get("/api/macro/earnings", response_class=HTMLResponse)
+async def preview_macro_earnings_partial(
+    request: Request,
+    earn_index: str = "all",
+    earn_quarter: str = "",
+    earn_sector: str = "",
+    earn_view: str = "scorecard",
+    cal_index: str = "all",
+    cal_period: str = "this_week",
+):
+    """Lazy-loaded Earnings pane — Scorecard + Calendar sub-tabs.
+
+    Cut from the initial /macro gather (10 s + 8 s combined ceiling).
+    Both sub-payloads run in parallel here so the lazy fetch wall
+    time = max(earnings 10s, ecal 8s) instead of the sum.
+    """
+    earnings_payload, calendar_payload = await asyncio.gather(
+        _bounded_call(
+            _v2_macro_earnings_payload(earn_index, earn_quarter or None, earn_sector or None),
+            timeout=10.0, fallback=_v2_macro_earnings_empty, name="earnings",
+        ),
+        _bounded_call(
+            _v2_macro_calendar_payload(request, cal_index, cal_period),
+            timeout=8.0,  fallback=_v2_macro_calendar_empty, name="ecal",
+        ),
+    )
+    earn_view_norm = "calendar" if (earn_view or "").lower() == "calendar" else "scorecard"
+    return templates.TemplateResponse(
+        "_redesign/partials/macro_earnings.html",
+        {
+            "request":   request,
+            "earn":      earnings_payload,
+            "ecal":      calendar_payload,
+            "earn_view": earn_view_norm,
+        },
+    )
+
+
+@router.get("/api/macro/performance", response_class=HTMLResponse)
+async def preview_macro_performance_partial(
+    request: Request,
+    perf_index: str = "sp500",
+    perf_period: str = "1d",
+):
+    """Lazy-loaded Performance pane — market breadth.
+
+    Cut from the initial /macro gather (10 s ceiling).  Pure-payload
+    fetch; no sub-tab activator needed.
+    """
+    performance_payload = await _bounded_call(
+        _v2_macro_performance_payload(perf_index, perf_period),
+        timeout=10.0, fallback=_v2_macro_performance_empty, name="performance",
+    )
+    return templates.TemplateResponse(
+        "_redesign/partials/macro_performance.html",
+        {"request": request, "perf": performance_payload},
     )
 
 

@@ -1,0 +1,214 @@
+{#-
+  Macro · Performance pane partial — fetched on first Performance-tab
+  activation.  See `preview_macro_performance_partial` in
+  filings/routers/_redesign/macro.py.
+-#}
+{% from "_redesign/macros/_primitives.html" import
+     mono, kicker, label, btn, panel, panel_head, segment,
+     kpi_strip, spark %}
+
+    {% if perf.have_data %}
+
+      {{ kpi_strip(perf.kpi_strip) }}
+
+      {# Filter row — index + period.  Mirrors v1 segmented controls. #}
+      <div class="pp-macro-earn-filters">
+        <div class="pp-macro-earn-filter-group">
+          {{ label("INDEX") }}
+          <div class="pp-macro-pill-row">
+            {% for key, lbl in perf.indices.items() %}
+              <a class="pp-macro-pill {% if perf.current_index == key %}is-active{% endif %}"
+                 href="?tab=performance&perf_index={{ key }}&perf_period={{ perf.current_period }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="pp-macro-earn-filter-group">
+          {{ label("PERIOD") }}
+          <div class="pp-macro-pill-row">
+            {% for key, lbl in perf.periods.items() %}
+              <a class="pp-macro-pill {% if perf.current_period == key %}is-active{% endif %}"
+                 href="?tab=performance&perf_index={{ perf.current_index }}&perf_period={{ key }}">
+                {{ lbl }}
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      {# ── Status + Up/Down ratio ── #}
+      {% call panel() %}
+        {{ panel_head("Market tone",
+                      sub=perf.data_index_name ~ " · " ~ perf.data_period_label
+                          ~ (" · as of " ~ (perf.data_as_of | dt_long) if perf.data_as_of else "")) }}
+        <div class="pp-macro-perf-tone">
+          <div class="pp-macro-perf-status pp-macro-perf-status-{{ perf.status.tone }}">
+            <span class="pp-mono pp-macro-perf-status-kicker">STATUS</span>
+            <span class="pp-macro-perf-status-label">{{ perf.status.label }}</span>
+          </div>
+          <div class="pp-macro-perf-ratio">
+            <div class="pp-macro-perf-ratio-bar">
+              <span class="pp-macro-perf-ratio-up"   style="width: {{ perf.advance_pct }}%;"></span>
+              <span class="pp-macro-perf-ratio-flat" style="width: {{ perf.unchanged_pct }}%;"></span>
+              <span class="pp-macro-perf-ratio-dn"   style="width: {{ perf.decline_pct }}%;"></span>
+            </div>
+            <div class="pp-macro-perf-ratio-meta">
+              <span class="pp-mono pp-up">▲ {{ perf.metrics.advances }} advancing ({{ perf.advance_pct }}%)</span>
+              <span class="pp-mono pp-down">▼ {{ perf.metrics.declines }} declining ({{ perf.decline_pct }}%)</span>
+            </div>
+          </div>
+          {% if perf.divergence %}
+            <div class="pp-macro-perf-divergence pp-macro-perf-divergence-{{ perf.divergence.type }}">
+              <span class="pp-mono pp-macro-perf-divergence-kicker">DIVERGENCE</span>
+              <span class="pp-macro-perf-divergence-msg">{{ perf.divergence.message }}</span>
+            </div>
+          {% endif %}
+        </div>
+      {% endcall %}
+
+      {# ── Sector performance bars + top movers ── #}
+      <div class="pp-row pp-row-2-1">
+        {% call panel() %}
+          {{ panel_head("Sector performance",
+                        sub="advance/decline split within each GICS sector"
+                            ~ (" · as of " ~ (perf.data_as_of | dt_long) if perf.data_as_of else "")) }}
+          <div class="pp-macro-sector-bars">
+            {% for s in perf.sector_breadth %}
+              <div class="pp-macro-sector-row" tabindex="0">
+                <span class="pp-macro-sector-name">{{ s.sector }}</span>
+                {# Three-segment stacked bar: ▲ green up · grey unchanged
+                   · ▼ red down.  Widths are pre-computed percentages so
+                   the template stays declarative; segments only render
+                   when their share is non-zero so a perfectly-mixed
+                   sector doesn't show ghost slivers. #}
+                <div class="pp-macro-sector-bar">
+                  {% if s.up_pct > 0 %}
+                    <span class="pp-macro-sector-bar-up"
+                          style="width: {{ s.up_pct }}%;"
+                          aria-hidden="true"></span>
+                  {% endif %}
+                  {% if s.unchanged_pct > 0 %}
+                    <span class="pp-macro-sector-bar-flat"
+                          style="width: {{ s.unchanged_pct }}%;"
+                          aria-hidden="true"></span>
+                  {% endif %}
+                  {% if s.down_pct > 0 %}
+                    <span class="pp-macro-sector-bar-dn"
+                          style="width: {{ s.down_pct }}%;"
+                          aria-hidden="true"></span>
+                  {% endif %}
+                </div>
+                <span class="pp-mono pp-macro-sector-pct">{{ s.up_pct }}%</span>
+                <span class="pp-mono pp-dim2 pp-macro-sector-meta">{{ s.up }}/{{ s.total }}</span>
+
+                {# Hover/focus tooltip — full advance/decline distribution.
+                   Hidden by default; row :hover/:focus-within reveals it.
+                   Sits absolutely above the bar so it doesn't push layout. #}
+                <div class="pp-macro-sector-tip" aria-hidden="true">
+                  <div class="pp-macro-sector-tip-head">
+                    <span class="pp-macro-sector-tip-name">{{ s.sector }}</span>
+                    <span class="pp-mono pp-dim2 pp-macro-sector-tip-total">{{ s.total }} names</span>
+                  </div>
+                  <div class="pp-macro-sector-tip-row">
+                    <span class="pp-macro-sector-tip-dot pp-macro-sector-tip-dot-up"></span>
+                    <span class="pp-macro-sector-tip-label">Advancing</span>
+                    <span class="pp-mono pp-up pp-macro-sector-tip-val">{{ s.up }} · {{ s.up_pct }}%</span>
+                  </div>
+                  <div class="pp-macro-sector-tip-row">
+                    <span class="pp-macro-sector-tip-dot pp-macro-sector-tip-dot-flat"></span>
+                    <span class="pp-macro-sector-tip-label">Unchanged</span>
+                    <span class="pp-mono pp-dim pp-macro-sector-tip-val">{{ s.unchanged }} · {{ s.unchanged_pct }}%</span>
+                  </div>
+                  <div class="pp-macro-sector-tip-row">
+                    <span class="pp-macro-sector-tip-dot pp-macro-sector-tip-dot-dn"></span>
+                    <span class="pp-macro-sector-tip-label">Declining</span>
+                    <span class="pp-mono pp-down pp-macro-sector-tip-val">{{ s.down }} · {{ s.down_pct }}%</span>
+                  </div>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endcall %}
+
+        {% call panel() %}
+          {{ panel_head("Top movers", sub="biggest single-name moves") }}
+          <div class="pp-macro-movers">
+            <div class="pp-macro-movers-group">
+              <div class="pp-mono pp-macro-movers-kicker pp-up">GAINERS</div>
+              {% for m in perf.top_gainers %}
+                <a class="pp-macro-mover-row" href="/stock/{{ m.ticker }}">
+                  <span class="pp-mono pp-ink-strong">{{ m.ticker }}</span>
+                  <span class="pp-macro-mover-name">{{ m.name }}</span>
+                  <span class="pp-mono pp-up">+{{ m.pct }}%</span>
+                </a>
+              {% endfor %}
+            </div>
+            <div class="pp-macro-movers-group">
+              <div class="pp-mono pp-macro-movers-kicker pp-down">LOSERS</div>
+              {% for m in perf.top_losers %}
+                <a class="pp-macro-mover-row" href="/stock/{{ m.ticker }}">
+                  <span class="pp-mono pp-ink-strong">{{ m.ticker }}</span>
+                  <span class="pp-macro-mover-name">{{ m.name }}</span>
+                  <span class="pp-mono pp-down">{{ m.pct }}%</span>
+                </a>
+              {% endfor %}
+            </div>
+          </div>
+        {% endcall %}
+      </div>
+
+      {# ── Momentum chart: cumulative A/D vs index price ── #}
+      {% if perf.momentum.have_data %}
+        {% call panel(cls="pp-macro-momentum-panel") %}
+          {{ panel_head("Market momentum",
+                        sub="cumulative advance/decline line vs " ~ perf.momentum.index_name ~ " · last " ~ perf.momentum.n_days ~ " sessions"
+                            ~ (" · as of " ~ (perf.data_as_of | dt_long) if perf.data_as_of else "")) }}
+          <div class="pp-macro-momentum-body">
+            <div class="pp-chart-hover pp-macro-momentum-chart"
+                 data-vb-w="{{ perf.momentum.vb_w }}" data-vb-h="{{ perf.momentum.vb_h }}"
+                 data-chart-points='{{ perf.momentum.hover_points|default([])|tojson }}'>
+            <svg class="pp-macro-momentum-svg"
+                 viewBox="0 0 {{ perf.momentum.vb_w }} {{ perf.momentum.vb_h }}"
+                 preserveAspectRatio="none"
+                 aria-label="A/D line vs index">
+              {# A/D line (coral, primary) #}
+              <path d="{{ perf.momentum.ad_path }}"
+                    fill="none" stroke="var(--pp-accent)" stroke-width="2.4"
+                    vector-effect="non-scaling-stroke"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+              {# Index price (ink, secondary) #}
+              <path d="{{ perf.momentum.px_path }}"
+                    fill="none" stroke="var(--pp-ink)" stroke-width="2"
+                    vector-effect="non-scaling-stroke" stroke-dasharray="6 4"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            </div>{# /pp-chart-hover #}
+            <div class="pp-macro-momentum-xaxis">
+              {% for tk in perf.momentum.x_labels %}
+                <span class="pp-mono pp-macro-momentum-tick"
+                      style="left: {{ (tk.x / perf.momentum.vb_w * 100) }}%;">{{ tk.label }}</span>
+              {% endfor %}
+            </div>
+            <div class="pp-macro-trend-legend">
+              <span class="pp-mono"><span class="pp-macro-trend-swatch pp-macro-trend-swatch-eps"></span> A/D line (cumulative)</span>
+              <span class="pp-mono"><span class="pp-macro-trend-swatch pp-macro-trend-swatch-rev"></span> {{ perf.momentum.index_name }} price</span>
+            </div>
+          </div>
+        {% endcall %}
+      {% endif %}
+
+      <p class="pp-macro-sentiment-foot">
+        Breadth + sector rotation + top movers from S&amp;P 500 / NASDAQ 100 / Dow 30 close-to-close.
+        A/D line tracks the daily net of advancing minus declining names (cumulative).
+        Data via yfinance · close prices through {{ (perf.data_as_of | dt_long) if perf.data_as_of else "latest session" }}.
+      </p>
+
+    {% else %}
+      {% call panel() %}
+        <div class="pp-page-placeholder">
+          <div class="pp-page-placeholder-title">Market data warming up</div>
+          <div class="pp-page-placeholder-sub">yfinance is fetching constituent prices — refresh in a few seconds.</div>
+        </div>
+      {% endcall %}
+    {% endif %}
