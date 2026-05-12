@@ -42,15 +42,25 @@ _TTL_BY_TIER = {
 
 _VALID_TIERS = frozenset(_TTL_BY_TIER)
 
-# After this age the cached bundle is past its SWR sweet spot and the
-# request handler will block on a fresh rebuild rather than serve it.
-# Sized 24h because:
-#   - 13F holdings change ~once per quarter; stale data >24h is fine
-#   - Financials are quarterly; stale data >24h is fine
-#   - Insider trades roll in continuously; >24h means we'd miss
-#     today's filings, which IS user-visible -- so 24h is the cap.
+# After this age the cached bundle is past the request handler's
+# SWR sweet spot.  Used to be 24h with the rationale that >24h-old
+# data was "past the point where serving it is useful" — but real
+# user traffic includes occasional visits to tickers last cached
+# weeks/months ago.  Under the 24h cap, those visits paid the full
+# 3-8 s cold-rebuild (worst case: bot-scrape-style requests for
+# obscure tickers).
+#
+# Default raised to 30 days as an LKG horizon — any ticker visited
+# in the last month serves its cached bundle immediately, with a
+# background refresh kicking off to update for the next visit.  The
+# trade-off is that infrequently-visited tickers might briefly show
+# an older "current price" until the bg refresh lands; ~5-10 s of
+# slight staleness vs ~8 s of blank loading screen — the former is
+# better UX.  If misleading-stale-data becomes a complaint, layer
+# on a freshness indicator in the template.
+#
 # Override per-deploy with `STOCK_BUNDLE_MAX_STALE_S` env var.
-MAX_STALE_AGE_S = int(os.environ.get("STOCK_BUNDLE_MAX_STALE_S", 24 * 3600))
+MAX_STALE_AGE_S = int(os.environ.get("STOCK_BUNDLE_MAX_STALE_S", 30 * 24 * 3600))
 
 # Tier names exposed for callers so the strings aren't sprinkled around.
 HOT_TIER:  str = "hot"
