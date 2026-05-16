@@ -3086,9 +3086,24 @@
          * @param {Function} [opts.render]  - fn(html, el) — custom render; default sets innerHTML + activates scripts
          * @param {string}   [opts.errorMsg]- user-visible error text
          * @param {string}   [opts.skeleton]- skeleton HTML (injected immediately)
-         * @param {number}   [opts.timeout] - ms before abort (default 10000)
-         * @param {number}   [opts.retries] - max retries (default 3)
+         * @param {number}   [opts.timeout] - ms before abort (default 15000)
+         * @param {number}   [opts.retries] - max retries (default 1 — one quiet retry, then manual "Retry" button)
          * @param {boolean}  [opts.json]    - if true, parses JSON and passes to render(data, el)
+         *
+         * Retry policy note: maxRetries used to default to 3 with a 10s
+         * client timeout.  Under a slow-Supabase day, each panel timeout
+         * fired a fresh fetch BEFORE the server's 8s budget could return
+         * a bounded fallback — and aborting on the client doesn't cancel
+         * the server handler, so one slow panel ballooned into 3-4
+         * stuck server-side handlers per L2-backed endpoint.  Across
+         * the ~10 lazy panels on /stock/{ticker} that's 30-40 stuck
+         * handlers per page load amplifying load on a degraded backend.
+         * Dropping to 1 + raising client timeout above the server's
+         * budget (15s > 8s) ensures the server's bounded fallback
+         * lands BEFORE the client gives up — the user sees the
+         * server's empty/cached fallback render instead of triggering
+         * a retry storm.  The error UI still exposes a manual "Retry"
+         * button so transient failures remain user-recoverable.
          */
         window.ppLoadSection = function(opts) {
             var el = typeof opts.el === 'string' ? document.getElementById(opts.el) : opts.el;
@@ -3097,8 +3112,8 @@
             var url = opts.url;
             var errorMsg = opts.errorMsg || 'Unable to load data';
             var skeleton = opts.skeleton || _defaultSkeleton();
-            var timeout = opts.timeout || 10000;
-            var maxRetries = opts.retries != null ? opts.retries : 3;
+            var timeout = opts.timeout || 15000;
+            var maxRetries = opts.retries != null ? opts.retries : 1;
             var isJson = opts.json || false;
             var render = opts.render || null;
             var attempt = 0;

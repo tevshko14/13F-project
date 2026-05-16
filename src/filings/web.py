@@ -78,7 +78,11 @@ from filings.app_state import (
     valid_member_id as _valid_member_id,
     valid_ticker as _valid_ticker,
 )
-from filings.concurrency import to_heavy as _to_heavy, to_supabase as _to_supabase
+from filings.concurrency import (
+    fire_and_forget as _fire_and_forget,
+    to_heavy as _to_heavy,
+    to_supabase as _to_supabase,
+)
 from filings.models import SuperinvestorSummary, StockInfo
 from filings.routers import auth_admin as _auth_admin_router
 from filings.routers import redesign_preview as _redesign_preview_router
@@ -7296,6 +7300,10 @@ TICKER_TAPE_SYMBOLS = [
 ]
 
 
+# Shared L2 category for every homepage fragment so admin/ops queries
+# against ``api_cache.category`` can target the homepage bundle as a unit.
+_L2_HOMEPAGE_CATEGORY = "homepage"
+
 _ticker_tape_cache = _HtmlCache(120)  # 2-min L1 — matches browser SWR
 _L2_TICKER_TAPE_KEY = "homepage:ticker_tape"
 _L2_TICKER_TAPE_TTL = 3600  # 1h L2 fallback
@@ -7351,7 +7359,10 @@ async def ticker_tape_api(request: Request):
         {"request": request, "tickers": tickers},
     )
     _ticker_tape_cache.set(resp)
-    asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_TICKER_TAPE_KEY, "homepage", resp.body, _L2_TICKER_TAPE_TTL))
+    _fire_and_forget(
+        asyncio.to_thread(_l2_set_html, _L2_TICKER_TAPE_KEY, _L2_HOMEPAGE_CATEGORY, resp.body, _L2_TICKER_TAPE_TTL),
+        name="l2_set_html:ticker_tape",
+    )
     return resp
 
 
@@ -7478,7 +7489,10 @@ async def market_overview_api(request: Request):
     )
 
     _overview_cache.set(resp)
-    asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_OVERVIEW_KEY, "homepage", resp.body, _L2_OVERVIEW_TTL))
+    _fire_and_forget(
+        asyncio.to_thread(_l2_set_html, _L2_OVERVIEW_KEY, _L2_HOMEPAGE_CATEGORY, resp.body, _L2_OVERVIEW_TTL),
+        name="l2_set_html:overview",
+    )
     return resp
 
 
@@ -7519,7 +7533,10 @@ async def live_activity_api(request: Request):
             {"request": request, "notifications": notifs},
         )
         _live_activity_cache.set(resp)
-        asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_LIVE_ACTIVITY_KEY, "homepage", resp.body, _L2_LIVE_ACTIVITY_TTL))
+        _fire_and_forget(
+            asyncio.to_thread(_l2_set_html, _L2_LIVE_ACTIVITY_KEY, _L2_HOMEPAGE_CATEGORY, resp.body, _L2_LIVE_ACTIVITY_TTL),
+            name="l2_set_html:live_activity",
+        )
         return resp
     except Exception:
         logger.warning("live_activity_api: fetch failed, trying L2", exc_info=True)
@@ -7560,7 +7577,10 @@ async def market_news_api(request: Request):
         {"request": request, "articles": articles},
     )
     _market_news_cache.set(resp)
-    asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_NEWS_KEY, "homepage", resp.body, _L2_NEWS_TTL))
+    _fire_and_forget(
+        asyncio.to_thread(_l2_set_html, _L2_NEWS_KEY, _L2_HOMEPAGE_CATEGORY, resp.body, _L2_NEWS_TTL),
+        name="l2_set_html:news",
+    )
     return resp
 
 
@@ -7591,7 +7611,10 @@ async def retail_sentiment_api(request: Request):
         {"request": request, **data},
     )
     _retail_sentiment_cache.set(resp)
-    asyncio.create_task(asyncio.to_thread(_l2_set_html, _L2_RETAIL_SENTIMENT_KEY, "homepage", resp.body, _L2_RETAIL_SENTIMENT_TTL))
+    _fire_and_forget(
+        asyncio.to_thread(_l2_set_html, _L2_RETAIL_SENTIMENT_KEY, _L2_HOMEPAGE_CATEGORY, resp.body, _L2_RETAIL_SENTIMENT_TTL),
+        name="l2_set_html:retail_sentiment",
+    )
     return resp
 
 
@@ -7655,7 +7678,10 @@ async def heatmap(request: Request, period: str = "1D"):
         },
     )
     _heatmap_cache.set(resp, period)
-    asyncio.create_task(asyncio.to_thread(_l2_set_html, f"{_L2_HEATMAP_KEY}:{period}", "homepage", resp.body, _L2_HEATMAP_TTL))
+    _fire_and_forget(
+        asyncio.to_thread(_l2_set_html, f"{_L2_HEATMAP_KEY}:{period}", _L2_HOMEPAGE_CATEGORY, resp.body, _L2_HEATMAP_TTL),
+        name="l2_set_html:heatmap",
+    )
     return resp
 
 

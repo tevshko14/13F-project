@@ -646,8 +646,20 @@ def _get_client():
 
         try:
             from supabase import create_client
+            from supabase.lib.client_options import ClientOptions
 
-            _client = create_client(url, key)
+            # Cap the sync client's postgrest timeout to 8s.  Default is
+            # 120s, which under a slow Supabase day lets a fire-and-forget
+            # writeback (e.g. ``_l2_set_html`` via ``asyncio.to_thread``)
+            # pin an asyncio default-pool thread for two full minutes.
+            # The web container's pool is ~16 slots on a 2-core Micro;
+            # six writebacks per homepage saturate the pool in seconds
+            # once Supabase response times grow past a few seconds.
+            # 8s matches the async client's existing cap so sync and
+            # async paths share a single worst-case latency budget.
+            _client = create_client(
+                url, key, options=ClientOptions(postgrest_client_timeout=8),
+            )
             logger.info("Supabase client initialised (%s)", url)
             # Try auto-migration (non-fatal)
             _auto_migrate()
@@ -699,11 +711,23 @@ async def _get_async_client():
             # set to 8s to match _DEFAULT_LIGHT_TIMEOUT -- the default
             # 120s would let a slow Supabase pin a request long after
             # our own timeout has fired.
+            #
+            # Explicit httpx.Timeout covers all four httpx phases:
+            # connect (TCP+TLS), read (response bytes), write (request
+            # bytes), and pool (slot acquisition).  Without an explicit
+            # pool timeout, a single hung connection — common under a
+            # ReadTimeout where httpx can't be sure the socket is reusable
+            # — quietly starves the pool and new requests queue forever
+            # on pool acquisition, BEFORE the 8s postgrest timeout even
+            # starts measuring.  That presented as "request never returns"
+            # in our incident logs.  max_connections bumped to 16 to give
+            # the 8-slot Supabase semaphore room for transient retries.
             options = AsyncClientOptions(
                 postgrest_client_timeout=8,
                 httpx_client=httpx.AsyncClient(
+                    timeout=httpx.Timeout(connect=5.0, read=8.0, write=8.0, pool=5.0),
                     limits=httpx.Limits(
-                        max_connections=12,
+                        max_connections=16,
                         max_keepalive_connections=8,
                     ),
                 ),

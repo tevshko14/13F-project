@@ -28,7 +28,7 @@ import logging
 from typing import Any, Callable, TypedDict
 
 from filings import supabase_cache
-from filings.concurrency import gate_supabase_async, to_heavy
+from filings.concurrency import fire_and_forget, gate_supabase_async, to_heavy
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +221,10 @@ async def _l2_cached_impl(
             or age_seconds <= stale_budget_seconds
         )
         if within_budget:
-            asyncio.create_task(_refresh(key, ttl_seconds, compute, category))
+            fire_and_forget(
+                _refresh(key, ttl_seconds, compute, category),
+                name=f"l2_refresh:{key}",
+            )
             return data, _meta("l2_stale", as_of_ts, age_seconds)
 
     # Cold miss (row absent or exceeded stale budget).
@@ -236,7 +239,10 @@ async def _l2_cached_impl(
     # Non-blocking miss: kick off the compute in the background, return
     # LKG / None to the caller right now so the request path doesn't
     # wait on the upstream.
-    asyncio.create_task(_refresh(key, ttl_seconds, compute, category))
+    fire_and_forget(
+        _refresh(key, ttl_seconds, compute, category),
+        name=f"l2_refresh:{key}",
+    )
     if lkg_fallback:
         lkg = await _read_l2_row(_lkg_key(key))
         if lkg is not None and lkg.get("data") is not None:
@@ -273,9 +279,15 @@ async def _compute_singleflight(
         payload = await _run_compute(compute)
         # Schedule writeback BEFORE resolving the future so concurrent
         # awaiters know the writeback is queued (preserves the existing
-        # "writeback follows successful compute" invariant).
+        # "writeback follows successful compute" invariant).  Use
+        # fire_and_forget so the task gets a strong reference and can't
+        # be GC'd mid-flight under load — plain create_task only weakly
+        # tracks pending tasks.
         if payload:
-            asyncio.create_task(_writeback(key, category, payload, ttl_seconds))
+            fire_and_forget(
+                _writeback(key, category, payload, ttl_seconds),
+                name=f"l2_writeback:{key}",
+            )
         fut.set_result(payload)
         return payload
     except Exception as exc:
