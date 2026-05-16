@@ -1227,6 +1227,8 @@ async def set_cached_async(
     category: str,
     data: dict,
     ttl_seconds: int | None = None,
+    *,
+    skip_hash_check: bool = False,
 ) -> bool:
     """Async sibling of ``set_cached``.
 
@@ -1235,6 +1237,15 @@ async def set_cached_async(
     writeback so per-request cache writes don't hold default-pool
     threads during the Supabase round-trip.
 
+    ``skip_hash_check=True`` bypasses the pre-write hash lookup entirely
+    (no ``get_content_hash_async`` round-trip).  Use this when the
+    caller already knows the row needs a fresh write — most importantly
+    the LKG sidecar, which by definition always wants the latest
+    snapshot and never benefits from a "data unchanged" short-circuit.
+    Saves one PostgREST round-trip per write at the cost of one extra
+    UPSERT when the data is unchanged.  On a 1 GB Micro instance under
+    Supabase pressure, halving the round-trip count is the dominant win.
+
     Returns ``True`` on success, ``False`` on error / not configured.
     """
     client = await _get_async_client()
@@ -1242,23 +1253,24 @@ async def set_cached_async(
         return False
 
     new_hash = _compute_hash(data)
-    cached_hash = _hash_cache.get(cache_key)
-    existing_hash = cached_hash or await get_content_hash_async(cache_key)
-    if existing_hash and cached_hash is None:
-        _hash_cache.set(cache_key, existing_hash)
+    if not skip_hash_check:
+        cached_hash = _hash_cache.get(cache_key)
+        existing_hash = cached_hash or await get_content_hash_async(cache_key)
+        if existing_hash and cached_hash is None:
+            _hash_cache.set(cache_key, existing_hash)
 
-    if existing_hash and existing_hash == new_hash:
-        # Data unchanged — just bump TTL.
-        try:
-            await (
-                client.table(_TABLE)
-                .update({"expires_at": _expires_at_iso(ttl_seconds)})
-                .eq("cache_key", cache_key)
-                .execute()
-            )
-            return True
-        except Exception:
-            pass  # Fall through to full upsert.
+        if existing_hash and existing_hash == new_hash:
+            # Data unchanged — just bump TTL.
+            try:
+                await (
+                    client.table(_TABLE)
+                    .update({"expires_at": _expires_at_iso(ttl_seconds)})
+                    .eq("cache_key", cache_key)
+                    .execute()
+                )
+                return True
+            except Exception:
+                pass  # Fall through to full upsert.
 
     row = {
         "cache_key": cache_key,
@@ -2407,7 +2419,14 @@ def run_retention_cleanup() -> dict:
         logger.warning("Retention: youtube_events cleanup failed: %s", exc)
         results["youtube_events_deleted"] = -1
 
-    # 4. Expired api_cache rows: physical delete (skip 13f -- stale-while-revalidate)
+    # 4. Expired api_cache rows: physical delete.  Skip 13f (and its lkg_
+    # sidecar) so historical fund holdings serve via stale-while-revalidate
+    # even past their TTL — the 13f data integrity rule says these never
+    # get deleted.  Every OTHER category, including all lkg_* sidecars,
+    # IS subject to TTL-based cleanup — that's the fix for the monotonic
+    # api_cache growth that was driving Postgres compute pressure on
+    # Micro tier (LKG rows previously had expires_at=NULL and were
+    # invisible to this filter).
     now_iso = now.isoformat()
     try:
         resp = (
@@ -2415,6 +2434,7 @@ def run_retention_cleanup() -> dict:
             .delete(count="exact")
             .lt("expires_at", now_iso)
             .neq("category", "13f")
+            .neq("category", "lkg_13f")
             .execute()
         )
         results["expired_cache_deleted"] = resp.count if resp.count is not None else 0

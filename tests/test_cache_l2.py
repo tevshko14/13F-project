@@ -44,8 +44,12 @@ class FakeSupabase:
         # The row dict is exactly what cache_l2 expects.
         return dict(row)
 
-    async def set_cached_async(self, key, category, data, ttl_seconds):
-        self.writes.append((key, category, data, ttl_seconds))
+    async def set_cached_async(self, key, category, data, ttl_seconds, **kwargs):
+        # ``**kwargs`` absorbs forward-compat flags like
+        # ``skip_hash_check=True`` that production callers pass for the
+        # LKG sidecar path.  Recorded as the 5th tuple element so tests
+        # can assert on the flag when relevant.
+        self.writes.append((key, category, data, ttl_seconds, kwargs))
         # Persist into the in-memory store with computed freshness
         # metadata so subsequent reads return what we wrote.
         self.rows[key] = {
@@ -199,11 +203,16 @@ async def test_writeback_persists_lkg_sidecar(fake_supabase):
     lkg_writes     = [w for w in fake_supabase.writes if w[0] == "lkg:k6"]
     assert len(primary_writes) == 1
     assert len(lkg_writes) == 1
-    # LKG row has no TTL (lives indefinitely).
-    assert lkg_writes[0][3] is None
+    # LKG row carries a finite TTL (was None pre-fix — that was the bug
+    # that caused api_cache to grow monotonically because retention's
+    # ``expires_at < now()`` filter never matched NULL expires_at).
+    assert lkg_writes[0][3] == cache_l2._LKG_TTL_SECONDS
     # LKG row carries the lkg_<category> namespace so admin queries
     # can target sidecar rows distinctly.
     assert lkg_writes[0][1] == "lkg_test"
+    # LKG writes skip the hash-check round-trip — LKG always wants the
+    # latest snapshot so the data-unchanged short-circuit is pure waste.
+    assert lkg_writes[0][4].get("skip_hash_check") is True
 
 
 @pytest.mark.asyncio

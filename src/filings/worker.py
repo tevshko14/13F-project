@@ -202,8 +202,16 @@ async def _run() -> None:
 
     _track(_web._prefetch_market_data(fake_app), "prefetch_market")
 
+    # Periodic retention cleanup — every 6 h.  Mirrors web.py's
+    # registration so whichever process owns WORKER_MODE!=web keeps
+    # api_cache bounded.  Previously this was a one-shot at startup,
+    # which let LKG rows + expired entries accumulate indefinitely.
     _track(
-        asyncio.to_thread(supabase_cache.run_retention_cleanup),
+        _web._periodic_task(
+            name="retention cleanup", startup_delay=300,
+            interval=_web._RETENTION_INTERVAL,
+            body=_web._run_retention_cleanup,
+        ),
         "retention_cleanup",
     )
 

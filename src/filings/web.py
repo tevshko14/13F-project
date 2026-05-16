@@ -655,8 +655,14 @@ async def lifespan(app: FastAPI):
         # Prefetch S&P 500 market data in background (~30-60s on cold start)
         _track(_prefetch_market_data(app), "prefetch_market")
 
-        # Run retention cleanup in background (keep DB small)
-        _track(asyncio.to_thread(supabase_cache.run_retention_cleanup), "retention_cleanup")
+        # Periodic retention cleanup — every 6 h.  Was previously a
+        # one-shot at startup, which combined with the LKG sidecar's
+        # missing TTL caused api_cache to grow monotonically until
+        # Postgres compute pressure broke Supabase Micro.
+        _track(_periodic_task(
+            name="retention cleanup", startup_delay=300,
+            interval=_RETENTION_INTERVAL, body=_run_retention_cleanup,
+        ), "retention_cleanup")
 
         # Self-heal: refresh any stale funds in background
         if _ENABLE_BACKGROUND_REFRESH:
@@ -1875,6 +1881,27 @@ async def _run_feature_announcement_scan() -> None:
 # ── Memory profile background poller ─────────────────────────────────
 
 _MEMPROF_POLL_INTERVAL = 5 * 60  # 5 minutes — cheap enough; won't churn logs
+
+
+# Retention cleanup runs every 6 h.  Previously this fired once per
+# lifespan startup, which on a long-lived worker meant cleanup happened
+# essentially never — combined with the LKG sidecar leaving rows with
+# expires_at=NULL, api_cache grew monotonically until Postgres compute
+# pressure tipped Supabase Micro into the unhealthy state.  Six hours
+# is a balance between Postgres bloat (favors frequent) and per-cycle
+# DELETE cost on a ~50 MB table (favors infrequent).
+_RETENTION_INTERVAL = 6 * 3600
+
+
+async def _run_retention_cleanup() -> None:
+    """One iteration of retention cleanup.  Wraps the sync
+    ``supabase_cache.run_retention_cleanup`` in ``asyncio.to_thread``
+    so it doesn't block the event loop during the DELETE chain (5
+    tables, can take 5-30 s on a busy Postgres).  Errors are
+    swallowed by ``_periodic_task`` — a single failed run shouldn't
+    kill the periodic loop."""
+    from filings import supabase_cache
+    await asyncio.to_thread(supabase_cache.run_retention_cleanup)
 
 
 async def _run_memprof_log() -> None:

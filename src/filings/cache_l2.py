@@ -346,10 +346,27 @@ async def _refresh(
         logger.debug("l2_cached: bg refresh compute failed for %s: %s", key, exc)
 
 
+# LKG rows get a long but finite TTL (7 days) so the retention cleanup
+# at ``supabase_cache.run_retention_cleanup`` can reclaim them.  Previously
+# the LKG path passed ``ttl_seconds=None`` which left ``expires_at`` NULL
+# in the row; retention filters on ``expires_at < now()`` so NULL rows
+# never matched and ``api_cache`` grew monotonically.  Seven days is long
+# enough to survive any plausible upstream outage (worst case observed
+# was ~14 h) but short enough that abandoned keys actually disappear.
+_LKG_TTL_SECONDS = 7 * 24 * 3600
+
+
 async def _writeback(key: str, category: str, payload: Any, ttl_seconds: int) -> None:
     """Write a payload to L2 + LKG.  Errors swallowed; ``allow_drop=True``
     so Supabase saturation skips the writeback instead of piling up.
-    LKG is written second so a primary failure doesn't poison the snapshot."""
+    LKG is written second so a primary failure doesn't poison the snapshot.
+
+    LKG writes pass ``skip_hash_check=True`` because the LKG row by
+    definition always wants the latest snapshot — the hash-comparison
+    short-circuit just wastes a PostgREST round-trip with no upside.
+    Combined with the finite ``_LKG_TTL_SECONDS`` so retention catches
+    abandoned LKG rows, this halves the per-writeback round-trip count.
+    """
     try:
         await gate_supabase_async(
             supabase_cache.set_cached_async(key, category, payload, ttl_seconds),
@@ -359,13 +376,15 @@ async def _writeback(key: str, category: str, payload: Any, ttl_seconds: int) ->
         logger.debug("l2_cached: writeback failed for %s: %s", key, exc)
         return
 
-    # LKG sidecar — overwrites on every successful refresh, ttl=None so
-    # the row never expires.  Category prefix keeps ops/admin queries
-    # able to target LKG rows distinctly.
+    # LKG sidecar — overwrites on every successful refresh.  Finite TTL
+    # so retention can reclaim abandoned LKG rows; skip_hash_check so we
+    # don't pay a SELECT for a row we always want to overwrite.  Category
+    # prefix keeps ops/admin queries able to target LKG rows distinctly.
     try:
         await gate_supabase_async(
             supabase_cache.set_cached_async(
-                _lkg_key(key), f"lkg_{category}", payload, None,
+                _lkg_key(key), f"lkg_{category}", payload, _LKG_TTL_SECONDS,
+                skip_hash_check=True,
             ),
             allow_drop=True,
         )
