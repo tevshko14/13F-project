@@ -737,15 +737,29 @@ def is_available() -> bool:
 
 
 def _handle_table_missing(exc: Exception) -> None:
-    """Log an appropriate message depending on whether the table is missing."""
+    """Log an appropriate message depending on whether the table is missing.
+
+    The supabase-py / postgrest-py client wraps Cloudflare HTML, network
+    errors, and PostgREST API errors in exception types whose ``__str__``
+    is often empty (e.g. ``APIError`` with the message buried in ``.message``).
+    Surface ``type(exc).__name__``, message, code, and HTTP status so a
+    degraded-Supabase day produces actionable logs instead of empty strings.
+    """
     err = str(exc)
     if "PGRST205" in err or "api_cache" in err:
         logger.info(
             "Supabase api_cache table not found -- run the SQL migration "
             "or set SUPABASE_DB_URL for auto-migration. Falling back to disk cache."
         )
-    else:
-        logger.warning("Supabase operation failed: %s", exc)
+        return
+
+    message = getattr(exc, "message", None) or err or "<empty>"
+    code = getattr(exc, "code", None)
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    logger.warning(
+        "Supabase operation failed: %s msg=%r code=%s status=%s",
+        type(exc).__name__, message, code, status,
+    )
 
 
 # ── Single-key read / write ──────────────────────────────────────
@@ -855,37 +869,14 @@ async def get_cached_with_stale_async(
         return None, False
 
 
-async def get_cached_full_row_async(
-    cache_key: str,
-) -> dict | None:
-    """Richer L2 reader that surfaces freshness metadata.
+def _row_to_full_meta(row: dict | None) -> dict | None:
+    """Convert a raw ``api_cache`` row into the full-meta dict shape
+    returned by ``get_cached_full_row_async`` / ``get_cached_full_rows_async``.
 
-    Returns a dict ``{data, is_fresh, expires_at, ttl_seconds, as_of_ts,
-    age_seconds}`` or ``None`` on cache miss / Supabase unavailable.
-
-    ``as_of_ts`` is derived from ``expires_at - ttl_seconds`` (the schema
-    has no separate ``updated_at`` column on api_cache).  ``age_seconds``
-    is the wall-clock age right now.  Used by ``cache_l2.l2_cached_with_meta``
-    so the request path can render "Cached · 2m ago" badges without an
-    extra round-trip.
+    Returns ``None`` when the row is absent or has no ``response_data``.
+    Shared between the single-key and batch readers so freshness/age
+    semantics stay identical.
     """
-    client = await _get_async_client()
-    if client is None:
-        return None
-
-    try:
-        resp = await (
-            client.table(_TABLE)
-            .select("response_data, expires_at, ttl_seconds")
-            .eq("cache_key", cache_key)
-            .maybe_single()
-            .execute()
-        )
-    except Exception as exc:
-        _handle_table_missing(exc)
-        return None
-
-    row = resp.data if resp else None
     if row is None:
         return None
     data = row.get("response_data")
@@ -916,6 +907,82 @@ async def get_cached_full_row_async(
         "as_of_ts":     as_of_ts,
         "age_seconds":  age_seconds,
     }
+
+
+async def get_cached_full_row_async(
+    cache_key: str,
+) -> dict | None:
+    """Richer L2 reader that surfaces freshness metadata.
+
+    Returns a dict ``{data, is_fresh, expires_at, ttl_seconds, as_of_ts,
+    age_seconds}`` or ``None`` on cache miss / Supabase unavailable.
+
+    ``as_of_ts`` is derived from ``expires_at - ttl_seconds`` (the schema
+    has no separate ``updated_at`` column on api_cache).  ``age_seconds``
+    is the wall-clock age right now.  Used by ``cache_l2.l2_cached_with_meta``
+    so the request path can render "Cached · 2m ago" badges without an
+    extra round-trip.
+    """
+    client = await _get_async_client()
+    if client is None:
+        return None
+
+    try:
+        resp = await (
+            client.table(_TABLE)
+            .select("response_data, expires_at, ttl_seconds")
+            .eq("cache_key", cache_key)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return None
+
+    return _row_to_full_meta(resp.data if resp else None)
+
+
+async def get_cached_full_rows_async(
+    cache_keys: list[str],
+) -> dict[str, dict | None]:
+    """Batch sibling of ``get_cached_full_row_async`` — one query for N keys.
+
+    Issues a single ``SELECT ... WHERE cache_key IN (...)`` against
+    PostgREST instead of N parallel single-row reads.  Collapsing the
+    warmer's per-target fanout into one round-trip removes the dominant
+    source of cold-start Supabase pressure (PostgREST→Postgres connection
+    churn that has historically saturated Micro-tier under load).
+
+    Returns a dict keyed by every requested cache_key — missing keys map
+    to ``None`` so callers can iterate the original key list uniformly.
+    On Supabase unavailable / query error, every key maps to ``None``
+    (treated as a uniform cold miss; callers fall through to compute).
+    """
+    if not cache_keys:
+        return {}
+
+    client = await _get_async_client()
+    if client is None:
+        return {k: None for k in cache_keys}
+
+    try:
+        resp = await (
+            client.table(_TABLE)
+            .select("cache_key, response_data, expires_at, ttl_seconds")
+            .in_("cache_key", cache_keys)
+            .execute()
+        )
+    except Exception as exc:
+        _handle_table_missing(exc)
+        return {k: None for k in cache_keys}
+
+    rows_by_key: dict[str, dict] = {}
+    for row in (resp.data or []):
+        key = row.get("cache_key")
+        if isinstance(key, str):
+            rows_by_key[key] = row
+
+    return {k: _row_to_full_meta(rows_by_key.get(k)) for k in cache_keys}
 
 
 # Keys whose value changes every fetch (timestamps, freshness markers)

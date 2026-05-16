@@ -27,10 +27,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal
 
+from filings import supabase_cache
 from filings.cache_l2 import l2_cached
+from filings.concurrency import gate_supabase_async
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,26 @@ Tier = Literal["hot", "warm", "cold"]
 HOT_INTERVAL_SECONDS  = 90
 WARM_INTERVAL_SECONDS = 4 * 60
 COLD_INTERVAL_SECONDS = 6 * 60 * 60
+
+
+# Max simultaneous compute+writeback chains in flight during a tier's
+# warm pass.  Without this cap, ``asyncio.gather`` fans out all targets
+# at once — on a 13-target tier that's 13 concurrent PostgREST writes +
+# 13 upstream fetches, which on Supabase Micro saturates PostgREST's
+# internal pool and triggers Cloudflare 522s.  Three keeps the cap
+# below the smallest tier size so the warmer can't self-DDoS Supabase.
+# Override via env for ops experimentation; the warmer's per-target work
+# is independent so larger values just trade safety for parallelism.
+def _parse_warmer_concurrency() -> int:
+    raw = os.environ.get("WARMER_CONCURRENCY", "3")
+    try:
+        n = int(raw)
+        return n if n >= 1 else 3
+    except ValueError:
+        logger.warning("Invalid WARMER_CONCURRENCY=%r, using default 3", raw)
+        return 3
+
+WARMER_CONCURRENCY = _parse_warmer_concurrency()
 
 
 # Bump when a registered payload's SHAPE changes incompatibly.
@@ -370,11 +393,21 @@ async def read_via_l2(
 
 
 async def warm_tier(tier: Tier) -> dict:
-    """Refresh every L2 entry for *tier* in parallel.
+    """Refresh every L2 entry for *tier* with batched reads + bounded fanout.
 
-    Calls ``l2_cached(block_on_miss=True, ...)`` for each target — that
-    populates the primary row AND the LKG sidecar (via writeback) so
-    the next request-path read finds both fresh.
+    Cold-start and periodic warmer ticks used to issue N independent L2
+    reads (one per target) plus N concurrent compute+writeback chains.
+    On Supabase Micro that was the dominant source of PostgREST→Postgres
+    pool pressure and the trigger for Cloudflare 522 cascades.
+
+    This implementation:
+
+    * Issues **one** ``get_cached_full_rows_async`` query for every key
+      in the tier — collapses N reads into one round-trip.
+    * Bounds concurrent compute+writeback chains to ``WARMER_CONCURRENCY``
+      via a semaphore so the writeback half of the cycle doesn't fan out
+      either.  Fresh-L2 targets are no-ops past the prefetched read and
+      don't consume a slot.
 
     Returns a status dict ``{tier, warmed, failed, total}`` for logging.
     Failures are swallowed (logged at debug) — individual upstream
@@ -384,14 +417,27 @@ async def warm_tier(tier: Tier) -> dict:
     if not targets:
         return {"tier": tier, "warmed": 0, "failed": [], "total": 0}
 
-    results = await asyncio.gather(
-        *(
-            l2_cached(
-                versioned_key(t.key), ttl_seconds=t.ttl_seconds,
+    versioned_keys = [versioned_key(t.key) for t in targets]
+    try:
+        rows = await gate_supabase_async(
+            supabase_cache.get_cached_full_rows_async(versioned_keys),
+        )
+    except Exception as exc:
+        logger.debug("warmer[%s]: batch L2 read failed: %s — falling back to per-key reads", tier, exc)
+        rows = {k: None for k in versioned_keys}
+
+    sem = asyncio.Semaphore(WARMER_CONCURRENCY)
+
+    async def _warm_one(t: WarmerTarget, vkey: str) -> Any:
+        async with sem:
+            return await l2_cached(
+                vkey, ttl_seconds=t.ttl_seconds,
                 compute=t.compute, category=t.category,
+                prefetched_row=rows.get(vkey),
             )
-            for t in targets
-        ),
+
+    results = await asyncio.gather(
+        *(_warm_one(t, vkey) for t, vkey in zip(targets, versioned_keys)),
         return_exceptions=True,
     )
 

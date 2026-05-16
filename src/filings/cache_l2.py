@@ -13,6 +13,12 @@ Read order: fresh hit → stale hit → LKG hit → None / compute.  Reads/
 writes run on the event loop via the async Supabase client (gated by
 ``gate_supabase_async`` for backpressure).  Sync compute callables
 go through ``to_heavy`` for thread-pool budget.
+
+**Single-flight compute** — concurrent callers for the same cold/stale
+key coalesce onto one upstream fetch.  Without this, N concurrent users
+hitting the same expired key fire N upstream requests AND N writebacks,
+amplifying load on a degraded upstream day; with it, all callers share
+one in-flight compute.
 """
 
 from __future__ import annotations
@@ -25,6 +31,14 @@ from filings import supabase_cache
 from filings.concurrency import gate_supabase_async, to_heavy
 
 logger = logging.getLogger(__name__)
+
+
+# Single-flight registry — one entry per in-flight compute keyed by cache
+# key.  Cleared in the `finally` of `_compute_singleflight`.  Both the
+# blocking-miss path and the background `_refresh` path go through this,
+# so a user request and the warmer can't race-fire two computes for the
+# same key.
+_inflight: dict[str, asyncio.Future[Any]] = {}
 
 
 # ── LKG sidecar key naming ───────────────────────────────────────────
@@ -66,6 +80,12 @@ class CacheMeta(TypedDict, total=False):
     age_seconds: int | None
 
 
+# Sentinel distinguishing "caller didn't pass prefetched_row" from
+# "caller passed prefetched_row=None to signal a known cache miss" (the
+# warmer uses the latter after a batch read finds the key absent).
+_NO_PREFETCH: Any = object()
+
+
 # ── Public API ───────────────────────────────────────────────────────
 
 
@@ -78,6 +98,7 @@ async def l2_cached_with_meta(
     block_on_miss: bool = True,
     stale_budget_seconds: int | None = None,
     lkg_fallback: bool = False,
+    prefetched_row: dict | None = _NO_PREFETCH,  # type: ignore[assignment]
 ) -> tuple[Any, CacheMeta]:
     """Read-through Supabase L2 cache with SWR + optional LKG fallback.
 
@@ -108,6 +129,14 @@ async def l2_cached_with_meta(
                               primary row is missing/exceeded budget,
                               read ``lkg:{key}`` instead of returning
                               None.  No effect when ``block_on_miss=True``.
+        prefetched_row:       Optional full-meta row (as returned by
+                              ``supabase_cache.get_cached_full_row_async``)
+                              from a prior batch read — skips the per-key
+                              Supabase round-trip.  Pass an explicit
+                              ``None`` to skip the read AND treat as a
+                              cache miss (used by the warmer after a
+                              batched ``get_cached_full_rows_async``).
+                              Omit (default) to read inline as before.
 
     Behavior matrix:
 
@@ -120,6 +149,7 @@ async def l2_cached_with_meta(
         key, ttl_seconds, compute,
         category=category, block_on_miss=block_on_miss,
         stale_budget_seconds=stale_budget_seconds, lkg_fallback=lkg_fallback,
+        prefetched_row=prefetched_row,
     )
 
 
@@ -132,14 +162,17 @@ async def l2_cached(
     block_on_miss: bool = True,
     stale_budget_seconds: int | None = None,
     lkg_fallback: bool = False,
+    prefetched_row: dict | None = _NO_PREFETCH,  # type: ignore[assignment]
 ) -> Any:
     """Data-only wrapper around ``l2_cached_with_meta`` — same behavior,
     discards the freshness metadata for callers that don't need it."""
-    data, _meta = await l2_cached_with_meta(
-        key, ttl_seconds, compute,
-        category=category, block_on_miss=block_on_miss,
-        stale_budget_seconds=stale_budget_seconds, lkg_fallback=lkg_fallback,
-    )
+    kwargs: dict[str, Any] = {
+        "category": category, "block_on_miss": block_on_miss,
+        "stale_budget_seconds": stale_budget_seconds, "lkg_fallback": lkg_fallback,
+    }
+    if prefetched_row is not _NO_PREFETCH:
+        kwargs["prefetched_row"] = prefetched_row
+    data, _meta = await l2_cached_with_meta(key, ttl_seconds, compute, **kwargs)
     return data
 
 
@@ -155,9 +188,20 @@ async def _l2_cached_impl(
     block_on_miss: bool,
     stale_budget_seconds: int | None,
     lkg_fallback: bool,
+    prefetched_row: dict | None = _NO_PREFETCH,  # type: ignore[assignment]
 ) -> tuple[Any, CacheMeta]:
-    """Core read-through logic shared by ``l2_cached`` and ``l2_cached_with_meta``."""
-    row = await _read_l2_row(key)
+    """Core read-through logic shared by ``l2_cached`` and ``l2_cached_with_meta``.
+
+    When ``prefetched_row`` is supplied (anything other than the
+    ``_NO_PREFETCH`` sentinel), the inline Supabase read is skipped and
+    the passed row is used directly — letting the warmer batch-read N
+    keys in one query and then dispatch per-key compute without N
+    additional reads.
+    """
+    if prefetched_row is _NO_PREFETCH:
+        row = await _read_l2_row(key)
+    else:
+        row = prefetched_row
 
     if row is not None:
         is_fresh    = row.get("is_fresh", False)
@@ -183,12 +227,10 @@ async def _l2_cached_impl(
     # Cold miss (row absent or exceeded stale budget).
     if block_on_miss:
         try:
-            payload = await _run_compute(compute)
+            payload = await _compute_singleflight(key, compute, category, ttl_seconds)
         except Exception as exc:
             logger.warning("l2_cached: compute raised for %s: %s", key, exc)
             return None, _meta("miss", None, None)
-        if payload:
-            asyncio.create_task(_writeback(key, category, payload, ttl_seconds))
         return payload, _meta("compute", None, 0)
 
     # Non-blocking miss: kick off the compute in the background, return
@@ -200,6 +242,49 @@ async def _l2_cached_impl(
         if lkg is not None and lkg.get("data") is not None:
             return lkg["data"], _meta("lkg", lkg.get("as_of_ts"), lkg.get("age_seconds"))
     return None, _meta("miss", None, None)
+
+
+async def _compute_singleflight(
+    key: str,
+    compute: Callable[[], Any],
+    category: str,
+    ttl_seconds: int,
+) -> Any:
+    """Run ``compute`` for ``key`` with single-flight coalescing.
+
+    The first caller for a given key kicks off the compute + writeback
+    chain and registers the in-flight Future.  Concurrent callers (user
+    requests or the bg refresh task) for the same key await that Future
+    instead of starting their own compute — collapsing N upstream calls
+    into one, and N writebacks into one.
+
+    On a degraded-upstream day where compute is slow, this is the
+    difference between "fan out 10× to a slow yfinance because 10 users
+    hit the same expired key" vs "one fetch, nine fast awaits."
+    """
+    fut = _inflight.get(key)
+    if fut is not None and not fut.done():
+        return await fut
+
+    loop = asyncio.get_event_loop()
+    fut = loop.create_future()
+    _inflight[key] = fut
+    try:
+        payload = await _run_compute(compute)
+        # Schedule writeback BEFORE resolving the future so concurrent
+        # awaiters know the writeback is queued (preserves the existing
+        # "writeback follows successful compute" invariant).
+        if payload:
+            asyncio.create_task(_writeback(key, category, payload, ttl_seconds))
+        fut.set_result(payload)
+        return payload
+    except Exception as exc:
+        fut.set_exception(exc)
+        raise
+    finally:
+        # Always remove from the registry so a transient failure doesn't
+        # poison subsequent attempts.
+        _inflight.pop(key, None)
 
 
 def _meta(source: str, as_of_ts: str | None, age_seconds: int | None) -> CacheMeta:
@@ -235,14 +320,18 @@ async def _run_compute(compute: Callable[[], Any]) -> Any:
 async def _refresh(
     key: str, ttl_seconds: int, compute: Callable[[], Any], category: str,
 ) -> None:
-    """Background task: re-run the upstream fetch and write it back to L2."""
+    """Background task: re-run the upstream fetch and write it back to L2.
+
+    Routes through ``_compute_singleflight`` so a stale-triggered bg
+    refresh AND a concurrent cold-miss user request for the same key
+    share one upstream fetch + one writeback.  Without this coalescing,
+    a stale hit on the warmer's tick + a stale hit on a user request
+    fire two computes one tick apart.
+    """
     try:
-        payload = await _run_compute(compute)
+        await _compute_singleflight(key, compute, category, ttl_seconds)
     except Exception as exc:
         logger.debug("l2_cached: bg refresh compute failed for %s: %s", key, exc)
-        return
-    if payload:
-        await _writeback(key, category, payload, ttl_seconds)
 
 
 async def _writeback(key: str, category: str, payload: Any, ttl_seconds: int) -> None:

@@ -302,3 +302,105 @@ async def test_async_compute_runs_without_thread_pool(fake_supabase):
 
     data = await cache_l2.l2_cached("a1", 60, compute_async, category="test")
     assert data == {"v": "async"}
+
+
+# ── Single-flight compute coalescing ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_single_flight_coalesces_concurrent_cold_misses(fake_supabase):
+    """Concurrent cold-miss readers for the same key share ONE compute.
+
+    Without coalescing, N concurrent users hitting a cold key fire N
+    upstream fetches — on a degraded-upstream day that compounds load.
+    With single-flight, the second-and-later callers await the first
+    in-flight future and never trigger their own compute.
+    """
+    compute_calls = 0
+    started = asyncio.Event()
+    can_finish = asyncio.Event()
+
+    async def compute():
+        nonlocal compute_calls
+        compute_calls += 1
+        started.set()
+        await can_finish.wait()
+        return {"v": compute_calls}
+
+    # Fire 5 concurrent reads of the same cold key.
+    tasks = [
+        asyncio.create_task(
+            cache_l2.l2_cached("sf1", 60, compute, category="test")
+        )
+        for _ in range(5)
+    ]
+    await started.wait()             # first compute is in flight
+    can_finish.set()                  # unblock it
+    results = await asyncio.gather(*tasks)
+
+    # All five callers get the same result, but compute ran exactly once.
+    assert compute_calls == 1
+    assert all(r == {"v": 1} for r in results)
+
+
+@pytest.mark.asyncio
+async def test_single_flight_releases_on_failure(fake_supabase):
+    """A failed compute clears the in-flight registry so subsequent
+    callers retry instead of being poisoned by the dead future."""
+    calls = 0
+
+    def compute():
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient upstream")
+        return {"v": "ok"}
+
+    # First call raises → returns None (compute path) with no row.
+    first = await cache_l2.l2_cached("sf2", 60, compute, category="test")
+    assert first is None
+    # Second call must retry, not reuse the failed future.
+    second = await cache_l2.l2_cached("sf2", 60, compute, category="test")
+    assert second == {"v": "ok"}
+    assert calls == 2
+
+
+# ── Prefetched-row pass-through (batch warmer path) ──────────────────
+
+
+@pytest.mark.asyncio
+async def test_prefetched_fresh_row_skips_read_and_compute(fake_supabase):
+    """When the warmer batch-reads first and passes a fresh row in,
+    `l2_cached` skips the per-key Supabase read AND the compute."""
+    compute_called = 0
+    def compute():
+        nonlocal compute_called
+        compute_called += 1
+        return {"v": "should-not-fire"}
+
+    fresh_row = _row({"v": "from-batch"}, is_fresh=True, age_seconds=10)
+    data = await cache_l2.l2_cached(
+        "pf1", 60, compute, category="test", prefetched_row=fresh_row,
+    )
+    assert data == {"v": "from-batch"}
+    assert compute_called == 0
+    # The per-key inline read never happened — the row dict was never
+    # added to fake_supabase.rows, but we still got data.
+    assert "pf1" not in fake_supabase.rows
+
+
+@pytest.mark.asyncio
+async def test_prefetched_none_treated_as_cold_miss(fake_supabase):
+    """Explicit prefetched_row=None means the batch found the key absent
+    — fall through to compute, but still skip the inline read."""
+    compute_called = 0
+    def compute():
+        nonlocal compute_called
+        compute_called += 1
+        return {"v": "computed"}
+
+    data = await cache_l2.l2_cached(
+        "pf2", 60, compute, category="test", prefetched_row=None,
+    )
+    assert data == {"v": "computed"}
+    assert compute_called == 1
