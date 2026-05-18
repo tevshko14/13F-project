@@ -677,20 +677,24 @@ def _get_client():
 
         try:
             from supabase import create_client
-            from supabase.lib.client_options import ClientOptions
 
-            # Cap the sync client's postgrest timeout to 8s.  Default is
-            # 120s, which under a slow Supabase day lets a fire-and-forget
-            # writeback (e.g. ``_l2_set_html`` via ``asyncio.to_thread``)
-            # pin an asyncio default-pool thread for two full minutes.
-            # The web container's pool is ~16 slots on a 2-core Micro;
-            # six writebacks per homepage saturate the pool in seconds
-            # once Supabase response times grow past a few seconds.
-            # 8s matches the async client's existing cap so sync and
-            # async paths share a single worst-case latency budget.
-            _client = create_client(
-                url, key, options=ClientOptions(postgrest_client_timeout=8),
-            )
+            # Note: do NOT pass ``options=ClientOptions(...)`` here.  The
+            # installed supabase-py version (2.28.0) has an internal
+            # incompatibility where ``create_client`` accesses
+            # ``options.storage`` (not ``options.storage_client_timeout``)
+            # and raises ``'ClientOptions' object has no attribute
+            # 'storage'`` — poisoning the sync client at init time.  An
+            # earlier commit (1a4a8bf) added ``ClientOptions(
+            # postgrest_client_timeout=8)`` to cap the timeout from the
+            # 120s default to 8s; that change silently broke every sync
+            # write (``upsert_insider_trades``, ``upsert_congress_trades``,
+            # ``_l2_set_html`` etc.) until this revert.  The async client
+            # uses ``AsyncClientOptions`` which works correctly and keeps
+            # the 8s cap for the request path; the sync path is used
+            # only by background syncs / writebacks where 120s is
+            # acceptable (and shielded by per-call timeouts at the
+            # caller's gate).
+            _client = create_client(url, key)
             logger.info("Supabase client initialised (%s)", url)
             # Try auto-migration (non-fatal)
             _auto_migrate()
