@@ -38,6 +38,16 @@ _initialised = False  # True once we've attempted init (even if it failed)
 _table_verified = False  # True once we've confirmed the table exists
 _init_lock = threading.Lock()  # Protects one-time client creation
 
+# When a first init attempt fails (e.g. Supabase platform was unhealthy
+# during container boot), the prior behavior set _initialised=True with
+# _client=None and never retried — silently breaking every sync write
+# until the next container restart.  Track the last init attempt time so
+# we can retry on a cooldown.  60s balances "recover quickly from a
+# transient outage" vs "don't hammer Supabase auth on every call when
+# it's genuinely down."
+_last_init_attempt = 0.0
+_INIT_RETRY_AFTER_S = 60.0
+
 # Async sibling for hot-path request callers -- runs on the event
 # loop so Supabase round trips don't hold default-pool slots.
 # Constructed at module import: asyncio.Lock() in 3.10+ binds to a
@@ -620,19 +630,40 @@ def _get_client():
     Uses double-checked locking so concurrent threads on first request
     don't each create a separate client or run migrations in parallel.
 
-    Returns ``None`` when either env var is missing or the client
-    could not be created.
-    """
-    global _client, _initialised
+    If a previous init attempt failed (e.g. Supabase platform was
+    unhealthy when the container booted), subsequent calls retry after
+    ``_INIT_RETRY_AFTER_S`` instead of returning ``None`` forever.  The
+    previous behavior silently broke every sync write — ``upsert_*``,
+    ``_l2_set_html`` — until the container restarted, which manifested
+    as "data ingestion is dead" with no error logs (the empty-stringified
+    `_client is None` short-circuit at every callsite).
 
-    # Fast path: already initialised (no lock needed)
-    if _initialised:
+    Returns ``None`` when either env var is missing OR the most recent
+    init attempt failed AND the cooldown hasn't elapsed.  On a `None`
+    return after a previous failure, emit a WARNING so the failure mode
+    is visible in logs (was silent before).
+    """
+    global _client, _initialised, _last_init_attempt
+    import time as _time
+
+    # Fast path: client is live, no work needed.
+    if _client is not None:
         return _client
 
+    # Fast path 2: init was attempted recently and failed — don't hammer.
+    # The cooldown lets a transient Supabase outage recover without us
+    # creating clients on every call.
+    if _initialised and (_time.time() - _last_init_attempt) < _INIT_RETRY_AFTER_S:
+        return None
+
     with _init_lock:
-        # Re-check after acquiring lock (another thread may have finished)
-        if _initialised:
+        # Re-check after acquiring lock (another thread may have finished).
+        if _client is not None:
             return _client
+        if _initialised and (_time.time() - _last_init_attempt) < _INIT_RETRY_AFTER_S:
+            return None
+
+        _last_init_attempt = _time.time()
 
         url = os.environ.get("SUPABASE_URL", "").strip()
         key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
@@ -664,7 +695,16 @@ def _get_client():
             # Try auto-migration (non-fatal)
             _auto_migrate()
         except Exception as exc:
-            logger.warning("Supabase client init failed: %s", exc)
+            # Loud warning — previously this exact failure mode was
+            # silent at the callsite (every sync upsert returned 0 with
+            # no log) and only this single warning at init time told
+            # the story.  If the log buffer rolled past it, debugging
+            # became impossible.  Promote to WARNING and surface in
+            # subsequent calls too (next caller will retry after cooldown).
+            logger.warning(
+                "Supabase sync client init failed: %s — will retry in %ds",
+                exc, int(_INIT_RETRY_AFTER_S),
+            )
             _client = None
 
         # Mark initialised AFTER _client is assigned so concurrent threads
@@ -1773,6 +1813,13 @@ def upsert_insider_trades(rows: list[dict]) -> int:
     """
     client = _get_client()
     if client is None:
+        # Previously this was a silent 0-return that masked the
+        # "sync client is poisoned" failure mode for days at a time
+        # (every "Backfilled 0 trades for X" log was actually here).
+        logger.warning(
+            "upsert_insider_trades: Supabase sync client unavailable — "
+            "dropping %d trades", len(rows),
+        )
         return 0
 
     # Filter out rows that already exist in Supabase
@@ -3093,6 +3140,12 @@ def upsert_congress_trades(rows: list[dict]) -> int:
     """
     client = _get_client()
     if client is None:
+        # Loud signal — see comment in upsert_insider_trades.  Silent
+        # 0-return was the original "broken since March 1" failure mode.
+        logger.warning(
+            "upsert_congress_trades: Supabase sync client unavailable — "
+            "dropping %d trades", len(rows),
+        )
         return 0
 
     if not rows:
@@ -3441,6 +3494,47 @@ def get_latest_congress_sync(limit: int = 5) -> list[dict] | None:
     except Exception as exc:
         logger.warning("get_latest_congress_sync failed: %s", exc)
         return None
+
+
+def insert_congress_sync_log(
+    *,
+    status: str,
+    pages_scraped: int,
+    new_trades: int,
+    new_members: int,
+    duration_secs: float,
+    error_message: str | None = None,
+) -> bool:
+    """Append a row to ``congress_sync_log`` summarising one sync run.
+
+    Mirrors the insider/13f sync_log pattern.  Called by ``congress_sync``
+    after the sync completes.  Non-fatal — logs a warning on failure but
+    doesn't raise (a failed log write shouldn't fail the whole sync).
+    """
+    client = _get_client()
+    if client is None:
+        logger.warning(
+            "insert_congress_sync_log: Supabase sync client unavailable — "
+            "log row dropped (status=%s, new_trades=%d)", status, new_trades,
+        )
+        return False
+    try:
+        client.table("congress_sync_log").insert({
+            "started_at":    (
+                datetime.now(timezone.utc) - timedelta(seconds=duration_secs)
+            ).isoformat(),
+            "finished_at":   datetime.now(timezone.utc).isoformat(),
+            "status":        status,
+            "pages_scraped": pages_scraped,
+            "new_trades":    new_trades,
+            "new_members":   new_members,
+            "duration_secs": round(duration_secs, 2),
+            "error_message": error_message,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning("insert_congress_sync_log failed: %s", exc)
+        return False
 
 
 # ── Ticker logos ─────────────────────────────────────────────────────

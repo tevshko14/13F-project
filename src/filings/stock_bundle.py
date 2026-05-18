@@ -342,6 +342,64 @@ def get_all_tickers_in_tier(tier: str) -> list[str]:
     return [r["ticker"] for r in rows if r.get("ticker")]
 
 
+def _merge_preserving_lkg(
+    new_bundle: dict,
+    existing_bundle: dict,
+    source_status: dict | None,
+) -> dict:
+    """Preserve existing bundle fields for sources that just failed.
+
+    Closes the v1 → v2 regression where a failed sub-fetch (yfinance
+    rate-limit, OpenInsider scraper returning [], Supabase upsert
+    silently dropping rows etc.) overwrites a previously-good cached
+    value with the bounded-fallback empty shape — and that empty
+    shape then serves for up to ``MAX_STALE_AGE_S`` (30 days) on the
+    stock page.  v1's ``_with_l2_fallback`` decorator avoided this
+    because each tab cached its own rendered HTML independently;
+    v2's per-ticker bundle is all-or-nothing per build cycle.
+
+    Rule: when ``source_status[name] != "ok"`` AND the existing
+    bundle has a non-empty value for ``name``, keep the existing
+    value.  When the new fetch succeeded ("ok"), trust the new
+    value even if it's empty (e.g. a small-cap genuinely has no
+    insider trades — that's real data, not a fetch failure).
+
+    No-op if ``source_status`` is falsy (caller didn't pass it) or
+    ``existing_bundle`` is missing.
+    """
+    if not source_status or not existing_bundle:
+        return new_bundle
+
+    def _is_empty(v) -> bool:
+        """``None``, empty container, or empty string — but NOT numeric 0
+        or ``False``.  Bundle keys hold dicts/lists/strings in practice;
+        being explicit guards against future scalar fields that
+        ``not v`` would misclassify as empty."""
+        return v is None or (hasattr(v, "__len__") and len(v) == 0)
+
+    merged = dict(new_bundle)
+    preserved: list[str] = []
+    for name, status in source_status.items():
+        if status == "ok":
+            continue  # fetch succeeded → trust the new value
+        new_val = new_bundle.get(name)
+        old_val = existing_bundle.get(name)
+        # Only preserve when new is empty AND old is non-empty.  Avoids
+        # preserving stale data over a genuine empty result (e.g. a
+        # brand-new IPO with no fundamentals yet).
+        if _is_empty(new_val) and not _is_empty(old_val):
+            merged[name] = old_val
+            preserved.append(name)
+    if preserved:
+        logger.info(
+            "stock bundle: preserved non-empty existing fields %s "
+            "(new fetch returned empty with source_status %s)",
+            preserved,
+            {k: source_status.get(k) for k in preserved},
+        )
+    return merged
+
+
 def set_bundle(
     ticker: str,
     bundle: dict,
@@ -358,9 +416,18 @@ def set_bundle(
     :data:`STATUS_PARTIAL`).  Pass an explicit value only if the
     caller knows something the source-status map doesn't (e.g.
     force-marking a write as :data:`STATUS_FAILED`).
+
+    When ``source_status`` is provided, sub-fields whose source
+    failed (``status != "ok"``) and whose new value is empty are
+    backfilled from the existing bundle if one is cached — see
+    :func:`_merge_preserving_lkg`.
     """
     client = _get_client()
     if client is None:
+        logger.warning(
+            "set_bundle: Supabase sync client unavailable for %s — write dropped",
+            ticker,
+        )
         return False
     if tier not in _VALID_TIERS:
         tier = "cold"
@@ -368,6 +435,13 @@ def set_bundle(
     now_iso = datetime.now(timezone.utc).isoformat()
     if last_attempt_status is None:
         last_attempt_status = derive_attempt_status(source_status)
+
+    # LKG-style backstop: for sub-sources that failed, keep the
+    # previously-cached value instead of overwriting with the fallback.
+    if source_status and bundle:
+        existing = get_bundle(ticker)
+        if existing and existing.get("bundle"):
+            bundle = _merge_preserving_lkg(bundle, existing["bundle"], source_status)
 
     payload = {
         "ticker":              ticker.upper(),
